@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
+
 import hashlib
 from pathlib import Path
 
@@ -183,6 +185,7 @@ def _secondary_foundation(tmp_path: Path):
     workspace.mkdir()
     archive.mkdir()
     work.mkdir(parents=True)
+    provision_legacy_storage(workspace)
     ensure_workspace_layout(workspace)
     central = workspace / "SD-Kartensicherungen"
     initialize_database(database)
@@ -407,6 +410,7 @@ def test_03211_applied_edit_reservation_closes_multi_library_race(
 ):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     ensure_workspace_layout(workspace)
     central = workspace / "SD-Kartensicherungen"
 

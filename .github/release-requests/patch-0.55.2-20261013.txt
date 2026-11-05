@@ -1,0 +1,1 @@
+Build and publish patch-0.55.2 only after full backend QA passes. Stage 1 progressive PWA shell: early visible translated tabs/title/dock, no fullscreen mask, per-target accent. Keep full page navigation; no SPA, no database/filesystem modifications. Verify isolated 0.55.2 regression tests.

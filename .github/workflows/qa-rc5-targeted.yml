@@ -1,0 +1,36 @@
+name: RC5 concrete failure counterprobes
+on:
+  push:
+    branches: [qa/rc5-targeted]
+permissions:
+  contents: read
+jobs:
+  targeted:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libimage-exiftool-perl
+          python -m pip install -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
+      - name: Exact source and only the concrete failed cases plus retention counterprobes
+        run: |
+          python qa/release/verify_rc5_source.py
+          python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" targets qa/release/rc5-targets.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc5-concrete-counterprobes
+          path: ${{ runner.temp }}/f14-qa/targets/results/

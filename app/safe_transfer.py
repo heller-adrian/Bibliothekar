@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.root_operations import validate_active_roots
+
 from pathlib import Path
 import errno
 import hashlib
@@ -16,6 +18,7 @@ class SafeTransferError(RuntimeError):
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             block = handle.read(1024 * 1024)
@@ -29,6 +32,7 @@ def _fsync_directory(path: Path) -> None:
     flags = os.O_RDONLY
     if hasattr(os, "O_DIRECTORY"):
         flags |= os.O_DIRECTORY
+    validate_active_roots()
     descriptor = os.open(path, flags)
     try:
         os.fsync(descriptor)
@@ -87,11 +91,13 @@ def move_verified_no_overwrite(
     if destination.exists() or destination.is_symlink():
         raise SafeTransferError("Zieldatei existiert bereits: " + str(destination))
 
+    validate_active_roots()
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     hardlink_created = False
     if _same_filesystem(source, destination.parent):
         try:
+            validate_active_roots()
             os.link(source, destination, follow_symlinks=False)
             hardlink_created = True
         except FileExistsError as error:
@@ -123,12 +129,14 @@ def move_verified_no_overwrite(
                         "Der sichere Link-Schritt konnte nicht bestätigt werden: "
                         + str(destination)
                     )
+                validate_active_roots()
                 os.unlink(source)
                 _fsync_directory(source.parent)
                 _fsync_directory(destination.parent)
                 return {"method": "link_unlink", "destination": str(destination)}
             except Exception:
                 if destination.exists() and source.exists():
+                    validate_active_roots()
                     destination.unlink(missing_ok=True)
                     _fsync_directory(destination.parent)
                 raise
@@ -138,6 +146,7 @@ def move_verified_no_overwrite(
     )
     published = False
     try:
+        validate_active_roots()
         with source.open("rb") as source_handle, temporary.open("xb") as target_handle:
             shutil.copyfileobj(source_handle, target_handle, length=1024 * 1024)
             target_handle.flush()
@@ -154,12 +163,14 @@ def move_verified_no_overwrite(
         )
 
         try:
+            validate_active_roots()
             os.link(temporary, destination, follow_symlinks=False)
         except FileExistsError as error:
             raise SafeTransferError(
                 "Zieldatei ist während der Übertragung entstanden: " + str(destination)
             ) from error
         published = True
+        validate_active_roots()
         temporary.unlink(missing_ok=True)
         _fsync_directory(destination.parent)
 
@@ -169,12 +180,15 @@ def move_verified_no_overwrite(
             expected_sha256=expected_sha256,
         )
 
+        validate_active_roots()
         os.unlink(source)
         _fsync_directory(source.parent)
         return {"method": "copy_verify_delete", "destination": str(destination)}
     except Exception:
+        validate_active_roots()
         temporary.unlink(missing_ok=True)
         if published and destination.exists() and source.exists():
+            validate_active_roots()
             destination.unlink(missing_ok=True)
             _fsync_directory(destination.parent)
         raise
@@ -203,6 +217,7 @@ def reconcile_migrated_file(
             expected_size=expected_size,
             expected_sha256=expected_sha256,
         )
+        validate_active_roots()
         source.unlink()
         _fsync_directory(source.parent)
         return {"status": "deduplicated_verified_destination"}

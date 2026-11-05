@@ -6,6 +6,8 @@ import hashlib
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures('isolated_registered_metadata_config')
+
 from app import main
 from app.backup_management import backup_deletion_status, delete_backup
 from app.database import (
@@ -32,6 +34,17 @@ def _foundation(tmp_path: Path):
     archive.mkdir()
     layout = ensure_workspace_layout(workspace)
     initialize_database(database)
+    # Establish the same F14 state that a real installation retains before
+    # registration; do not bootstrap it after registration as if it were lost.
+    from unittest.mock import patch
+    import os
+    from app.root_operations import reserve
+    from app.storage_config import storage_paths
+    with patch.dict(os.environ,{"KAMERA_REGISTRY_DATABASE":str(registry)}):
+        with reserve(workspace,library_id="main",database=database,kind="startup",
+                     ids={"function":"tests.backend.test_0400_import_backup_controls._foundation"},
+                     paths=[workspace,Path(layout["work_root"]),archive,*storage_paths(workspace).values()]):
+            pass
     initialize_library_registry(registry)
     adopt_main_library(
         registry,
@@ -141,12 +154,12 @@ def test_0400_import_ui_explains_copy_and_exposes_controls():
     assert "zusätzlichen Speicherplatz" in source
     assert 'data-cancel-import=' in source
     assert 'data-delete-backup=' in source
-    assert "window.confirm(" in source
+    assert "window.BibliothekarI18n.confirmAsync(" in source
     assert "/cancel" in source
     assert "/api/backups/" in source
 
 
-def test_0400_folder_import_can_be_cancelled_without_incoming_residue(tmp_path: Path):
+def test_0400_folder_import_cancel_retains_protocol_and_source(tmp_path: Path):
     source = tmp_path / "source"
     workspace = tmp_path / "workspace"
     logs = tmp_path / "logs"
@@ -168,7 +181,8 @@ def test_0400_folder_import_can_be_cancelled_without_incoming_residue(tmp_path: 
             cancellation_callback=lambda: True,
         )
 
-    assert not (backup_root(workspace) / ".incoming" / "CANCEL_0400").exists()
+    assert (source/"IMG_0001.JPG").read_bytes()==b"camera"
+    assert (backup_root(workspace)/".incoming"/"CANCEL_0400").exists()
 
 
 def test_0400_completed_unused_backup_can_be_deleted(tmp_path: Path):

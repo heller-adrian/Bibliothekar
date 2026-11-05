@@ -15,7 +15,7 @@ def test_0220_version_and_app_shell():
     assert "Archiv" in html
     assert "Bibliothek wechseln" in html
     assert "Einstellungen" in html
-    assert "Bibliothekar Assistent" in html
+    assert "Bibliothekar Assistent" not in html
     assert 'data-bk-theme-choice="light"' in html
     assert 'data-bk-theme-choice="dark"' in html
     assert 'data-bk-theme-choice="system"' in html
@@ -26,7 +26,7 @@ def test_0220_workspace_groups_captures_and_events():
     events = main.events_interface().body.decode("utf-8")
 
     assert 'class="bk-workspace-subnav"' in captures
-    assert '>Aufnahmen</a>' in captures
+    assert '>Medien</a>' in captures
     assert '>Ereignisse</a>' in captures
     assert 'href="/workspace" class="active"' in captures
 
@@ -41,7 +41,7 @@ def test_0220_import_source_picker_keeps_all_paths():
     assert 'data-source-mode="folder"' in html
     assert 'id="device-select"' in html
     assert 'id="folder-root-select"' in html
-    assert 'id="source-select"' in html
+    assert 'id="folder-source-detail"' in html
 
 
 def test_0220_manifest_and_copy_report_live_progress(tmp_path: Path):

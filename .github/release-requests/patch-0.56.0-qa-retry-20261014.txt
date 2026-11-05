@@ -1,0 +1,1 @@
+Retry full backend/UI/JavaScript/TrueNAS-compose QA after correcting two historical tests that still expected V2 despite replacing it by the new transparent V3 brand in 0.56.0. Conditionally publish ghcr.io/heller-adrian/bibliothekar:patch-0.56.0 only if all checks pass. Preserve mobile PWA behavior, all user data and TrueNAS state.

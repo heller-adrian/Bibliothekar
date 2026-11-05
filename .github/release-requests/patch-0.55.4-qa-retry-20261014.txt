@@ -1,0 +1,1 @@
+Retry complete QA and conditional patch-0.55.4 container publication after aligning the release label with the code's release version. Require all backend tests, JS checks and TrueNAS compose validation green before publishing. Keep NAS user data unchanged.

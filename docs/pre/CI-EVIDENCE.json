@@ -1,0 +1,84 @@
+{
+  "commit": "70c0bb57afa168efec83b1b60245b819b36161ff",
+  "run": 40840603811,
+  "artifacts": [
+    {
+      "name": "rc14-backend-0",
+      "digest": "sha256:eb7e2953a1fa60436dcf024a8831cb80422ab0e466b476ec8648f358e204efb7"
+    },
+    {
+      "name": "rc14-backend-1",
+      "digest": "sha256:09bee01ba9a7b90c0bb52b4d900f4264d43b7999e51cec2ec0667a641d564ea7"
+    },
+    {
+      "name": "rc14-backend-3",
+      "digest": "sha256:4a6db808e7b2e86cce6591ca73758ada007f7dab55f8f7e976e81a675e9d7e59"
+    },
+    {
+      "name": "rc14-container",
+      "digest": "sha256:64d58a288887bec3d4cf3c89c4d692b192979857c21c7e805d6dbc6afb4f0b3d"
+    },
+    {
+      "name": "rc14-backend-4",
+      "digest": "sha256:f8b5a370f6689be5ad629f2aa797275c57fe73ba0f431d6530e65865258c34b1"
+    },
+    {
+      "name": "rc14-backend-6",
+      "digest": "sha256:6fbd4b1be96cee917957969318d8ea9fee53b15c82531413d9a7669da8fb825a"
+    },
+    {
+      "name": "rc14-backend-5",
+      "digest": "sha256:3cafbd8f04a1b4c4f6f07a3eb04f7f4e71a74520e616e041c87a62c2f2ffb2d6"
+    },
+    {
+      "name": "rc14-backend-7",
+      "digest": "sha256:367a6c02776d28d3bb052ff1b3c2b4aba4a4652297c41c04aede449faaa8d4dc"
+    },
+    {
+      "name": "pre-browser",
+      "digest": "sha256:dd9ec291f25568e2bbbf64581cbeed7b7417a592e3e650e41b572b9fbcb6f02f"
+    },
+    {
+      "name": "rc14-backend-2",
+      "digest": "sha256:b4d1df17de2b56c2a8f8207e8e122e60a70bc37bec3288f0f39844a7c7a5f041"
+    },
+    {
+      "name": "rc14-targeted",
+      "digest": "sha256:7a5b9ed414348ff5817873e740488d881c6fe57cd0a281eb9f6e438f027f10a6"
+    }
+  ],
+  "backend_unique": 2269,
+  "browser": {
+    "rc14-browser/results.json": 147,
+    "rc14-browser-legacy/results.json": 44,
+    "pre-browser/results.json": 4
+  },
+  "container": {
+    "pre-evidence.json": {
+      "status": "PASS",
+      "cases": 1,
+      "source": "70c0bb57afa168efec83b1b60245b819b36161ff"
+    },
+    "rc13-evidence.json": {
+      "status": "PASS",
+      "cases": 2,
+      "source": "70c0bb57afa168efec83b1b60245b819b36161ff"
+    },
+    "rc14-evidence.json": {
+      "status": "PASS",
+      "cases": 2,
+      "source": "70c0bb57afa168efec83b1b60245b819b36161ff"
+    },
+    "rc12-evidence.json": {
+      "status": "PASS",
+      "cases": 25,
+      "source": "70c0bb57afa168efec83b1b60245b819b36161ff"
+    },
+    "rc11-evidence.json": {
+      "status": "PASS",
+      "cases": 19,
+      "source": "70c0bb57afa168efec83b1b60245b819b36161ff"
+    }
+  },
+  "pre_exiftool": "12.57"
+}

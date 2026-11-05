@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from tests.backend.test_f14_root_operations import fixture
 from app import main
 from app.database import (
     claim_next_job,
@@ -174,7 +175,7 @@ def test_0334_queued_folder_import_is_claimable_after_backfill(tmp_path: Path):
     assert claimed["started_at"] is not None
 
 
-def test_0334_folder_import_rejected_when_startup_is_degraded(monkeypatch):
+def test_0334_folder_import_rejected_when_startup_is_degraded(fixture, monkeypatch):
     monkeypatch.setattr(
         main,
         "DATABASE_INITIALIZATION_ERROR",
@@ -190,7 +191,7 @@ def test_0334_folder_import_rejected_when_startup_is_degraded(monkeypatch):
     assert "Initialisierung fehlgeschlagen" in str(captured.value.detail)
 
 
-def test_0334_folder_import_rejected_when_initialized_worker_is_dead(monkeypatch):
+def test_0334_folder_import_rejected_when_initialized_worker_is_dead(fixture, monkeypatch):
     monkeypatch.setattr(main, "DATABASE_INITIALIZATION_ERROR", None)
     monkeypatch.setattr(main, "WORKSPACE_LAYOUT_ERROR", None)
     monkeypatch.setattr(main, "LIBRARY_REGISTRY_ERROR", None)

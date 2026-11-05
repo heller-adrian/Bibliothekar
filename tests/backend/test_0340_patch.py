@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,7 @@ from app.metadata_correction import (
 )
 from app.metadata_correction_ui import METADATA_CORRECTION_HTML
 from app.workspace_layout import ensure_workspace_layout
+from tests.backend.registered_metadata_fixture import registered_metadata_fixture
 
 
 def _fake_multiple_analysis(root: Path, include_other: bool = False) -> dict:
@@ -56,8 +59,8 @@ def _fake_multiple_analysis(root: Path, include_other: bool = False) -> dict:
 
 def test_0340_multiple_folder_is_created_next_to_general(tmp_path: Path):
     ensure_workspace_layout(tmp_path)
-    general = tmp_path / "Metadatenkorrektur" / "Allgemein"
-    multiple = tmp_path / "Metadatenkorrektur" / "Mehrfachkorrektur"
+    general = tmp_path / "Metadata Correction" / "General"
+    multiple = tmp_path / "Metadata Correction" / "Batch Correction"
     assert general.is_dir()
     assert multiple.is_dir()
 
@@ -96,12 +99,14 @@ def test_0340_preview_applies_constant_offset_to_every_file(
     assert len(preview["preview_fingerprint"]) == 64
 
 
+@pytest.mark.usefixtures('isolated_registered_metadata_config')
 def test_0340_preview_does_not_write_and_apply_writes_all_files(
     tmp_path: Path,
     monkeypatch,
 ):
-    root = tmp_path / "Metadatenkorrektur" / "Mehrfachkorrektur"
-    root.mkdir(parents=True)
+    _db,workspace,registry=registered_metadata_fixture(tmp_path)
+    monkeypatch.setenv("KAMERA_REGISTRY_DATABASE",str(registry))
+    root = workspace / "Metadatenkorrektur" / "Mehrfachkorrektur"
     first = root / "A.JPG"
     second = root / "B.MP4"
     first.write_bytes(b"photo")
@@ -126,7 +131,7 @@ def test_0340_preview_does_not_write_and_apply_writes_all_files(
     )
 
     preview = preview_multiple_metadata_correction(
-        workspace_root=tmp_path,
+        workspace_root=workspace,
         library_id="main",
         reference_relative_path="A.JPG",
         proposed_datetime="2026-07-21T12:30:00",
@@ -136,7 +141,7 @@ def test_0340_preview_does_not_write_and_apply_writes_all_files(
     assert second.read_bytes() == b"video"
 
     result = apply_multiple_metadata_correction(
-        workspace_root=tmp_path,
+        workspace_root=workspace,
         library_id="main",
         reference_relative_path="A.JPG",
         proposed_datetime="2026-07-21T12:30:00",
@@ -209,10 +214,11 @@ def test_0340_ui_has_preview_apply_and_import_flow():
 def test_0340_worker_supports_managed_multiple_import():
     source = Path("app/main.py").read_text(encoding="utf-8")
     assert '"metadata_multiple_import"' in source
-    assert "allow_workspace_source=managed_multiple_import" in source
+    assert "managed_metadata_import = managed_multiple_import or managed_general_import" in source
+    assert "allow_workspace_source=managed_metadata_import" in source
     assert "imported_source_files" in source
     assert "Mehrfachkorrektur-Import verweist auf einen unerwarteten Quellordner." in source
 
 
 def test_0340_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.40.3"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION

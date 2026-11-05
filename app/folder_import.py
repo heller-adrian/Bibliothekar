@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from app.managed_directory_names import directory_path as managed_directory_path
+
+from app.root_operations import protect, validate_active_roots
+
+
+
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,9 +15,11 @@ import os
 import re
 import hashlib
 import shutil
+import time
 
-from app.metadata import analyze_tree
+from app.metadata import analyze_tree, classify_media
 from app.source_filter import should_ignore_source_path
+from app.import_publication import import_identity, publish_import_file, rollback_import_file
 from app.pipeline import (
     PipelineError,
     append_log,
@@ -43,6 +51,7 @@ IdentityCallback = Callable[[str, str], None]
 ImportHistoryCallback = Callable[[list[dict[str, Any]]], None]
 FamilyAdmissionCallback = Callable[[dict[str, Any], dict[str, str], dict[str, int]], dict[str, Any]]
 DestinationDirectoryCallback = Callable[[str], Path | None]
+ExistingSecondCallback = Callable[[str, str], bool]
 CancellationCallback = Callable[[], bool]
 
 
@@ -51,9 +60,92 @@ class ImportCancelled(PipelineError):
 
 
 
-def quick_source_signature(source: Path) -> str:
+def preflight_folder_import(
+    source: Path,
+    workspace: Path,
+    pool_probe_path: Path,
+    *,
+    processing_buffer_percent: int,
+    safety_reserve_gib: int,
+    max_scan_seconds: float = 8.0,
+    max_entries: int = 200000,
+    cancellation_callback: CancellationCallback | None = None,
+    allow_workspace_source: bool = False,
+) -> dict[str, int]:
+    """Vor einer Jobannahme nur Dateigrößen ermitteln, niemals SHA-256 lesen.
+
+    Ein unüberschaubarer NAS-Baum wird kontrolliert abgewiesen, damit der
+    HTTP-Worker keine unbegrenzte Verzeichnissuche ausführt. Quoten werden
+    über die wirksam verfügbare Kapazität des tatsächlichen Schreibpfads
+    abgefragt; ein späterer Check schützt vor zwischenzeitlichen Änderungen.
+    """
+    source = source.resolve(strict=True)
+    workspace = workspace.resolve(strict=True)
+    if (source == workspace or source in workspace.parents
+            or (workspace in source.parents and not allow_workspace_source)):
+        raise PipelineError("Quelle und Kamera-Arbeitsbereich dürfen nicht ineinander liegen.")
+    started = time.monotonic()
+    count = 0
+    bytes_total = 0
+    stack = [source]
+    while stack:
+        if cancellation_callback is not None and cancellation_callback():
+            raise ImportCancelled("Import vor Beginn abgebrochen.")
+        if time.monotonic() - started > max_scan_seconds:
+            raise PipelineError(
+                "Die Quelle ist für eine schnelle Speicherprüfung zu umfangreich. "
+                "Bitte einen kleineren Unterordner auswählen."
+            )
+        current = stack.pop()
+        with os.scandir(current) as entries:
+            for item in entries:
+                count += 1
+                if count > max_entries:
+                    raise PipelineError(
+                        "Die Importquelle umfasst zu viele Einträge für eine sichere Vorprüfung. "
+                        "Bitte einen kleineren Unterordner auswählen."
+                    )
+                if item.is_symlink():
+                    raise PipelineError("Symbolische Links sind als Importquelle nicht erlaubt.")
+                path = Path(item.path)
+                if should_ignore_source_path(source, path):
+                    continue
+                if item.is_dir(follow_symlinks=False):
+                    stack.append(path)
+                elif item.is_file(follow_symlinks=False):
+                    bytes_total += item.stat(follow_symlinks=False).st_size
+                else:
+                    raise PipelineError("Unzulässiger Dateityp in der Importquelle.")
+    reserve = safety_reserve_gib * 1024 ** 3
+    required = bytes_total + math.ceil(bytes_total * processing_buffer_percent / 100) + reserve
+    workspace_fs = os.statvfs(workspace)
+    pool_fs = os.statvfs(pool_probe_path)
+    workspace_free = workspace_fs.f_bavail * workspace_fs.f_frsize
+    pool_free = pool_fs.f_bavail * pool_fs.f_frsize
+    if min(workspace_free, pool_free) < required:
+        raise PipelineError(
+            "Nicht genügend freier Speicher für diesen Import: benötigt "
+            f"{required / 1024**3:.1f} GiB einschließlich Puffer und Sicherheitsreserve; "
+            f"im Arbeitsbereich {workspace_free / 1024**3:.1f} GiB verfügbar. "
+            "Eventuelle Dataset-Quoten sind maßgeblich."
+        )
+    return {
+        "files_and_directories": count,
+        "source_bytes": bytes_total,
+        "required_bytes": required,
+        "workspace_available_bytes": workspace_free,
+        "pool_available_bytes": pool_free,
+    }
+
+
+def quick_source_signature(
+    source: Path,
+    cancellation_callback: CancellationCallback | None = None,
+) -> str:
     digest = hashlib.sha256()
     for path in sorted(source.rglob("*")):
+        if cancellation_callback is not None and cancellation_callback():
+            raise ImportCancelled("Import wurde vom Nutzer abgebrochen.")
         if should_ignore_source_path(source, path):
             continue
         if path.is_symlink() or not path.is_file():
@@ -85,21 +177,32 @@ def partition_import_entries(
     entries: list[dict[str, Any]],
     known_hashes: set[tuple[int, str]] | None = None,
     duplicate_origins: dict[tuple[int, str], dict[str, Any]] | None = None,
+    known_sha256: set[str] | None = None,
+    duplicate_origins_by_sha: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Split one source manifest into new files and exact known duplicates."""
+    """Split one source manifest into new files and exact known duplicates.
+
+    SHA-256 is the stable identity of the original imported bytes. 0.42.0
+    deliberately keeps the historical size+SHA fast path, but also accepts an
+    exact original SHA match when legacy metadata corrections left an
+    unreliable source_size_bytes backfill behind.
+    """
     known = known_hashes or set()
+    known_sha = {str(value) for value in (known_sha256 or set()) if str(value)}
     origins = duplicate_origins or {}
+    origins_by_sha = duplicate_origins_by_sha or {}
     new_entries: list[dict[str, Any]] = []
     duplicates: list[dict[str, Any]] = []
     details: list[dict[str, Any]] = []
     for raw in entries:
         entry = dict(raw)
-        key = (int(entry["size_bytes"]), str(entry["sha256"]))
-        if key not in known:
+        sha = str(entry["sha256"])
+        key = (int(entry["size_bytes"]), sha)
+        if key not in known and sha not in known_sha:
             new_entries.append(entry)
             continue
         duplicates.append(entry)
-        origin = dict(origins.get(key) or {})
+        origin = dict(origins.get(key) or origins_by_sha.get(sha) or {})
         details.append({
             "relative_path": str(entry["relative_path"]),
             "size_bytes": int(entry["size_bytes"]),
@@ -184,6 +287,7 @@ def build_folder_import_plan(
     analysis: dict[str, Any],
     shared_root: Path,
     destination_directory_callback: DestinationDirectoryCallback | None = None,
+    existing_second_callback: ExistingSecondCallback | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     entry_by_path = {
         str(entry["relative_path"]): entry
@@ -205,9 +309,61 @@ def build_folder_import_plan(
     for record in files:
         members_by_family[str(record["family_key"])].append(record)
 
+    from app.managed_directory_names import directory_name
+    undated_name = directory_name(shared_root, "undated")
+
+    # Read each target directory once: an incremental import must consider
+    # existing media, but may not silently rename existing or archived files.
+    existing_stems_by_directory: dict[str, set[str]] = {}
+    def existing_stems(directory: Path) -> set[str]:
+        key = directory.as_posix()
+        if key not in existing_stems_by_directory:
+            stems: set[str] = set()
+            target = shared_root / directory
+            if target.is_dir() and not target.is_symlink():
+                with os.scandir(target) as children:
+                    for child in children:
+                        if child.is_file(follow_symlinks=False):
+                            stems.add(Path(child.name).stem.casefold())
+            existing_stems_by_directory[key] = stems
+        return existing_stems_by_directory[key]
+
+    def location_for(capture: str) -> Path:
+        value = datetime.fromisoformat(capture)
+        directory = Path(value.strftime("%Y")) / value.strftime("%Y-%m-%d")
+        if destination_directory_callback is not None:
+            resolved = destination_directory_callback(capture[:19])
+            if resolved is not None:
+                directory = Path(resolved)
+                if directory.is_absolute() or ".." in directory.parts:
+                    raise PipelineError(
+                        "Unsicherer kanonischer Zielordner für Import: " + str(directory)
+                    )
+        return directory
+
+    # Counts are per target directory + camera + whole camera-local second.
+    # Different models in the same second are not a naming collision.
+    burst_groups: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    for key, source_members in members_by_family.items():
+        family = family_by_key.get(key, {})
+        capture = _family_capture_time(family, source_members)
+        confidence = str(family.get("capture_time_confidence")
+                         or source_members[0].get("capture_time_confidence") or "missing")
+        if not capture or confidence in {"low", "conflict", "missing"}:
+            continue
+        camera = next(
+            (member for member in source_members
+             if member.get("camera_make") or member.get("camera_model")),
+            source_members[0],
+        )
+        _, token = normalize_device_name(camera.get("camera_make"), camera.get("camera_model"))
+        group = (location_for(capture).as_posix().casefold(), capture[:19], token.casefold())
+        burst_groups[group].add(key)
     reserved: set[str] = set()
     plan: list[dict[str, Any]] = []
     review_family_count = 0
+    burst_family_count = 0
+    burst_without_subseconds_count = 0
     device_counts: dict[str, int] = defaultdict(int)
 
     for family_key in sorted(members_by_family):
@@ -248,7 +404,7 @@ def build_folder_import_plan(
             for member in members:
                 source_relative = str(member["relative_path"])
                 original = Path(source_relative)
-                candidate = Path("Ohne_Datum") / original.name
+                candidate = Path(undated_name) / original.name
                 index = 0
                 while not _destination_is_free(
                     shared_root,
@@ -257,7 +413,7 @@ def build_folder_import_plan(
                 ):
                     index += 1
                     candidate = (
-                        Path("Ohne_Datum")
+                        Path(undated_name)
                         / f"{original.stem}_{index:03d}{original.suffix}"
                     )
                 reserved.add(candidate.as_posix())
@@ -281,27 +437,38 @@ def build_folder_import_plan(
             continue
 
         capture = datetime.fromisoformat(str(capture_value))
-        day = capture.strftime("%Y-%m-%d")
-        year = capture.strftime("%Y")
-        base = capture.strftime("%Y%m%d_%H%M%S") + "_" + device_token
-        destination_directory = Path(year) / day
-        if destination_directory_callback is not None:
-            resolved_directory = destination_directory_callback(
-                str(capture_value)[:19]
-            )
-            if resolved_directory is not None:
-                candidate_directory = Path(resolved_directory)
-                if (
-                    candidate_directory.is_absolute()
-                    or ".." in candidate_directory.parts
-                ):
-                    raise PipelineError(
-                        "Unsicherer kanonischer Zielordner für Import: "
-                        + str(candidate_directory)
-                    )
-                destination_directory = candidate_directory
+        stamp = capture.strftime("%Y%m%d_%H%M%S")
+        base = stamp + "_" + device_token
+        destination_directory = location_for(str(capture_value))
+        group = (destination_directory.as_posix().casefold(),
+                 str(capture_value)[:19], device_token.casefold())
+        stems = existing_stems(destination_directory)
+        burst_prefix = re.compile(
+            r"^" + re.escape(stamp) + r"\d{3}_" + re.escape(device_token)
+            + r"(?:_\d{3})?$", flags=re.IGNORECASE,
+        )
+        existing_burst = base.casefold() in stems or any(
+            burst_prefix.fullmatch(stem) for stem in stems
+        )
+        catalog_burst = bool(
+            existing_second_callback(str(capture_value)[:19], device_token)
+        ) if existing_second_callback is not None else False
+        burst = len(burst_groups.get(group, ())) > 1 or existing_burst or catalog_burst
+        fractional = re.search(
+            r"\.(\d+)(?=Z|[+-]\d{2}:\d{2}|$)", str(capture_value)
+        )
+        if burst:
+            burst_family_count += 1
+            if fractional:
+                # Exactly three real millisecond digits, not hundredths.
+                base = f"{stamp}{capture.microsecond // 1000:03d}_{device_token}"
+            else:
+                # EXIF lacks a fractional capture time: a clearly marked
+                # sequence fallback, never a fabricated millisecond value.
+                burst_without_subseconds_count += 1
+                base += "_Burst"
 
-        suffix_index = 0
+        suffix_index = 0 if fractional or not burst else 1
         while True:
             family_base = base if suffix_index == 0 else f"{base}_{suffix_index:03d}"
             relative_paths = [
@@ -352,6 +519,8 @@ def build_folder_import_plan(
         "excluded_file_count": len(excluded),
         "family_count": len(members_by_family),
         "review_family_count": review_family_count,
+        "burst_family_count": burst_family_count,
+        "burst_without_subseconds_count": burst_without_subseconds_count,
         "devices": [
             {"name": name, "family_count": count}
             for name, count in sorted(device_counts.items())
@@ -377,6 +546,7 @@ def _remove_empty_directories(root: Path) -> None:
     )
     for directory in directories:
         try:
+            validate_active_roots()
             directory.rmdir()
         except OSError:
             pass
@@ -401,6 +571,7 @@ def remove_excluded_files(
             raise PipelineError(
                 f"SHA-256-Abweichung bei ausgeschlossener Datei: {relative.as_posix()}"
             )
+        validate_active_roots()
         path.unlink()
 
     _remove_empty_directories(temporary_original)
@@ -413,32 +584,66 @@ def move_import_into_workspace(
     *,
     post_move_callback: PathCallback | None = None,
     cancellation_callback: CancellationCallback | None = None,
+    ownership_record: dict | None = None,
 ) -> None:
-    if not temporary_original.is_dir():
+    if not temporary_original.is_dir() and ownership_record is None:
         raise PipelineError(
             f"Temporäre Sicherung fehlt: {temporary_original}"
         )
 
+    validate_active_roots()
     shared_root.mkdir(parents=True, exist_ok=True)
-    if int(temporary_original.stat().st_dev) != int(shared_root.stat().st_dev):
+    if temporary_original.exists() and int(temporary_original.stat().st_dev) != int(shared_root.stat().st_dev):
         raise PipelineError(
             "Temporäre Sicherung und Arbeitsbereich liegen nicht auf demselben Dateisystem."
         )
 
-    moved: list[tuple[Path, Path]] = []
+    from app.trash_selective import _atomic_json, _sync_dir
+    # The original inode survives an exclusive same-filesystem rename. Persist ownership
+    # before the first move, including the gap before the path callback.
+    journal = temporary_original.parent / "move-journal.json"
+    from app.import_recovery import read_record, relative
+    if ownership_record is None and (journal.exists() or journal.is_symlink()):
+        ownership_record = read_record(journal)
+    ownership = []
+    supplied = (ownership_record or {}).get('files', [])
+    if ownership_record is not None and (ownership_record.get('format') != 1
+            or ownership_record.get('root') != str(shared_root.resolve()) or len(supplied) != len(plan)):
+        raise PipelineError('import_recovery_journal_mismatch: '+str(journal))
+    for index,item in enumerate(plan):
+        source = temporary_original / relative(item['source_relative_path'])
+        destination = shared_root / relative(item['destination_relative_path'])
+        if ownership_record is None:
+            owned = {**item,'inode':import_identity(source,item)}
+        else:
+            owned = supplied[index]
+            if any(owned.get(k) != item.get(k) for k in ('source_relative_path','destination_relative_path','sha256','size_bytes')):
+                raise PipelineError('import_recovery_plan_changed: '+str(source))
+            present = [p for p in (source,destination) if p.exists() or p.is_symlink()]
+            if len(present) != 1 or import_identity(present[0],owned) != owned.get('inode'):
+                raise PipelineError('import_recovery_ownership_ambiguous: '+str(source))
+        ownership.append(owned)
+    if ownership_record is None:
+        _atomic_json(journal, dict(format=1, root=str(shared_root.resolve()), files=ownership))
+        _sync_dir(journal.parent.parent)
+    moved: list[tuple[Path, Path, dict]] = []
     try:
-        for item in plan:
+        for item, owned in zip(plan, ownership, strict=True):
             if cancellation_callback is not None and cancellation_callback():
                 raise ImportCancelled("Import wurde vom Nutzer abgebrochen.")
             source = temporary_original / str(item["source_relative_path"])
             destination = shared_root / str(item["destination_relative_path"])
+            if ownership_record is not None and not source.exists() and destination.exists():
+                moved.append((source,destination,owned))
+                continue
             if not source.is_file():
                 raise PipelineError(f"Quelldatei fehlt: {source}")
             if destination.exists() or destination.is_symlink():
                 raise PipelineError(f"Zieldatei existiert bereits: {destination}")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(source, destination)
-            moved.append((source, destination))
+            # Preserve the F14 root binding and F12 exclusive publication.
+            validate_active_roots()
+            moved.append((source, destination, owned))
+            publish_import_file(source, destination, owned)
 
         for item in plan:
             if cancellation_callback is not None and cancellation_callback():
@@ -461,9 +666,6 @@ def move_import_into_workspace(
                 "Temporäre Sicherung enthält nach der Überführung noch Dateien."
             )
 
-        _remove_empty_directories(temporary_original)
-        temporary_original.rmdir()
-
         # SQLite wird erst nach vollständig geprüfter Dateibewegung
         # aktualisiert. Scheitert die Transaktion, stellt der folgende
         # Except-Block alle Dateien an ihren Sicherungspfad zurück.
@@ -471,13 +673,16 @@ def move_import_into_workspace(
             raise ImportCancelled("Import wurde vom Nutzer abgebrochen.")
         if post_move_callback is not None:
             post_move_callback(plan)
+        if temporary_original.exists():
+            _remove_empty_directories(temporary_original)
+            validate_active_roots()
+            temporary_original.rmdir()
     except Exception:
         rollback_errors: list[str] = []
-        for source, destination in reversed(moved):
+        for source, destination, owned in reversed(moved):
             try:
-                if destination.exists() and not source.exists():
-                    source.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(destination, source)
+                validate_active_roots()
+                rollback_import_file(source, destination, owned)
             except Exception as error:
                 rollback_errors.append(f"{destination} → {source}: {error}")
         if rollback_errors:
@@ -488,6 +693,52 @@ def move_import_into_workspace(
         raise
 
 
+def discard_import_moves(central: Path, job_id: str, rows: list, *, verify_callback=None) -> int:
+    """Preflight every owned copy before deleting any; retain unknown bytes."""
+    import json
+    from app.trash_restore import _relative, _source
+    from app.trash_selective import _sync_dir
+    journal = central / ".incoming" / job_id / "move-journal.json"
+    candidates = {}
+    known = {str(row["original_relative_path"]): row for row in rows}
+    if journal.exists() or journal.is_symlink():
+        if journal.is_symlink() or not journal.is_file():
+            raise PipelineError("Unsicheres Import-Movejournal.")
+        data = json.loads(journal.read_text())
+        if data.get("format") != 1 or data.get("root") != str(central.resolve()) or not isinstance(data.get("files"), list):
+            raise PipelineError("Import-Movejournal passt nicht zum Bestand.")
+        for item in data["files"]:
+            row = known.get(str(item["source_relative_path"]))
+            if row is None or int(row["size_bytes"]) != item["size_bytes"] or str(row["sha256"]) != item["sha256"]:
+                raise PipelineError("Import-Movejournal passt nicht zum Katalog.")
+            rel = _relative(item["destination_relative_path"])
+            candidate = central / rel
+            if candidate.exists() or candidate.is_symlink():
+                candidate = _source(central, rel)
+                info = candidate.stat()
+                if [info.st_dev, info.st_ino] != item["inode"]:
+                    raise PipelineError("Importziel besitzt keinen nachgewiesenen Besitz.")
+                candidates[str(rel)] = (candidate, item["size_bytes"], item["sha256"])
+    for row in rows:
+        if row["current_root_kind"] != "shared_workspace": continue
+        rel = _relative(str(row["current_relative_path"]))
+        candidate = central / rel
+        if candidate.exists() or candidate.is_symlink():
+            candidate = _source(central, rel)
+            candidates[str(rel)] = (candidate, int(row["size_bytes"]), str(row["sha256"] or ""))
+    for path, size, sha in candidates.values():
+        if verify_callback is not None:
+            verify_callback(path, size, sha)
+        elif not sha or path.stat().st_size != size or sha256_file(path) != sha:
+            raise PipelineError("Importdatei wurde verändert; Bereinigung gesperrt: " + str(path))
+    for path, size, sha in candidates.values():
+        validate_active_roots()
+        path.unlink()
+        _sync_dir(path.parent)
+    return len(candidates)
+
+
+@protect(workspace_arg='workspace', database_arg='None', kind='import', error_type=PipelineError)
 def run_folder_import_job(
     *,
     source: Path,
@@ -503,9 +754,12 @@ def run_folder_import_job(
     identity_callback: IdentityCallback | None = None,
     imported_hashes: set[tuple[int, str]] | None = None,
     duplicate_origins: dict[tuple[int, str], dict[str, Any]] | None = None,
+    imported_sha256: set[str] | None = None,
+    duplicate_origins_by_sha: dict[str, dict[str, Any]] | None = None,
     import_history_callback: ImportHistoryCallback | None = None,
     family_admission_callback: FamilyAdmissionCallback | None = None,
     destination_directory_callback: DestinationDirectoryCallback | None = None,
+    existing_second_callback: ExistingSecondCallback | None = None,
     work_root: Path | None = None,
     central_stock: bool = False,
     allow_workspace_source: bool = False,
@@ -557,18 +811,20 @@ def run_folder_import_job(
     # In 0.31.1 it points at the central stock for real camera imports.
     work_root = destination_root
     temporary_original = temporary_job_root / "Original"
-    temporary_protocol = temporary_job_root / "Protokoll"
+    temporary_protocol = managed_directory_path(temporary_job_root, "import_protocol")
     permanent_protocol = log_dir / "backups" / job_id
     status_path = temporary_protocol / "status.json"
     manifest_path = temporary_protocol / "manifest.json"
     snapshot_path = temporary_protocol / "snapshot.json"
     plan: list[dict[str, Any]] = []
+    committed_plan: list[dict[str, Any]] = []
 
     if temporary_job_root.exists():
         raise PipelineError(f"Temporärer Sicherungsbestand existiert bereits: {temporary_job_root}")
     if permanent_protocol.exists():
         raise PipelineError(f"Protokollziel existiert bereits: {permanent_protocol}")
 
+    validate_active_roots()
     temporary_protocol.mkdir(parents=True)
     status: dict[str, Any] = {
         "schema_version": 3,
@@ -598,6 +854,14 @@ def run_folder_import_job(
             1,
             "Quelle wird inventarisiert und per SHA-256 erfasst.",
         )
+        # Zuerst ein begrenzter Größen-Scan, bevor irgendeine Datei gehasht wird.
+        preflight_folder_import(
+            source, workspace, pool_probe_path,
+            processing_buffer_percent=processing_buffer_percent,
+            safety_reserve_gib=safety_reserve_gib,
+            cancellation_callback=cancellation_callback,
+            allow_workspace_source=allow_workspace_source,
+        )
         all_entries = source_manifest(
             source,
             progress_callback=lambda current, total: progress(
@@ -607,8 +871,10 @@ def run_folder_import_job(
                 max(total, 1),
                 "Quelldateien werden inventarisiert und per SHA-256 erfasst.",
             ),
+            cancellation_callback=check_cancelled,
         )
-        source_signature = quick_source_signature(source)
+        check_cancelled()
+        source_signature = quick_source_signature(source, cancellation_callback)
         source_fingerprint = manifest_fingerprint(all_entries)
         if identity_callback is not None:
             identity_callback(source_signature, source_fingerprint)
@@ -617,7 +883,27 @@ def run_folder_import_job(
             all_entries,
             imported_hashes,
             duplicate_origins,
+            imported_sha256,
+            duplicate_origins_by_sha,
         )
+        if already_imported and not any(classify_media(Path(item["relative_path"])) in MEDIA_TYPES for item in entries):
+            # A verified duplicate-only recheck is a successful no-op. Preserve
+            # per-card history even when no bytes need to be published.
+            if import_history_callback is not None:
+                import_history_callback(already_imported)
+            status.update({"state": "success", "stage": "completed", "temporary_backup_removed": True,
+                           "source": {"file_count": 0, "total_source_file_count": len(all_entries),
+                                      "duplicate_file_count": len(already_imported), "already_imported_file_count": len(already_imported),
+                                      "new_file_count": 0, "signature": source_signature, "fingerprint": source_fingerprint,
+                                      "file_history_complete": True},
+                           "organization": {"working_root": str(work_root), "file_count": 0, "verified": True,
+                                            "imported_source_files": [], "destinations": []}})
+            atomic_json(status_path, status)
+            archive_protocol_directory(temporary_protocol, permanent_protocol)
+            _remove_empty_directories(temporary_job_root)
+            validate_active_roots()
+            temporary_job_root.rmdir()
+            return status
         if not entries:
             raise PipelineError(
                 "Auf dieser SD-Karte wurden keine neuen Dateien gefunden. "
@@ -687,6 +973,7 @@ def run_folder_import_job(
             temporary_original,
             entries,
             progress_callback=report_copy_progress,
+            cancellation_callback=check_cancelled,
         )
 
         progress(
@@ -733,7 +1020,21 @@ def run_folder_import_job(
             len(entries),
             "ExifTool analysiert Aufnahmezeit, Zeitzone und Aufnahmegerät.",
         )
-        analysis = analyze_tree(temporary_original, include_other=False)
+        analysis = analyze_tree(
+            temporary_original,
+            include_other=False,
+            cancellation_callback=check_cancelled,
+            progress_callback=lambda current, total: progress(
+                "analyzing_metadata",
+                "metadata_analysis",
+                current,
+                max(total, 1),
+                (
+                    "ExifTool analysiert Aufnahmezeit, Zeitzone und "
+                    f"Aufnahmegerät ({current}/{max(total, 1)})."
+                ),
+            ),
+        )
         checksum_by_path = {
             str(entry["relative_path"]): str(entry["sha256"])
             for entry in entries
@@ -782,6 +1083,7 @@ def run_folder_import_job(
             analysis,
             work_root,
             destination_directory_callback=destination_directory_callback,
+            existing_second_callback=existing_second_callback,
         )
         if not plan and not admission.get("blocked_families"):
             raise PipelineError("Die Quelle enthält keine unterstützten Medien.")
@@ -824,6 +1126,9 @@ def run_folder_import_job(
             post_move_callback=path_callback,
             cancellation_callback=cancellation_callback,
         )
+        # Erst ab vollständiger, bestätigter Überführung gehören diese Pfade
+        # diesem Job. Vorher ist der Rollback ausschließlich Sache der Move-Routine.
+        committed_plan = list(plan)
 
         if import_history_callback is not None:
             imported_paths = {str(item["source_relative_path"]) for item in plan}
@@ -855,6 +1160,7 @@ def run_folder_import_job(
             "source": {
                 "file_count": len(entries),
                 "total_source_file_count": len(all_entries),
+                "file_history_complete": len(plan) + len(already_imported) == sum(classify_media(Path(e["relative_path"])) in MEDIA_TYPES for e in all_entries),
                 "already_imported_file_count": len(already_imported),
                 "duplicate_file_count": len(already_imported),
                 "duplicate_files": duplicate_details,
@@ -889,8 +1195,13 @@ def run_folder_import_job(
         atomic_json(status_path, status)
 
         archive_protocol_directory(temporary_protocol, permanent_protocol)
+        from app.import_recovery import read_record
+        atomic_json(permanent_protocol / 'move-journal.json', read_record(temporary_job_root / 'move-journal.json'))
         if temporary_job_root.exists():
             _remove_empty_directories(temporary_job_root)
+            validate_active_roots()
+            (temporary_job_root / "move-journal.json").unlink(missing_ok=True)
+            validate_active_roots()
             temporary_job_root.rmdir()
 
         finished_at = datetime.now(timezone.utc).astimezone().isoformat()
@@ -934,46 +1245,8 @@ def run_folder_import_job(
         )
         return status
     except ImportCancelled:
-        cleanup_errors: list[str] = []
-        for item in plan:
-            destination = work_root / str(item["destination_relative_path"])
-            try:
-                if not destination.exists():
-                    continue
-                if not destination.is_file() or destination.is_symlink():
-                    raise PipelineError(
-                        "Unerwarteter Eintrag beim Abbruch: " + str(destination)
-                    )
-                if (
-                    destination.stat().st_size != int(item["size_bytes"])
-                    or sha256_file(destination) != str(item["sha256"])
-                ):
-                    raise PipelineError(
-                        "Datei hat sich während des Abbruchs verändert: "
-                        + str(destination)
-                    )
-                destination.unlink()
-                _remove_empty_directories(destination.parent)
-            except Exception as cleanup_error:
-                cleanup_errors.append(str(cleanup_error))
-
-        if temporary_job_root.exists():
-            try:
-                shutil.rmtree(temporary_job_root)
-            except Exception as cleanup_error:
-                cleanup_errors.append(str(cleanup_error))
-        if permanent_protocol.exists():
-            try:
-                shutil.rmtree(permanent_protocol)
-            except Exception as cleanup_error:
-                cleanup_errors.append(str(cleanup_error))
-
-        if cleanup_errors:
-            raise PipelineError(
-                "Import wurde abgebrochen, aber die Bereinigung war unvollständig: "
-                + " | ".join(cleanup_errors)
-            )
-
+        # A stopped copy is evidence, not disposable scratch. Publication itself
+        # rolls owned moves back; preserve staged bytes and all protocol files.
         append_log(log_dir, {
             "time": datetime.now(timezone.utc).astimezone().isoformat(),
             "job_id": job_id,
@@ -995,6 +1268,7 @@ def run_folder_import_job(
             if permanent_protocol.exists()
             else status_path
         )
+        validate_active_roots()
         active_status.parent.mkdir(parents=True, exist_ok=True)
         atomic_json(active_status, status)
         append_log(log_dir, {
@@ -1045,10 +1319,12 @@ def cleanup_completed_folder_import(
         checked.append(path)
 
     for path in checked:
+        validate_active_roots()
         path.unlink()
         parent = path.parent
         while parent != root:
             try:
+                validate_active_roots()
                 parent.rmdir()
             except OSError:
                 break

@@ -1,0 +1,6 @@
+[
+  "tests/backend/test_rc9_setup_separation.py",
+  "tests/backend/test_rc7_reset_states.py",
+  "tests/backend/test_rc6_legacy_setup.py",
+  "tests/backend/test_rc5_practice_followup.py"
+]

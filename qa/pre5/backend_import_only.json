@@ -1,0 +1,3 @@
+[
+  "tests/backend/test_0562_process_recovery.py::test_0562_import_discard_keeps_unowned_files[bytes]"
+]

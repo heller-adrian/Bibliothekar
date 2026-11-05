@@ -1,0 +1,11 @@
+Bibliothekar 0.50.5 – separates, nichtstabiles Testimage.
+Basis: patch/0.50.0-audit, abgenommener Quellstand d19c982032469064e59200deb87d565e16981c97.
+QA: https://github.com/heller-adrian/Bibliothekar/actions/runs/38132481433
+Ergebnis: 1.029 Backend-Tests, isolierter Archiv-Harness PASS.
+Umfang: UI-Locale vor dem ersten Paint, kein deutscher Lade-Flash, schnelle
+sofortige Hauptreiter-Navigation ohne 190-ms-Wartezeit, zusätzliche
+englische Aufgaben-/Statusübersetzungen, lokale EN/DE-Bestätigungsfenster.
+Ziel: ghcr.io/heller-adrian/bibliothekar:patch-0.50.5
+Nicht als main/latest/v0.50.5 veröffentlichen und keine Produktionsdaten testen.
+Ausführliche Dokumentation: docs/0505_I18N_PWA_NAVIGATION.md.
+iPhone-PWA-Abnahme und seltene Meldungszustände bleiben bis stable offen.

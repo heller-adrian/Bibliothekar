@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from datetime import date
 
 from app.event_naming import (
     DEFAULT_EVENT_NAMING,
@@ -62,19 +63,19 @@ def _clean_name(
             f"{field_name} fehlt."
         )
 
-    forbidden = {
-        "/",
-        "\\",
-        "\0",
-    }
+    # Validate new planning input only. Persisted historical folder names are
+    # never rewritten by this check.
+    forbidden = set('<>:"/\\|?*')
 
-    if any(
-        character in name
-        for character in forbidden
-    ):
+    if (any(character in name for character in forbidden)
+        or any(ord(character) < 32 or ord(character) == 127 for character in name)
+        or name.endswith('.')
+        or name.split('.')[0].upper() in {'CON', 'PRN', 'AUX', 'NUL',
+            *(f'COM{i}' for i in range(1, 10)), *(f'LPT{i}' for i in range(1, 10))}):
         raise EventPreviewError(
             f"{field_name} enthält ein "
-            "unzulässiges Zeichen."
+            'für SMB unzulässiges Zeichen oder einen reservierten Ordnernamen. '
+            'Bitte <>:"/\\|?*, Steuerzeichen und abschließende Punkte vermeiden.'
         )
 
     return name
@@ -98,6 +99,13 @@ def _validate_date(
         raise EventPreviewError(
             f"{field_name} ist ungültig."
         )
+
+    try:
+        date.fromisoformat(date_value)
+    except ValueError as error:
+        raise EventPreviewError(
+            f"{field_name} ist ungültig."
+        ) from error
 
     return date_value
 
@@ -167,6 +175,8 @@ def _build_no_event_preview(
     payload: dict[str, Any],
     available_families: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    if payload.get("subevents") or payload.get("child_segments"):
+        raise EventPreviewError("„Ohne Ereignis“ besitzt keine semantischen Unterereignisse.")
     from app.event_timeline import normalize_no_event_segments, EventTimelineError
     try:
         segments = normalize_no_event_segments(payload.get("no_event_segments") or [])
@@ -180,7 +190,7 @@ def _build_no_event_preview(
             "Bitte für jeden Monat eine eigene Sammlung anlegen."
         )
     month_key = next(iter(months))
-    raw_naming = payload.get("folder_naming") or DEFAULT_EVENT_NAMING
+    raw_naming = payload.get("folder_naming") or normalize_event_naming({})
     naming = (
         dict(raw_naming)
         if isinstance(raw_naming, dict) and str(raw_naming.get("mode") or "") == "locked"
@@ -208,7 +218,7 @@ def _build_no_event_preview(
     if str(naming.get("mode") or "") == "locked":
         parent_folder = str(naming.get("locked_folder_name") or "").strip()
         if not parent_folder:
-            parent_folder = render_no_event_folder_name(month_key, DEFAULT_EVENT_NAMING)
+            parent_folder = render_no_event_folder_name(month_key, normalize_event_naming({}))
         no_event_label = str(payload.get("event_name") or "Ohne Ereignis").strip() or "Ohne Ereignis"
     else:
         parent_folder = render_no_event_folder_name(month_key, naming)
@@ -268,11 +278,12 @@ def build_event_preview(
     if payload.get("child_segments"):
         raise EventPreviewError("Normale Ereignisse benötigen einen durchgehenden Beginn und ein Ende. Getrennte Belegungssegmente sind nicht zulässig.")
     selected_intervals = payload.get("selected_intervals") or []
-    if selected_intervals and payload.get("event_kind", "event") == "event":
-        from app.released_ranges import merge_intervals
-        ranges = merge_intervals((v['start_datetime'], v['end_datetime']) for v in selected_intervals)
-        if len(ranges) != 1 and not payload.get("existing_parent_event_id"):
-            raise EventPreviewError("Die Auswahl ist nicht durchgehend. Bitte getrennte Ereignisse oder „Ohne Ereignis“ verwenden.")
+    # Seit 0.43.0 definieren Tageskarten keine Belegungssegmente mehr.
+    # Ein normales Ereignis ist ausschließlich der durchgehende Beginn-/Ende-
+    # Zeitraum des Formulars. Fotofreie Kalendertage und nicht angehakte
+    # Tageskarten innerhalb dieses Bereichs sind deshalb keine „Lücken“.
+    # Nur Erweiterungen bestehender Ereignisse verwenden selected_intervals
+    # weiterhin als expliziten neu hinzukommenden Bereich.
     event_kind = str(
         payload.get(
             "event_kind",
@@ -404,10 +415,24 @@ def build_event_preview(
             + child_name
         ) if child_name else None
 
+    raw_naming = payload.get("folder_naming") or normalize_event_naming({})
+    naming = (
+        dict(raw_naming)
+        if isinstance(raw_naming, dict) and str(raw_naming.get("mode") or "") == "locked"
+        else naming_snapshot_for_new_event(raw_naming)
+    )
+    if "subevent_prefix_enabled" in payload:
+        naming = dict(naming)
+        naming["subevent_prefix_enabled"] = bool(payload.get("subevent_prefix_enabled"))
+
     from app.subevents import normalize_subevents
     try:
-        subevents = normalize_subevents(payload.get('subevents') or [],
-            f"{start_date}T{start_time or '00:00'}:00",f"{end_date}T{end_time or '23:59'}:59")
+        subevents = normalize_subevents(
+            payload.get('subevents') or [],
+            f"{start_date}T{start_time or '00:00'}:00",
+            f"{end_date}T{end_time or '23:59'}:59",
+            naming=naming,
+        )
     except ValueError as error:
         raise EventPreviewError(str(error)) from error
     requested_family_ids = {
@@ -471,9 +496,6 @@ def build_event_preview(
     empty_subevent_days = []
     child_family_ids = set()
 
-    if subevents:
-        from datetime import date, timedelta
-
     for subevent in subevents:
         matching = [
             family for family in candidate_families
@@ -503,23 +525,9 @@ def build_event_preview(
             })
             continue
 
-        if preserve_day_folders:
-            start_day = date.fromisoformat(subevent["start_datetime"][:10])
-            end_day = date.fromisoformat(subevent["end_datetime"][:10])
-            occupied = set(matching_day_keys)
-            missing_days = []
-            current_day = start_day
-            while current_day <= end_day:
-                day_key = current_day.isoformat()
-                if day_key not in occupied:
-                    missing_days.append(day_key)
-                current_day += timedelta(days=1)
-            if missing_days:
-                empty_subevent_days.append({
-                    "name": subevent["name"],
-                    "folder_name": subevent["folder_name"],
-                    "day_keys": missing_days,
-                })
+        # Fotofreie Kalendertage innerhalb eines definierten Unterereignisses
+        # sind keine strukturellen Lücken.  Tagesordner entstehen nur dort,
+        # wo tatsächlich Aufnahmen vorhanden sind.
 
     if subevents:
         parent_structure_day_keys = sorted({
@@ -531,19 +539,12 @@ def build_event_preview(
     else:
         parent_structure_day_keys = selected_day_keys
 
-    raw_naming = payload.get("folder_naming") or DEFAULT_EVENT_NAMING
-    naming = (
-        dict(raw_naming)
-        if isinstance(raw_naming, dict) and str(raw_naming.get("mode") or "") == "locked"
-        else naming_snapshot_for_new_event(raw_naming)
-    )
-
     if event_kind == "no_event":
         if str(naming.get("mode") or "") == "locked":
             parent_name = str(payload.get("event_name") or "Ohne Ereignis").strip() or "Ohne Ereignis"
             parent_folder = str(naming.get("locked_folder_name") or "").strip()
             if not parent_folder:
-                parent_folder = render_no_event_folder_name(start_date[:7], DEFAULT_EVENT_NAMING)
+                parent_folder = render_no_event_folder_name(start_date[:7], normalize_event_naming({}))
         else:
             parent_name = normalize_event_naming(naming)["no_event_label"]
             parent_folder = render_no_event_folder_name(start_date[:7], naming)
@@ -685,4 +686,3 @@ def build_event_preview(
         "structure_lines": lines,
         "structure_text": "\n".join(lines),
     }
-

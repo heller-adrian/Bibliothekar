@@ -65,15 +65,19 @@ def register_analysis_inventory(
     analysis: dict[str, Any],
     checksums: dict[str, str],
     sizes: dict[str, int],
+    reimport_of_job_id: str | None = None,
 ) -> dict[str, Any]:
     backup_id = backup_key(library_id, job_id)
+    # A confirmed new backup attempt is distinct from the old import, while
+    # canonical family/media identity continues to use the original hashes.
+    attempt_identity = f"reimport:{job_id}:{source_identity}" if reimport_of_job_id else source_identity
     register_source_backup(
         registry_path,
         backup_id=backup_id,
         source_kind="import",
-        source_identity=source_identity or job_id,
+        source_identity=attempt_identity or job_id,
         backup_path=source_path or job_id,
-        metadata={"library_id": library_id, "job_id": job_id},
+        metadata={"library_id": library_id, "job_id": job_id, "physical_source_identity": source_identity, "reimport_of_job_id": reimport_of_job_id},
     )
 
     members_by_family: dict[str, list[dict[str, Any]]] = {}
@@ -165,6 +169,7 @@ def _database_family_rows(
                 ff.job_id,
                 ff.family_key,
                 j.source_signature,
+                j.duplicate_of_job_id,
                 j.source_fingerprint,
                 j.source_device_id,
                 j.source_path,
@@ -176,7 +181,6 @@ def _database_family_rows(
             FROM file_families ff
             JOIN jobs j ON j.id = ff.job_id
             JOIN files f ON f.family_id = ff.id
-            WHERE COALESCE(TRIM(f.sha256_original), '') <> ''
             ORDER BY ff.job_id, ff.id, f.id
             """
         ).fetchall()
@@ -193,10 +197,18 @@ def backfill_library_inventory(
     rows = _database_family_rows(database_path)
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in rows:
+        if not str(row.get("sha256_original") or "").strip():
+            raise LibraryRegistryError("source_inventory_conflict: missing original checksum")
         grouped.setdefault(
             (str(row["job_id"]), str(row["family_key"])),
             [],
         ).append(row)
+
+    # Current ownership is mutable; original source membership is not.
+    from app.source_provenance import qualify_origins, _ProjectionAuthority
+    authority = _ProjectionAuthority(registry_path, database_path, family_content_fingerprint)
+    original = qualify_origins(registry_path, database_path, library_id, grouped,
+                               family_content_fingerprint, _authority=authority)
 
     backup_registered: set[str] = set()
     family_count = 0
@@ -204,6 +216,15 @@ def backfill_library_inventory(
     claim_count = 0
 
     for (job_id, family_key), members in grouped.items():
+        if (job_id, family_key) in original:
+            family_count += 1
+            media_count += len(members)
+            if claim_all_owned:
+                claim_source_family(registry_path,
+                    source_family_key=occurrence_key(library_id,job_id,family_key),
+                    library_id=library_id,event_id=None,claim_state="owned")
+                claim_count += 1
+            continue
         first = members[0]
         backup_id = backup_key(library_id, job_id)
         if backup_id not in backup_registered:
@@ -222,10 +243,11 @@ def backfill_library_inventory(
             # Quellenidentität.
             is_main_import = library_id == MAIN_LIBRARY_ID
             source_kind = "import" if is_main_import else "existing_library"
+            attempt_identity = f"reimport:{job_id}:{identity}" if first.get("duplicate_of_job_id") else identity
             source_identity = (
-                identity
+                attempt_identity
                 if is_main_import
-                else f"{library_id}:{identity}"
+                else f"{library_id}:{attempt_identity}"
             )
             register_source_backup(
                 registry_path,
@@ -237,6 +259,12 @@ def backfill_library_inventory(
                     "library_id": library_id,
                     "job_id": job_id,
                     "physical_source_identity": identity,
+                    # Only candidates actually used by the historical stale
+                    # job-snapshot fallback can be reconciled at startup.
+                    "legacy_import_identity": (
+                        str(first.get("source_device_id") or first.get("source_path") or "")
+                        if is_main_import else ""
+                    ),
                 },
             )
             backup_registered.add(backup_id)
@@ -251,13 +279,21 @@ def backfill_library_inventory(
             for row in members
         ]
         source_key = occurrence_key(library_id, job_id, family_key)
+        from app.source_provenance import projection_origin
+        projection=projection_origin(registry_path,database_path,library_id,job_id,family_key,members,
+                                     _authority=authority)
+        origin_metadata={"library_id":library_id,"job_id":job_id}
+        if projection is not None:
+            normalized_members=projection['members']
+            origin_metadata.update(projection_origin=projection['source_family_key'],
+                projected_missing_members=projection['projected_missing_members'])
         family = register_source_family(
             registry_path,
             source_family_key=source_key,
             backup_id=backup_id,
             family_key=family_key,
             content_fingerprint=family_content_fingerprint(normalized_members),
-            metadata={"library_id": library_id, "job_id": job_id},
+            metadata=origin_metadata,
         )
         media_ids: list[str] = []
         for member in normalized_members:

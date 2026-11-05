@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 import errno
 import os
 from pathlib import Path
@@ -82,10 +84,11 @@ def test_0323_shell_shows_current_library_and_old_review_route_is_removed():
     shell = ui_shell._shell_markup("workspace", "captures")
 
     assert 'id="bk-current-library-name"' in shell
-    assert "Bibliothek …" in shell
+    assert "Bibliothek …" not in shell
+    assert "Hauptbibliothek" in shell
     assert "/api/libraries/current" in ui_shell.BIBLIOTHEKAR_JS
-    assert "0.40.3 · Kamerakern 0.32.11" in shell
-    assert main.DEPLOYMENT_VERSION == "0.40.3"
+    assert f'Version <span data-bk-version>{EXPECTED_RELEASE_VERSION}</span>' in shell
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
     assert "/review" not in {
         getattr(route, "path", None)
         for route in main.app.routes

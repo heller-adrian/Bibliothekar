@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,19 +34,21 @@ def test_0336_still_write_normalizes_exif_and_xmp(monkeypatch, tmp_path: Path):
     )
 
     command = captured[0]
+    for tag in ("OffsetTimeOriginal", "OffsetTimeDigitized", "OffsetTime"):
+        assert f"-EXIF:{tag}=+02:00" in command
     assert "-EXIF:DateTimeOriginal=2026:10:03 21:14:58" in command
     assert "-EXIF:CreateDate=2026:10:03 21:14:58" in command
-    assert "-XMP-exif:DateTimeOriginal=2026:10:03 21:14:58" in command
-    assert "-XMP-xmp:CreateDate=2026:10:03 21:14:58" in command
-    assert "-XMP-xmp:ModifyDate=2026:10:03 21:14:58" in command
+    assert "-XMP-exif:DateTimeOriginal=2026:10:03 21:14:58+02:00" in command
+    assert "-XMP-xmp:CreateDate=2026:10:03 21:14:58+02:00" in command
+    assert "-XMP-xmp:ModifyDate=2026:10:03 21:14:58+02:00" in command
 
 
 def test_0336_reintegration_code_never_accepts_ohne_datum_destination():
     source = Path("app/metadata_correction.py").read_text(encoding="utf-8")
     assert "Korrigierte Metadaten würden erneut in Ohne_Datum einsortiert." in source
-    assert 'record["selected_capture_time"] = proposed[:19]' in source
+    assert 'record["selected_capture_time"] = proposed' in source
     assert 'record["capture_time_confidence"] = "high"' in source
 
 
 def test_0336_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.40.3"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION

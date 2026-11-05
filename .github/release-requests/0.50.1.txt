@@ -1,0 +1,12 @@
+Bibliothekar 0.50.1 – separates Testimage für externe Ereignisordner-Löschungen.
+
+Verifizierter Quellstand vor dieser Release-Anforderung: fbddbcc0f1c80e16bf67706ec9202d47517ebbb8.
+Branch patch/0.50.0-audit, Pull Request #19 bleibt Draft.
+CI: https://github.com/heller-adrian/Bibliothekar/actions/runs/38072582148
+1003/1003 Backendtests, 6 Warnungen; isolierter Archiv-Container-Test bestanden.
+Keine NAS-Produktivdaten für die Tests. Keine Schema-Migration.
+Externe Ordnerlöschungen: vollständige/partielle Ereignisse; applied/archived; zweifache Prüfung; Quittierung; Bestand; Fremdzuordnungen; manuelle Umbenennung.
+Image ausschließlich ghcr.io/heller-adrian/bibliothekar:patch-0.50.1.
+Bestehendes patch-0.50.0, main, v0.40.3, latest und alle Stable-Tags unverändert.
+Keine TrueNAS-Discover-Freigabe. Keine Stable-/1.0.0-Freigabe.
+Container muss aus dem durch diese Anforderung entstandenen Commit gebaut werden; SOURCE_REVISION entspricht dem Commit und Image-Digest wird in GitHub Actions dokumentiert.

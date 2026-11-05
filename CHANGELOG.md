@@ -1,6 +1,480 @@
+## 1.0.0 – Erste stabile Veröffentlichung
+
+- Stabile Version aus dem praktisch abgenommenen Stand `1.0.0-pre.7.2`, ohne neue Foto- oder Archivfunktionen.
+- Sichere Kamera-/SD-Karten-Sicherungen, Dateifamilien, Metadatenkorrektur, Ereigniszuordnung, gemeinsamer Arbeitsbereich und kontrollierte Archivierung.
+- Manuelle Dateiumbenennungen und Änderungen angewendeter beziehungsweise archivierter Ereignisse lassen sich mit ausdrücklichem Übernehmen/Rückgängigmachen behandeln.
+- Archivänderungsassistent mit geprüfter Schrittfolge, Wiederanlauf-/Recovery-Prüfungen und read-only Archivgrenzen.
+- Der Name manuell umbenannter „Ohne Ereignis“-Sammlungen bleibt auch bei späterer Archivplanung maßgeblich; der Kopierknopf hat einen browsergeeigneten Fallback.
+- Die separate optionale SD-/USB-Geräteintegration benötigt weiterhin erhöhte Containerrechte; die standardmäßige Ordner-/NAS-Quellen-Variante nicht.
+- Öffentlichkeitsorientierte README und reproduzierbares TrueNAS-Compose-Beispiel aktualisiert. Aufnahme in den offiziellen TrueNAS-Katalog steht noch aus.
+
+## 1.0.0-rc.13 – Quellenhistorie und korrigierte Bedienoberfläche (28.10.2026)
+
+- Bestätigte Einzeldateiverluste ändern die ursprüngliche Quellfamilie nicht.
+  Betroffene RC12-Installationen setzen anhand ihrer erhaltenen Nachweise fort.
+- Zweite Bibliotheken referenzieren die ursprüngliche kanonische Herkunft;
+  widersprüchliche oder unbelegte Fehlbestände werden weiterhin gesperrt.
+- Atomarer F14-State-Austausch wird eng begrenzt und vollständig erneut geprüft;
+  Symlinks, Hardlinks und ungültige Kontrollnachweise bleiben Sperrgründe.
+- Tatsächliche Bibliothekspfade, vollständige DE/EN-Dialoge, verständliche
+  manuelle Archiv-/Rückänderung und mobile Statusanzeige korrigiert.
+- Speicherreparatur erhält ausschließlich Darstellungskorrekturen; ihre
+  Bedingungen und Verlustbestätigungen bleiben erhalten.
+- Vollständiger automatisierter Abnahmenachweis und praktische TrueNAS-Schritte:
+  [RC13-Unterlagen](docs/rc13/TEST-REPORT.md),
+  [Upgrade](docs/rc13/UPGRADE-RC12.md),
+  [TrueNAS-Test](docs/rc13/TRUENAS-TEST.md).
+  Native TrueNAS-/ACL-Abnahme erfolgt separat; RC13 bleibt ein Prerelease.
+
+## 1.0.0-rc.12 – Ein-Mount-Installation und nachvollziehbare Reparatur (27.10.2026)
+
+- Neues explizites hostverwaltetes Appdatenprofil unter /appdata: reale Zugriffsrechte statt globaler UID-/ACL-Exklusivitätsblockade.
+- FRESH, INITIALIZING, READY, DEGRADED, AMBIGUOUS mit getrenntem Onboarding und authentifizierter Reparatur.
+- F14-Format3, persistente Instanzbindung, Workspace-Claim, Mount-Provenienz und Schutz vor verlorener Steuerhistorie.
+- Originalordner wiedererkennen oder bestätigten leeren Rollen-Ersatz dokumentieren; keine Katalog-/Journal-Löschung.
+- Basisprofil ohne privilegierten Helper; optionaler rootkontrollierter Wechselmedien-Runtime-Mount ohne Hostpropagation.
+- Legacy-Layout und explizite RC10/RC11-Übernahme bleiben getrennt. Native TrueNAS-Abnahme steht aus.
+
+## 1.0.0-rc.11 – Kandidat zur Prüfung (27.10.2026)
+
+- Privates, nativ ACL-geprüftes Trash-/Recovery-Lock; gemeinsamer Workspace bleibt von privater Kontrollautorität getrennt.
+- Explizite Offlineübernahme von RC10-Erststarts mit Originalnachweisen, stabiler Reservation, F14-Format 2 und dauerhaftem Abschlussreceipt.
+- Crashfenster zwischen completed und Reservationsfreigabe geschlossen; Worker erst nach Abschluss freigegeben.
+- Historische F14-/Katalog-/Registry-/Retention-Gegenbeweise und konkrete deutsch/englische Speicherdiagnosen ergänzt.
+- Keine Veröffentlichung oder produktive Migration. Voraussetzungen, Upgrade-/Rollbackgrenzen und tatsächliche QA siehe [RC11](docs/rc11/README.md).
+
+## 0.56.2
+
+- F5–F10 aus Audit Phase 3: frühe Sortier-/Reconcile-Recovery, dauerhafte Papierkorb-Restores und Import-Move-Nachweise, fortsetzbare SSD-Teilfreigabe mit vollständiger Archivprüfung sowie wiederholbare Metadatenpropagation und Arbeitskopienbereinigung.
+- Originale 65 Prozessabbruchfälle als Backend-Regressionen übernommen und Wiederanlauf-/Fremddatei-Gegenproben ergänzt.
+
+## 0.56.1 – Stabilitätspatch nach Audit Phase 2 (14.10.2026)
+
+
+- F1/F2: Selektive Papierkorblöschung erhält ein atomar ersetztes, dauerhaft geschriebenes Journal mit gezielter Katalogsicherung. Teilcommits getrennter SQLite-Datenbanken werden wiederholbar kompensiert; Familien und abhängige Zuordnungen bleiben erhalten. Wiederherstellung blockiert bei widersprüchlichen Dateien oder Katalogen und bewahrt die Nachweise.
+- F3: Allgemeine Metadatenkorrektur verwendet die bestehende Austausch-Recovery mit gesicherten Originalbytes. Nach einem fehlgeschlagenen SQLite-Abschluss ist Rückbau und erneute Ausführung möglich; bestätigte Abschlüsse werden fertiggestellt.
+- F4: Stammordnerumbenennung prüft ursprüngliche Workspace-Komponenten und alte sowie neue Ordner auf Symlinks vor Dateioperationen.
+- Vier unveränderte Audit-Reproduktionen und gezielte Unterbrechungs-/Negativtests als dauerhafte Regressionen. Keine Schema- oder Bestandsmigration.
+
+## 0.56.0 – Transparente V3-Wortmarke und installierbares Web-App-Icon (14.10.2026)
+
+- Für Header, „Über Bibliothekar“ sowie Login und Ersteinrichtung gilt ab sofort das originale transparente `bibliothekar-logo-v3.svg` (ohne Farbflächen oder Neuzeichnen).
+- Auf breiten Einrichtungsseiten wird die große Wortmarke horizontal zentriert und bleibt räumlich unabhängig vom mittigen Formular. Mobile Ansicht unverändert.
+- Browser-Favicon und Web-App-Manifest verwenden `bibliothekar-logo-symbol-background.svg` mit dunkelblauer Fläche, einschließlich eines abgeleiteten PNG-Icons für Apple-Touch und installierte Anwendungen.
+- `bibliothekar-logo-symbol.svg` ohne Hintergrund bleibt zusätzlich als unverändertes Quellasset vorhanden; alte V2-URL wird aus Kompatibilitätsgründen weiter ausgeliefert.
+- Icons/Logo sind auch beim Login und vor Anlage der ersten Bibliothek erreichbar. Keine Änderung der Zugriffsrechte auf APIs oder private Medien.
+- Frühere Datenbank-, Ordner- und mobile PWA-Logik bleiben unverändert.
+
+## 0.55.4 – Config-Bootstrap und eigenständiges Desktop-Logo (14.10.2026)
+
+- Ein fehlendes \`/config/settings.json\` wird beim Containerstart mit einem gültigen, minimalen JSON-Objekt und restriktiven Dateirechten automatisch erstellt. Damit meldet die Health-Anzeige bei einem vollständig neuen Setup nicht mehr allein wegen der fehlenden Settings-Datei \`Degraded\`. Existierende und auch fehlerhafte Konfigurationen bleiben ausdrücklich unverändert.
+- Großes Bibliothekar-Logo auf breiten Desktop-Einrichtungsseiten, links oben fest positioniert; Login und Erstbibliotheksformular bleiben unabhängig davon mittig.
+- Schmale/mobile Passwort- und Einrichtungsseiten behalten vollständig das bewährte 0.55.3-Layout.
+- Keine Migration, keine Dateioperationen in Benutzer-Workspaces, kein Eingriff in das Administratorpasswort.
+
+## 0.55.3 – Feinschliff vor der Release-Prüfung (14.10.2026)
+
+- Login und Einrichtung zeigen das originale Bibliothekar-Logo groß vor dem Formular auf dem gleichen dunklen Markenblau (`#15222c`) wie der Desktop-Header; EN/DE-Schalter und Authentifizierung bleiben unverändert.
+- `Degraded` bleibt ein echter Health-Befund. Im Importbereich lassen sich die vom Backend gelieferten konkreten Ursachen direkt einblenden; kein künstliches Grün.
+- Desktop/Mac: Zeigefinger-Cursor auf aktiven Bedienelementen. Die alte bildschirmfüllende Standalone-Navigationsanimation wird ausschließlich für breite Mac-/Desktop-Fenster deaktiviert.
+- Settings → Paths beschreibt `General` und die mögliche historische Ausnahme; der alte `Allgemein`-API-Endpunkt nutzt nun die auf existierenden Ordnern basierende Pfadauflösung, ohne Dateien umzubenennen.
+- iPhone-PWA: kein schwarzer WebKit-Tap-Highlight bei Aufgaben/Menü; nur das Import-Docksymbol wird zu einer roten Festplatte.
+- Keine Migration; Datenbank, Import, Archivierung und bisherige mobile Navigation bleiben unangetastet.
+
+## 0.55.2 – Schrittweises Laden der mobilen PWA (13.10.2026)
+
+- Die PWA zeigt Kopfzeile, obere Reiter, Überschrift und unteres Dock nach dem HTML-Empfang sofort an; der Hauptbereich wird erst nach seiner synchronen Übersetzung eingeblendet, ohne API-Anfragen abzuwarten.
+- Die Vollbild-Ladefläche bei der PWA-Navigation entfällt. Stattdessen bleiben vorhandene lokale Lade-/Platzhalteranzeigen der Datenbereiche sichtbar; ausgehende Datenbereiche werden während der Navigation gegen Interaktion gesperrt.
+- Der farbige Indikator am unteren Reiter richtet sich bereits beim Antippen nach der Farbe des **Zielreiters**, nicht der bisherigen Seite.
+- Bestehende vollständige Seitenwechsel und Daten-/Bibliothekslogik bleiben unverändert. **Kein SPA-Umbau (Stufe 2)** und keine Migration vorhandener Bestände.
+- Regressionstests für frühen Header, sprachsicheren First Paint, farbige Reiter und lokale Ladeanzeige.
+
+## 0.55.1 – PWA-Navigation und Sprachwahl bei der Ersteinrichtung (13.10.2026)
+
+- Untere PWA-Navigation reagiert sofort auf Berühren; beim vollständigen Seitenwechsel bleibt der ausgewählte Dock-Reiter sichtbar, der Inhalt zeigt einen Ladezustand. Keine Änderungen an Datei- oder Bibliotheksoperationen.
+- Ersteinrichtung und Passwortseite bieten EN/DE direkt an; Sprachwahl wird in denselben Browser-Einstellungen wie bisher gespeichert und bei späteren Seitenaufrufen genutzt.
+- Keine neue deutsche \`Arbeitsbereich\`-Kompatibilitätsverknüpfung auf einem leeren Workspace; bestehende historische Verknüpfungen bleiben erhalten.
+- Neue Archiv-Hilfsfallbacks verwenden \`All / Sorted / Export\`; bestehende deutsche \`Alle / Sortiert / Export\`-Pfade werden weiter erkannt.
+- Isolierte Regressionstests ergänzt; keine automatische Migration oder Umbenennung von Nutzerdateien.
+
 # Changelog
 
+## 0.53.2 – Papierkorb-Hintergrundwiederherstellung (Korrekturpatch)
+
+- Restore Selection und Restore All erzeugen einen dauerhaften Hintergrundauftrag; die HTTP-Anfrage verschiebt keine Fotos mehr.
+- Die geprüfte temporäre Importquelle im eigenen Metadatenverzeichnis wird auch von der Importvorprüfung sicher zugelassen.
+- Bekannte Originale behalten ihre bestehende Sicherungsidentität; neue Originale werden über den normalen Import nach Datum/Familie katalogisiert.
+- Der Hintergrundmonitor zeigt Papierkorbaufträge mit Fortschritt und Fehlerstatus.
+- Nicht abgeschlossene leere Papierkorb-Sicherungen werden nicht als aktive Sicherungen angeboten.
+- Die Aufgabe für freie Tagesbestände berücksichtigt gewöhnliche freigegebene Familien, schließt aber offene Neu-Zuordnungen und getrennte Archivfreigaben aus.
+- Bei Warteschlangen-Aufträgen schützt das System ausgewählte Quelldateien vor konkurrierendem endgültigem Löschen.
+- Nach Containerstart werden nur eindeutig unbegonnene Papierkorbaufträge fortgesetzt; unsichere Teiloperationen bleiben zur Prüfung gesperrt.
+- Der vollständige Durchlauf wird mit neuen realen Dateisystem- und Datenbank-Regressionstests geprüft.
+
+
+## 0.53.2 – Papierkorb, Herkunft, Aufgaben, manuelle Wiederherstellung (Entwicklung)
+
+- Papierkorb: neu importierte, nicht katalogisierte Dateien werden SHA-256-geprüft über eine versteckte Hintergrundsicherung in den Tagesbestand übernommen; Verwaltungsdateien wie .DS_Store bleiben aus dem Kameraimport ausgeschlossen.
+- Bekannte Dateien: Wiederherstellung bleibt prüfsummengesichert und behält ihre ursprüngliche Sicherungsidentität. Ausgewählte Dateien können unabhängig vom übrigen Papierkorb endgültig geleert werden.
+- Der Sicherungsfilter zeigt auch Metadatenkorrektur- und Papierkorbimporte, während Import & Review diese Hintergrundwege weiterhin ausblendet.
+- Ereignisvorschau: nur physischer Ist-Bestand und bei Bedarf Abweichungsdiagnose statt doppelter Struktur.
+- Manuelle Applied-Änderungen: ergänzter Undo-Weg mit SHA-256-Prüfung; Archiv-Undo bleibt ein read-only-Manuellverfahren.
+- Aufgaben: noch offene Archivierungen werden sichtbar; freigegebene, nicht zugeordnete Aufnahmen werden zuverlässiger gezählt.
+- Zweisprachige Schaltflächen, Bestätigungen und Fehleranzeigen; isolierte Regressionstests.
+
+
+## 0.53.0 – Papierkorb: selektive und vollständige Wiederherstellung (Entwicklung)
+
+- Ohne Auswahl: „Alle wiederherstellen“; mit ausgewählten Dateien: „Auswahl wiederherstellen“; Mehrfachauswahl wie in der Metadatenkorrektur, inklusive Umschalt-Klick und „Alle auswählen“.
+- Eindeutig katalogisierte Fotos gehen SHA-256-geprüft und ohne Überschreiben in den kanonischen zentralen Tagesbestand. Bibliotheksprojektionen und Historie werden aktualisiert; die Kamerabibliothek bleibt read-only.
+- Unbekannte, beschädigte, nicht eindeutig zugeordnete oder noch ereignisgebundene Dateien sowie Kollisionen werden vor der ersten Bewegung blockiert. Teilfehler führen zu einem kontrollierten Rückbauversuch.
+- Isolierte QA für Einzel-/Komplettwiederherstellung, Datenbanken, Prüfsummen, Kollisionen und Rollback.
+
+
+## 0.51.0 – Guided manual event edits and English storage defaults (development)
+
+- Added an explicit **Review as event edit** transition for manually dissolved subevents. The server validates the exact saved physical inventory, original family ownership, capture-time bounds, retained sibling events and a matching open manual-change task before permitting any edit.
+- Applied events use the established transactional event-edit mutation and mandatory reapply/reconcile workflow. An ordinary edit still cannot bypass an unresolved physical structure task; a reviewed guided task is completed only within the event-edit SQLite transaction.
+- Archived events are handed to the existing read-only archive change-request flow with the same narrow semantic preflight. Archive contents are not modified by the server.
+- Central managed internal folder names now default to English for newly created paths, with existing legacy folders preserved. Ambiguous simultaneous nonempty English and German roots fail closed rather than splitting the database's stock.
+- Metadata tools support `General`, `Batch Correction` and `No Date` while preserving existing German folder names and stored relative paths. New folder imports and simulated imports use the selected undated root.
+- Archive staging uses the selected library's actual work area, including `Assign Later`, `Released Archive Files` and compatible legacy staging paths; reversal chooses `Reversal` and `Restoration` on new setups.
+- New regression coverage includes direct applied-child dissolution, rejection without explicit approval, exact family retention, canonical workflow reentry, legacy/new directory names and collision handling.
+- **Release gate:** the patch remains isolated from `main`/`latest` until full GitHub QA and a separate test-image build complete. TrueNAS physical acceptance is still required.
+
+## 0.50.9 – Getrennte Ereignisordner und sichere manuelle Änderungen (in Entwicklung)
+
+- Manuell erkannte unterschiedliche Organisationsstrukturen von Haupt-, Unter- und Tagesereignisblättern erhalten separate Input-Ordner. Die Blatt-Zuordnung verwendet stabile Ereignis-IDs statt Ordnernamen.
+- SQLite speichert die bestätigten Blatt-Layouts über die additive Migration 053. Die portable event.json enthält diese Blatt-Layouts und zeigt im Strukturbaum deren jeweilige Ordner.
+- Manuelle Applied-Dateiverschiebungen synchronisieren die ereignisbezogene SQLite-Revision über einen wiederholbaren event.json-Auftrag. Ein zeitlich falsch zugeordnetes Unterereignis bleibt ein Konflikt; vollständig in den Hauptordner verschobene Unterereignisse werden nicht stillschweigend umbenannt oder aufgelöst.
+- Archivierte Ereignisse bleiben read-only: Eine neue event.json wird zuerst in einem Hilfsbereich vorbereitet und erst nach exaktem SHA-256-Abgleich im Archiv übernommen. Der Hilfsbereich verwendet den tatsächlichen Bibliotheks-Arbeitsordner; neue Installationen erhalten `Assign Later`, vorhandene deutsche Hilfsordner bleiben kompatibel.
+- Fremde/beschädigte event.json-Dateien und symbolische Links dürfen im Hilfsbereich nicht überschrieben werden. Nach einem Absturz kann eine byteidentische temporäre Datei sicher weiterverwendet werden.
+- Zusätzliche englische UI-Texte für Rückänderung, Archiv, Dateioperationen und Importe. Die bisherigen englischen Standardordner für neue Installationen bleiben bestehen; bereits angelegte deutsche Ordner werden nicht automatisch umbenannt.
+- Isolierte Negativ- und Regressionstests prüfen Haupt-/Unterereignisse, abweichende Zeitfenster, nicht autorisierte Auflösung, zwei Archivpfadvarianten, manipulierte event.json, Fremddateien und Pfadtraversal.
+- **Noch offen:** Eine manuelle Auflösung eines Unterereignisses direkt als *fachliche* Ereignisänderung ist bewusst noch nicht freigeschaltet. Sie benötigt den atomaren, bestätigten Edit-/Reassignment-Workflow; bloße Finder-Bewegungen reichen nicht als Zustimmung. Eine pauschale Umbenennung aller übrigen historischen internen Ordner ist nicht Bestandteil dieses Patches.
+- Entwicklung nur in `patch/0.50.9`; keine automatische Migration bestehender Archive und kein Release auf `main`/`latest`.
+
+## 0.50.8 – Hintergrundaufträge, Speicheranzeige und Internationalisierung
+
+- Der Systemstatus ermittelt freien Platz auf dem tatsächlichen Library-Workspace-Dataset anstelle der temporären Kompatibilitätsansicht unter /tmp.
+- Archiv-Freigabe bestätigt den Serverauftrag, fängt Fehler vor und nach dem Dialog ab und meldet diese sichtbar.
+- Hintergrund-Dock ist nicht mehr auf große Desktopfenster beschränkt; kurze, abgeschlossene Anwende- und Freigabeaufträge bleiben für die Abnahme kurz sichtbar.
+- Bereits vorhandene englische Standard-Unterordner `All` und `Sorted` werden bei der Inventarisierung korrekt klassifiziert.
+- Ergänzte und dynamische DE/EN-Übersetzungen für Laufwerksimport, Tageskarten, Ereignisvorschau und Archiv-Fehler; Dateipfade, Ereignisnamen und vorhandene Ordner bleiben unverändert.
+- Eigene isolierte Regressionstests ergänzt. Installations- und produktive Daten werden nicht migriert.
+
+
+## 0.50.3 – Tiefenprüfung englische PWA-Oberfläche (11.10.2026)
+
+- Sechs reale iPhone-Screenshots gegen HTML-/JavaScript-Quelltexte geprüft: deutsche Import-Statuskarten, SD-Card-Hilfe, Filter/Zähler, Archivstatus, dynamische Anzeigen, Metadata-Correction-Titel und Quelle-/Pfadbeschriftungen lokalisiert.
+- Umfangreiche neue EN-Übersetzungen für systemeigene Importbezeichnungen (Folder Import / SD Card Import / Drive Import), Archiv-, Reassignment- und Recovery-Workflows, Sicherheitsbestätigungen und kontextuelle Fehlermeldungen.
+- Dynamische Anzeigetexte mit kontrollierten Mustern übersetzt, ohne benutzerdefinierte Dateinamen, Verzeichnisnamen, gespeicherte SQLite- oder event.json-Werte zu ändern.
+- Browser-Dokumenttitel bei EN↔DE-Wechsel übersetzt; Archivkarten schützen ihre echten Benutzer-/Ordnernamen explizit vor Übersetzung.
+- Screenshotbasierte Regressionstests, bestehende Sprachtests, gesamte Backend-QA und isolierte Archivprüfung als Release-Gates. Main, latest und v0.40.3 bleiben unverändert.
+- Standardnamen der konfigurierbaren Hauptverzeichnisse neuer Installationen weiterhin englisch; ältere interne physische Ordner bleiben aus Pfadkompatibilitätsgründen unverändert. Grenzen: docs/0503_I18N_SCREENSHOT_AUDIT.md.
+
+
+## 0.50.2 – English-first UI, Lokalisierungsarbeit (10.10.2026)
+
+- Englisch wird Standard im Browser; Sprachumschalter Englisch/Deutsch in den Einstellungen freigeschaltet und Auswahl lokal im Browser gespeichert.
+- Gemeinsame UI-Übersetzungsdatei mit dynamischer Beobachtung gerenderter Texte, Dialoge, Fehlermeldungen und Beschriftungen; keine Übersetzung gespeicherter Dateipfade, Event-IDs, SQL-Daten oder Benutzereingaben.
+- Anmeldung und erste Bibliothekseinrichtung an die Sprachwahl angebunden.
+- Englische Stammordnernamen ausschließlich für neue Installationen: SD Card Backups, Library Workspaces, Metadata Correction, Trash. Vorhandene deutsche Ordner und explizit konfigurierte Pfade bleiben erhalten; ältere Tests prüfen weiterhin ihre unveränderte deutsche Ablage.
+- Neue Monatssammlungen ohne Ereignis verwenden standardmäßig „No Event“, falls keine abweichende Bezeichnung eingestellt ist.
+- Umfangreiche Lokalisierungs- und Rückwärtskompatibilitätstests ergänzt; die vollständige Übersetzungsabdeckung weiterer dynamischer Fachdialoge erfordert abschließende Abnahme vor Testimage-Veröffentlichung.
+- Weder Produktivdaten noch Stable latest oder das bisherige Testimage werden geändert.
+
+## 0.50.1 – Extern gelöschte Ereignisordner erkennen (10.10.2026)
+
+- Fehlende Ereigniswurzel in passiven Applied-/Archived-Inventuren nach kontrollierter Archivübernahmeprüfung als leeren realen IST-Bestand behandeln; die bisherigen strengen Archivoperationen bleiben unverändert.
+- Zwei bestätigende Prüfungen, quittierbare Hinweise für vollständig und teilweise entfernte Ereignisordner, korrekte SQLite-Bestandsbereinigung. Keine Wiederherstellung absichtlich gelöschter Dateien.
+- Nachvollziehbare Platzierungskonflikte und fremde Ereigniszuordnungen blockieren destruktive Löschannahmen.
+- Synthetische Regressionen für Verschiebungen, Renames, Teilbestände, fremde Ansprüche, Neustart/Quittierung und unerreichbare Wurzeln; kein Datenbankschemawechsel.
+- Separater Entwicklungstag `patch-0.50.1` vorgesehen; Stable `latest`, `main`, `v0.40.3` unverändert. Siehe `docs/0501_EVENT_DELETION_REPORT.md`.
+
+## 0.48.0 – iOS-PWA: vollständige Karten- und Metadatenrahmen (10.10.2026)
+
+- Die Schnellauswahl per Halten und Ziehen animiert keine Tageskarten, Checkboxen oder umrandeten Metadatenstatus mehr mit `transform`. Der kurze Auswahlpuls wird als innenliegender Schatten (`box-shadow: inset`) gezeichnet.
+- Widersprüchliche Animationen aus 0.42.3/0.42.4, temporäre `will-change: transform`-Beschleunigung und die 0.45.6-Kindanimation der Kontur „Metadaten eindeutig“ bereinigt.
+- Neue CSS-/Auswahl-Regressionen schützen gegen erneut animierte Konturen, auch für den letzten Tagesordner. Echte iOS-WebKit-Abnahme bleibt notwendig.
+- Bereichsauswahl, Umkehren der Auswahl und Auto-Scroll bleiben unverändert. Keine Datenbankmigration und keine Änderungen an Kameradateien.
+
+
+## 0.47.8 – Mobile Ereignisbuttons lesbar (09.10.2026)
+
+- Die Beschriftungen von „Öffnen“, „Sortierung prüfen“ und „Ereignis löschen“ erhalten bei Handybreiten eine gezielte kleinere Schriftgröße. Alle drei Aktionen bleiben nebeneinander, ohne aus ihren Buttons herauszuragen.
+- Die Änderung gilt für die installierte Web-App und die mobile Browser-Website, nicht für den Desktop.
+- Keine Änderungen am Ereignisworkflow, an SQLite oder am Dateibestand.
+
+## 0.47.7 – Rückkehrkopien beim Archivverwerfen zuverlässig entfernen (09.10.2026)
+
+- Archiv-Verwerfen prüft vor dem SSD-Cleanup sämtliche betroffenen Archivoriginale und SSD-Rückkehrkopien erneut nach Größe und SHA-256. Erst danach werden bekannte Kopien entfernt und leere Tages-/Jahresordner unter „Freigewordene Archivdateien“ aufgeräumt.
+- Fehlende oder veränderte Archivoriginale erfordern weiterhin den bewährten Rückänderungsauftrag. Unbekannte/fremde SSD-Dateien werden niemals entfernt.
+- Ein nicht vollständig bereinigter Rückkehrbestand darf keinen als abgeschlossen verbuchten Abbruch mehr erzeugen. Der Auftrag bleibt offen und wiederholbar, bis alle eigenen Rückkehrkopien sicher entfernt sind.
+- Tests für Kamera- und Export-Assets, geteilte Freigabeordner, veränderte Kopien, verlorene Archivoriginale und abgeschlossene Rückänderungen.
+- Keine neue Datenbankmigration und keine automatisch veränderten Archivdateien.
+
+## 0.47.5 – Sichere Ereignisänderungen und Hintergrundfortschritt (09.10.2026)
+
+- Der Nachsortierplan angewendeter Ereignisse erkennt aus dem ursprünglichen Mutations-Snapshot auch bereits entfernte oder umbenannte Unterereignisordner. Diese werden nicht länger fälschlich als freie Organisationsordner in den neuen Zielpfad übernommen.
+- Bei Archiv-Änderungen werden auch leere, entfernte Unterereignisse im manuellen Ordnerbereinigungsplan berücksichtigt. Bibliothekar verändert das Archiv weiterhin nicht selbst.
+- Im seitenunabhängigen Desktop-Hintergrundmonitor werden die bereits vom Server berechneten Prozentwerte einzelner Sortierläufe und Sammelaufträge angezeigt.
+- Die Wiederaufnahme des Fortschritts eines laufenden Sammelauftrags ist vom Laden der umfangreichen Aufnahmenübersicht entkoppelt.
+- Ordnerbäume nutzen eine feste Zeichenbreite für korrekte Verbindungslinien; die übrige App bleibt in Futura.
+- Zusätzliche Regressionstests, Versionsanpassung auf 0.47.5; keine Datenbankmigration und keine automatisch ausgeführte Reparatur vorhandener Ereignisse.
+
+## 0.47.4 – Abschlusskorrekturen an Import und Hintergrundanzeige (09.10.2026)
+
+- Der alte Block „Bereits erkannte Sicherungsquellen“ sowie die Auswahl `saved` entfallen aus dem Ordnerbrowser. Der SD-Import prüft den tatsächlich eingebundenen Kartenordner, unabhängig von der alten Quellensuche.
+- Der NAS-/Wechselmedien-Ordnerbrowser zeigt Anzahl aller Dateien, Anzahl der Medien und Gesamtgröße des gewählten Ordners. Veraltete asynchrone Antworten werden ignoriert.
+- Die minimierte Desktop-Anzeige der Hintergrundvorgänge ist quadratisch (48 × 48 Pixel); statt des X erscheint ein Abwärtspfeil.
+- Im Dialog „Über Bibliothekar“ sowie in der Health-API wird nur noch die einheitliche Version 0.47.4 angegeben.
+- Der überholte Host-Mount `/sources/import` entfällt aus Compose/Dockerfile. `/sources/nas` bleibt unverändert. Keine Datenbankmigration und keine Änderung bestehender Kameradateien.
+
+
+## 0.47.3 – PWA: einheitlicher Dock und sichtbare Seitenüberschriften (09.10.2026)
+
+- Arbeitsbereich und Archiv nutzen in der installierten Smartphone-Web-App bereits vor dem ersten Paint dieselbe Viewport-Geometrie wie Import & Prüfung. Die mobile Browserwebsite behält ihre ursprüngliche Viewport-Angabe.
+- Fixierte Unternavigation von Aufnahmen/Ereignisse und Metadatenkorrektion sitzt ohne negativen Außenabstand direkt am oberen Rand des sichtbaren Seitenbereichs; Überschriften bleiben vollständig darunter statt abgeschnitten zu sein.
+- Aufgabenzähler: nur gelber Kreis von 39 auf 33 CSS-Pixel verkleinert, Zifferngröße beibehalten. Die übrigen Dock-Maße, Icons, Logo V2 und Funktionen bleiben unverändert.
+- Keine Datenbankmigration, Import-/Archivlogik unverändert.
+
+## 0.47.2 – Kompakter PWA-Seitenkopf und einheitliche untere Navigation (09.10.2026)
+
+- Die installierte Handy-Web-App zieht Seitenüberschriften und Bereichsreiter weiter in Richtung Statusleiste. Safe-Area-Reserve bleibt erhalten; das Nachrücken erfolgt im Dokumentfluss.
+- Ein für alle Bereiche gleicher, fest an der Gerätekante verankerter Dock ersetzt widersprüchliche Höhen früherer PWA-Regeln.
+- Aufgaben erhält die gelbe runde Zahl als Icon und den Schriftzug darunter; Aufgaben und Hamburger-Menü sind rahmenlos. Symbole der drei Hauptbereiche sind größer, das aktive zusätzlich hervorgehoben.
+- Menü- und Aufgaben-Panels sitzen oberhalb des Docks, Scrollflächen behalten einen ausreichenden Sicherheitsabstand.
+- Logo V2 und weitere 0.47.1-Funktionen bleiben erhalten, ebenso die Desktopansicht und die normale mobile Website. Keine Datenbankmigration.
+
+## 0.47.1 – Aktualisiertes Bibliothekar-Logo (09.10.2026)
+
+- Das vom Nutzer in `patch/0.47.0` ergänzte `app/bibliothekar-logo-v2.svg` wird in der gemeinsamen Kopfzeile und im Dialog „Über Bibliothekar“ angezeigt.
+- Die SVG-Geometrie und Proportionen bleiben unverändert; die v2-Kontur verwendet den vom Nutzer gelieferten Farbwert. Die alte SVG bleibt für Version 0.47.0 vorhanden.
+- Auslieferung über `/assets/bibliothekar-logo-v2.svg` mit neuer Cachekennung `v=0.47.1`; dynamischer Bibliotheksname und sämtliche Maße des Headers bleiben unverändert.
+- Keine Datenbankmigration, keine Änderungen an PWA-Navigation, Kamera- oder Archivfunktionen.
+
+## 0.47.0 – Platzgewinn und Navigation in der iPhone-Web-App (09.10.2026)
+
+- Nur in der installierten Smartphone-Web-App verschwindet der dunkelblaue Kopf mit der Wortmarke. Import-, Arbeitsbereich-, Archiv- und Unterseitenfarben reichen bis unter die iPhone-Statusleiste.
+- Import, Archiv, Papierkorb und weitere Seiten beginnen nach dem oberen Sicherheitsabstand mit ihrer Überschrift; Aufnahmen/Ereignisse und Metadatenkorrektion beginnen mit ihren weiterhin fixierbaren Bereichsreitern.
+- Keine künstliche Kopfhöhe mehr im Sticky-System. Desktop und mobile Browserseite behalten ihre bisherigen Header.
+- PWA-Navigation unten höher, Icons größer, flexibel verteilte Spalten und vollständig lesbare Beschriftungen auch bei Aufgaben; Menü und Aufgaben-Panels stehen darüber. Inhalte bleiben trotz höherem Dock scrollbar.
+- Das Dialogfenster „Über Bibliothekar“ enthält jetzt an Stelle des Texttitels die weiße SVG-Wortmarke auf dunkelblauem Hintergrund; übriger Text bleibt unverändert.
+- Keine SQLite-Migration oder Änderungen an Fotoverarbeitungsprozessen.
+
+## 0.46.0 – Neues Bibliothekar-Markenlogo (09.10.2026)
+
+- Das vom Designer bereitgestellte weiße SVG (in Pfade konvertierter Schriftzug mit freigestelltem Symbol) ersetzt das bisherige farbige Symbol und den HTML-Schriftzug in der gemeinsamen Hauptnavigation.
+- Die aktuelle Bibliotheksbezeichnung bleibt als eigenes, automatisch wechselndes Textelement unter der Wortmarke im freien SVG-Bereich bestehen.
+- Gleiches SVG in Desktop, mobiler Website und iPhone-Web-App; jeweils passende Abmessungen, ohne andere Seitenheader individuell zu verändern.
+- Auslieferung über `/assets/bibliothekar-logo.svg` mit SVG-Medientyp und Versionscache; keine externen Fonts oder Rasterbilder erforderlich.
+- Keine Datenbankmigration und keine Änderungen des Import-, Sortier- und Archivkerns.
+
+## 0.45.6 – UI-Feinschliff (09.10.2026)
+
+- Der Name der aktuellen Importphase steht rechts oben in der aufgeklappten Importkarte beim Erstellungsdatum, unterhalb der Aktionen; der Phasenbalken behält seinen Fortschrittswert.
+- Tages- und Ereigniskarten im Hellmodus zeigen einen Zwischenwert zwischen den Hover-Stärken 0.45.4 und 0.45.5; Dunkelmodus bleibt unverändert.
+- In der iPhone-Standalone-Schnellauswahl wackeln nur die Karteninhalte, damit WebKit den oberen Kartenrand während der Animation nicht mehr abschneidet.
+- Ausschließlich UI/CSS und Versionstexte; keine Datenbankmigration oder Änderung des Importprozesses.
+
+## 0.45.5 – Sicherer Abbruch und Importkontrolle
+
+- Live-Fortschrittsanzeige mit Phasen-Badge und unabhängigem Gesamtfortschritt.
+- Noch zurückhaltendere Hover-Effekte bei Tages-, Prüffall- und Ereigniskarten.
+- Begrenzte, nicht hashende Speicher-Vorprüfung vor der Jobannahme; NAS-Stammordner und übergroße oder unüberschaubare Quellen werden früh abgewiesen.
+- Tatsächlich verfügbarer Platz am Schreibdataset mit Puffer und Sicherheitsreserve; erneute Prüfung im Worker vor dem Kopieren.
+- Dauerhafte, auf einen Auftrag beschränkte Abbruchanforderung; 1-MiB-Unterbrechungspunkte beim Hashen und Kopieren, gezielt beendbarer ExifTool-Kindprozess.
+- Nach 15 Sekunden offener Abbruchanforderung Bestätigung zum Eskalieren; keine ungeprüften Löschungen. Rollback entfernt nur von diesem Import nachweislich überführte Zieldateien.
+- Neue Regressionstests für Speichergrenzen, Abbrüche großer Dateien, Fremddateischutz und Neustartfestigkeit.
+- Keine SQLite-Migration und kein Merge nach main.
+
+## 0.45.4 – UI-Feinschliff und stabiler Importverlauf (08.10.2026)
+
+- „Ausgeblendet“ öffnet sofort; Hintergrundabfragen und veraltete Zwischenstände überschreiben keine neueren Zähler. Ein schnelles SQLite-Count-API verhindert unnötige Sicherungsprüfungen für die reine Anzahl.
+- Ausgeklappte Importdetails verwenden keinen überholten Bildspalten-Platzhalter mehr; Datum, Beschreibung und technische Daten sind linksbündig.
+- Tages-, Prüffall- und Ereigniskarten reagieren in Hell- und Dunkelmodus dezenter mit einem weichen Ein-/Ausblenden. Die Auswahl bleibt unabhängig; reduzierte Bewegung wird berücksichtigt.
+- Unbenutzte Statushöhe unter „Ereignisse“ entfernt, damit Kennzahlen unmittelbar unter dem Seitentitel stehen.
+- Seitentitel und Bereichstitel zeigen ihre bestehenden Hilfen nur noch per Klick/Tastatur an, als schwebende Hinweise ohne Layoutverschiebung.
+- Reine UI-/Anzeigeänderungen; keine Migration und keine Änderung des Kamera-, Ereignis- oder Archiv-Workflows.
+
+## 0.45.3 – Importkartendetails, mobile Aktionen und Ereignissuche (08.10.2026)
+
+- Importkarten: Details ohne doppelten Namen oder Status; technische Angaben ohne leere Vorschau-Spalte, Hellmodus-Farben korrigiert.
+- Handy-Website und Web-App: Aktionen unter der Importkarte in einer gemeinsamen Zeile, auch wenn Details aufgeklappt sind.
+- „Ausgeblendet“: reduzierte, mittig beschriftete Schaltfläche ohne Dekorationssymbole.
+- Tagesordner und Ereignisse: dezente Hoverfarben in beiden Themes; mehr unterer Freiraum für den Desktop-Arbeitsbereich.
+- Ereignissuche: sichtbares Label entfernt, barrierefreies Suchfeld mit Lupensymbol und zusätzlichem Abstand zum Titel.
+- Alle Datenbank-, Import-, Cache- und Sicherungsfunktionen gegenüber 0.45.2 unverändert.
+
+## Kostenkontrolle der GitHub Actions (0.45.2)
+
+- Bei Zwischen-Commits auf patch/* werden weder doppelte Backendtests noch Container-Builds gestartet.
+- Backend-QA lässt sich manuell oder über einen Pull Request auslösen; der Container wird auf Patchbranches ausschließlich per "Run workflow" erzeugt.
+- Importquellen und Archivübersichten bleiben nur wenige Sekunden serverseitig gecacht; echte Bearbeitungs- und Dateiprüfungen bleiben verbindlich.
+- Alle ausgeblendeten Importverläufe sind auch bei leerer sichtbarer Liste erreichbar.
+
+## 0.45.2 – Schnellere Ansichten, Prüf-Reload und kompakter Importverlauf (08.10.2026)
+
+- Sofortige Bibliotheksbezeichnung, differenzierte hellfarbige Prüffallkarte, bereinigte Tagesordnerübersicht.
+- Wiederverwendbare Ansichten für Aufnahmen, Ereignisse und Importquellen; physische Prüfungen beim manuellen Neuladen und vor kritischen Dateioperationen.
+- Eigene paginierte SQLite-Sichtbarkeit des Import-/Prüfverlaufs. Kompakte Karten mit aufklappbaren technischen Details, sicherem Ausblenden/Wiederherstellen.
+- Regressionstests zur neuen Version und zum Schutz der Dateibestände.
+
+## 0.45.1 – Kontinuierliche Reiteranimation und Theme-First-Paint (08.10.2026)
+
+- Dark-/Light-Mode bereits vor dem ersten Paint synchron aus der gespeicherten Theme-Wahl initialisiert; vermeidet helle Zwischenframes und vorübergehend schwarze inaktive Reiter auf iOS Safari und in der installierten Web-App.
+- Bereichswechsel als zusammenhängende Animation: Mobile Tap hebt nur einmal an, Desktop Hover hebt leicht und Pointerdown/Klick etwas weiter an; keine Rückbewegung zwischen Pointerup und Navigation.
+- Übergabe des Zielreiters per kurzlebigem SessionStorage-Eintrag an die nächste HTML-Seite: Zielreiter bleibt zunächst angehoben und fährt erst nach dem ersten Paint in die aktive Endlage.
+- Browser-History/BFCache bereinigt Presszustände; Reduced-Motion wird berücksichtigt. Frozen-Design und Kamera-/Archivfachlogik bleiben unverändert.
+- Gezielte Tests für frühe Theme-Initialisierung, Reiternavigation und Versionsverträge.
+
+## 0.45.0 – Typografie und Navigation (08.10.2026)
+
+- Appweit die Schriftfolge Futura → Helvetica Neue → Helvetica → Arial → sans-serif eingeführt; keine externen Fontdateien erforderlich. Gilt auch für Eingaben, technische Textfelder sowie Import-, Ereignis- und Archivansicht.
+- KI-Assistenten-Button im Desktop-Header und Assistenten-Eintrag im mobilen Hamburger-Menü ausgeblendet. Die interne Platzhalterroute bleibt für eine spätere KI-Anbindung erhalten.
+- Navigation gegen schriftbedingte Überläufe abgesichert (verkürzte Labels statt ungeplanter Umbrüche, besonders auf schmalen Mobilgeräten).
+- Versionsanzeige und fokussierte Regressionstests auf 0.45.0 angehoben; Fachlogik und Bibliotheksdaten bleiben unverändert.
+
+
 ## [Unreleased]
+
+### 0.44.4 – kompakter Desktop-Hinweis für Hintergrundvorgänge
+
+- Der bisherige Hinweis für das Verwerfen wurde vom Header nach rechts unten verlagert; er verdeckt keine obere Navigation mehr.
+- Ein kleiner Schließen-Button verkleinert den Hinweis auf ein Statussymbol. Durch Klick wird die Übersicht wieder geöffnet; der eingeklappte Zustand bleibt beim Seitenwechsel erhalten.
+- Die Desktop-Übersicht zeigt drei vorhandene serverseitige Prozesse an: laufende Importe, Ereignissortierungen (auch Sammelanwendungen) und persistente Verwerfaufträge. Verlinkungen führen zu den zugehörigen App-Bereichen.
+- Sehr schmale bzw. niedrige Fenster und Geräte mit Touch-Zeiger erhalten keinen Overlay-Hinweis. Die eigentlichen Vorgänge bleiben davon unberührt.
+- Der Statusabruf ist rein lesend; beim Import, Sortieren und Verwerfen werden keine Abläufe verändert.
+
+
+
+### 0.44.3 – Verwerfen als persistenter Hintergrundauftrag
+
+- Applied-Änderungen werden als idempotente SQLite-Aufträge übernommen; der Server-Worker verarbeitet die Wiederherstellung unabhängig vom Browser und stellt nach einem App-Neustart unterbrochene Aufträge erneut zu.
+- Dateirücknahmen erkennen nach einem Prozessabbruch vollständig oder halb abgeschlossene sichere Hardlink-Verschiebungen anhand von Dateipfaden, Inode, Größe und SHA-256.
+- Alle App-Bereiche zeigen den Status des Hintergrundauftrags an. Nach bestätigter Annahme darf der Browser gewechselt, geschlossen oder neu geladen werden; nicht gleichzeitig dieselben Dateien bearbeiten.
+- Archiv-Rückänderungen bleiben bewusst beim separat geführten manuellen Finder-Workflow und werden nicht automatisch abgeschlossen.
+
+
+### 0.44.2 – unmittelbares Feedback bei Ereignisänderungen
+
+- Das Prüfungsfenster öffnet sich bei angewendeten Ereignissen bereits beim Löschen oder Speichern; ein animierter Fortschrittsindikator informiert während der Berechnung.
+- Beim Verwerfen laufender Applied-Änderungen erscheint auf der Ereignisseite sofort ein Ladekreis, bis der ursprüngliche Zustand wiederhergestellt ist.
+- Die veralteten gelben Karten „Neu-Zuordnung offen“ und „Nachsortierung offen“ entfallen. Nur tatsächlich unterbrochene Transaktionen bleiben über das aufgeklappte Ereignis fortsetzbar und verwerfbar.
+- Archivierte Ereignisse zeigen die Vorbereitung ihres manuellen Löschauftrags ebenfalls sofort im zugehörigen Dialog.
+
+
+### 0.44.0 – Bibliothekar-Papierkorb
+
+- Der gemeinsame Kamera-Arbeitsbereich besitzt einen vierten verwalteten Stammordner „Papierkorb“. Seine interne Rolle ist stabil; der sichtbare Ordnername kann unter Einstellungen → Pfade unabhängig geändert werden.
+- Der Papierkorb ist über das Hamburgermenü erreichbar und gleicht beim Öffnen automatisch den tatsächlichen Dateisystembestand mit SQLite ab. Finder-/SMB-Verschiebungen in den Papierkorb werden als normaler Workflow erkannt.
+- Dateien mit physischem Zustand `trash` werden aus aktivem Tagesbestand, Ereignisdateien und Sortierplänen ausgeschlossen. SQLite folgt dem beobachteten Speicherort, bleibt aber als Herkunfts-/Identitätsquelle für eine spätere Wiederherstellung erhalten.
+- „Papierkorb entleeren“ ist ausschließlich manuell, verlangt eine Sicherheitsbestätigung, löscht den physischen Bestand ohne Symlink-Folgepfade und bereinigt anschließend die zugehörigen SQLite-Datei-/Familieneinträge.
+- Die vorhandene Umbenennungsarchitektur der verwalteten Stammordner wurde gehärtet: Bibliotheks-Kompatibilitätswurzeln verwenden nun die konfigurierten Rollennamen statt sichtbarer Standardnamen.
+- Es gibt keine automatische Löschfrist und keinen zweiten Löschmechanismus neben dem Papierkorb.
+
+### 0.43.4 – Unterbrochene Importe bereinigen
+
+- Durch einen App-Neustart unterbrochene Ordnerimporte bleiben als klarer Status „Unterbrochen“ erhalten, berechnen aber keine weiterlaufende Restzeit mehr.
+- Fehlgeschlagene und unterbrochene Kamera-/Ordnerimporte erhalten im Importverlauf die Aktion „Import entfernen“.
+- Beim Entfernen werden noch vorhandene sichere Importreste im zentralen Arbeitsbestand gegen Größe und SHA-256 geprüft, temporäre `.incoming`-Daten entfernt und anschließend der zugehörige Auftrags-/Verlaufseintrag bereinigt. Die ursprüngliche Importquelle bleibt unverändert.
+- Laufende Importe behalten „Import abbrechen“, abgeschlossene Sicherungen behalten die bestehende kontrollierte Aktion „Sicherung löschen“. Damit hat jeder relevante Importzustand eine passende Abschlussaktion, ohne abgeschlossene Provenienz vorschnell zu verwerfen.
+- Die vorhandene Neustart-Sicherung bleibt unverändert: laufende Aufträge werden beim Start deterministisch als „interrupted_after_restart“ markiert und können danach sauber entfernt werden.
+
+### 0.43.3 – Feinschliff Importfortschritt
+
+- Laufende Importe zeigen die Prozentzahl nicht mehr doppelt: Die Balken sind nur noch mit „Aktuelle Stufe“ und „Gesamt“ beschriftet; die Prozentangabe bleibt kompakt in „Fortschritt gesamt“ darunter.
+- Der Abstand zwischen den beiden laufenden Fortschrittsbalken wurde reduziert.
+- Die Restzeitschätzung erscheint bereits nach kurzer Laufzeit. Backend-Zeitstempel werden für iOS/Safari robust normalisiert; bei sehr kurzen Restzeiten wird in Sekunden geschätzt statt nur ein Gedankenstrich gezeigt.
+- Abgeschlossene Importe zeigen nur noch den grünen Gesamtbalken mit der Beschriftung „Abgeschlossen“; der Stufenbalken entfällt.
+
+### 0.43.2 – Sticky-Vorschauen, zweistufiger Importfortschritt und Speicher-Loader
+
+- Die Zielstruktur-Vorschau im Arbeitsbereich bleibt auf Desktop beim Scrollen direkt unter dem Secondary-Header. Ihre lange Tages-/Dateiliste besitzt einen eigenen vertikalen Scrollbereich, damit nicht die gesamte Seite verschoben werden muss.
+- „Datei prüfen“ und „Referenzaufnahme“ in der Metadatenkorrektur bleiben auf Desktop ebenfalls unter dem Metadaten-Secondary-Header sichtbar und scrollen bei langem Inhalt innerhalb ihres eigenen Panels.
+- Die Sticky-Unterkante wird aus tatsächlicher Shell- und Secondary-Header-Höhe berechnet und bei Größenänderungen automatisch aktualisiert.
+- Laufende Importe zeigen getrennt den Fortschritt der aktuellen Stufe und den Gesamtfortschritt. Der Stufenbalken beginnt bei jedem Verarbeitungsschritt neu; die Prozentangabe unterhalb der Balken bezieht sich ausschließlich auf den Gesamtfortschritt.
+- Zusätzlich wird aus Startzeit und gewichtetem Gesamtfortschritt eine geschätzte verbleibende Gesamtdauer angezeigt.
+- Beim Speichern bzw. Anwenden von Ereignisänderungen zeigt der Aktionsbutton einen Loader und verhindert während der laufenden Anfrage Doppelklicks.
+
+### 0.43.1 – Kombinierbare Unterereignisnamen und native Datumsfelder
+
+- Die Benennung von Unterereignissen verwendet jetzt dieselben frei kombinierbaren Optionen wie normale Ereignisse: „Jahr einbeziehen“, „Uhrzeit einbeziehen“ und „Von–bis im Namen“. Der separate Auswahlmodus „Datum/Datumsbereich/Uhrzeit/Jahr/Kein Präfix“ entfällt.
+- „Standardmäßig verwenden“ schaltet den Unterereignis-Präfix vollständig ein oder aus; der kompakte Schalter „Präfix: an/aus“ im Ereignisfenster bleibt unverändert erhalten.
+- 0.43.0-Ereignisse behalten ihre bereits gespeicherte Unterereignis-Benennung. Alte 0.43.0-Bibliothekseinstellungen werden beim Lesen in das neue kombinierbare Modell überführt.
+- Die Vorschau zeigt Unterereignis und dessen Ordnerstruktur jetzt innerhalb des normalen Ereignisbeispiels. Die separate dritte Vorschaukarte entfällt.
+- Ereignis- und Unterereignis-Datumsfelder verwenden wieder native Datumsfelder des Browsers. Damit stehen lokalisierte Eingabe, segmentweises Tippen und das native Kalendersymbol wieder zur Verfügung; die zusätzlich eingeführten Kalender-Emoji-Schaltflächen entfallen.
+
+### 0.43.0 – Ereignisplanung und Unterereignisse
+
+- Fotofreie Kalendertage innerhalb eines normalen Ereignis- oder Unterereigniszeitraums gelten nicht als Lücken. Ein normales Ereignis bleibt ein durchgehender Beginn-/Ende-Zeitraum; Tageskarten sind nur Auswahlhilfen.
+- Nicht angehakte Tageskarten aus sichtbaren aktiven Sicherungen werden innerhalb des gewählten Zeitraums automatisch mit einbezogen. Die Bestätigung „Weitere Aufnahmen“ erscheint nur noch für zusätzliche freie Aufnahmen aus aktuell ausgeblendeten aktiven Sicherungen.
+- Datumswerte für normale Ereignisse und Unterereignisse lassen sich vollständig als `JJJJ-MM-TT` tippen. Der Kalender bleibt als optionaler Button verfügbar; ungültige Kalenderdaten werden serverseitig abgewiesen.
+- Jahresübergreifende Ereignisse und Unterereignisse erhalten bei datumsbasierten Präfixen automatisch eindeutige Jahresangaben.
+- Einstellungen → Ereignisordner enthält den eigenen Bereich „Unterereignisse“. Für neue Unterereignisordner kann der Namenspräfix auf Datum, Datumsbereich, Uhrzeit, Jahr oder kein Präfix gestellt und standardmäßig ein- oder ausgeschaltet werden.
+- Sobald im Erstellfenster mindestens ein Unterereignis angelegt ist, erscheint kompakt „Präfix: an/aus“. Die Entscheidung wird mit dem Ereignis eingefroren; bestehende Ereignisse behalten ihren bisherigen Benennungsstand.
+- „Ohne Ereignis“ kann keine semantischen Unterereignisse besitzen. Verschachtelte Unter-Unterereignisse werden ebenfalls nicht zugelassen.
+- Bestehende Archiv-/Strukturänderungen laufen weiterhin über den vorhandenen Workflow „Manuelle Ereignisänderung“; für 0.43.0 wurde kein paralleler Änderungsmechanismus eingeführt.
+
+### 0.42.5 – PWA-Auswahlabschluss und Metadaten-Sheet
+
+- In der installierten Handy-Web-App bleiben auswählbare Karten nicht mehr dauerhaft als eigene Transform-/Compositor-Layer vorgemerkt. Die Optimierung gilt nur während des kurzen Wobble-Effekts; dadurch werden die feinen Kartenrahmen auf iOS nicht mehr an Viewport- bzw. Sticky-Layer-Grenzen abgeschnitten.
+- Long-Press aus dem normalen Metadatenmodus aktiviert Bibliothek, Allgemein und Mehrfachkorrektur jetzt ohne DOM-Neuaufbau unter dem noch aufliegenden Finger. Der aktuelle Touch-Zielknoten bleibt bestehen, sodass dieselbe Geste unmittelbar in die echte Drag-/Autoscroll-Auswahl übergeht.
+- Das nicht-modale mobile Auswahlfenster misst seine tatsächliche Höhe und reserviert entsprechend zusätzlichen Scrollraum am Seitenende. Auch die letzten Metadatenkarten lassen sich dadurch oberhalb des Fensters erreichen und nachträglich aus- oder abwählen.
+
+### 0.42.4 – Reversible PWA-Auswahl und mobile Metadatenfenster
+
+- Die Long-Press-Schnellauswahl arbeitet jetzt als zusammenhängende Range: Beim Zurückwischen werden nur die durch die laufende Geste hinzugekommenen Karten wieder abgewählt; bereits vorher ausgewählte Karten bleiben erhalten.
+- Randscrollen während einer laufenden Auswahl wird kontinuierlich per Animation-Frame fortgeführt. Neu in den Viewport kommende Karten werden dadurch ohne erneutes Überstreichen nahtlos in die Auswahl einbezogen.
+- Die Wobble-Rückmeldung verzichtet auf Skalierung und wackelt nur horizontal, damit Kartenrahmen am oberen bzw. unteren Viewportrand nicht abgeschnitten erscheinen.
+- In Bibliothek, Allgemein und Mehrfachkorrektur aktiviert Long-Press den regulären Auswahlmodus mit sichtbaren Checkboxen. Auswahl und Abwahl werden unmittelbar in den Häkchen und Karten dargestellt.
+- Ein gezielter Einzel-Tap öffnet die mobile Dateiprüfung als vollflächige, vollständig scrollbar bleibende Detailansicht.
+- Ab zwei ausgewählten Metadateneinträgen erscheint stattdessen ein kompaktes, nicht-modales Auswahlfenster am unteren Rand. Der Hintergrund bleibt ohne Blur sichtbar und weiter bedienbar, sodass zusätzliche Dateien ausgewählt werden können.
+- Die Mehrfachkorrektur besitzt jetzt denselben expliziten Auswahlmodus wie Bibliothek und Allgemein; Einzel-Tap bleibt weiterhin die Auswahl einer Referenzaufnahme.
+
+### 0.42.3 – Web-App-Interaktion für Aufnahmen und Metadaten
+
+- In der installierten Handy-Web-App bleibt der `x Prüffälle`-Badge der Ohne-Datum-Karte vollständig innerhalb der Aufnahmen-Karte.
+- Metadatenkarten brechen lange Dateinamen, Pfade und Badge-Texte auf kleinen Web-App-Bildschirmen sauber um, statt Inhalt über Status-Tags laufen zu lassen.
+- In `Bibliothek`, `Allgemein` und `Mehrfachkorrektur` öffnet ein normaler Dateiklick in der installierten Handy-Web-App die bestehende Detail-/Referenzansicht als eigenes Bottom-Sheet. Es gibt einen expliziten `Schließen`-Button; nach erfolgreicher Metadatenänderung bzw. Mehrfach-Vorschau schließt das Sheet automatisch.
+- Long-Press auf eine auswählbare Karte aktiviert ausschließlich in der installierten Handy-Web-App die Schnellauswahl. Gedrücktes Ziehen über weitere Karten fügt sie der Auswahl hinzu; jede neu erfasste Karte erhält ein kurzes Wobble-Feedback.
+- Die Schnellauswahl steht bei `Aufnahmen` sowie in den Metadatenbereichen `Bibliothek` und `Allgemein` zur Verfügung. In `Mehrfachkorrektur` begrenzt eine per Geste gewählte Teilmenge Preview und `Anwenden` tatsächlich auf diese Dateien.
+- Eine Teilmenge der Mehrfachkorrektur kann bewusst nicht direkt mit `Anwenden und in Tagesbestand übernehmen` importiert werden, weil dieser Importpfad weiterhin den vollständigen Mehrfachkorrektur-Ordner repräsentiert. Ohne Gestenauswahl bleibt das bisherige Verhalten unverändert.
+- Die neue Touch-Geste, Animation und mobile Detailansicht sind auf Standalone/Web-App und kleine Displays begrenzt; Desktop und mobile Browser-Website behalten ihr bisheriges Verhalten.
+
+### 0.42.2 – Automatische Metadatenprüfung
+
+- Die Bereiche `Bibliothek`, `Allgemein` und `Mehrfachkorrektur` prüfen ihren jeweiligen Bestand jetzt automatisch beim Öffnen bzw. Reload der Metadatenkorrektur.
+- Der vorhandene Button `Bestand prüfen` bleibt für eine manuelle erneute Prüfung erhalten.
+- Automatische und manuelle Prüfungen zeigen während des laufenden Scans denselben Busy-Zustand mit Spinner am Button und Ladeindikator in der Statuszeile.
+
+### 0.42.1 – Metadaten-Rücksortierung und Prüffall-UI
+
+- Interne Übernahmen aus `Allgemein` und `Mehrfachkorrektur` bleiben technisch als verifizierte Hintergrundjobs erhalten, werden aber nicht mehr als sichtbare Karten im Import- und Prüfverlauf dargestellt.
+- Freie datierte Familien werden in den globalen Aufgaben bibliotheksweit zu einer einzigen Aufgabe `Noch nicht zugeordnet` zusammengefasst. Eine zurücksortierte korrigierte Familie erhöht damit den bestehenden Zähler, statt eine eigene Ein-Familien-Aufgabe zu erzeugen.
+- `Ohne Datum` ist im Arbeitsbereich keine auswählbare Tagesgruppe mehr. Prüffälle stehen hervorgehoben am Anfang der Tagesordnerliste, werden von `Alle auswählen` ausgeschlossen und können nicht in die Ereignisplanung übernommen werden.
+- Ein Klick auf die Prüffallkarte zeigt in der Zielstruktur-Vorschau einen direkten Einstieg `Metadatenkorrektur`; Doppelklick bzw. der Button öffnen unmittelbar die Bibliotheks-Prüffälle.
+
+### 0.42.0 – Metadatenkorrektur für große Bestände
+
+- Bereits bekannte Kameraoriginale werden beim Reimport zusätzlich über ihre stabile ursprüngliche SHA-256-Identität erkannt. Damit erscheinen ältere, vor der Einführung von `source_size_bytes` korrigierte Dateien nicht wegen einer nachträglich veränderten Dateigröße erneut als neue Prüffälle.
+- Die Dateiliste arbeitet standardmäßig ohne Checkboxen. Mehrfachauswahl wird bewusst über `Auswählen` aktiviert und unterstützt Umschalt-/Bereichsauswahl sowie `Alle auswählen`.
+- Bei Mehrfachauswahl wird kein gemeinsames Datum/Uhrzeit-Feld mehr angeboten. Stattdessen wählt man einen gemeinsamen Metadaten-Quelltyp; jede Datei übernimmt ihren eigenen aktuellen Wert dieses Tags.
+- Mehrfachkorrekturen werden serverseitig gebündelt: Der Metadatenbestand wird pro beteiligtem Bereich bzw. Bibliothek nur einmal vorgeprüft, statt für jede ausgewählte Datei erneut vollständig gescannt zu werden.
+- Metadatenkandidaten zeigen deutsche Bezeichnungen, technischen ExifTool-Tag und eine einfache deterministische Vertrauensbewertung. Der bevorzugte Kandidat ist direkt sichtbar; weitere Kandidaten bleiben kompakt aufklappbar.
+- Die vor einer Korrektur beobachteten Metadaten bleiben über die vorhandenen persistenten Korrekturaufträge einsehbar.
+- Dateien aus `Allgemein` können kontrolliert über den vorhandenen verifizierten Importpfad in den Tagesbestand übernommen werden. Bereits bekannte Kameraaufnahmen werden dabei blockiert, statt künstlich eine neue Sicherung bzw. Provenienz zu erzeugen.
+- `FileCreateDate` steht als zusätzlicher niedrig gewichteter Dateisystem-Kandidat zur Verfügung; die Auswahl bleibt vollständig deterministisch und verwendet kein KI-Modell.
+
+### 0.41.4 – Applied-Reparatur, Planned-Performance und konsistentes Loading
+
+- Falsch verschobene Dateien aus angewendeten Ereignissen behalten ihren semantischen Sollpfad persistent und können mit Größen-/SHA-256-Prüfung sicher dorthin zurückgesetzt werden; manuell bereits korrekt zurückgelegte Dateien werden beim erneuten Prüfen ebenfalls verifiziert und übernommen.
+- Fehlgeschlagene automatische Reparaturen werden nicht mehr wie Erfolg behandelt: Die Aufgabe bleibt offen, der erwartete Sollort wird angezeigt und „Ignorieren“ bleibt für normale Zuordnungskonflikte möglich.
+- Reines Speichern eines geplanten Ereignisses löst beim unmittelbaren UI-Nachladen keinen zweiten vollständigen Inventar-/Reconcile-/Strukturscan mehr aus. Normale Seitenaufrufe und Reloads behalten die vollständige physische IST-Prüfung.
+- Speichern, Rückgängig, Arbeitsbereich, Ereignisliste, Archivprüfung sowie Import-/Prüfaktualisierung erhalten konsistente Busy-/Spinner-Zustände ohne künstliche Wartezeiten.
+- Der Einstellungsdialog ist gegen bereichsspezifische Import-CSS-Regeln abgeschirmt; Akkordeons und Vorschaukästen verwenden in Hell/Dunkel dieselben Settings-Komponenten wie in Arbeitsbereich und Archiv.
+- „Archiv prüfen“ im externen Hinweisdialog erhält einen nicht abgeschnittenen, aber weiterhin tastaturzugänglichen Fokuszustand.
 
 ### 0.40.3 – iPhone-Web-App im Hochformat fixieren
 

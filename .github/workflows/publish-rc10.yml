@@ -1,0 +1,199 @@
+name: Publish Bibliothekar RC10 prerelease
+on:
+  push:
+    branches: [release/v1.0.0-rc.10]
+permissions:
+  contents: write
+  packages: write
+  actions: read
+concurrency:
+  group: publish-bibliothekar-rc10
+  cancel-in-progress: true
+jobs:
+  publish:
+    if: github.repository == 'heller-adrian/Bibliothekar'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      IMAGE: ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.10
+      TAG: v1.0.0-rc.10
+      ACCEPTED_SHA: da8f9950cc6129f778c0f6bdabeb23b3a4b463f0
+      ACCEPTED_QA: '40419758051'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify unchanged accepted app and successful QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          git cat-file -e "$ACCEPTED_SHA^{commit}"
+          git diff --quiet "$ACCEPTED_SHA" HEAD -- app tests qa Dockerfile compose.example.yaml requirements.txt requirements-rc.constraints.txt
+          python - <<'PY'
+          import os,subprocess
+          changes=subprocess.check_output(['git','diff','--name-only',os.environ['ACCEPTED_SHA'],'HEAD'],text=True).splitlines()
+          assert changes==['.github/workflows/publish-rc10.yml'],changes
+          from app import __version__
+          assert __version__=='1.0.0-rc.10',__version__
+          print('Accepted application source is byte-identical.')
+          PY
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTED_QA" > release-assets/accepted-QA.json
+          python - <<'PY'
+          import json,os
+          r=json.load(open('release-assets/accepted-QA.json'))
+          assert r['conclusion']=='success' and r['head_sha']==os.environ['ACCEPTED_SHA']
+          PY
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1 || gh release view "$TAG" >/dev/null 2>&1; then
+            echo 'Existing release/tag; refuse overwrite.' >&2
+            exit 1
+          fi
+          git rev-parse HEAD HEAD^{tree} > release-assets/source-identity.txt
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Refuse existing GHCR RC10 image
+        run: |
+          if docker buildx imagetools inspect "$IMAGE" >/dev/null 2>&1; then
+            echo 'Existing registry tag; refuse overwrite.' >&2
+            exit 1
+          fi
+      - name: Build, verify all app bytes, and smoke before publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .
+          docker run --rm --entrypoint python "$IMAGE" -c 'from app import __version__; assert __version__ == "1.0.0-rc.10"'
+          python - <<'PY'
+          import os,json,hashlib,subprocess
+          from pathlib import Path
+          src={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in Path('app').rglob('*') if p.is_file()}
+          program='from pathlib import Path;import hashlib,json;r=Path("/opt/kamera");print(json.dumps({str(p.relative_to(r)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (r/"app").rglob("*") if p.is_file()}))'
+          im=json.loads(subprocess.check_output(['docker','run','--rm','--entrypoint','python',os.environ['IMAGE'],'-c',program],text=True))
+          assert src==im,(len(src),len(im))
+          Path('release-assets/app-sha256.json').write_text(json.dumps(im,indent=2,sort_keys=True)+'\n')
+          print('Verified application bytes:',len(src))
+          PY
+          # Complete isolated Docker onboarding/replacement acceptance already
+          # passed in the SHA-pinned RC10 QA workflow; do not repeat it here.
+      - name: Publish GHCR image and independently retrieve immutable digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE" | tee release-assets/push.log
+          DIGEST="$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*/\1/p' release-assets/push.log | tail -1)"
+          test "${#DIGEST}" -eq 71
+          REF="ghcr.io/heller-adrian/bibliothekar@${DIGEST}"
+          docker pull "$REF"
+          test "$(docker image inspect "$IMAGE" --format '{{.Id}}')" = "$(docker image inspect "$REF" --format '{{.Id}}')"
+          test "$(docker image inspect "$REF" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+          docker run --rm --entrypoint python "$REF" -c 'from app import __version__;assert __version__=="1.0.0-rc.10"'
+          printf '%s\n' "$REF" > release-assets/IMAGE-DIGEST.txt
+          docker buildx imagetools inspect "$REF" --raw > release-assets/registry-manifest.json
+      - name: Package source and verified TrueNAS update guidance
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF="$(cat release-assets/IMAGE-DIGEST.txt)"
+          cp compose.example.yaml release-assets/compose.rc10.yaml
+          sed -i "s|ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.10|$REF|" release-assets/compose.rc10.yaml
+          cat > release-assets/UPDATE-RC9-RC10.md <<'EOF'
+          # RC9 to RC10: guarded TrueNAS prerelease update
+
+          Stop Bibliothekar and make a consistent backup of /database with
+          SQLite WAL/SHM, /config, /logs, /workspace, all F14 operation records,
+          retention data, and the external archive before any upgrade.
+          Do not perform Clean Slate or remove directories as an upgrade step.
+
+          Change only the image to the immutable digest in IMAGE-DIGEST.txt.
+          Keep all host datasets, ACLs, secrets, UID/GID and mounts unchanged.
+          Preserve the RC9 image digest and backups for rollback.
+
+          On a new installation with only Finder .DS_Store metadata, RC10 can
+          create its four managed directories automatically; a prepopulated,
+          unregistered archive stays completely untouched. The first-library
+          registration remains explicit.
+
+          An established library with a missing directory has two repair paths:
+          restore its original directory/inode and choose Check again; or
+          explicitly accept missing files and choose Create replacement folder.
+          The second path preserves the loss record and increases F14 generations.
+          Only use replacement after verifying that recovering the original is
+          impossible; unknown or inaccessible storage cannot be replaced blindly.
+
+          Post-loss import uses actual verified retained copies, not just old SHA
+          history, to determine which photos still need backing up. Import
+          history remains intact. There is no automatic deletion of unknown media.
+
+          Synthetic Linux and Docker acceptance passed, but native TrueNAS
+          SCALE, ZFS/NFSv4 ACL and physical SD-card end-to-end checks remain
+          required before stable 1.0.0. Check user 568 permissions separately.
+          EOF
+          cat > release-assets/RELEASE-NOTES.md <<'EOF'
+          # Bibliothekar v1.0.0-rc.10 prerelease
+
+          Automatic first installation now distinguishes unused technical
+          SQLite/F14/Finder metadata from actual library history, so a
+          .DS_Store file in /workspace does not strand fresh onboarding.
+          Registered historical libraries and uncertain media still block
+          unsafe automatic setup.
+
+          Existing installations offer just two understandable repair routes:
+          restore original folders and recheck, or explicitly confirm a lost
+          managed root and create a replacement. F14 identities, generations,
+          retention and historical catalogue rows are preserved; no external
+          archive content is automatically adopted or overwritten.
+
+          Following explicit loss acceptance, folder/SD import checks actual
+          catalogued retained copies and their SHA-256 before treating
+          historical imports as safe duplicates. Bilingual EN/DE recovery
+          controls and safe failure behavior are included.
+
+          SHA-bound GitHub Actions QA passed 151 targeted regression tests.
+          An isolated amd64 container accepted Finder metadata, populated
+          read-only archive, first-library setup, restart, Trash replacement,
+          registered-library work-root replacement, and subsequent restarts.
+
+          This remains a prerelease. Native TrueNAS SCALE/ZFS/NFSv4 ACL,
+          UID/GID 568 and physical SD-card acceptance have not been run on a
+          real NAS; no new complete backend-wide suite was run for RC10.
+          EOF
+          cp Dockerfile requirements.txt requirements-rc.constraints.txt release-assets/
+          git archive --format=tar --prefix=bibliothekar-1.0.0-rc.10/ HEAD | gzip -n > release-assets/bibliothekar-1.0.0-rc.10-source.tar.gz
+          (cd release-assets && find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - name: Create GitHub prerelease, verify assets, tag and digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat release-assets/RELEASE-NOTES.md > "$RUNNER_TEMP/rc10-notes.md"
+          printf '\nCommit: %s\nTree: %s\nImage: %s\nQA: https://github.com/%s/actions/runs/%s\n' \
+            "$GITHUB_SHA" "$(git rev-parse HEAD^{tree})" "$(cat release-assets/IMAGE-DIGEST.txt)" "$GITHUB_REPOSITORY" "$ACCEPTED_QA" >> "$RUNNER_TEMP/rc10-notes.md"
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --prerelease --latest=false \
+            --notes-file "$RUNNER_TEMP/rc10-notes.md" release-assets/*
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > release-assets/release-verification.json
+          python - <<'PY'
+          import json
+          x=json.load(open('release-assets/release-verification.json'))
+          assert x['prerelease'] and not x['draft'] and x['tag_name']=='v1.0.0-rc.10'
+          names={a['name'] for a in x['assets']}
+          assert {'SHA256SUMS','IMAGE-DIGEST.txt','compose.rc10.yaml','UPDATE-RC9-RC10.md'}<=names,names
+          print(x['html_url'])
+          PY
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha)" = "$GITHUB_SHA"
+      - name: Upload non-binary release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc10-release-evidence
+          retention-days: 30
+          path: |
+            release-assets/
+            !release-assets/*.tar.gz

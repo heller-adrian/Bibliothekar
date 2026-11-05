@@ -1,0 +1,2 @@
+Freigabeauftrag 0.45.5: Nach erfolgreicher Backend-QA und Archiv-Isolation (882 Tests bestanden) das Patch-Container-Image ghcr.io/heller-adrian/bibliothekar:patch-0.45.5 bauen und in GitHub Container Registry veröffentlichen.
+Umfang: Phasenfortschritt, dezenter Hover, Speicher-Vorprüfung, abbrechbare Datei- und Metadatenoperationen, jobspezifische dauerhaft gespeicherte Abbruchanforderung und nur eigens zugehörige Datei-Rücknahme. Keine SQLite-Migration; main und latest unverändert.

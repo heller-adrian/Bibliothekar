@@ -1,6 +1,8 @@
 """0.28.0: later backups extend one archived canonical event via archive change."""
 from __future__ import annotations
 
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
+
 from pathlib import Path
 import hashlib
 
@@ -21,6 +23,7 @@ def test_0280_later_backup_extends_archived_event_via_change_request(
     workspace = tmp_path / "workspace"
     archive = tmp_path / "archive"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     archive.mkdir()
     ensure_workspace_layout(workspace)
     initialize_database(db)

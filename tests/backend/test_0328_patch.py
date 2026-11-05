@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from pathlib import Path
 import hashlib
 
@@ -27,25 +29,36 @@ from app.sort_plan import build_event_sort_plan
 from app.workspace_layout import ensure_workspace_layout, resolve_library_work_root
 
 
+
+def _provisioned_storage(workspace, language='legacy'):
+    from app.storage_config import LEGACY_STORAGE_DEFAULTS, ENGLISH_STORAGE_DEFAULTS
+    names=LEGACY_STORAGE_DEFAULTS if language=='legacy' else ENGLISH_STORAGE_DEFAULTS
+    for name in names.values():(workspace/name).mkdir(exist_ok=True)
+    from app.managed_directory_names import directory_name
+    metadata=workspace/names['metadata_directory_name']
+    for kind in ('metadata_general','metadata_multiple'):
+        (metadata/directory_name(metadata,kind)).mkdir(exist_ok=True)
+
+
 def test_0328_fresh_workspace_uses_single_managed_root(tmp_path: Path, monkeypatch):
     config = tmp_path / "config" / "settings.json"
     monkeypatch.setenv("KAMERA_CONFIG", str(config))
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    _provisioned_storage(workspace,"english")
     layout = ensure_workspace_layout(workspace)
 
-    assert Path(layout["backup_root"]) == workspace / "SD-Kartensicherungen"
-    assert Path(layout["workspaces_root"]) == workspace / "Arbeitsbereiche"
-    assert Path(layout["metadata_root"]) == workspace / "Metadatenkorrektur"
-    assert Path(layout["work_root"]) == workspace / "Arbeitsbereiche"
-    assert not (workspace / "Arbeitsbereiche" / "main").exists()
+    assert Path(layout["backup_root"]) == workspace / "SD Card Backups"
+    assert Path(layout["workspaces_root"]) == workspace / "Library Workspaces"
+    assert Path(layout["metadata_root"]) == workspace / "Metadata Correction"
+    assert Path(layout["work_root"]) == workspace / "Library Workspaces"
+    assert not (workspace / "Library Workspaces" / "main").exists()
 
     # Vor der ersten Bibliothek gibt es keinen Bibliotheks-Unterordner.
     # Der historische Singular-Pfad darf nur auf den neutralen Stamm zeigen.
     legacy = workspace / "Arbeitsbereich"
-    assert legacy.is_symlink()
-    assert legacy.resolve() == (workspace / "Arbeitsbereiche").resolve()
+    assert not legacy.exists() and not legacy.is_symlink()
 
 
 def test_0328_main_archive_path_survives_bootstrap_adoption(tmp_path: Path):
@@ -128,11 +141,11 @@ def test_0328_settings_surface_exposes_paths_and_editable_library_roots():
     shell = ui_shell._shell_markup("workspace", "events")
     script = ui_shell.BIBLIOTHEKAR_JS
 
-    assert main.DEPLOYMENT_VERSION == "0.40.3"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
     assert 'data-bk-settings-area="paths"' in shell
-    assert 'id="bk-storage-backup-name"' in shell
-    assert 'id="bk-storage-workspaces-name"' in shell
-    assert 'id="bk-storage-metadata-name"' in shell
+    assert 'id="bk-storage-backup-name"' not in shell
+    assert 'id="bk-storage-workspaces-name"' not in shell
+    assert 'id="bk-storage-metadata-name"' not in shell
     assert 'data-bk-library-work' in script
     assert 'data-bk-library-archive' in script
     assert "/api/settings/storage-paths" in script
@@ -144,8 +157,10 @@ def _sha_0328(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+@pytest.mark.parametrize("root_language",["legacy","english"])
 def test_0328_released_stock_sort_plan_uses_13_files_without_legacy_job_blockers(
     tmp_path: Path,
+    root_language,
     monkeypatch,
 ):
     config = tmp_path / "config" / "settings.json"
@@ -153,16 +168,19 @@ def test_0328_released_stock_sort_plan_uses_13_files_without_legacy_job_blockers
     database = tmp_path / "kamera.sqlite3"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    _provisioned_storage(workspace,root_language)
+    released_name="Freigewordene Archivdateien" if root_language=="legacy" else "Released Archive Files"
     ensure_workspace_layout(workspace)
     initialize_database(database)
 
     job_id = "RELEASED_13"
     family_ids: list[int] = []
     source_file_ids: list[int] = []
-    central = workspace / "SD-Kartensicherungen"
+    from app.storage_config import storage_paths
+    central = Path(storage_paths(workspace)["backup_root"])
     released_dir = (
         central
-        / "Freigewordene Archivdateien"
+        / released_name
         / "2026"
         / "2026-07-19"
     )
@@ -208,7 +226,7 @@ def test_0328_released_stock_sort_plan_uses_13_files_without_legacy_job_blockers
             jpg_id = None
             for extension, media_type in ((".JPG", "jpeg"), (".RAF", "raw")):
                 relative = (
-                    "Freigewordene Archivdateien/2026/2026-07-19/"
+                    f"{released_name}/2026/2026-07-19/"
                     + stem
                     + extension
                 )
@@ -259,7 +277,7 @@ def test_0328_released_stock_sort_plan_uses_13_files_without_legacy_job_blockers
             (2, "export", "20260719_192500_Fuji-X-E5_Export.jpg", b"export-one"),
         ):
             relative = (
-                "Freigewordene Archivdateien/2026/2026-07-19/"
+                f"{released_name}/2026/2026-07-19/"
                 + filename
             )
             connection.execute(
@@ -323,6 +341,13 @@ def test_0328_released_stock_sort_plan_uses_13_files_without_legacy_job_blockers
 
 
 
+    with database_connection(database) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+        assert not connection.execute("PRAGMA foreign_key_check").fetchall()
+    for physical in central.rglob("*"):
+        if physical.is_file():assert physical.stat().st_size>0
+
+
 def test_0328_managed_workspaces_name_change_retargets_main_alias_and_registry(
     tmp_path: Path,
     monkeypatch,
@@ -339,6 +364,7 @@ def test_0328_managed_workspaces_name_change_retargets_main_alias_and_registry(
     database_dir.mkdir()
     archive.mkdir()
 
+    _provisioned_storage(workspace,"legacy")
     layout = ensure_workspace_layout(workspace)
     initialize_database(database)
     initialize_library_registry(registry)
@@ -353,24 +379,15 @@ def test_0328_managed_workspaces_name_change_retargets_main_alias_and_registry(
     monkeypatch.setattr(main, "WORKSPACE_PATH", workspace)
     monkeypatch.setattr(main, "REGISTRY_DATABASE_FILE", registry)
 
-    result = main.api_set_storage_paths({
-        "backup_directory_name": "SD-Kartensicherungen",
-        "workspaces_directory_name": "Bibliotheksbereiche",
-        "metadata_directory_name": "Metadatenkorrektur",
-    })
-
-    canonical = workspace / "Bibliotheksbereiche"
-    legacy = workspace / "Arbeitsbereich"
-    stored = get_library(registry, MAIN_LIBRARY_ID, active_only=False)
-
-    assert Path(result["workspaces_root"]) == canonical
-    assert canonical.is_dir()
-    assert not (canonical / "main").exists()
-    assert not (workspace / "Arbeitsbereiche").exists()
-    assert legacy.is_symlink()
-    assert legacy.resolve() == canonical.resolve()
-    assert stored is not None
-    assert Path(str(stored["work_root"])) == canonical.resolve()
+    before=get_library(registry, MAIN_LIBRARY_ID, active_only=False)
+    canonical=Path(layout['workspaces_root']);sentinel=canonical/'synthetic.JPG';sentinel.write_bytes(b'unchanged-original');inode=sentinel.stat().st_ino
+    with pytest.raises(main.HTTPException) as exc:
+        main.api_set_storage_paths({'workspaces_directory_name':'Bibliotheksbereiche'})
+    assert exc.value.status_code==410
+    assert sentinel.read_bytes()==b'unchanged-original' and sentinel.stat().st_ino==inode
+    assert not (workspace/'Bibliotheksbereiche').exists()
+    assert get_library(registry, MAIN_LIBRARY_ID, active_only=False)==before
+    assert (workspace/'Arbeitsbereich').resolve()==Path(layout['work_root']).resolve()
 
 
 
@@ -766,6 +783,7 @@ def test_0328_registered_main_workspace_retargets_alias_without_recreating_main(
     workspaces = workspace / "Arbeitsbereiche"
     custom_main = workspaces / "Arbeitsbereich"
     workspace.mkdir()
+    _provisioned_storage(workspace,"legacy")
     custom_main.mkdir(parents=True)
 
     legacy = workspace / "Arbeitsbereich"

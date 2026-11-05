@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0",
+  "source_prerelease": "v1.0.0-pre.7.2",
+  "source_commit": "9804587b9eba2525dc925e6c8de3b2e0f7977d71",
+  "public_visibility_review": "PENDING",
+  "native_truenas": "USER_ACCEPTED_PRE_7_2"
+}

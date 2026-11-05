@@ -7,6 +7,7 @@ their import job.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+import json
 from pathlib import PurePosixPath
 from typing import Any, Iterable
 
@@ -95,6 +96,27 @@ def occupied_ranges_for_day(
             ).fetchall()
         )
 
+    # A saved applied edit is a SOLL change, not a filesystem change. Its
+    # original segments still determine physical free-day directories. An
+    # explicit include_event_ids selects the target view for confirmed apply.
+    old_segments: dict[str, list[dict[str, Any]]] = {}
+    if physical:
+        for mutation in connection.execute(
+            """SELECT m.anchor_event_id,m.original_state_json FROM event_mutations m
+               JOIN events e ON e.id=m.anchor_event_id
+               WHERE m.status='pending_apply' AND m.mutation_kind='edit'
+                 AND e.status='applied' AND e.event_kind='no_event'
+                 AND e.resort_required=1"""
+        ).fetchall():
+            anchor = str(mutation['anchor_event_id'])
+            if anchor in included:
+                continue
+            state = json.loads(str(mutation['original_state_json']))
+            previous = next((e for e in state['events'] if str(e['id']) == anchor), None)
+            if previous and previous.get('event_kind') == 'no_event' and previous['status'] == 'applied':
+                old_segments[anchor] = [s for s in state['event_time_segments']
+                                        if str(s['event_id']) == anchor]
+
     result: list[tuple[str, str]] = []
     seen: set[str] = set()
     day_start = f"{day_key}T00:00:00"
@@ -106,7 +128,7 @@ def occupied_ranges_for_day(
             continue
         seen.add(event_id)
         if str(event.get("event_kind") or "event") == "no_event":
-            intervals = connection.execute(
+            intervals = old_segments[event_id] if event_id in old_segments else connection.execute(
                 """SELECT start_datetime,end_datetime FROM event_time_segments
                    WHERE event_id=? AND start_datetime<=? AND end_datetime>=?
                    ORDER BY start_datetime,id""",
@@ -182,7 +204,11 @@ def released_origin_directory(
     capture_time: str,
     *,
     physical: bool,
+    release_name: str = "Released Archive Files",
 ) -> PurePosixPath | None:
+    from app.managed_directory_names import NAME_PAIRS
+    if release_name not in NAME_PAIRS["released_archive"]:
+        raise FreeStockLayoutError("Unknown released archive directory name.")
     bounds = effective_released_range(
         connection, family_id, capture_time, physical=physical
     )
@@ -198,7 +224,7 @@ def released_origin_directory(
             f"{_filesystem_time(start, end=False)}–"
             f"{_filesystem_time(end, end=True)}"
         )
-    return PurePosixPath("Freigewordene Archivdateien", day_key[:4], folder)
+    return PurePosixPath(release_name, day_key[:4], folder)
 
 
 def canonical_free_directory(

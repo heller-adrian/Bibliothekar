@@ -1,0 +1,8 @@
+Bibliothekar 0.52.1: isolated TrueNAS patch publication request.
+Source branch: patch/0.52.1
+Validated source commit: 534887f7b25b406ff2a97ea15230d09d18b2068a
+Complete backend regression: 1091 passed, 0 failed (6 existing deprecation warnings).
+Isolated Docker archive filesystem harness: PASS.
+QA run: https://github.com/heller-adrian/Bibliothekar/actions/runs/38295342345
+Changes: no Finder-driven automatic semantic dissolution; complete SHA-verified file undo plus canonical empty folder reconstruction; explicit folder-only undo; informational notices for confirmed real loss; Dismiss closes and acknowledges persistently; no overwrite; bilingual UI.
+Publish ONLY ghcr.io/heller-adrian/bibliothekar:patch-0.52.1 and patch branch; DO NOT modify main/latest, production datasets, DBs or 0.52.0 image.

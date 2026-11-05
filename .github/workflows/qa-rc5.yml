@@ -1,0 +1,114 @@
+name: RC5 acceptance without publication
+on:
+  push:
+    branches: [release/v1.0.0-rc.5]
+permissions:
+  contents: read
+concurrency:
+  group: rc5-acceptance
+  cancel-in-progress: false
+jobs:
+  backend-and-container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 105
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      IMAGE: bibliothekar-rc5-qa:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Initialize runner-local evidence path
+        run: printf 'RC5_EVIDENCE=%s/rc5-evidence\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Install isolated QA dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libimage-exiftool-perl
+          python -m pip install -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
+      - name: Freeze source, package and environment evidence
+        run: |
+          mkdir -p "$RC5_EVIDENCE"
+          git rev-parse HEAD HEAD^{tree} > "$RC5_EVIDENCE/source.txt"
+          python qa/release/verify_rc5_source.py > "$RC5_EVIDENCE/source-contract.json"
+          python --version > "$RC5_EVIDENCE/environment.txt"
+          uname -a >> "$RC5_EVIDENCE/environment.txt"
+          node --version >> "$RC5_EVIDENCE/environment.txt"
+          exiftool -ver >> "$RC5_EVIDENCE/environment.txt"
+          pip freeze >> "$RC5_EVIDENCE/environment.txt"
+          test -d /dev/shm
+          docker compose -f docs/rc5/compose.truenas.yaml config -q
+      - name: One complete isolated Linux backend suite
+        run: python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" backend
+      - name: Build the tested tree without pushing an image
+        run: |
+          TREE="$(git rev-parse HEAD^{tree})"
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            --label org.opencontainers.image.version=1.0.0-rc.5 \
+            --label org.opencontainers.image.revision="$GITHUB_SHA" \
+            --label org.bibliothekar.source.tree="$TREE" \
+            --label org.opencontainers.image.source=https://github.com/heller-adrian/Bibliothekar \
+            -t "$IMAGE" . > "$RC5_EVIDENCE/build.log" 2>&1
+          docker image inspect "$IMAGE" > "$RC5_EVIDENCE/image-inspect.json"
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE")" = "$GITHUB_SHA"
+          test "$(docker image inspect --format '{{index .Config.Labels "org.bibliothekar.source.tree"}}' "$IMAGE")" = "$TREE"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE")" = linux/amd64
+          docker run --rm --entrypoint python "$IMAGE" -c 'from app import __version__; assert __version__ == "1.0.0-rc.5"; print(__version__)'
+          docker run --rm --entrypoint python "$IMAGE" -c 'from pathlib import Path; import hashlib,json; r=Path("/opt/kamera"); print(json.dumps({str(p.relative_to(r)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (r/"app").rglob("*") if p.is_file() and "__pycache__" not in p.parts}))' > "$RC5_EVIDENCE/image-app-sha256.json"
+          python - <<'PY'
+          import json,hashlib,os
+          from pathlib import Path
+          actual=json.loads((Path(os.environ['RC5_EVIDENCE'])/'image-app-sha256.json').read_text())
+          expected={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in Path('app').rglob('*') if p.is_file() and '__pycache__' not in p.parts}
+          assert actual==expected
+          PY
+          docker run --rm --entrypoint sh "$IMAGE" -c 'python -m pip freeze; dpkg-query -W' > "$RC5_EVIDENCE/image-packages.txt"
+      - name: Fresh isolated container health, authentication, database and UI smoke
+        run: |
+          set -euo pipefail
+          SCRATCH="$RUNNER_TEMP/rc5-smoke"
+          mkdir -p "$SCRATCH"/{config,database,logs,workspace,archive,tmp}
+          sudo chown -R 568:568 "$SCRATCH"
+          docker run -d --name rc5-smoke --read-only --tmpfs /tmp:size=64m,mode=1777 -p 127.0.0.1:18080:8080 \
+            -e KAMERA_SOURCE_HELPER_ENABLED=false -e BIBLIOTHEKAR_ADMIN_PASSWORD=synthetic-rc-build-smoke-password \
+            -e KAMERA_CONFIG=/config/settings.json -e KAMERA_DATABASE_DIR=/database -e KAMERA_REGISTRY_DATABASE=/database/global.sqlite3 \
+            -e KAMERA_LOG_DIR=/logs -e KAMERA_WORKSPACE=/workspace -e KAMERA_POOL_PROBE=/workspace -e KAMERA_ARCHIVE_ROOT=/main-library \
+            -v "$SCRATCH/config:/config" -v "$SCRATCH/database:/database" -v "$SCRATCH/logs:/logs" \
+            -v "$SCRATCH/workspace:/workspace" -v "$SCRATCH/archive:/main-library:ro" "$IMAGE"
+          TMPDIR="$RUNNER_TEMP" python qa/release/smoke_rc5.py
+          docker exec -i rc5-smoke python - <<'PY' > "$RC5_EVIDENCE/web-identity.json"
+          import json
+          from pathlib import Path
+          web=[]
+          for p in Path('/proc').iterdir():
+              if not p.name.isdigit(): continue
+              try:
+                  argv=p.joinpath('cmdline').read_bytes().decode().split(chr(0))
+                  if argv[1:4]==['-m','uvicorn','app.main:app']:
+                      web.append({'argv':argv,'uid':p.stat().st_uid,'gid':p.stat().st_gid})
+              except (FileNotFoundError,ProcessLookupError): pass
+          assert web and all(r['uid']==568 and r['gid']==568 for r in web)
+          print(json.dumps(web))
+          PY
+          docker exec rc5-smoke python -c 'import sqlite3,json; from pathlib import Path; rows=[]; files=list(Path("/database").glob("*.sqlite3")); assert files; [(rows.append({"file":str(p),"integrity":(c:=sqlite3.connect(p.as_uri()+"?mode=ro",uri=True)).execute("PRAGMA integrity_check").fetchall(),"foreign_keys":c.execute("PRAGMA foreign_key_check").fetchall()}),c.close()) for p in files]; assert all(r["integrity"]==[("ok",)] and not r["foreign_keys"] for r in rows); print(json.dumps(rows))' > "$RC5_EVIDENCE/database-smoke.json"
+      - name: Real startup recovery and full empty, then unsafe-case refusal
+        run: python qa/release/container_recovery_rc5.py
+      - name: Diagnostics and cleanup of disposable container
+        if: always()
+        run: |
+          mkdir -p "$RC5_EVIDENCE"
+          docker logs rc5-smoke > "$RC5_EVIDENCE/container.log" 2>&1 || true
+          docker rm -f rc5-smoke >/dev/null 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc5-acceptance
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/rc5-evidence/
+            ${{ runner.temp }}/f14-qa/**/results/

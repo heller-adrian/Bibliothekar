@@ -1,3 +1,4 @@
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
 from pathlib import Path
 import hashlib
 
@@ -13,6 +14,7 @@ NOW='2026-09-08T12:00:00+00:00'
 def seed(db:Path, workspace:Path):
     initialize_database(db)
     work=workspace/'Arbeitsbereich'; work.mkdir(parents=True)
+    provision_legacy_storage(workspace)
     with database_connection(db) as c:
         c.execute("INSERT INTO jobs(id,kind,trigger_type,state,stage,operation,source_volume_label,created_at,updated_at) VALUES ('j','sd_import','manual','completed','event_sort_applied','folder_import','TEST',?,?)",(NOW,NOW))
         families=[]
@@ -50,6 +52,7 @@ def seed(db:Path, workspace:Path):
 
 def test_connected_applied_events_are_one_reconciliation_and_execute_atomically(tmp_path):
     db=tmp_path/'db.sqlite3'; workspace=tmp_path/'workspace'; families=seed(db,workspace)
+    provision_legacy_storage(workspace)
     plan=build_workspace_reconcile_plan(db,'j','a',workspace)
     assert plan['summary']['ready'] is True
     assert plan['event_ids']==['a','b']
@@ -78,6 +81,7 @@ def test_archived_removed_family_returns_to_free_ssd_stock(tmp_path):
     from app.event_change_request import propose_event_change, get_event_change_files
     from app.event_change_apply import confirm_event_change, finish_event_change, verify_event_change
     db=tmp_path/'archive.sqlite3'; initialize_database(db); workspace=tmp_path/'workspace'; (workspace/'Arbeitsbereich').mkdir(parents=True)
+    provision_legacy_storage(workspace)
     archive=tmp_path/'archive'; archive.mkdir()
     with database_connection(db) as c:
         c.execute("INSERT INTO jobs(id,kind,trigger_type,state,stage,operation,source_volume_label,created_at,updated_at) VALUES ('j','sd_import','manual','completed','event_ssd_released','folder_import','TEST',?,?)",(NOW,NOW))
@@ -145,6 +149,7 @@ def test_archived_no_event_edit_keeps_true_segments_and_releases_removed_family(
     from app.event_change_request import propose_event_change, get_event_change_files
     from app.event_change_apply import confirm_event_change, finish_event_change, verify_event_change
     db=tmp_path/'noevent.sqlite3'; initialize_database(db); workspace=tmp_path/'workspace'; (workspace/'Arbeitsbereich').mkdir(parents=True)
+    provision_legacy_storage(workspace)
     archive=tmp_path/'archive'; archive.mkdir()
     with database_connection(db) as c:
         c.execute("INSERT INTO jobs(id,kind,trigger_type,state,stage,operation,source_volume_label,created_at,updated_at) VALUES ('j','sd_import','manual','completed','event_ssd_released','folder_import','TEST',?,?)",(NOW,NOW))
@@ -185,6 +190,7 @@ def test_archived_no_event_edit_keeps_true_segments_and_releases_removed_family(
 
 def test_reconcile_recovers_stale_current_path_by_unique_size_and_sha(tmp_path):
     db=tmp_path/'db.sqlite3'; workspace=tmp_path/'workspace'; seed(db,workspace)
+    provision_legacy_storage(workspace)
     work=workspace/'Arbeitsbereich'
     old=work/'2026/07-19 - B/18-16 - 23-59 - B/Alle/F2.JPG'
     actual=work/'2026/legacy-no-event/Alle/F2.JPG'
@@ -213,6 +219,7 @@ def test_reconcile_recovers_stale_current_path_by_unique_size_and_sha(tmp_path):
 
 def test_reconcile_does_not_guess_when_stale_source_has_two_identical_matches(tmp_path):
     db=tmp_path/'db.sqlite3'; workspace=tmp_path/'workspace'; seed(db,workspace)
+    provision_legacy_storage(workspace)
     work=workspace/'Arbeitsbereich'
     old=work/'2026/07-19 - B/18-16 - 23-59 - B/Alle/F2.JPG'
     p1=work/'2026/recovery-a/Alle/F2.JPG'; p2=work/'2026/recovery-b/Alle/F2.JPG'

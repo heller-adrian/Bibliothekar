@@ -66,8 +66,8 @@ def test_0276_no_event_is_one_month_and_uses_canonical_name():
         },
         families,
     )
-    assert preview["event_name"] == "07 - Ohne Ereignis"
-    assert preview["parent_folder"] == "07 - Ohne Ereignis"
+    assert preview["event_name"] == "07 - No Event"
+    assert preview["parent_folder"] == "07 - No Event"
 
 
 def test_0276_extra_user_file_is_advisory_and_does_not_block_or_break_reversal(tmp_path: Path):

@@ -1,0 +1,91 @@
+"""Disposable RC7 containers only. Never invoke against an installed system."""
+import hashlib,json,os,sys
+from pathlib import Path
+from app import root_operations as ro
+from app.managed_storage_health import inspect_storage
+from app.storage_config import ENGLISH_STORAGE_DEFAULTS
+from app.library_registry import list_libraries
+from app.database import database_connection
+assert sys.platform=='linux' and os.environ.get('RC7_SYNTHETIC_QA')=='1'
+assert (os.geteuid(),os.getegid())==(568,568)
+ws=Path('/workspace');db=Path('/database/kamera.sqlite3');reg=Path('/database/global.sqlite3');mode=sys.argv[1]
+record=Path('/logs/rc7-setup-original.json')
+if mode=='seed-reset':
+    assert not any(ws.iterdir()) and not list(db.parent.glob('*.sqlite3'))
+    Path('/config/settings.json').write_text('{}')
+    for name in ENGLISH_STORAGE_DEFAULTS.values():(ws/name).mkdir()
+    with ro.reserve(ws,library_id='main',paths=[ws,*(ws/n for n in ENGLISH_STORAGE_DEFAULTS.values())],database=db,kind='startup',ids={'initialize_storage':True}):pass
+    parent=ro._control_location(ws)
+    with ro._lock(parent/'state.lock',exclusive=True):
+        state=ro._read(parent/'state.json');state['storage_initialization']['phase']='completed';ro._write(parent/'state.json',state)
+    state.pop('storage_initialization',None)
+    scenario=os.environ['RC7_RESET_CASE']
+    if scenario=='A-technical':
+        state={'format':1,'workspace':ro._identity(ws),'generation':0,'libraries':{},'bindings':{str(ws):ro._identity(ws)}}
+    ro._write(parent/'state.json',state)
+    record.write_text(json.dumps(state))
+    # /logs and /workspace are distinct bind mounts. Only these newly created,
+    # verified-empty QA directories are replaced to model historical identities.
+    # Hold their FDs so Linux cannot recycle their inodes for the new roots.
+    held=[]
+    try:
+        for name in ENGLISH_STORAGE_DEFAULTS.values():
+            path=ws/name;fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW);held.append(fd)
+            assert not os.listdir(fd)
+            old=os.fstat(fd);path.rmdir()
+            assert not path.exists()
+    finally:
+        for fd in held:os.close(fd)
+    from app.library_registry import initialize_library_registry
+    from contextlib import closing
+    import sqlite3,shutil
+    if scenario.endswith('header'):
+        from app import main
+        assert main._onboarding_required() and reg.is_file()
+    else:
+        initialize_library_registry(reg)
+        with closing(sqlite3.connect(reg)) as c:
+            c.execute("INSERT INTO libraries (library_id,display_name,database_path,workspace_root,work_root,archive_root,settings_json,is_main,is_active,is_registered,created_at,updated_at) VALUES ('main','Nicht eingerichtet',?,?,?,?,?,1,1,0,'synthetic','synthetic')",(str(db),str(ws),str(ws/'.bibliothekar-ohne-bibliothek'),'/main-library',json.dumps({'bootstrap':True,'onboarding_required':True})))
+            c.commit();c.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+    if scenario.startswith('B-'):
+        # Only the synthetic control namespace just created by this fixture.
+        assert parent.parent==Path('/database/.bibliothekar-root-control')
+        shutil.rmtree(parent.parent);record.write_text('{}')
+    result={'seed':'empty synthetic old identity state','old_state_sha256':hashlib.sha256(record.read_bytes()).hexdigest()}
+elif mode=='check-reset':
+    parent=ro._control_location(ws);state=ro._read(parent/'state.json')
+    scenario=os.environ['RC7_RESET_CASE']
+    if scenario=='B-header':assert not state.get('setup_reset')
+    else:
+        assert ro._read(parent/state['setup_reset']['history'])==json.loads(record.read_text())
+        assert len(state['setup_reset']['bootstrap_registry'])==(0 if scenario.endswith('header') else 1)
+    assert inspect_storage(ws,database=db)['ready']
+    result={'confirmed_reset':'PASS','old_identity_evidence_retained':'PASS'}
+elif mode=='seed-damage':
+    rows=list_libraries(reg,active_only=False,registered_only=True);assert len(rows)==1
+    original=Path(rows[0]['work_root'])/'preserved.JPG';original.write_bytes(b'RC7 damaged-installation sentinel')
+    (ws/'Trash').rename(ws/'qa-held-Trash')
+    result={'damage':'synthetic removed root with registered library and original retained'}
+elif mode=='check-damage':
+    health=inspect_storage(ws,database=db)
+    assert not health['ready'] and not health['can_initialize'] and not health.get('can_setup_again'),health
+    assert not (ws/'Trash').exists() and (ws/'qa-held-Trash').is_dir()
+    rows=list_libraries(reg,active_only=False,registered_only=True)
+    assert (Path(rows[0]['work_root'])/'preserved.JPG').read_bytes()==b'RC7 damaged-installation sentinel'
+    result={'damaged_used_installation_blocked':'PASS','original_retained':'PASS','storage':health}
+elif mode=='prepare-import':
+    # Only the synthetic test's resource budget is zeroed; production defaults
+    # and the independent private retention reserve are untouched.
+    from app.main import load_settings,CONFIG_PATH
+    settings=load_settings();settings['storage']={**settings.get('storage',{}),'processing_buffer_percent':0,'safety_reserve_gib':0}
+    CONFIG_PATH.write_text(json.dumps(settings))
+    result={'synthetic_import_reserve':0}
+elif mode=='check-import':
+    rows=list_libraries(reg,active_only=False,registered_only=True);assert len(rows)==1
+    with database_connection(Path(rows[0]['database_path'])) as c:
+        jobs=c.execute("SELECT id,state,file_count FROM jobs WHERE operation='folder_import'").fetchall()
+        assert len(jobs)==1 and jobs[0]['state']=='completed' and jobs[0]['file_count']==1,[tuple(r) for r in jobs]
+        assert c.execute('PRAGMA integrity_check').fetchone()[0]=='ok' and not c.execute('PRAGMA foreign_key_check').fetchall()
+    result={'duplicate_sources_regular_import_count':1,'sqlite':'PASS'}
+else:raise AssertionError(mode)
+print(json.dumps(result))

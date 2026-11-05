@@ -1,0 +1,22 @@
+{
+  "version": "1.0.0-rc.5",
+  "previous_version": "1.0.0-rc.4",
+  "accepted_base": "e788208fb479aefb569cd2b46acbc65051de6bfb",
+  "accepted_tree": "691c335c0dce41d5c1f1fa3085822496d96fed00",
+  "accepted_packages": [
+    "7122afa8864258cba6d1d5500b78413ded7acae7",
+    "aebb88835c0bafb4f49794a149f527654d7113d6",
+    "6c6bba86f0a270b6f58d18284312bac7d8d2644c"
+  ],
+  "version_files": [
+    "app/__init__.py",
+    "app/main.py",
+    "app/ui_shell.py"
+  ],
+  "platform": "linux/amd64",
+  "publication_authorized": false,
+  "approved_correction_sha256": {
+    "app/trash_retention.py": "be61751f4cfdb5a0cba7eaf4f78653872ec01c96ff4671498b577237338437b7"
+  },
+  "approved_correction_reason": "Linux evidence: default-only POSIX ACL on an existing ancestor is not an access grant; final creation parents and all access ACLs stay strict."
+}

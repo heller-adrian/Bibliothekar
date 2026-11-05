@@ -1,0 +1,10 @@
+[
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_library_swap_restart_is_safe_at_three_crash_boundaries[after_backup]",
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_library_swap_restart_is_safe_at_three_crash_boundaries[after_first_replacement]",
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_library_swap_restart_is_safe_at_three_crash_boundaries[after_second_backup]",
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_library_swap_restart_is_safe_at_three_crash_boundaries[after_db_commit]",
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_library_swap_restart_is_safe_at_three_crash_boundaries[after_journal_commit]",
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_unauthorized_db_in_journal_is_blocked",
+  "tests/backend/test_f11_trash_reservation.py::test_f11_reservation_wins[direct-restore]",
+  "tests/backend/test_rc5_practice_followup.py::test_missing_other_registered_catalog_never_means_no_duplicates"
+]

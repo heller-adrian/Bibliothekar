@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0-rc.2",
+  "accepted_base": "fca566ee2c3c4820bab2c29bebe3790627c90416",
+  "accepted_packages": [
+    "1fae16709bf262b82429c3d3d0980f05f2b77ca0",
+    "d02e2a4a88f4100036b5c17a8f03f26811e31c30",
+    "6e22db2162858f5787e4657c3f040f77cc02c447"
+  ],
+  "platform": "linux/amd64",
+  "publication_authorized": false
+}

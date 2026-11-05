@@ -1,0 +1,7 @@
+{
+  "state": {"format":1,"workspace":[97,34],"generation":0,"libraries":{},"storage_names":{"backup_directory_name":"SD Card Backups","metadata_directory_name":"Metadata Correction","trash_directory_name":"Trash","workspaces_directory_name":"Library Workspaces"},"storage_initialization":{"database":"/database/kamera.sqlite3","names":{"backup_directory_name":"SD Card Backups","metadata_directory_name":"Metadata Correction","trash_directory_name":"Trash","workspaces_directory_name":"Library Workspaces"},"phase":"initializing"},"bindings":{"/workspace":[97,34],"/workspace/Library Workspaces":[97,27732],"/workspace/Metadata Correction":[97,27733],"/workspace/SD Card Backups":[97,27731],"/workspace/Trash":[97,27734]}},
+  "operation_name":"operation-b87b8f2ab815cc171249c9421dc7deae096aea68d29c2f2564de0d2e08308056.json",
+  "operation":{"format":1,"reservation_id":"9c2ab846562a4fb6aee39e2d08edeee6","kind":"startup","ids":{"initialize_storage":true},"generation":[0,0],"workspace":"/workspace","database":"/database/kamera.sqlite3","library":"main","bindings":{"/workspace":[97,34],"/workspace/Library Workspaces":[97,27732],"/workspace/Metadata Correction":[97,27733],"/workspace/SD Card Backups":[97,27731],"/workspace/Trash":[97,27734]}},
+  "legacy_lock":{"mode":504,"uid":568,"gid":0,"size":0,"nlink":1},
+  "provenance":"User supplied read-only TrueNAS observations, 2026-10-27. Tests rebase paths and inode identities onto isolated real directories; application code contains none of these IDs."
+}

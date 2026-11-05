@@ -1,0 +1,12 @@
+[
+  "tests/backend/test_rc10_storage_recovery.py",
+  "tests/backend/test_rc9_setup_separation.py",
+  "tests/backend/test_rc7_reset_states.py",
+  "tests/backend/test_rc6_legacy_setup.py",
+  "tests/backend/test_rc1_sd_reimport.py",
+  "tests/backend/test_f14_fixed_storage.py",
+  "tests/backend/test_rc11_bootstrap.py",
+  "tests/backend/test_rc4_private_retention.py",
+  "tests/backend/test_f14_root_operations.py",
+  "tests/backend/test_rc5_practice_followup.py"
+]

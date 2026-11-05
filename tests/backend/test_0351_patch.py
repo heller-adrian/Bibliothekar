@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from app import main
 from app.ui_shell import (
     BIBLIOTHEKAR_0351_CSS,
@@ -9,7 +11,7 @@ from app.ui_shell import (
 
 
 def test_0351_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.40.3"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
 
 
 def test_0351_pwa_popovers_use_visible_triggers():

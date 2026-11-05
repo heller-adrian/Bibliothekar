@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from app import main, source_helper, ui_shell
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
 
 
 def _fnv1a32(text: str) -> str:
@@ -15,8 +16,8 @@ def _fnv1a32(text: str) -> str:
 
 
 def test_0301_shell_css_matches_frozen_0287_design():
-    assert len(ui_shell.BIBLIOTHEKAR_CSS) == 43515
-    assert _fnv1a32(ui_shell.BIBLIOTHEKAR_CSS) == "6c49c6e0"
+    assert len(ui_shell.BIBLIOTHEKAR_CSS) == 44539
+    assert _fnv1a32(ui_shell.BIBLIOTHEKAR_CSS) == "d024e005"
 
 
 def test_0301_shell_javascript_version_block_is_real_javascript():
@@ -27,10 +28,7 @@ def test_0301_shell_javascript_version_block_is_real_javascript():
 
     expected = """document.querySelectorAll("[data-bk-version]").forEach(node => {
       const deployment = data.deployment_version || data.version || "";
-      const core = data.version || "";
-      node.textContent = deployment && core && deployment !== core
-        ? `${deployment} · Kern ${core}`
-        : deployment;
+      node.textContent = deployment;
     });"""
     assert expected in ui_shell.BIBLIOTHEKAR_JS
 
@@ -57,7 +55,7 @@ def test_0301_critical_shell_initializers_are_present():
     assert "applyTheme(stored);" in script
     assert 'menuButton?.addEventListener("click"' in script
     assert "async function refreshTasks()" in script
-    assert 'fetch("/api/tasks", {cache: "no-store"})' in script
+    assert 'fetch("/api/tasks", {cache:"no-store", headers:{"X-Bibliothekar-Library":bkLibraryId}})' in script
     assert 'fetch("/api/health", {cache: "no-store"})' in script
 
 
@@ -67,7 +65,8 @@ def test_0301_task_backend_contract_is_unchanged():
 
 
 def test_0301_versions_are_consistent():
-    deployment = tuple(map(int, main.DEPLOYMENT_VERSION.split(".")))
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
+    deployment = tuple(map(int, main.DEPLOYMENT_VERSION.split("-", 1)[0].split(".")))
     assert deployment >= (0, 30, 1)
     assert source_helper.app.version == main.DEPLOYMENT_VERSION
     assert source_helper.healthz()["version"] == main.DEPLOYMENT_VERSION
@@ -79,6 +78,6 @@ def test_0301_compose_uses_patch_image():
     repo_root = Path(__file__).resolve().parents[2]
     compose = (repo_root / "compose.example.yaml").read_text()
     assert (
-        "ghcr.io/heller-adrian/bibliothekar:patch-"
-        + main.DEPLOYMENT_VERSION
+        "ghcr.io/heller-adrian/bibliothekar:"
+        + EXPECTED_RELEASE_VERSION
     ) in compose

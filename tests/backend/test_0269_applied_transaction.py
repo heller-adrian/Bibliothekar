@@ -1,3 +1,4 @@
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
 from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 
@@ -110,6 +111,7 @@ def test_0269_released_free_marker_is_not_an_open_task_or_reassignment(tmp_path)
     from tests.backend.test_0250_continuous import attach_files, create, payload, setup
 
     db=tmp_path/'db'; workspace=tmp_path/'workspace'
+    provision_legacy_storage(workspace)
     setup(db,['2026-07-23T10:00:00'])
     source=create(db,payload('2026-07-23T00:00','2026-07-23T23:59'))['parent_event']
     attach_files(db,workspace,source['id'])
@@ -156,9 +158,10 @@ def test_0269_released_free_marker_is_not_an_open_task_or_reassignment(tmp_path)
     assert (workspace/'SD-Kartensicherungen'/'2026'/'2026-07-23'/'1.JPG').read_bytes()==b'1'
     tasks=list_global_tasks(db)
     assert not any(
-        item['kind'] in {'reassignment','resort','unassigned_families'}
+        item['kind'] in {'reassignment','resort'}
         for item in tasks
     )
+    assert any(item['kind'] == 'unassigned_families' for item in tasks)
     cards=list_job_planning_overview(db,'j')['available_day_groups']
     assert len(cards)==1
     assert cards[0].get('released_free') is True

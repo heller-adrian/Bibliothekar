@@ -9,7 +9,7 @@ def test_0221_mobile_navigation_keeps_three_main_registers_on_top():
     assert 'class="bk-tab-mobile-label">Arbeitsbereich</span>' in html
     assert 'class="bk-tab-mobile-label">Archiv</span>' in html
     assert 'class="bk-tab-mobile-label">KI</span>' not in html
-    assert 'href="/assistant"' in html
+    assert 'href="/assistant"' not in html
     assert 'data-bk-area="import"' in html
 
 
@@ -29,8 +29,8 @@ def test_0221_mobile_sources_remain_three_cards():
 
 def test_0221_assistant_is_small_header_action_not_large_register():
     html = main.index()
-    assert 'bk-assistant-button' in html
-    assert 'href="/assistant"' in html
+    assert 'class="bk-shell-button bk-assistant-button' not in html
+    assert 'href="/assistant"' not in html
     assert 'id="bk-ai-tab"' not in html
     assert 'id="bk-ai-panel"' not in html
 

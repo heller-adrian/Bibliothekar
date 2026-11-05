@@ -76,7 +76,7 @@ def test_reassignment_offers_monthly_no_event_from_other_job_and_new_no_event(tm
         db, "new", "src", [new_fid], target_mode="existing_no_event", target_event_id=existing["id"]
     )
     assert result["pending_family_count"] == 0
-    assert result["target"]["folder_name"] == "07 - Ohne Ereignis"
+    assert result["target"]["folder_name"] == "07 - No Event"
     assert result["target"]["event_id"] == existing["id"]
     assert result["target"]["linkage_kind"] == ""
     with database_connection(db) as c:
@@ -84,7 +84,7 @@ def test_reassignment_offers_monthly_no_event_from_other_job_and_new_no_event(tm
         assert row["job_id"] == "old"
         assert row["event_kind"] == "no_event"
         assert row["linked_event_id"] is None
-        assert row["folder_name"] == "07 - Ohne Ereignis"
+        assert row["folder_name"] == "07 - No Event"
         assert c.execute("SELECT COUNT(*) FROM event_assignments WHERE event_id=? AND family_id=?", (existing["id"], new_fid)).fetchone()[0] == 1
 
 
@@ -108,7 +108,7 @@ def test_normal_sort_can_extend_cross_job_month_collection(tmp_path):
         e = c.execute("SELECT job_id,folder_name,linkage_kind FROM events WHERE id=?", (result["event_id"],)).fetchone()
         assert result["event_id"] == existing["id"]
         assert e["job_id"] == "a"
-        assert e["folder_name"] == "07 - Ohne Ereignis"
+        assert e["folder_name"] == "07 - No Event"
         assert not e["linkage_kind"]
         assert c.execute("SELECT COUNT(*) FROM event_assignments WHERE event_id=? AND family_id=?", (existing["id"], fb)).fetchone()[0] == 1
 

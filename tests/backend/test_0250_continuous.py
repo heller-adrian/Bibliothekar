@@ -1,3 +1,4 @@
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
 """0.25 product invariants. Every database and file is isolated by tmp_path."""
 import json
 from pathlib import Path
@@ -61,10 +62,19 @@ def test_exact_cards_and_no_event_reload(tmp_path):
     assert list_job_planning_overview(db,'j')['available_day_groups']==[]
 
 
-def test_disjoint_normal_selection_rejected(tmp_path):
-    db=tmp_path/'db';event,cards=split_day(db)
-    with pytest.raises(EventPreviewError,match='durchgehend'):
-        create(db,payload('2026-07-23T00:00','2026-07-23T23:59',selected_intervals=cards))
+def test_disjoint_day_cards_do_not_define_normal_event_gaps(tmp_path):
+    db=tmp_path/'db'
+    setup(db,['2026-07-23T10:00:00','2026-07-23T14:00:00','2026-07-23T18:00:00'])
+    selected_intervals=[
+        {'start_datetime':'2026-07-23T09:00:00','end_datetime':'2026-07-23T11:00:00'},
+        {'start_datetime':'2026-07-23T17:00:00','end_datetime':'2026-07-23T19:00:00'},
+    ]
+    result=create(db,payload(
+        '2026-07-23T00:00','2026-07-23T23:59',
+        selected_intervals=selected_intervals,
+    ))
+    context=get_event_edit_context(db,'j',result['parent_event']['id'])
+    assert len(context['assigned_family_ids'])==3
 
 
 def test_extension_updates_parent_on_either_adjacent_side(tmp_path):
@@ -231,6 +241,7 @@ def test_manual_workspace_assignment_then_confirmed_reconcile(tmp_path,rename):
     from app.sort_apply import CONFIRMATION_PHRASE, SortApplyError
     from app.event_document import build_event_document_from_db,write_event_document
     db=tmp_path/'db';workspace=tmp_path/'workspace'
+    provision_legacy_storage(workspace)
     setup(db,['2026-07-23T10:00:00','2026-07-23T14:00:00','2026-07-23T18:00:00'])
     event=create(db,payload('2026-07-23T00:00','2026-07-23T23:59'))['parent_event']
     attach_files(db,workspace,event['id'])
@@ -278,7 +289,7 @@ def test_manual_workspace_assignment_then_confirmed_reconcile(tmp_path,rename):
         assert c.execute('SELECT COUNT(*) FROM event_reapply_removed_families WHERE target_event_id IS NULL').fetchone()[0]==0
         assert c.execute('SELECT COUNT(*) FROM released_free_families WHERE job_id=?',('j',)).fetchone()[0]==2
     assert not any(
-        task['kind'] in {'reassignment','resort','unassigned_families'}
+        task['kind'] in {'reassignment','resort'}
         for task in list_global_tasks(db)
     )
     central=workspace/'SD-Kartensicherungen'
@@ -305,6 +316,7 @@ def test_0260_applied_delete_releases_files_and_keeps_open_task(tmp_path,preserv
     from app.sort_plan import build_event_sort_plan
     from app.sort_apply import CONFIRMATION_PHRASE,prepare_sort_run,execute_sort_run
     db=tmp_path/'db';workspace=tmp_path/'workspace'
+    provision_legacy_storage(workspace)
     setup(db,['2026-07-23T10:00:00'])
     event=create(db,payload('2026-07-23T00:00','2026-07-23T23:59'))['parent_event']
     attach_files(db,workspace,event['id'])
@@ -336,7 +348,7 @@ def test_0260_applied_delete_releases_files_and_keeps_open_task(tmp_path,preserv
         ).fetchone()[0]==1
     assert (workspace/'SD-Kartensicherungen'/'2026'/'2026-07-23'/'1.JPG').read_bytes()==b'1'
     assert not any(
-        task['kind'] in {'reassignment','resort','unassigned_families'}
+        task['kind'] in {'reassignment','resort'}
         for task in list_global_tasks(db)
     )
     cards=list_job_planning_overview(db,'j')['available_day_groups']
@@ -369,6 +381,7 @@ def test_0260_workspace_free_card_new_event_finishes_reassignment(tmp_path,prese
     from app.sort_plan import build_event_sort_plan
     from app.sort_apply import CONFIRMATION_PHRASE,prepare_sort_run,execute_sort_run
     db=tmp_path/'db';workspace=tmp_path/'workspace'
+    provision_legacy_storage(workspace)
     setup(db,['2026-07-23T10:00:00'])
     source=create(db,payload('2026-07-23T00:00','2026-07-23T23:59'))['parent_event']
     attach_files(db,workspace,source['id'])
@@ -384,7 +397,7 @@ def test_0260_workspace_free_card_new_event_finishes_reassignment(tmp_path,prese
         assert c.execute('SELECT COUNT(*) FROM events WHERE id=?',(source['id'],)).fetchone()[0]==0
         assert c.execute('SELECT COUNT(*) FROM released_free_families WHERE job_id=?',('j',)).fetchone()[0]==1
     tasks=list_global_tasks(db)
-    assert not any(t['kind'] in {'reassignment','resort','unassigned_families'} for t in tasks)
+    assert not any(t['kind'] in {'reassignment','resort'} for t in tasks)
     cards=list_job_planning_overview(db,'j')['available_day_groups']
     assert len(cards)==1 and cards[0].get('released_free') is True
     assert not cards[0].get('reassignment_pending')
@@ -419,6 +432,7 @@ def test_0260_applied_year_change_document_lifecycle(tmp_path,cancel):
     from app.workspace_reconcile import build_workspace_reconcile_plan,prepare_workspace_reconcile_run,execute_workspace_reconcile_run
     from app.sort_apply import CONFIRMATION_PHRASE
     db=tmp_path/'db';workspace=tmp_path/'workspace'
+    provision_legacy_storage(workspace)
     setup(db,['2025-12-31T10:00:00','2026-01-01T14:00:00'])
     event=create(db,payload('2025-12-31T00:00','2026-01-01T23:59'))['parent_event']
     attach_files(db,workspace,event['id'])
@@ -551,6 +565,7 @@ def test_0260_archived_no_event_two_same_day_segments_reassigns_removed_segment(
     from app.archive_reassignment import assign_archive_reassignments,list_archive_reassignments
     from app.event_change_apply import confirm_event_change,verify_event_change,finish_event_change
     db=tmp_path/'db';workspace=tmp_path/'workspace'
+    provision_legacy_storage(workspace)
     setup(db,['2026-07-23T10:00:00','2026-07-23T18:00:00'])
     original_segments=[
         {'day_key':'2026-07-23','start_time':'09:00','end_time':'11:00'},

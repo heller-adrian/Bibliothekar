@@ -1,3 +1,6 @@
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+from tests.backend.default_constant_fixture import shipped_constants
 from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 
@@ -8,10 +11,11 @@ from app import source_helper
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_0290_runtime_defaults_are_portable():
+def test_0290_runtime_defaults_are_portable(monkeypatch):
+    for name,value in shipped_constants(main,["WORKSPACE_PATH","DATABASE_DIRECTORY","LOG_PATH","POOL_PROBE_PATH","ARCHIVE_ROOT","IMPORT_ROOT","NAS_SOURCE_ROOT","REMOVABLE_ROOT"]).items():monkeypatch.setattr(main,name,value)
     assert main.APP_VERSION == PACKAGE_VERSION
-    assert main.RELEASE_VERSION == "0.28.7"
-    assert tuple(map(int, main.DEPLOYMENT_VERSION.split("."))) >= (0, 29, 1)
+    assert main.RELEASE_VERSION == EXPECTED_RELEASE_VERSION
+    assert tuple(map(int, main.DEPLOYMENT_VERSION.split("-", 1)[0].split("."))) >= (0, 29, 1)
     assert str(main.WORKSPACE_PATH) == "/workspace"
     assert str(main.DATABASE_DIRECTORY) == "/database"
     assert str(main.LOG_PATH) == "/logs"
@@ -22,7 +26,8 @@ def test_0290_runtime_defaults_are_portable():
     assert str(main.REMOVABLE_ROOT) == "/sources/removable"
 
 
-def test_0290_no_fixed_legacy_truenas_host_path_in_runtime():
+def test_0290_no_fixed_legacy_truenas_host_path_in_runtime(monkeypatch):
+    for name,value in shipped_constants(source_helper,["MOUNT_ROOT","HOST_MOUNT_ROOT"]).items():monkeypatch.setattr(source_helper,name,value)
     helper_source = (REPO_ROOT / "app" / "source_helper.py").read_text()
     main_source = (REPO_ROOT / "app" / "main.py").read_text()
     legacy = "/mnt/apps/appdata/kamera-automatisierung"
@@ -33,15 +38,22 @@ def test_0290_no_fixed_legacy_truenas_host_path_in_runtime():
 
 def test_0290_compose_uses_custom_app_mount_contract():
     compose = (REPO_ROOT / "compose.example.yaml").read_text()
-    assert "ghcr.io/heller-adrian/bibliothekar:patch-" in compose
+    assert ("ghcr.io/heller-adrian/bibliothekar:" + EXPECTED_RELEASE_VERSION) in compose
     assert "KAMERA_WORKSPACE: /workspace" in compose
     assert "KAMERA_POOL_PROBE: /workspace" in compose
     assert "KAMERA_ARCHIVE_ROOT: /main-library" in compose
-    assert "KAMERA_IMPORT_ROOT: /sources/import" in compose
+    assert "KAMERA_IMPORT_ROOT: /sources/import" not in compose
     assert "KAMERA_NAS_SOURCE_ROOT: /sources/nas" in compose
-    assert "KAMERA_REMOVABLE_ROOT: /sources/removable" in compose
-    assert "${BIBLIOTHEKAR_MAIN_LIBRARY_DIR}:/main-library:ro" in compose
-    assert "${BIBLIOTHEKAR_WORKSPACE_DIR}:/workspace" in compose
+    import yaml
+    volumes=yaml.safe_load(compose)['services']['bibliothekar']['volumes']
+    by_target={row['target']:row for row in volumes}
+    assert by_target['/appdata']['source']=='${BIBLIOTHEKAR_APPDATA_DIR}'
+    assert by_target['/main-library']['read_only'] is True
+    assert by_target['/workspace']['source']=='${BIBLIOTHEKAR_WORKSPACE_DIR}'
+    assert all(row['bind']['create_host_path'] is False for row in volumes)
+    from app.appdata import configure
+    from app import appdata
+    assert '"removable-sources"' in Path(appdata.__file__).read_text() or "'removable-sources'" in Path(appdata.__file__).read_text()
 
 
 def test_0290_workspace_owns_sd_backup_structure():

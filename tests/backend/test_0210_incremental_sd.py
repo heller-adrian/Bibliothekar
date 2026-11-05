@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 import hashlib
@@ -23,7 +25,7 @@ def _sha(data: bytes) -> str:
 
 def test_0210_version_and_schema(tmp_path: Path):
     assert main.APP_VERSION == PACKAGE_VERSION
-    assert main.RELEASE_VERSION == "0.28.7"
+    assert main.RELEASE_VERSION == EXPECTED_RELEASE_VERSION
     db = tmp_path / "kamera.sqlite3"
     status = initialize_database(db)
     assert 38 in status["applied_versions"]
@@ -158,4 +160,4 @@ def test_source_helper_rejects_stale_mount_for_current_device(monkeypatch):
     assert len(devices) == 1
     assert devices[0]["device_path"] == "/dev/sde1"
     assert devices[0]["mounted"] is False
-    assert any("umount" in call for call in calls)
+    assert not any("umount" in call for call in calls)  # Foreign mounts are preserved.

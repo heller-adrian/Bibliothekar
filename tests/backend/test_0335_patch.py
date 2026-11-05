@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from pathlib import Path
 import hashlib
 
@@ -113,8 +115,11 @@ def test_0335_metadata_ui_is_flat_selectable_and_two_step():
     assert "In Tagesbestand einsortieren" in METADATA_CORRECTION_HTML
     assert "selectedFiles()" in METADATA_CORRECTION_HTML
     assert "files.every(file=>file.reintegration_ready)" in METADATA_CORRECTION_HTML
-    assert "for(const item of files)" in METADATA_CORRECTION_HTML
-    assert "Einträge ausgewählt.</strong></div>" in METADATA_CORRECTION_HTML
+    assert 'id="meta-select-mode"' in METADATA_CORRECTION_HTML
+    assert "state.selectionMode" in METADATA_CORRECTION_HTML
+    assert "correctSelectedBySource(files)" in METADATA_CORRECTION_HTML
+    assert "Für jede Datei wird ihr eigener Wert des gewählten Metadaten-Tags verwendet." in METADATA_CORRECTION_HTML
+    assert "Einträge ausgewählt.</strong><div" in METADATA_CORRECTION_HTML
     assert "0.34.0" not in METADATA_CORRECTION_HTML
     assert "Metadaten werden sicher auf Arbeitskopien geschrieben" not in METADATA_CORRECTION_HTML
     assert "outline:2px" not in METADATA_CORRECTION_HTML
@@ -136,10 +141,11 @@ def test_0335_workspace_supports_shift_range_and_select_all():
 def test_0335_import_history_starts_with_five_and_can_expand():
     source = Path("app/main.py").read_text(encoding="utf-8")
     assert "let jobHistoryLimit = 5;" in source
-    assert "jobHistoryJobs.slice(0, jobHistoryLimit)" in source
+    assert "requestHistoryPages(false, jobHistoryLimit)" in source
+    assert 'LIMIT ? OFFSET ?' in source
     assert "jobHistoryLimit += 5;" in source
     assert "Mehr anzeigen" in source
 
 
 def test_0335_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.40.3"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION

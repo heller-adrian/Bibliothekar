@@ -1,0 +1,5 @@
+Bibliothekar 0.47.7 – geprüftes eigenständiges Docker-Testimage veröffentlichen.
+Ausgangsversion: patch/0.47.6.
+QA: 929 bestandene Backendtests, 0 Fehler, 5 nicht blockierende Warnungen; isolierter Archiv-Harness bestanden.
+Archivänderungen verwerfen: Die in Freigewordene Archivdateien erstellten oder zuvor manuell zurückkopierten SSD-Dateien werden erst nach Prüfung des jeweils unveränderten Archivoriginals und sämtlicher zum Auftrag gehörender SSD-Kopien per Größe/SHA-256 gelöscht. Die zugehörigen leeren Segment-/Jahresordner werden aufgeräumt. Fremde Dateien in geteilten Ordnern bleiben erhalten und werden gemeldet. Fehlt ein Archivoriginal, muss der bestehende sichere Rückänderungsauftrag durchgeführt werden. Bei fehlgeschlagenem Cleanup bleibt der Änderungsauftrag offen statt fälschlich als abgeschlossen markiert zu werden; der Vorgang ist wiederholbar.
+Keine Datenbankmigration. Keine automatischen Änderungen in der Kamerabibliothek. main/latest nicht verändern.

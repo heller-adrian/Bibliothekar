@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 import asyncio
 import os
 import stat
@@ -156,10 +158,10 @@ def _main_foundation(tmp_path: Path):
 
 
 def test_0310_versions_and_frozen_css_contract():
-    assert main.DEPLOYMENT_VERSION == "0.40.3"
-    assert source_helper.app.version == "0.40.3"
-    assert source_helper.healthz()["version"] == "0.40.3"
-    assert len(ui_shell.BIBLIOTHEKAR_CSS) == 43515
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
+    assert source_helper.app.version == EXPECTED_RELEASE_VERSION
+    assert source_helper.healthz()["version"] == EXPECTED_RELEASE_VERSION
+    assert len(ui_shell.BIBLIOTHEKAR_CSS) == 44539
     assert ".bk-library-card" not in ui_shell.BIBLIOTHEKAR_CSS
     assert ".bk-library-card" in ui_shell.BIBLIOTHEKAR_0310_CSS
 
@@ -385,7 +387,7 @@ def test_0310_library_runtime_context_is_task_local(tmp_path):
     assert get_current_library() is None
 
 
-def test_0310_library_management_is_nondestructive_registry_state(tmp_path):
+def test_0310_library_management_is_nondestructive_registry_state(tmp_path,monkeypatch):
     main_db, registry, workspace, archive = _main_foundation(tmp_path)
 
     business_db = tmp_path / "database" / "business.sqlite3"
@@ -426,7 +428,13 @@ def test_0310_library_management_is_nondestructive_registry_state(tmp_path):
         "business",
         True,
     )["is_active"] is True
-    unregistered = unregister_library(registry, "business")
+    # Retirement now requires confirmation, real roots and a RO archive.
+    import pytest
+    from app.library_registry import LibraryRegistryError
+    with pytest.raises(LibraryRegistryError,match="confirmation"):
+        unregister_library(registry,"business")
+    monkeypatch.setattr(main,"_mount_read_only",lambda path:True)
+    unregistered = unregister_library(registry, "business",confirmation="REMOVE LIBRARY")
     assert unregistered["is_registered"] is False
     assert business_db.is_file()
     assert business_archive.is_dir()

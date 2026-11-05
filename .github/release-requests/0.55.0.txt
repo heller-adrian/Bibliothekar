@@ -1,0 +1,6 @@
+Bibliothekar 0.55.0
+Based on patch/0.54.4; do not modify main, latest, production DB or photos.
+Scope: mobile/narrow Create Event dialog ONLY: force Start date/time and End date/time side-by-side for parent and dynamic child forms using real dialog width, ResizeObserver and high-specificity CSS. Keep WebKit padding/box safeguards.
+The no-event day segment UI, edit dialog and desktop are unchanged.
+QA on PR #29: 1131 backend tests passed, 6 warnings; archive-isolation harness passed.
+Publish ghcr.io/heller-adrian/bibliothekar:patch-0.55.0 only after release workflow repeats QA successfully.

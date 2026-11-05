@@ -1,0 +1,8 @@
+Bibliothekar 0.52.0: isolated TrueNAS GHCR patch-image publication request.
+Source branch: patch/0.52.0
+Validated source commit: e4378de35382ceae8fd83d54f040495f7738490d
+Full backend regression: 1083 passed, 0 failed (6 pre-existing deprecation warnings).
+Archive-isolation Docker QA: SUCCESS.
+QA: https://github.com/heller-adrian/Bibliothekar/actions/runs/38290602091
+Scope: safe Finder/SMB event edits, complete dissolved subevent detection, safe restoration or explicit guided edit, physical IST vs canonical target preview, bilingual DE/EN dialogs, SHA-256 preflight and no unreviewed archive writes.
+Publish ONLY ghcr.io/heller-adrian/bibliothekar:patch-0.52.0 and branch tag. Do not modify main/latest, productive TrueNAS datasets, or stable channel.

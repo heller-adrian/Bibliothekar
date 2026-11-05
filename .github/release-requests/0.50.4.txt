@@ -1,0 +1,11 @@
+Bibliothekar 0.50.4 – ausschließlich separates Testimage für die englische PWA-Oberfläche.
+Geprüfter Quellcommit: 60891ae42d23da7855c29da46564ed74fe14e706
+Vollständiger GitHub Backend-QA- und Archiv-Harness-Lauf: https://github.com/heller-adrian/Bibliothekar/actions/runs/38104743681 – SUCCESS.
+Referenz: acht iPhone-Screenshots mit deutschen UI-Resttexten.
+Anpassungen: Import/Verlauf, Ereignisliste, Ereigniserstellung, Papierkorb, Arbeitsbereich, dynamische Status/Zähler, seltene Backend-Fehler.
+Alle vorhandenen deutschen Einstellungen, Nutzernamen, Eventnamen, Datei- und Ordnerpfade sowie SQLite/Eventdaten bleiben unberührt.
+Ältere Versionstests korrekt auf 0.50.4 aktualisiert; tests/backend/test_0504_english_ui_completion.py ergänzt.
+Detaillierter Befund: docs/0504_ENGLISH_COMPLETION_AUDIT.md.
+Nur ghcr.io/heller-adrian/bibliothekar:patch-0.50.4 veröffentlichen.
+Nicht nach main mergen; kein Stable latest oder v0.50.4-Tag; keine produktiven NAS-Mounts.
+Reale iPhone-PWA-Abnahme und seltene Sicherheitsdialoge bleiben vor Stable erforderlich.

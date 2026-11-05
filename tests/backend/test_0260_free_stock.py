@@ -1,3 +1,4 @@
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
 """Physical free-stock boundaries across events, jobs, and years."""
 
 import hashlib
@@ -127,6 +128,7 @@ def _seed_cross_job_shift(tmp_path):
     workspace = tmp_path / "workspace"
     root = workspace / "Arbeitsbereich"
     initialize_database(db)
+    provision_legacy_storage(workspace)
     with database_connection(db) as connection:
         for job_id in ("first", "second"):
             incoming = workspace / "imports" / job_id
@@ -328,18 +330,19 @@ def test_deleting_one_of_two_events_merges_free_stock_across_jobs(tmp_path):
         assert connection.execute(
             "SELECT COUNT(*) FROM events WHERE id='first-event'"
         ).fetchone()[0] == 0
-    first_tasks = [
-        task for task in list_global_tasks(db)
-        if task.get("job_id") == "first"
-    ]
-    assert not any(task["kind"] in {"reassignment","resort"} for task in first_tasks)
-    # The fixture already contained one unrelated free family ("free2") before
-    # the delete. It remains a legitimate generic task. The family released by
-    # the confirmed delete is excluded by released_free_families, so the task
-    # must still report exactly that one pre-existing family.
-    unassigned = [task for task in first_tasks if task["kind"] == "unassigned_families"]
+    tasks = list_global_tasks(db)
+    assert not any(task["kind"] in {"reassignment","resort"} for task in tasks)
+    # Freier datierter Bestand ist seit 0.42.1 eine globale Aufgabe über alle
+    # Import-/Korrekturjobs. Die durch das bestätigte Löschen freigegebene
+    # Familie wird nach bestätigter Freigabe auch als freier Bestand gezählt; die beiden
+    # bereits vorher freien Familien aus "first" und "second" werden gemeinsam
+    # gezählt statt als job-spezifische Karten dargestellt.
+    unassigned = [task for task in tasks if task["kind"] == "unassigned_families"]
     assert len(unassigned) == 1
-    assert unassigned[0]["detail"].startswith("1 Familie ·")
+    assert unassigned[0]["family_count"] == 3
+    assert unassigned[0]["job_count"] == 2
+    assert unassigned[0]["detail"] == "3 Familien · freier Tagesbestand"
+    assert unassigned[0]["href"] == "/workspace?task=free"
 @pytest.mark.parametrize("preserve", [False, True])
 def test_reassignment_new_event_uses_explicit_day_folder_option(tmp_path, preserve):
     db = tmp_path / "db.sqlite3"
@@ -393,7 +396,7 @@ def test_reassignment_year_boundary_creates_separate_no_event_months(tmp_path):
         result = assign_event_reassignments(
             db, "j", "source", [fid], target_mode="new_no_event", segments=[segment],
         )
-        assert result["target"]["folder_name"] == f"{month} - Ohne Ereignis"
+        assert result["target"]["folder_name"] == f"{month} - No Event"
         with database_connection(db) as connection:
             target = connection.execute(
                 "SELECT start_datetime,event_kind FROM events WHERE id=?",
@@ -418,6 +421,7 @@ def test_cross_job_no_event_workspace_target_finishes_applied_reassignment(tmp_p
 
     db = tmp_path / "db.sqlite3"
     workspace = tmp_path / "workspace"
+    provision_legacy_storage(workspace)
     setup(db, ["2026-07-23T10:00:00"])
     source = create(db, payload("2026-07-23T00:00", "2026-07-23T23:59"))["parent_event"]
     attach_files(db, workspace, source["id"])

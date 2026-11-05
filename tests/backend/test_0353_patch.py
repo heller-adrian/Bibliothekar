@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from app import main
 from app.metadata_correction_ui import METADATA_CORRECTION_HTML
 from app.transfer_ui import TRANSFER_HTML
@@ -8,7 +10,7 @@ from app.workspace_ui import WORKSPACE_HTML
 
 
 def test_0353_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.40.3"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
 
 
 def test_0353_title_help_has_no_visible_question_mark():
@@ -23,7 +25,7 @@ def test_0353_title_help_has_no_visible_question_mark():
         assert "data-bk-title-help" in html
         assert "bk-page-help" not in html
     assert "bkToggleTitleHelp" in BIBLIOTHEKAR_JS
-    assert "(hover: hover) and (pointer: fine)" in BIBLIOTHEKAR_0353_CSS
+    assert ".bk-title-help:hover::after" not in BIBLIOTHEKAR_0353_CSS
 
 
 def test_0353_archive_subheadings_use_title_help():

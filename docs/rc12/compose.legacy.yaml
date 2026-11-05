@@ -1,0 +1,49 @@
+services:
+  bibliothekar:
+    image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.12}
+    restart: unless-stopped
+    user: "0:0"
+    privileged: true
+
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      KAMERA_CONFIG: /config/settings.json
+      # BA-03: create this secret file under BIBLIOTHEKAR_CONFIG_DIR
+      # before exposing the service; no default password or anonymous mode.
+      BIBLIOTHEKAR_ADMIN_PASSWORD_FILE: /config/admin-password
+      BIBLIOTHEKAR_COOKIE_SECURE: ${BIBLIOTHEKAR_COOKIE_SECURE:-false}
+      KAMERA_WORKSPACE: /workspace
+      KAMERA_DATABASE_DIR: /database
+      KAMERA_REGISTRY_DATABASE: /database/bibliothekar-global.sqlite3
+      KAMERA_LOG_DIR: /logs
+      KAMERA_POOL_PROBE: /workspace
+      KAMERA_ARCHIVE_ROOT: /main-library
+      KAMERA_REMOVABLE_ROOT: /sources/removable
+      KAMERA_NAS_SOURCE_ROOT: /sources/nas
+      KAMERA_SOURCE_HELPER_URL: http://127.0.0.1:8090
+      KAMERA_SOURCE_HELPER_ENABLED: "true"
+      KAMERA_REMOVABLE_MOUNT_ROOT: /sources/removable
+      KAMERA_DEVICE_NODE_ROOT: /dev/bibliothekar
+      KAMERA_WEB_UID: "568"
+      KAMERA_WEB_GID: "568"
+
+    ports:
+      - "${BIBLIOTHEKAR_PORT:-30044}:8080"
+
+    volumes:
+      - ${BIBLIOTHEKAR_CONFIG_DIR}:/config
+      - ${BIBLIOTHEKAR_DATABASE_DIR}:/database
+      - ${BIBLIOTHEKAR_LOG_DIR}:/logs
+      - ${BIBLIOTHEKAR_WORKSPACE_DIR}:/workspace
+      - ${BIBLIOTHEKAR_MAIN_LIBRARY_DIR}:/main-library:ro
+      - ${BIBLIOTHEKAR_NAS_SOURCE_DIR}:/sources/nas:ro
+      - ${BIBLIOTHEKAR_REMOVABLE_DIR}:/sources/removable
+      - /run/udev:/run/udev:ro
+
+    read_only: true
+
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+    security_opt:
+      - no-new-privileges:true

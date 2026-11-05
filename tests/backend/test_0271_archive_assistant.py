@@ -1,6 +1,8 @@
 """0.27.1: variabler Archiv-Assistent und echte IST→SOLL-Hilfsstruktur."""
 from __future__ import annotations
 
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
+
 import hashlib
 import shutil
 from pathlib import Path
@@ -23,6 +25,7 @@ def _seed(tmp_path: Path, *, full_archive_triplet: bool = False):
     work.mkdir(parents=True)
     archive.mkdir()
     initialize_database(db)
+    provision_legacy_storage(workspace)
 
     folder = "07-22 - Test Archiv 2"
     old_rel = f"2026/{folder}/Alle/alt.JPG"
@@ -149,8 +152,10 @@ def test_0271_existing_triplet_stages_only_branch_with_new_files(tmp_path: Path)
 
     after = build_archive_change_assistant(db, archive, workspace, cr_id)
     assert after["phase"] == "finder"
-    assert [item["kind"] for item in after["operations"]] == ["copy_helper_folders"]
-    assert set(after["operations"][0]["items"]) == {"Alle", "event.json"}
+    assert [item["kind"] for item in after["operations"]] == ["copy_files", "replace_event_document"]
+    assert after["operations"][0]["items"] == ["neu.JPG"]
+    assert after["operations"][0]["target"].endswith("/Alle")
+    assert after["operations"][1]["items"] == ["event.json"]
 
 
 def test_0271_metadata_only_change_prepares_new_event_document(tmp_path: Path):
@@ -353,6 +358,7 @@ def test_0326_assistant_uses_explicit_library_path_labels(tmp_path: Path):
         "archive_root": "Testarchiv",
         "work_root": "Testarbeitsbereich",
         "backup_root": "SD-Kartensicherungen",
+        "staging_root": "Testarbeitsbereich/Später zuordnen",
     }
     operation = next(
         item for item in assistant["operations"]

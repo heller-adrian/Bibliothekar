@@ -1,6 +1,8 @@
 """0.27.0: Archiv-Erweiterungen bleiben kanonisch, auch über Sicherungsaufträge hinweg."""
 from __future__ import annotations
 
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
+
 import hashlib
 from pathlib import Path
 
@@ -101,6 +103,7 @@ def _seed_archived_case(tmp_path: Path, *, event_kind: str):
     archive_root.mkdir()
 
     initialize_database(db)
+    provision_legacy_storage(workspace)
     folder = "07.23 - Urlaub" if event_kind == "event" else "07 - Ohne Ereignis"
     old_rel = f"2026/{folder}/Alle/alt.JPG"
     incoming_rel = "2026/Neue-Sicherung/Alle/neu.JPG"

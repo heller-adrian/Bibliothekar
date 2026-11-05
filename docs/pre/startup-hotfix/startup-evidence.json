@@ -1,0 +1,28 @@
+{
+  "source": "79ab9c1f3c9906723e328873ad790074e3f7b60c",
+  "native_truenas": "NOT_RUN",
+  "count": 4000,
+  "baseline_image": "ghcr.io/heller-adrian/bibliothekar@sha256:86991ef46f1f29a990b63ea3983b1193adfe378247d1202e41fdfd7e21d44b9b",
+  "cases": [
+    {
+      "startup_seconds": 5.370224283000425,
+      "ready": true,
+      "authenticated_http": true,
+      "helper_disabled": true,
+      "unchanged_second_restart": false
+    },
+    {
+      "startup_seconds": 6.291424085000472,
+      "ready": true,
+      "authenticated_http": true,
+      "helper_disabled": true,
+      "unchanged_second_restart": true
+    }
+  ],
+  "status": "PASS",
+  "corrected_files_preserved": 14,
+  "origins_preserved": true,
+  "readonly_bytes_preserved": true,
+  "recheck_passed": true,
+  "web_uid": 568
+}

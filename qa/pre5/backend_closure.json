@@ -1,0 +1,12 @@
+[
+  "tests/backend/test_pre5_sqlite_authorization.py",
+  "tests/backend/test_pre5_statement_authorization.py",
+  "tests/backend/test_pre5_domain_recovery.py",
+  "tests/backend/test_rc4_private_retention.py::test_invalid_confirmation_never_starts_rescue",
+  "tests/backend/test_rc4_private_retention.py::test_missing_anchor_requires_explicit_rescue_and_preserves_different_variants",
+  "tests/backend/test_rc6_legacy_setup.py::test_incomplete_live_wipe_then_process_restart_and_confirmed_onboarding",
+  "tests/backend/test_rc6_legacy_setup.py::test_legacy_warning_delivered_scripts_and_css_are_valid",
+  "tests/backend/test_rc6_legacy_setup.py::test_legacy_reset_never_discards_surviving_evidence",
+  "tests/backend/test_rc14_import.py::test_rc13_staged_zero_published_resume_preserves_origin[3892]",
+  "tests/backend/test_rc5_practice_followup.py::test_hundred_known_files_no_import_and_no_managed_folders"
+]

@@ -22,6 +22,7 @@ def test_0267_version_and_planning_helpers_are_present():
 def test_0267_dom_smoke_renders_eight_day_cards_with_real_render_days_code():
     helpers = _js_block("    function planningOverview()", "    function renderDays()")
     renderer = _js_block("    function renderDays()", "    function renderSelection()")
+    mobile = _js_block("    function syncMobilePreviewButton()", "    mobilePreviewButton.addEventListener")
     script = textwrap.dedent(
         r"""
         const groups = Array.from({length: 8}, (_, index) => {
@@ -59,31 +60,63 @@ def test_0267_dom_smoke_renders_eight_day_cards_with_real_render_days_code():
             type: "",
             _html: "",
             classList: { add(){}, remove(){}, toggle(){} },
-            appendChild(child) { this.children.push(child); },
-            addEventListener(){},
-            set innerHTML(value) { this._html = value; },
+            appendChild(child) { this.children.push(child); child.parentNode=this; },
+            querySelector(selector) { const find=n=>n.children.find(c=>c.className===selector.slice(1)) || n.children.map(find).find(Boolean); return find(this); },
+            append(child) { this.children.push(child); child.parentNode=this; },
+            events: {},
+            addEventListener(type, listener) { (this.events[type] ||= []).push(listener); },
+            set innerHTML(value) { this._html = value; if(!value)this.children=[]; },
             get innerHTML() { return this._html; }
           };
         }
         const dayList = element();
-        const document = { createElement(){ return element(); } };
+        let selectedPreviewEventId=null;
+        const document = { createElement(){ return element(); },
+          querySelectorAll(selector){
+            if(selector===".day-card.selected")return dayList.children.filter(card=>selectedDays.has(card.dataset.bkSelectionKey));
+            if(selector==="[data-preview-event-id]")return dayList.children.filter(card=>card.dataset.previewEventId);
+            throw Error("unimplemented DOM selector: "+selector);
+          }
+        };
         function formatDay(value){ return value; }
         function formatBytes(value){ return String(value); }
         function formatTimelineDateRange(){ return ""; }
         function workspaceStatusLabel(value){ return value || ""; }
         function escapeHtml(value){ return String(value ?? ""); }
         function openStoredEventPreview(){}
-        function renderSelection(){}
+        let selectionRenders=0, previewClicks=0, clock=100;
+        let lastSelectedDayKey=null;
+        function renderSelection(){ selectionRenders++; }
+        const window={matchMedia:()=>({matches:true})};
+        const performance={now:()=>clock};
+        const mobilePreviewButton={click(){previewClicks++;}};
+        function setStatus(message){throw Error(message); }
         """
-    ) + "\n" + helpers + "\n" + renderer + textwrap.dedent(
+    ) + "\n" + mobile + "\n" + helpers + "\n" + renderer + textwrap.dedent(
         r"""
         renderDays();
         if (dayList.children.length !== 8) {
           throw new Error("expected 8 rendered day cards, got " + dayList.children.length);
         }
+        if(!mobilePreviewButton.hidden)throw Error("preview must be hidden without selection");
+        (async()=>{
+          const card=dayList.children[0];
+          const event={target:{closest:()=>false},preventDefault(){},stopImmediatePropagation(){}};
+          card.events.click[0](event);clock+=100;card.events.click[0](event);
+          await Promise.resolve();await Promise.resolve();
+          if(!selectedDays.has("2026-07-19")||selectionRenders!==1||previewClicks!==1)
+            throw Error("mobile double tap must select and open preview");
+          if(mobilePreviewButton.hidden||mobilePreviewButton.parentNode?.parentNode!==dayList.children[0] || mobilePreviewButton.parentNode.className!=="day-statuses")
+            throw Error("preview button must follow the actual selected card");
+          const desktopCount=previewClicks;window.matchMedia=()=>({matches:false});
+          card.events.click[0](event);clock+=100;card.events.click[0](event);
+          await Promise.resolve();
+          if(previewClicks!==desktopCount)throw Error("desktop click must not force mobile preview");
+        })().catch(error=>{console.error(error);process.exitCode=1;});
         """
     )
-    subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
+    result=subprocess.run(["node", "-e", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_0267_workspace_selection_is_permanently_docked_in_0269():

@@ -1,0 +1,63 @@
+name: Targeted pre startup hotfix acceptance
+on:
+  push:
+    branches: [codex/pre-startup-performance]
+    paths-ignore: ['docs/**', 'README.md', 'CHANGELOG.md']
+permissions:
+  contents: read
+  packages: read
+  actions: read
+concurrency:
+  group: pre-startup-hotfix
+  cancel-in-progress: false
+jobs:
+  targeted-startup:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+        working-directory: startup-${{ github.run_id }}
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PYTHONPATH: ${{ github.workspace }}/startup-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: startup-${{ github.run_id }}
+      - name: Isolated targeted Python regressions
+        run: |
+          set -euo pipefail
+          QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-startup.XXXXXXXX")"
+          export QA_WORK
+          printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
+          # Only container QA changed since this exact successful targeted step.
+          # Verify its frozen ZIP and XML; fail if app/tests/dependencies differ.
+          python3 qa/pre/reuse_startup_gate.py
+      - name: Build only isolated hotfix test image and read original RC14
+        run: |
+          set -euo pipefail
+          IMAGE="bibliothekar-startup-qa:$GITHUB_RUN_ID"
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .
+          docker pull ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.14
+          RC14_IMAGE="$(docker image inspect ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.14 --format '{{index .RepoDigests 0}}')"
+          printf 'IMAGE=%s\nRC14_IMAGE=%s\n' "$IMAGE" "$RC14_IMAGE" >> "$GITHUB_ENV"
+          docker image inspect --platform linux/amd64 "$RC14_IMAGE" > "$QA_WORK/rc14-image.json"
+      - name: Real supervisor four thousand files and original fourteen corrected JPEGs
+        run: |
+          set -euo pipefail
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre/startup_container.py
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre/container.py
+      - name: Preserve targeted startup evidence
+        if: always() && env.QA_WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pre-startup-hotfix-evidence
+          retention-days: 30
+          path: |
+            ${{ env.QA_WORK }}/*.json
+            ${{ env.QA_WORK }}/*.xml
+            ${{ env.QA_WORK }}/*.log

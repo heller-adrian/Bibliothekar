@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 """SSD-Hilfsstruktur fuer manuelle Aenderungen archivierter Ereignisse.
 
 Die Kamerabibliothek wird von diesem Modul niemals beschrieben. Komplexe
@@ -19,8 +23,37 @@ from app.database import database_connection
 from app.workspace_layout import backup_root, shared_work_root
 
 
-STAGING_DIRECTORY_NAME = "Später zuordnen"
-BRANCHES = ("Alle", "Sortiert", "Export")
+STAGING_DIRECTORY_NAME = "Später zuordnen"  # Legacy public constant; physical path uses resolver.
+
+
+def staging_directory_name(work_root: Path) -> str:
+    from app.managed_directory_names import directory_name
+    root = Path(work_root)
+    return directory_name(root, "assign_later")
+
+# English clean-install fallback with read support for historical German paths.
+BRANCHES = ("All", "Sorted", "Export")
+LEGACY_BRANCHES = ("Alle", "Sortiert", "Export")
+KNOWN_BRANCHES = frozenset((*BRANCHES, *LEGACY_BRANCHES))
+
+
+def _fallback_branches(path: PurePosixPath) -> tuple[str, ...]:
+    return LEGACY_BRANCHES if {"Alle", "Sortiert"}.intersection(path.parts) else BRANCHES
+
+
+def _plan_fallback_branches(plan: dict[str, Any]) -> tuple[str, ...]:
+    """Select one naming style per plan, including Export-only file rows."""
+    items = [*(plan.get("families_with_plans") or []),
+             *(plan.get("assets_with_plans") or [])]
+    for key in ("new_path", "old_path"):
+        validate_active_roots()
+        paths = [PurePosixPath(str(item.get(key) or "").replace("\\", "/"))
+                 for item in items if str(item.get(key) or "").strip()]
+        if any({"All", "Sorted"}.intersection(path.parts) for path in paths):
+            return BRANCHES
+        if any({"Alle", "Sortiert"}.intersection(path.parts) for path in paths):
+            return LEGACY_BRANCHES
+    return BRANCHES
 
 
 class ArchiveStagingError(RuntimeError):
@@ -36,6 +69,7 @@ def _inside(path: Path, root: Path) -> bool:
 
 
 def _safe_relative(value: Any) -> PurePosixPath:
+    validate_active_roots()
     raw = str(value or "").replace("\\", "/").strip("/")
     path = PurePosixPath(raw)
     if (
@@ -64,7 +98,7 @@ def _workspace_source_path(
     # Freigewordene Archivdateien gehören definitionsgemäß zum globalen
     # Zentralbestand, auch wenn ein gleichnamiger Legacy-Pfad im Arbeitsbereich
     # existieren sollte.
-    if rel.parts and rel.parts[0] == "Freigewordene Archivdateien":
+    if rel.parts and rel.parts[0] in {"Freigewordene Archivdateien", "Released Archive Files"}:
         return central_candidate, central_root
 
     if central_exists and not work_exists:
@@ -89,7 +123,9 @@ def _copy_verified_bytes(
     expected_sha: str,
 ) -> None:
     """Copy with no overwrite and verify the completed bytes."""
+    validate_active_roots()
     target.parent.mkdir(parents=True, exist_ok=True)
+    validate_active_roots()
     with source.open("rb") as src, target.open("xb") as dst:
         while True:
             block = src.read(1024 * 1024)
@@ -133,10 +169,12 @@ def _stage_verified_source(
             "Der vorbereitete SSD-Zielpfad ist bereits belegt: " + str(staged)
         )
 
+    validate_active_roots()
     staged.parent.mkdir(parents=True, exist_ok=True)
     mode = "hardlink"
     try:
         try:
+            validate_active_roots()
             os.link(source, staged, follow_symlinks=False)
         except OSError as exc:
             if exc.errno != errno.EXDEV:
@@ -186,11 +224,13 @@ def _stage_verified_source(
                     "Die SSD-Quelle hat sich vor dem Verschieben verändert: "
                     + str(source)
                 )
+            validate_active_roots()
             source.unlink()
         return mode
     except Exception:
         try:
             if staged.exists() and staged.is_file() and not staged.is_symlink():
+                validate_active_roots()
                 staged.unlink()
         except OSError:
             pass
@@ -212,6 +252,7 @@ def _safe_component(value: Any, label: str) -> str:
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
+    validate_active_roots()
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
@@ -231,6 +272,7 @@ def _remove_ignored_helper_metadata(directory: Path) -> int:
         if entry.name != ".DS_Store" and not entry.name.startswith("._"):
             continue
         try:
+            validate_active_roots()
             entry.unlink()
             removed += 1
         except OSError:
@@ -239,6 +281,7 @@ def _remove_ignored_helper_metadata(directory: Path) -> int:
 
 
 def _suffix_after_event_root(value: Any) -> tuple[str, ...]:
+    validate_active_roots()
     parts = PurePosixPath(str(value or "").replace("\\", "/").strip("/")).parts
     return tuple(parts[2:]) if len(parts) >= 2 else tuple(parts)
 
@@ -254,6 +297,7 @@ def _preview_child_folders(preview: dict[str, Any]) -> list[str]:
             end_time = end[11:16] if "T" in end else end[:5]
             name = str(segment.get("name") or "Unterereignis").strip()
             if start_time and end_time:
+                validate_active_roots()
                 folder = (
                     f"{start_time.replace(':','-')} - "
                     f"{end_time.replace(':','-')} - {name}"
@@ -333,7 +377,7 @@ def _desired_directory_plan(
             continue
 
         branch_index = next(
-            (index for index, part in enumerate(rel.parts) if part in BRANCHES),
+            (index for index, part in enumerate(rel.parts) if part in KNOWN_BRANCHES),
             None,
         )
         if branch_index is None:
@@ -341,7 +385,7 @@ def _desired_directory_plan(
             continue
         container = PurePosixPath(*rel.parts[:branch_index])
         directories.add(container)
-        for branch in BRANCHES:
+        for branch in _plan_fallback_branches(plan):
             directories.add(container / branch)
     return directories
 
@@ -423,8 +467,6 @@ def _obsolete_directories_from_plan(
             )
         )
     ]
-    if not affected_items:
-        return []
     if delete_event:
         return [current_root.as_posix()]
     try:
@@ -434,6 +476,25 @@ def _obsolete_directories_from_plan(
     if current_root != target_root:
         return [current_root.as_posix()]
 
+    # Empty old child folders produce no move/delete file rows. They are
+    # nevertheless app-managed obsolete archive structure and must be shown
+    # in the manual change steps (never deleted by the application).
+    with database_connection(database_path) as connection:
+        old_children = {
+            str(row["folder_name"])
+            for row in connection.execute(
+                "SELECT folder_name FROM events WHERE parent_event_id=?",
+                (event_id,),
+            ).fetchall()
+            if str(row["folder_name"] or "")
+        }
+    wanted_children = set(_preview_child_folders(preview))
+    removed_child_directories = {
+        current_root / name for name in (old_children - wanted_children)
+    }
+    if not affected_items:
+        return sorted(path.as_posix() for path in removed_child_directories)
+
     desired_directories = _desired_directory_plan(preview, plan)
     affected_containers: set[PurePosixPath] = set()
     affected_branches: dict[PurePosixPath, set[str]] = {}
@@ -442,7 +503,7 @@ def _obsolete_directories_from_plan(
         if tuple(old_rel.parts[:2]) != tuple(current_root.parts):
             continue
         branch_index = next(
-            (index for index, part in enumerate(old_rel.parts) if part in BRANCHES),
+            (index for index, part in enumerate(old_rel.parts) if part in KNOWN_BRANCHES),
             None,
         )
         container = (
@@ -456,7 +517,7 @@ def _obsolete_directories_from_plan(
                 str(old_rel.parts[branch_index])
             )
 
-    obsolete: set[PurePosixPath] = set()
+    obsolete: set[PurePosixPath] = set(removed_child_directories)
     for container in affected_containers:
         if container != current_root and container not in desired_directories:
             obsolete.add(container)
@@ -464,7 +525,12 @@ def _obsolete_directories_from_plan(
         # Sobald ein alter Container strukturell berührt wird, müssen auch
         # leere Schwesterzweige berücksichtigt werden. Sonst blieben z.B.
         # Sortiert/Export nach dem Wechsel auf Tagesordner unsichtbar zurück.
-        for branch in BRANCHES:
+        branches = (
+            LEGACY_BRANCHES
+            if {"Alle", "Sortiert"}.intersection(affected_branches.get(container, set()))
+            else BRANCHES
+        )
+        for branch in branches:
             branch_path = container / branch
             if branch_path not in desired_directories:
                 obsolete.add(branch_path)
@@ -753,7 +819,8 @@ def refresh_staged_event_document_after_verified_paths(
         return {"updated": False, "spec": None}
 
     work_root = shared_work_root(workspace_path).resolve(strict=False)
-    staging_base = (work_root / STAGING_DIRECTORY_NAME).resolve(strict=False)
+    staging_name = staging_directory_name(work_root)
+    staging_base = (work_root / staging_name).resolve(strict=False)
     target_rel = _safe_relative(str(new_spec["target_relative_path"]))
     document_path = (
         staging_base.joinpath(*target_rel.parts).resolve(strict=False)
@@ -776,17 +843,21 @@ def refresh_staged_event_document_after_verified_paths(
                 "Archivauftrags verändert und deshalb nicht automatisch ersetzt."
             )
 
+    validate_active_roots()
     document_path.parent.mkdir(parents=True, exist_ok=True)
     encoded = str(new_spec["payload"]).encode("utf-8")
     tmp = document_path.with_name("event.json.tmp.refresh")
     try:
+        validate_active_roots()
         with tmp.open("wb") as handle:
             handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
+        validate_active_roots()
         os.replace(tmp, document_path)
     finally:
         try:
+            validate_active_roots()
             tmp.unlink(missing_ok=True)
         except OSError:
             pass
@@ -795,7 +866,7 @@ def refresh_staged_event_document_after_verified_paths(
         "updated": True,
         "spec": {key: value for key, value in new_spec.items() if key != "payload"},
         "staged_event_document": (
-            PurePosixPath(STAGING_DIRECTORY_NAME) / target_rel
+            PurePosixPath(staging_name) / target_rel
         ).as_posix(),
     }
 
@@ -840,7 +911,7 @@ def required_target_directories_for_request(
             continue
         touched.add(root)
         branch_index = next(
-            (index for index, part in enumerate(rel.parts) if part in BRANCHES),
+            (index for index, part in enumerate(rel.parts) if part in KNOWN_BRANCHES),
             None,
         )
         if branch_index is None:
@@ -848,12 +919,13 @@ def required_target_directories_for_request(
             continue
         container = PurePosixPath(*rel.parts[:branch_index])
         touched.add(container)
-        for branch in BRANCHES:
+        for branch in _plan_fallback_branches(plan):
             touched.add(container / branch)
 
     return sorted(path.as_posix() for path in touched)
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=ArchiveStagingError)
 def prepare_archive_change_staging_for_request(
     database_path: Path,
     workspace_path: Path,
@@ -906,7 +978,8 @@ def prepare_archive_change_staging_for_request(
         }
 
     work_root = shared_work_root(workspace_path).resolve(strict=False)
-    staging_base = (work_root / STAGING_DIRECTORY_NAME).resolve(strict=False)
+    staging_name = staging_directory_name(work_root)
+    staging_base = (work_root / staging_name).resolve(strict=False)
     if not _inside(staging_base, work_root):
         raise ArchiveStagingError("Der Archiv-Hilfsbereich verlässt den Arbeitsbereich.")
 
@@ -915,7 +988,7 @@ def prepare_archive_change_staging_for_request(
         for value in description.get("helper_directories") or []
     }
     event_relative_root = _safe_relative(description["target_root"])
-    prepared_rel = PurePosixPath(STAGING_DIRECTORY_NAME) / event_relative_root
+    prepared_rel = PurePosixPath(staging_name) / event_relative_root
     prepared_root = work_root.joinpath(*prepared_rel.parts).resolve(strict=False)
     if not _inside(prepared_root, staging_base):
         raise ArchiveStagingError("Die vorbereitete Archivstruktur ist unsicher.")
@@ -928,6 +1001,7 @@ def prepare_archive_change_staging_for_request(
     staging_by_asset_id: dict[int, str] = {}
 
     try:
+        validate_active_roots()
         staging_base.mkdir(parents=True, exist_ok=True)
         for relative in sorted(directories, key=lambda value: (len(value.parts), value.as_posix())):
             target = staging_base.joinpath(*relative.parts).resolve(strict=False)
@@ -936,6 +1010,7 @@ def prepare_archive_change_staging_for_request(
             if target.exists() and not target.is_dir():
                 raise ArchiveStagingError("Ein vorbereiteter Strukturpfad ist bereits als Datei belegt: " + str(target))
             if not target.exists():
+                validate_active_roots()
                 target.mkdir(parents=True)
                 created_dirs.append(target)
 
@@ -965,7 +1040,7 @@ def prepare_archive_change_staging_for_request(
                 workspace_path,
                 source_rel,
             )
-            staged_rel = PurePosixPath(STAGING_DIRECTORY_NAME) / target_rel
+            staged_rel = PurePosixPath(staging_name) / target_rel
             staged = work_root.joinpath(*staged_rel.parts).resolve(strict=False)
 
             if not _inside(source, source_root) or not _inside(staged, staging_base):
@@ -1011,12 +1086,13 @@ def prepare_archive_change_staging_for_request(
         staged_event_document = ""
         if event_document is not None:
             document_rel = (
-                PurePosixPath(STAGING_DIRECTORY_NAME)
+                PurePosixPath(staging_name)
                 / PurePosixPath(str(event_document["target_relative_path"]))
             )
             document_path = work_root.joinpath(*document_rel.parts).resolve(strict=False)
             if not _inside(document_path, staging_base):
                 raise ArchiveStagingError("Der vorbereitete event.json-Pfad ist unsicher.")
+            validate_active_roots()
             document_path.parent.mkdir(parents=True, exist_ok=True)
             encoded = str(event_document["payload"]).encode("utf-8")
             if document_path.exists() or document_path.is_symlink():
@@ -1032,6 +1108,7 @@ def prepare_archive_change_staging_for_request(
             else:
                 tmp = document_path.with_name("event.json.tmp")
                 tmp.write_bytes(encoded)
+                validate_active_roots()
                 os.replace(tmp, document_path)
                 staged_paths.append(document_path)
             staged_event_document = document_rel.as_posix()
@@ -1095,17 +1172,20 @@ def prepare_archive_change_staging_for_request(
                 ) from rollback_exc
         for staged in reversed(staged_paths):
             try:
+                validate_active_roots()
                 staged.unlink(missing_ok=True)
             except OSError:
                 pass
         for directory in sorted(created_dirs, key=lambda path: len(path.parts), reverse=True):
             try:
+                validate_active_roots()
                 directory.rmdir()
             except OSError:
                 pass
         raise
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=ArchiveStagingError)
 def cleanup_archive_change_staging(
     database_path: Path,
     workspace_path: Path,
@@ -1116,16 +1196,18 @@ def cleanup_archive_change_staging(
 ) -> dict[str, Any]:
     """Remove only known helper links and, after verification, their SSD originals."""
     work_root = shared_work_root(workspace_path).resolve(strict=False)
-    staging_base = (work_root / STAGING_DIRECTORY_NAME).resolve(strict=False)
+    staging_name = staging_directory_name(work_root)
+    staging_base = (work_root / staging_name).resolve(strict=False)
     removed_staged = 0
     removed_originals = 0
     restored_originals = 0
     removed_empty_source_directories = 0
     warnings: list[str] = []
 
+    from app.managed_directory_names import directory_name
     central_root = backup_root(workspace_path).resolve(strict=False)
     release_root = (
-        central_root / "Freigewordene Archivdateien"
+        central_root / directory_name(central_root, "released_archive")
     ).resolve(strict=False)
 
     with database_connection(database_path) as connection:
@@ -1161,7 +1243,7 @@ def cleanup_archive_change_staging(
                     row["workspace_staging_path"] or ""
                 ) or (
                     (
-                        PurePosixPath(STAGING_DIRECTORY_NAME)
+                        PurePosixPath(staging_name)
                         / _safe_relative(str(row["new_path"] or ""))
                     ).as_posix()
                     if str(row["new_path"] or "").strip()
@@ -1222,6 +1304,7 @@ def cleanup_archive_change_staging(
                 raise ArchiveStagingError("Dateigröße stimmt nicht.")
             if not expected_sha or _sha256_file(path) != expected_sha:
                 raise ArchiveStagingError("SHA-256 stimmt nicht.")
+            validate_active_roots()
             path.unlink()
             return True, path
         except Exception as exc:
@@ -1246,6 +1329,7 @@ def cleanup_archive_change_staging(
         current = path.parent
         while _inside(current, root) and current != stop_root:
             try:
+                validate_active_roots()
                 current.rmdir()
                 removed_empty_source_directories += 1
             except OSError:
@@ -1382,7 +1466,7 @@ def cleanup_archive_change_staging(
             event_document = event_document_spec
         if event_document is not None:
             document_rel = (
-                PurePosixPath(STAGING_DIRECTORY_NAME)
+                PurePosixPath(staging_name)
                 / PurePosixPath(str(event_document["target_relative_path"]))
             )
             document_path = work_root.joinpath(*document_rel.parts).resolve(strict=False)
@@ -1393,6 +1477,7 @@ def cleanup_archive_change_staging(
                     and int(document_path.stat().st_size) == int(event_document["size_bytes"])
                     and _sha256_file(document_path) == str(event_document["sha256"])
                 ):
+                    validate_active_roots()
                     document_path.unlink()
                 else:
                     warnings.append(
@@ -1413,6 +1498,7 @@ def cleanup_archive_change_staging(
                 for directory in sorted(directories, key=lambda p: len(p.parts), reverse=True):
                     _remove_ignored_helper_metadata(directory)
                     try:
+                        validate_active_roots()
                         directory.rmdir()
                     except OSError:
                         pass
@@ -1420,6 +1506,7 @@ def cleanup_archive_change_staging(
                 while _inside(current, staging_base) and current != work_root and current != staging_base:
                     _remove_ignored_helper_metadata(current)
                     try:
+                        validate_active_roots()
                         current.rmdir()
                     except OSError:
                         break
@@ -1427,7 +1514,7 @@ def cleanup_archive_change_staging(
         except Exception as exc:
             warnings.append("Leere vorbereitete Struktur konnte nicht vollständig entfernt werden: " + str(exc))
 
-    reversal_root = staging_base / "Rückänderung" / cr_id
+    reversal_root = staging_base / directory_name(staging_base, "reversal") / cr_id
     if reversal_root.exists() and reversal_root.is_dir():
         # Nur bekannte Rückänderungs-Hilfsdateien werden entfernt. Der komplette
         # Baum gehört ausschließlich zu diesem Change Request.
@@ -1437,6 +1524,7 @@ def cleanup_archive_change_staging(
             parent = reversal_root.parent
             if parent != staging_base:
                 try:
+                    validate_active_roots()
                     parent.rmdir()
                 except OSError:
                     pass
@@ -1444,6 +1532,7 @@ def cleanup_archive_change_staging(
             warnings.append("Rückänderungs-Hilfsbereich konnte nicht vollständig entfernt werden: " + str(exc))
 
     try:
+        validate_active_roots()
         release_root.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         warnings.append(
@@ -1452,6 +1541,7 @@ def cleanup_archive_change_staging(
         )
 
     try:
+        validate_active_roots()
         staging_base.mkdir(parents=True, exist_ok=True)
         empty_candidates = [
             path for path in staging_base.rglob("*")
@@ -1464,6 +1554,7 @@ def cleanup_archive_change_staging(
         ):
             _remove_ignored_helper_metadata(directory)
             try:
+                validate_active_roots()
                 directory.rmdir()
                 removed_empty_source_directories += 1
             except OSError:

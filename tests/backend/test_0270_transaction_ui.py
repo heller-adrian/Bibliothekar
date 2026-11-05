@@ -67,22 +67,22 @@ def test_0270_archive_change_dialog_is_mandatory_and_reload_safe():
 def test_0271_archive_change_ui_is_compact_three_step_assistant():
     html = EVENTS_HTML
     assert "Vorbereiten" in html
-    assert "Finder-Arbeit" in html
+    assert "Manuelle Arbeit" in html
     assert "Prüfen & Abschließen" in html
     assert "Hilfsbereich vorbereiten" in html
-    assert "Finder-Arbeit erledigt · weiter zu Prüfen" in html
+    assert "Manuelle Arbeit prüfen · weiter" in html
     assert "Technische Details" in html
-    assert "Freigewordene Archivdateien werden zuerst sicher auf die SSD zurückgeholt." in html
-    assert "Änderung abschließen & SSD freigeben" in html
+    assert "Freigewordene Archivdateien werden zuerst sicher in den Arbeitsbereich zurückgeholt." in html
+    assert "Änderung abschließen & Arbeitsbereich freigeben" in html
     assert 'id="change-work-progress"' in html
-    assert "SSD-Originale und Hilfslinks sicher freigeben" in html
+    assert "Arbeitsbereich-Originale und Hilfslinks sicher freigeben" in html
     assert "change_step" in html
     assert "change-arrow" not in html
     assert ">↓<" not in html
     assert "NOCH ZU ENTFERNEN" in html
     assert "Alter Ordner noch vorhanden" in html
-    assert "Freigewordene Archivdateien auf SSD sichern" in html
-    assert "SSD-Kopien prüfen" in html
+    assert "Freigewordene Archivdateien im Arbeitsbereich sichern" in html
+    assert "Arbeitsbereich-Kopien prüfen" in html
     assert "Bestätigte Archivoriginale entfernen" in html
     assert "Entfernung aus dem Archiv prüfen" in html
     assert "Zielstruktur-Vorschau" in html

@@ -1,0 +1,21 @@
+[
+  "tests/backend/test_0340_patch.py::test_0340_preview_does_not_write_and_apply_writes_all_files",
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_multiple_correction_recovers_at_all_commit_boundaries[after_backup]",
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_reintegration_survives_swap_and_db_commit_crashes[after_incoming]",
+  "tests/backend/test_pre_metadata.py::test_rc14_truncated_catalogue_requires_exact_completed_receipt[valid]",
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_multiple_correction_recovers_at_all_commit_boundaries[after_first_replacement]",
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_reintegration_survives_swap_and_db_commit_crashes[after_journal_commit]",
+  "tests/backend/test_rc1_package_a.py::test_b03_library_real_write_then_explicit_reintegration",
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_multiple_correction_recovers_at_all_commit_boundaries[after_journal_commit]",
+  "tests/backend/test_pre_metadata.py::test_offset_survives_correction_and_reintegration[2025-07-07T15:04:37+02:00]",
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_multiple_correction_recovers_at_all_commit_boundaries[after_second_backup]",
+  "tests/backend/test_pre_metadata.py::test_offset_survives_correction_and_reintegration[2025-12-07T15:04:37+00:00]",
+  "tests/backend/test_rc6_handoff.py::test_two_real_process_checks_sigkill_and_three_restarts[False]",
+  "tests/backend/test_f14_root_operations.py::test_f14_two_independent_real_worker_processes",
+  "tests/backend/test_pre_metadata.py::test_offset_survives_correction_and_reintegration[2025-12-07T15:04:37+01:00]",
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_reintegration_survives_swap_and_db_commit_crashes[after_backup]",
+  "tests/backend/test_pre_metadata.py::test_offset_survives_correction_and_reintegration[2025-12-07T15:04:37+13:00]",
+  "tests/backend/test_0500_metadata_swap_recovery.py::test_0500_reintegration_survives_swap_and_db_commit_crashes[after_db_commit]",
+  "tests/backend/test_0532_trash_background.py::test_0532_actual_claimed_worker_finishes_trash_restore",
+  "tests/backend/test_pre_metadata.py::test_offset_survives_correction_and_reintegration[2025-12-07T15:04:37]"
+]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
+
 from pathlib import Path
 import hashlib
 
@@ -102,6 +104,7 @@ def test_0286_deleting_planned_event_restores_archive_release_marker(tmp_path: P
     workspace = tmp_path / "workspace"
     initialize_database(db)
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     ensure_workspace_layout(workspace)
     work = shared_work_root(workspace)
 
@@ -177,6 +180,7 @@ def test_0286_released_archive_assets_follow_cross_job_family_and_layout_roles(t
     workspace = tmp_path / "workspace"
     initialize_database(db)
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     ensure_workspace_layout(workspace)
     work = shared_work_root(workspace)
     central = workspace / "SD-Kartensicherungen"
@@ -403,6 +407,7 @@ def test_0286_released_archive_assets_are_visible_while_target_is_only_planned(t
     workspace = tmp_path / "workspace"
     initialize_database(db)
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     ensure_workspace_layout(workspace)
     work = shared_work_root(workspace)
 

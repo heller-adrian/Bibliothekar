@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "title": "Bibliothekar pre.3 isolated Linux acceptance",
+  "base_release": "v1.0.0-pre.2",
+  "application_code_commit": "86d42d440b0340b82227b7b0d9f775da6b9a2de3",
+  "tested_commit": "7733c64bc7c555e7dc416ed7b953a00b6cf911b2",
+  "delta_since_application_code_commit": [
+    "qa/pre3/container.py (test-only: retain additional startup F14 evidence on foreign bytes)"
+  ],
+  "workflow": {
+    "run_id": 40969680973,
+    "url": "https://github.com/heller-adrian/Bibliothekar/actions/runs/40969680973",
+    "conclusion": "SUCCESS",
+    "head_sha": "7733c64bc7c555e7dc416ed7b953a00b6cf911b2"
+  },
+  "artifact": {
+    "id": 12939434627,
+    "name": "pre3-metadata-evidence",
+    "zip_sha256": "e8f17247f477d46e115e4bdc351258451b829fd8734cf63c080e4ede08f94a03",
+    "downloaded_and_verified": true
+  },
+  "tests": {
+    "pytest": {
+      "passed": 181,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 5
+    },
+    "pre3_container": {
+      "status": "PASS",
+      "cases": [
+        "historical",
+        "rc14",
+        "foreign",
+        "three",
+        "sigkill",
+        "import-sigkill"
+      ],
+      "all_cases_passed": 6,
+      "archive_unchanged": true
+    },
+    "pre2_container": {
+      "status": "PASS",
+      "cases": [
+        "historical",
+        "foreign",
+        "crash"
+      ],
+      "all_cases_passed": 3
+    },
+    "rc14_iphone": {
+      "status": "PASS",
+      "corrected_files": 14,
+      "source_offset": "+13:00",
+      "origins_preserved": true,
+      "readonly_bytes_preserved": true
+    },
+    "two_libraries_4000": {
+      "status": "PASS",
+      "count": 4000,
+      "startup_seconds": [
+        6.014764085004572,
+        6.429867592996743
+      ],
+      "recheck_passed": true,
+      "web_uid": 568,
+      "origins_preserved": true,
+      "readonly_bytes_preserved": true
+    },
+    "actual_dng_1_7": "NOT_RUN",
+    "native_truenas_nfsv4": "NOT_RUN",
+    "physical_sd_usb": "NOT_RUN"
+  },
+  "included_artifact_files_sha256": {
+    "pre3-evidence.json": "9c8360a6d188a0942e74385ca7a87a8d095288e760fa9f2a5125312811af99f0",
+    "pre2-evidence.json": "4839b80f64f02f83d60dd976bff8f91d47672bad913f6be59de169e07dd7aa6f",
+    "startup-evidence.json": "71e790b9f9180e498f231dbc7645eb8ad692b8cfe77cffd2e0dc771263df0b14",
+    "pre-evidence.json": "1c07b74eda8812635715866f072c94f13cdcc488c374e3018821c4cad5f4c528",
+    "regressions.xml": "bca9cbaecf1767671537721dfe9d484acae6e6975c41cf63bc5c56ed1a36c0e4",
+    "regressions.log": "b4bd07455b20626d2969e11e114e8ae954cfa720dcab43ec4adde44ed233e88c",
+    "candidate-image.json": "776d904b3579e3966a7af03324120b0d7e1eb3e89018a4cc1bd9d4c019d6ffbe"
+  },
+  "accepted_scope": "Isolated synthetic Linux/UID568, immutable released baseline images, RO synthetic archive. No production NAS access.",
+  "remaining_risks": [
+    "Three actual NAS F14 operations remain unclassified; no guarantee of fully ready native startup before their evidence qualifies.",
+    "Native TrueNAS/NFSv4 and physical SD/USB not tested.",
+    "No real DNG 1.7 write tested; ExifTool unchanged.",
+    "Later independently moved files require separate verified continuity proof.",
+    "Independent loss completion model deferred."
+  ],
+  "publication": "NOT_PERFORMED",
+  "conclusion": "Ready to prepare distinct pre.3 publication with version-only application change and fresh publisher image-integrity checks; native NAS acceptance remains pending."
+}

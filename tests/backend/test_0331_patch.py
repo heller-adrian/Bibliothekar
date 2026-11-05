@@ -96,10 +96,10 @@ def test_0331_metadata_paths_never_create_technical_main_tree(tmp_path: Path):
         library_id="main",
         create=True,
     )
-    assert paths["root"] == workspace / "Metadatenkorrektur" / "Allgemein"
+    assert paths["root"] == workspace / "Metadata Correction" / "General"
     assert paths["input_root"] == paths["root"]
     assert paths["output_root"] == paths["root"]
-    assert not (workspace / "Metadatenkorrektur" / "Bibliothek" / "main").exists()
+    assert not (workspace / "Metadata Correction" / "Bibliothek" / "main").exists()
 
     library = metadata_area_paths(
         area="library",
@@ -107,8 +107,8 @@ def test_0331_metadata_paths_never_create_technical_main_tree(tmp_path: Path):
         library_id="main",
         create=True,
     )
-    assert library["input_root"] == workspace / "SD-Kartensicherungen" / "Ohne_Datum"
-    assert library["output_root"] == workspace / "SD-Kartensicherungen"
+    assert library["input_root"] == workspace / "SD Card Backups" / "No Date"
+    assert library["output_root"] == workspace / "SD Card Backups"
     assert not library["input_root"].exists()
 
 
@@ -190,7 +190,19 @@ def test_0331_library_correction_stays_undated_until_explicit_reintegration(
     payload = b"camera-payload"
     source.write_bytes(payload)
 
-    initialize_database(database)
+    # Install the original synthetic configuration before F14 first pins
+    # its inode and before any library/metadata registration.
+    (tmp_path / "settings.json").write_text("{}")
+    monkeypatch.setenv("KAMERA_CONFIG", str(tmp_path / "settings.json"))
+    # The historical regression used an unregistered "library-a" and then
+    # expected a real metadata reintegration. F14 must establish its owner
+    # BEFORE the first metadata intent; never spoof a library after failure.
+    from tests.backend.registered_metadata_fixture import registered_metadata_fixture
+    db, verified_workspace, registry = registered_metadata_fixture(
+        tmp_path, workspace=workspace, database=database, library_id="library-a")
+    assert db == database and verified_workspace == workspace
+    monkeypatch.setenv("KAMERA_REGISTRY_DATABASE", str(registry))
+    monkeypatch.setenv("KAMERA_CONFIG", str(tmp_path / "settings.json"))
     family_id, file_id = _insert_undated_family(
         database,
         payload=payload,

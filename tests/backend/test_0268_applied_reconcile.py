@@ -74,10 +74,12 @@ def test_0268_reconcile_tree_is_real_folder_tree():
 
 
 def test_0268_applied_state_copy_and_refresh_contract():
-    assert "⚠ Neu-Zuordnung offen" in EVENTS_HTML
-    assert "⚠ Nachsortierung offen" in EVENTS_HTML
+    assert "⚠ Neu-Zuordnung offen" not in EVENTS_HTML
+    assert "⚠ Nachsortierung offen" not in EVENTS_HTML
     assert "⚠ Änderung noch nicht angewendet" not in EVENTS_HTML
-    assert "Das Ereignis bleibt angewendet" in EVENTS_HTML
+    assert "Neu-Zuordnung fortsetzen" in EVENTS_HTML
+    assert "Änderung fortsetzen" in EVENTS_HTML
+    assert 'data-cancel-mutation=' in EVENTS_HTML
     assert "await loadEvents({reset:true});" in EVENTS_HTML
     assert 'applyButton.textContent = "Schließen"' in EVENTS_HTML
     assert 'applyButton.dataset.completed = "true"' in EVENTS_HTML

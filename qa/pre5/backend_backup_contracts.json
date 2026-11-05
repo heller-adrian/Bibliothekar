@@ -1,0 +1,3 @@
+[
+  "tests/backend/test_0500_backup_delete_recovery.py"
+]

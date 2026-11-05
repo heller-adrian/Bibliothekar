@@ -1,0 +1,32 @@
+[
+  {
+    "path": "qa/f12/original/guards.py",
+    "sha256": "ad8444084df682d75f6aa2aec5d8149918eede253683b0e406939137baf8cafa",
+    "byte_equal_phase4": true
+  },
+  {
+    "path": "qa/f12/original/runner.py",
+    "sha256": "43b538dea9fb52a16828d03536992a8a0b4db53ab45c1e7743d26591269ee44e",
+    "byte_equal_phase4": true
+  },
+  {
+    "path": "qa/f12/original/test_interleavings.py",
+    "sha256": "85cbeac6e396f67b22ff10e90d3e453067bec4fbb7655645888ebe017b094886",
+    "byte_equal_phase4": true
+  },
+  {
+    "path": "qa/f12/original/test_process_crashes.py",
+    "sha256": "0fc4a913eb0194c6ef9786f72d740b23aa2ced3ee2e76dff1022add8f4d61cbb",
+    "byte_equal_phase4": true
+  },
+  {
+    "path": "qa/f12/original/worker.py",
+    "sha256": "a3261282571afe272f5a4bb5b0210b3c60b1321c6807dbb6f2e1859367f80798",
+    "byte_equal_phase4": true
+  },
+  {
+    "path": "qa/f12/original/worker_concurrent.py",
+    "sha256": "6fd7178154d10b824155bc6a10d5f00d54a32a70501040282563c532ef65e49f",
+    "byte_equal_phase4": true
+  }
+]

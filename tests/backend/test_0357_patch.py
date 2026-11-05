@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from app import main
 
 
 def test_0357_deployment_version():
-    assert main.DEPLOYMENT_VERSION == "0.40.3"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
 
 
 def test_0357_onboarding_script_keeps_newline_escape_for_browser():

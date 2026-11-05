@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -30,6 +34,7 @@ def _now() -> str:
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
 
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             block = handle.read(1024 * 1024)
@@ -41,6 +46,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _safe_relative(value: Any) -> PurePosixPath:
+    validate_active_roots()
     raw = str(value or "").strip().replace("\\", "/")
     path = PurePosixPath(raw)
 
@@ -112,6 +118,8 @@ def latest_archive_verification(
 def list_archive_candidates(
     database_path: Path,
     archive_root: Path,
+    *,
+    observe_current: bool = False,
 ) -> dict[str, Any]:
     archive_root = archive_root.expanduser().resolve(strict=False)
     available = archive_root.exists() and archive_root.is_dir()
@@ -198,6 +206,9 @@ def list_archive_candidates(
                 latest_release.status AS release_status,
                 latest_release.deleted_file_count AS release_deleted_file_count,
                 latest_release.completed_at AS release_completed_at,
+                (SELECT COUNT(*) FROM archive_recovery_incidents ar
+                 WHERE ar.event_id=events.id AND ar.status='manual_review')
+                 AS unresolved_recovery_count,
                 (SELECT COUNT(*) FROM event_reapply_removed_families pr
                  WHERE pr.event_id=events.id AND pr.target_event_id IS NULL) AS pending_reassignment_count,
                 (SELECT COUNT(*) FROM event_mutations em
@@ -270,6 +281,29 @@ def list_archive_candidates(
         else:
             item["ssd_release_block_reason"] = None
         item["ssd_release_available"] = True
+        if observe_current and item["released"]:
+            # A live observation is not a new verification and must never
+            # replace the historical proof or update file/catalogue locations.
+            try:
+                inventory = scan_event_inventory(
+                    database_path, archive_root, str(item["job_id"]),
+                    str(item["event_id"]), root_kind="camera_archive",
+                    persist=False, fast_refresh=True,
+                )
+                originals = [row for row in inventory["files"] if row["asset_kind"] == "camera_original"]
+                families = {
+                    ("known", row["family_id"]) if row.get("family_id") is not None
+                    else ("observed", str(PurePosixPath(row["event_relative_path"]).with_suffix("")))
+                    for row in originals
+                }
+                item["current_archive"] = {
+                    "available": True, "scanned_at": inventory["scanned_at"],
+                    "event_prefix": inventory["event_prefix"],
+                    "file_count": len(inventory["files"]), "family_count": len(families),
+                    "uncatalogued_file_count": sum(row.get("known_file_id") is None for row in inventory["files"]),
+                }
+            except (EventInventoryError, OSError) as error:
+                item["current_archive"] = {"available": False, "error": str(error)}
         candidates.append(item)
 
     return {
@@ -288,6 +322,7 @@ def list_archive_candidates(
     }
 
 
+@protect(workspace_arg='archive_root', database_arg='database_path', kind='verification', error_type=ArchiveVerificationError, durable=False)
 def verify_event_archive(
     database_path: Path,
     archive_root: Path,
@@ -295,6 +330,7 @@ def verify_event_archive(
     event_id: str,
     *,
     workspace_path: Path | None = None,
+    resume_release_id: str | None = None,
 ) -> dict[str, Any]:
     archive_root = archive_root.expanduser().resolve(strict=False)
 
@@ -349,11 +385,12 @@ def verify_event_archive(
     }
 
     # 0.27.7: XMP und Exporte sind nach dem Anwenden echter Ereignisbestand.
-    # Für die Archivprüfung wird deshalb zusätzlich der aktuelle SSD-Bestand
+    # Für die Archivprüfung wird deshalb zusätzlich der aktuelle Arbeitsbereich-Bestand
     # als SOLL gelesen. Unbekannte Fremddateien bleiben weiterhin nur Hinweis.
     managed_asset_kinds = {"xmp", "export", "derived_media"}
     source_assets: list[dict[str, Any]] = []
     source_known_by_file_id: dict[int, dict[str, Any]] = {}
+    workspace_source_missing = False
     if workspace_path is not None and str(event.get("status") or "") == "applied":
         try:
             from app.workspace_layout import shared_work_root
@@ -367,21 +404,62 @@ def verify_event_archive(
                 update_known_file_locations=False,
                 fast_refresh=False,
             )
-        except (EventInventoryError, Exception) as exc:
-            if isinstance(exc, EventInventoryError):
+            source_rows = list(workspace_inventory["files"])
+        except EventInventoryError as exc:
+            # Der Anwender darf ein vollständig kopiertes/verschobenes
+            # Ereignis bereits aus dem Arbeitsbereich entfernt haben. Für die
+            # Archivprüfung bleibt dann der letzte persistierte IST-Snapshot
+            # zusammen mit den gespeicherten Kameraoriginal-SHA-Werten das
+            # sichere SOLL. Andere Inventarfehler werden weiterhin abgelehnt.
+            if "Ereignisordner wurde nicht gefunden" not in str(exc):
                 raise ArchiveVerificationError(str(exc)) from exc
-            raise
+            workspace_source_missing = True
+            with database_connection(database_path) as source_connection:
+                source_rows = [
+                    dict(row)
+                    for row in source_connection.execute(
+                        """SELECT known_file_id,family_id,relative_path,
+                                  event_relative_path,filename,extension,
+                                  asset_kind,size_bytes,sha256
+                           FROM event_inventory_files
+                           WHERE event_id=? AND root_kind='shared_workspace'
+                           ORDER BY event_relative_path,relative_path""",
+                        (event_id,),
+                    ).fetchall()
+                ]
         source_known_by_file_id = {
             int(item["known_file_id"]): item
-            for item in workspace_inventory["files"]
+            for item in source_rows
             if item.get("known_file_id") is not None
         }
         source_assets = [
             item
-            for item in workspace_inventory["files"]
+            for item in source_rows
             if item.get("known_file_id") is None
             and str(item.get("asset_kind") or "") in managed_asset_kinds
         ]
+
+    # Only a durable release plan can explain its own missing SSD entries.
+    # It is a frozen expectation, never a substitute for archive SHA checks.
+    release_files = {}
+    if resume_release_id is not None:
+        with database_connection(database_path) as connection:
+            release = connection.execute("SELECT * FROM event_ssd_releases WHERE id=? AND job_id=? AND event_id=? AND status!='completed'", (resume_release_id, job_id, event_id)).fetchone()
+            from app.workspace_layout import shared_work_root
+            if release is None or workspace_path is None or Path(str(release["workspace_root"])).resolve() != shared_work_root(workspace_path).resolve() or Path(str(release["archive_root"])).resolve() != archive_root:
+                raise ArchiveVerificationError("Freigabejournal passt nicht zum Archiv.")
+            release_files = {int(row["file_id"]): dict(row) for row in connection.execute("SELECT * FROM event_ssd_release_files WHERE release_id=?", (resume_release_id,))}
+            release_assets = [dict(row) for row in connection.execute("SELECT * FROM event_ssd_release_assets WHERE release_id=?", (resume_release_id,))]
+        if set(release_files) != {int(row["file_id"]) for row in files}:
+            raise ArchiveVerificationError("Freigabeplan und Kameraoriginale stimmen nicht überein.")
+        for row in files:
+            stored = release_files[int(row["file_id"])]
+            if (int(stored["expected_size_bytes"]) != int(row["size_bytes"]) or str(stored["expected_sha256"]) != str(row.get("sha256_current") or row.get("sha256_original") or "")):
+                raise ArchiveVerificationError("Freigabeplan und Dateikatalog widersprechen sich.")
+        observed_assets = {str(item["relative_path"]) for item in source_assets}
+        for stored in release_assets:
+            if stored["source_relative_path"] not in observed_assets:
+                source_assets.append(dict(known_file_id=None, relative_path=stored["source_relative_path"], event_relative_path=Path(stored["archive_relative_path"]).relative_to(str(inventory["event_prefix"])).as_posix(), size_bytes=stored["expected_size_bytes"], sha256=stored["expected_sha256"], asset_kind=stored["asset_kind"]))
 
     archive_assets_by_event_path = {
         str(item.get("event_relative_path") or ""): item
@@ -436,7 +514,7 @@ def verify_event_archive(
         try:
             file_id = int(row["file_id"])
             source_observed = source_known_by_file_id.get(file_id)
-            if source_known_by_file_id and source_observed is None:
+            if source_known_by_file_id and source_observed is None and file_id not in release_files:
                 relative_text = str(
                     row.get("current_relative_path")
                     or row.get("original_relative_path")
@@ -464,6 +542,7 @@ def verify_event_archive(
             if source_observed is not None:
                 expected_size = int(source_observed.get("size_bytes") or 0)
                 expected_sha256 = str(source_observed.get("sha256") or "").strip()
+                validate_active_roots()
                 source_event_relative = str(
                     source_observed.get("event_relative_path") or ""
                 ).replace("\\", "/").strip("/")
@@ -477,11 +556,17 @@ def verify_event_archive(
                     or row.get("sha256_original")
                     or ""
                 ).strip()
+                validate_active_roots()
                 expected_relative = str(
                     row.get("current_relative_path")
                     or row.get("original_relative_path")
                     or ""
                 ).replace("\\", "/").strip("/")
+
+            if file_id in release_files:
+                expected_relative = str(release_files[file_id]["archive_relative_path"])
+                expected_size = int(release_files[file_id]["expected_size_bytes"])
+                expected_sha256 = str(release_files[file_id]["expected_sha256"])
 
             if not expected_sha256:
                 raise ArchiveVerificationError("Gespeicherte SHA-256-Summe fehlt.")
@@ -497,6 +582,7 @@ def verify_event_archive(
                 )
                 missing_count += 1
             else:
+                validate_active_roots()
                 actual_relative = str(observed["relative_path"]).replace("\\", "/").strip("/")
                 relative_text = expected_relative
                 candidate = archive_path_without_symlinks(
@@ -507,16 +593,16 @@ def verify_event_archive(
                 actual_sha256 = str(observed["sha256"])
                 if actual_size != expected_size:
                     status = "size_mismatch"
-                    error_message = "Dateigröße weicht vom aktuellen SSD-Bestand ab."
+                    error_message = "Dateigröße weicht vom aktuellen Arbeitsbereich-Bestand ab."
                     mismatched_count += 1
                 elif actual_sha256 != expected_sha256:
                     status = "sha256_mismatch"
-                    error_message = "SHA-256-Summe weicht vom aktuellen SSD-Bestand ab."
+                    error_message = "SHA-256-Summe weicht vom aktuellen Arbeitsbereich-Bestand ab."
                     mismatched_count += 1
                 elif actual_relative != expected_relative:
                     status = "missing"
                     error_message = (
-                        "Die Ordnerlage im Archiv stimmt nicht mit dem aktuellen SSD-Bestand überein. "
+                        "Die Ordnerlage im Archiv stimmt nicht mit dem aktuellen Arbeitsbereich-Bestand überein. "
                         f"Archiv: {actual_relative} · SSD-SOLL: {expected_relative}"
                     )
                     mismatched_count += 1
@@ -743,6 +829,7 @@ def verify_event_archive(
         "assets": asset_results,
         "ssd_release_ready": final_status == "verified",
         "ssd_release_available": True,
+        "workspace_source_missing": workspace_source_missing,
         "inventory_summary": inventory.get("summary"),
         "message": (
             "Kamerabibliothek vollständig identisch geprüft."

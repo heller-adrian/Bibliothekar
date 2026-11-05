@@ -1,0 +1,343 @@
+name: Bibliothekar 1.0.0 - final complete release qualification
+on:
+  push:
+    branches: [ci/1.0.0-release-full-20261105]
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: bibliothekar-stabilize-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 5
+    steps:
+      - name: Verify disk headroom and local Docker before expensive tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h / /tmp "$RUNNER_TEMP"
+          free -h
+          docker info --format 'Docker server: {{.ServerVersion}}'
+          available_kib="$(df -Pk /tmp | awk 'END {print $4}')"
+          if (( available_kib < 20 * 1024 * 1024 )); then
+            echo "::error::Runner has less than 20 GiB free in /tmp; refusing a full test run."
+            exit 1
+          fi
+  backend:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        partition: [0, 1, 2, 3, 4, 5, 6, 7]
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend-100-${{ matrix.partition }}
+    env:
+      PARTITION: ${{ matrix.partition }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: backend-100-${{ matrix.partition }}
+      - name: Isolated current-source Python environment
+        run: |
+          set -euo pipefail
+          # Re-check the runner before every heavy partition, not only
+          # at the workflow-wide preflight. Never delete old evidence.
+          available_kib="$(df -Pk /tmp | awk 'END {print $4}')"
+          if (( available_kib < 12 * 1024 * 1024 )); then
+            echo "::error::Less than 12 GiB free before partition $PARTITION"
+            exit 1
+          fi
+          df -h / /tmp
+          QA_WORK="$(mktemp -d /tmp/bibliothekar-100-backend-$PARTITION.XXXXXXXX)"
+          echo "QA_WORK=$QA_WORK" >> "$GITHUB_ENV"
+          python3 -m venv "$QA_WORK/venv"
+          "$QA_WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
+      - name: Execute one complete disjoint backend partition
+        run: |
+          set +e
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" RUNNER_TEMP="$QA_WORK" "$QA_WORK/venv/bin/python" qa/rc13/regression.py "$PARTITION"
+          ret=$?
+          echo "QA_EXIT=$ret" >> "$GITHUB_ENV"
+          exit 0
+      - name: Validate selection manifest and JUnit including failures and skips
+        if: always() && env.QA_WORK != ''
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          from xml.etree import ElementTree as E
+          root=Path(os.environ['QA_WORK']);i=int(os.environ['PARTITION'])
+          mpath=root/'rc13-partition.json'
+          jpath=root/'f14-qa/targets/results/result.xml'
+          result={'partition':i,'source':os.environ['GITHUB_SHA'],'status':'FAIL',
+                  'exit':int(os.environ.get('QA_EXIT','99'))}
+          if mpath.exists():
+              m=json.loads(mpath.read_text())
+              nodes=m['all_nodes'];chosen=m['selected_nodes']
+              result.update(collected=len(nodes),selected=len(chosen))
+              result['coverage_ok']=(m['partition']==i and m['partitions']==8
+                  and len(nodes)==len(set(nodes)) and chosen==sorted(nodes)[i::8])
+          if jpath.exists():
+              xml=E.parse(jpath).getroot()
+              result['junit']={k:sum(int(t.get(k,0)) for t in xml.iter('testsuite'))
+                  for k in ('tests','failures','errors','skipped')}
+          j=result.get('junit',{})
+          if (result['exit']==0 and result.get('coverage_ok') is True
+              and j.get('tests')==result.get('selected')
+              and all(j.get(k,1)==0 for k in ('failures','errors','skipped'))):
+              result['status']='PASS'
+          (root/'partition-summary.json').write_text(json.dumps(result,indent=2))
+          print(json.dumps(result,indent=2))
+          if result['status']!='PASS':raise SystemExit(1)
+          PY
+      - name: Preserve independent partition evidence
+        if: always() && env.QA_WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: 100-backend-part-${{ matrix.partition }}
+          path: |
+            ${{ env.QA_WORK }}/partition-summary.json
+            ${{ env.QA_WORK }}/rc13-partition.json
+            ${{ env.QA_WORK }}/f14-qa/targets/results/result.xml
+            ${{ env.QA_WORK }}/f14-qa/targets/results/stdout.log
+            ${{ env.QA_WORK }}/f14-qa/targets/scratch/pytest/**/process.log
+            ${{ env.QA_WORK }}/f14-qa/targets/scratch/pytest/**/restart*.log
+            ${{ env.QA_WORK }}/f14-qa/targets/scratch/pytest/**/result.json
+            ${{ env.QA_WORK }}/f14-qa/targets/scratch/pytest/**/execution.json
+          retention-days: 30
+      - name: Clean only this backend partition's scratch
+        if: always() && env.QA_WORK != ''
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          case "$QA_WORK" in
+            /tmp/bibliothekar-100-backend-$PARTITION.*) ;;
+            *) echo '::error::Unexpected scratch path'; exit 1 ;;
+          esac
+          for attempt in 1 2 3 4 5; do
+            if rm -rf -- "$QA_WORK"; then exit 0; fi
+            sleep 2
+          done
+          echo '::warning::Active child may still be writing to this isolated test scratch.'
+
+  container:
+    needs: preflight
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre5-container-${{ github.run_id }}
+    env:
+      PRE4_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:0678dca61f426a01ae724852741bcad6fd7cf45ae3c13df873ed6f14349c4d77
+      PRE2_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:b9434137951a8f1e40de047bed6e3d8ee3be425e079b92aa6df9ec491c982c13
+      PRE1_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:cbaa863fb6173736bcd43e917de994fadba3d05cc69c1688c618fad21d8a17b8
+      RC14_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:86991ef46f1f29a990b63ea3983b1193adfe378247d1202e41fdfd7e21d44b9b
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: ${{ github.workspace }}/pre5-container-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: pre5-container-${{ github.run_id }}
+      - name: Isolated container scratch directory
+        run: |
+          set -euo pipefail
+          QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre5-container.XXXXXXXX")"
+          printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
+      - name: Build one isolated candidate and pull immutable historical fixtures
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir "$QA_WORK/docker"
+          export DOCKER_CONFIG="$QA_WORK/docker"
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "$GITHUB_ENV"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          IMAGE="bibliothekar-pre5-qa:$GITHUB_RUN_ID"
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .
+          printf 'IMAGE=%s\n' "$IMAGE" >> "$GITHUB_ENV"
+          docker pull "$PRE4_IMAGE"
+          docker pull "$PRE2_IMAGE"
+          docker pull "$PRE1_IMAGE"
+          docker pull "$RC14_IMAGE"
+          docker image inspect "$IMAGE" > "$QA_WORK/candidate-image.json"
+      - name: Isolated Chromium tooling
+        if: ${{ !contains(github.event.head_commit.message, '[pre5-iphone]') }}
+        run: |
+          set -euo pipefail
+          npm install --prefix "$QA_WORK/browser-tools" playwright@1.62.1
+          printf 'NODE_PATH=%s/browser-tools/node_modules\n' "$QA_WORK" >> "$GITHUB_ENV"
+      - name: Real API, supervisor, web termination, container restart and protected reads
+        if: ${{ !contains(github.event.head_commit.message, '[pre5-iphone]') }}
+        run: |
+          set -euo pipefail
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre5/container.py 2>&1 | tee "$QA_WORK/container.log"
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre4/container.py 2>&1 | tee "$QA_WORK/pre4-container.log"
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre4/historical_container.py 2>&1 | tee "$QA_WORK/historical-container.log"
+      - name: Ninety media files, real events, archive copy and three external moves
+        if: ${{ !contains(github.event.head_commit.message, '[pre5-iphone]') }}
+        run: |
+          set -euo pipefail
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre5/manual_changes_container.py 2>&1 | tee "$QA_WORK/manual-changes.log"
+      - name: Four thousand families and fourteen iPhone JPEGs
+        if: ${{ !contains(github.event.head_commit.message, '[pre5-iphone]') }}
+        run: |
+          set -euo pipefail
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre/startup_container.py 2>&1 | tee "$QA_WORK/startup.log"
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre/container.py 2>&1 | tee "$QA_WORK/iphone.log"
+      - name: Reproduce immutable RC14 fourteen-JPEG upgrade only
+        if: contains(github.event.head_commit.message, '[pre5-iphone]')
+        run: |
+          set -euo pipefail
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre/container.py 2>&1 | tee "$QA_WORK/iphone.log"
+      - name: Preserve evidence
+        if: always() && env.QA_WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pre5-container-${{ github.run_attempt }}
+          path: |
+            ${{ env.QA_WORK }}/*.json
+            ${{ env.QA_WORK }}/*.log
+            ${{ env.QA_WORK }}/pre5-browser/*
+            ${{ env.QA_WORK }}/pre4-historical/*.log
+            ${{ env.QA_WORK }}/pre4-browser/*
+          retention-days: 30
+      - name: Remove only this run's temporary registry credentials
+        if: always() && env.DOCKER_CONFIG != ''
+        run: rm -f "$DOCKER_CONFIG/config.json"
+      - name: Clean only this container job's fixtures and temporary image
+        if: always() && env.QA_WORK != ''
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          case "$QA_WORK" in
+            "$RUNNER_TEMP"/bibliothekar-pre5-container.*) ;;
+            *) echo '::error::Unsafe container scratch path'; exit 1 ;;
+          esac
+          if [[ -n "${IMAGE:-}" ]]; then
+            # Some isolated fixtures are UID 568; clean only this bind mount
+            # from a throwaway root container, never the host or NAS.
+            docker run --rm --network none --user 0:0 \
+              -v "$QA_WORK:/test-cleanup" --entrypoint /bin/sh "$IMAGE" \
+              -c 'find /test-cleanup -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +' \
+              || echo '::warning::Container-owned fixture cleanup incomplete'
+            docker image rm "$IMAGE" || true
+          fi
+          rm -rf -- "$QA_WORK" || echo '::warning::Some container scratch is not owned by runner'
+  frontend:
+    needs: preflight
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre5-front-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          path: pre5-front-${{ github.run_id }}
+      - name: Export actual templates and install isolated browser tooling
+        run: |
+          set -euo pipefail
+          QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre5-front.XXXXXXXX")"
+          printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
+          python3 -m venv "$QA_WORK/venv"
+          "$QA_WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD" "$QA_WORK/venv/bin/python" qa/rc14/export_ui.py "$QA_WORK/bundle.json"
+          npm install --prefix "$QA_WORK/tools" playwright@1.62.1
+      - name: Real renderers, German English and mobile desktop without network
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,size=256m,mode=1777 \
+            -v "$PWD/qa:/qa:ro" -v "$QA_WORK:/evidence" \
+            -e NODE_PATH=/evidence/tools/node_modules -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+            mcr.microsoft.com/playwright:v1.62.1-noble \
+            bash -euc 'node /qa/rc13/browser.cjs /evidence/bundle.json /evidence/rc13; node /qa/rc14/browser.cjs /evidence/bundle.json /evidence/rc14'
+      - name: Preserve frontend results
+        if: always() && env.QA_WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pre5-full-frontend-${{ github.run_attempt }}
+          path: |
+            ${{ env.QA_WORK }}/rc13
+            ${{ env.QA_WORK }}/rc14
+          retention-days: 30
+      - name: Clean only this frontend job's disposable scratch after artifact upload
+        if: always() && env.QA_WORK != ''
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          case "$QA_WORK" in
+            "$RUNNER_TEMP"/bibliothekar-pre5-front.*) ;;
+            *) echo '::error::Unsafe frontend scratch path'; exit 1 ;;
+          esac
+          # Root-owned Chromium output: isolate root cleanup to this exact bind mount.
+          docker run --rm --network none --user 0:0 \
+            -v "$QA_WORK:/test-cleanup" --entrypoint /bin/sh \
+            mcr.microsoft.com/playwright:v1.62.1-noble \
+            -c 'find /test-cleanup -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +'
+          rm -rf -- "$QA_WORK"
+
+
+  backend-coverage:
+    if: always()
+    needs: [preflight, backend]
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 20
+    steps:
+      - name: Download all eight backend partition evidence sets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: 100-backend-part-*
+          path: ${{ runner.temp }}/bibliothekar-100-coverage-${{ github.run_id }}
+      - name: Enforce exactly once-only coverage on current release source
+        shell: bash
+        env:
+          COVERAGE_ROOT: ${{ runner.temp }}/bibliothekar-100-coverage-${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ['COVERAGE_ROOT'])
+          all_manifests=[];all_reports=[]
+          for i in range(8):
+              d=root/f'100-backend-part-{i}'
+              mp=d/'rc13-partition.json';rp=d/'partition-summary.json'
+              if not(mp.exists() and rp.exists()):raise SystemExit(f'Partition {i}: missing evidence')
+              m=json.loads(mp.read_text());r=json.loads(rp.read_text())
+              assert m['partition']==i and m['partitions']==8
+              assert r['partition']==i and r['source']==os.environ['GITHUB_SHA']
+              all_manifests.append(m);all_reports.append(r)
+          collected=all_manifests[0]['all_nodes']
+          assert collected and len(collected)==len(set(collected))
+          assert all(m['all_nodes']==collected for m in all_manifests)
+          selected=[n for m in all_manifests for n in m['selected_nodes']]
+          assert len(selected)==len(collected) and set(selected)==set(collected), 'Missing or duplicate tests'
+          state='PASS' if all(x['status']=='PASS' for x in all_reports) else 'FAIL'
+          data={'source':os.environ['GITHUB_SHA'],'collected':len(collected),
+                'tested_once':len(selected),'parts':all_reports,'status':state}
+          (root/'coverage-summary.json').write_text(json.dumps(data,indent=2))
+          print(json.dumps(data,indent=2))
+          if state!='PASS':raise SystemExit('Unresolved backend failures')
+          PY
+      - name: Upload overall backend coverage result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: 100-backend-coverage-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bibliothekar-100-coverage-${{ github.run_id }}/coverage-summary.json
+          retention-days: 30

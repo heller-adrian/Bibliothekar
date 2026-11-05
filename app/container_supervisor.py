@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 WEB_UID = int(os.environ.get("KAMERA_WEB_UID", "568"))
 WEB_GID = int(os.environ.get("KAMERA_WEB_GID", "568"))
-HELPER_ENABLED = os.environ.get("KAMERA_SOURCE_HELPER_ENABLED", "true").strip().lower() in {
+HELPER_ENABLED = os.environ.get("KAMERA_SOURCE_HELPER_ENABLED", "false").strip().lower() in {
     "1",
     "true",
     "yes",
@@ -85,7 +85,24 @@ def run() -> int:
     signal.signal(signal.SIGINT, stop)
 
     try:
-        if HELPER_ENABLED:
+        helper_available = HELPER_ENABLED
+        print('Source helper: '+('enabled by KAMERA_SOURCE_HELPER_ENABLED' if HELPER_ENABLED else 'disabled (standard profile)'), flush=True)
+        from app.appdata import root as appdata_root
+        if appdata_root():
+            # Create app subdirectories using actual web credentials, not root.
+            # Failure is reported by the authenticated web recovery surface.
+            prepared = subprocess.run([sys.executable,'-c','from app.appdata import prepare; prepare()'],
+                                      preexec_fn=_web_preexec())
+            if prepared.returncode:
+                helper_available = False
+            elif helper_available:
+                try:
+                    from app.removable_runtime import prepare
+                    prepare()
+                except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+                    print('Removable helper unavailable: '+str(error)+'; web recovery remains available.',flush=True)
+                    helper_available = False
+        if helper_available:
             helper = subprocess.Popen(helper_command())
 
         web = subprocess.Popen(

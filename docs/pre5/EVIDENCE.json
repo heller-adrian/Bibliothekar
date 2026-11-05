@@ -1,0 +1,482 @@
+{
+  "status": "BACKEND_FAILURES_UNRESOLVED_NOT_RELEASED",
+  "branch": "codex/pre5-operation-recovery",
+  "base_tag": "v1.0.0-pre.4",
+  "accepted_target_source": "c548e308d795f459ff854fb6a5843431fb71eef1",
+  "target_run": 41116260923,
+  "target_job": 124271170153,
+  "tests": {
+    "new_targets": {
+      "passed": 42,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "focused": {
+      "passed": 46,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "historical": {
+      "passed": 237,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "artifact": {
+    "id": 13005609337,
+    "name": "pre5-reproductions-1",
+    "sha256": "954b432c2162f70cc1f149425671ca41688a9a3f9b44c3ede1441f88e6a4abc5",
+    "downloaded_archive_digest_verified": true
+  },
+  "not_yet_accepted": [
+    "Complete backend node coverage with no failures, errors or skips",
+    "Final versioned release image and publication integrity"
+  ],
+  "limits": {
+    "native_TrueNAS_NFSv4": "NOT_RUN",
+    "physical_SD_USB": "NOT_RUN",
+    "genuine_DNG_1_7_write": "NOT_RUN",
+    "native_RAF_write": "NOT_RUN",
+    "known_origin_metadata_variant_A": "DEFERRED",
+    "independent_loss_finalization": "DEFERRED"
+  },
+  "production_data_access": false,
+  "published": false,
+  "partial_container": {
+    "source": "c548e308d795f459ff854fb6a5843431fb71eef1",
+    "run": 41116260923,
+    "artifact_id": 13007910318,
+    "sha256": "ba1e51a5fdbd9fe4cc04b3bc9fd702d7a17e3e283bc5c7e77d38c3886ce00735",
+    "downloaded_archive_digest_verified": true,
+    "result": "FAIL_fixture_generation_before_ninety_file_scenario",
+    "passed": [
+      "pre5_real_general_api_two_restarts",
+      "pre5_exact_pre4_inventory_recovery",
+      "pre5_independent_import_event_sort_beside_conflict",
+      "pre4_read_views_unknown_effects_still_fenced",
+      "historical_pre2_pre1_RC14_recovery",
+      "Chromium_DE_EN_mobile_desktop"
+    ],
+    "not_run": [
+      "ninety_file_scenario",
+      "four_thousand_families",
+      "fourteen_iPhone_JPEGs"
+    ]
+  },
+  "latest_application_candidate": "bd9451206c6ac447e0d1d71f07fa4ee4263e25c2",
+  "additional_target_acceptance": {
+    "source": "64645b5f60a8756f15eb172a4dc10bb19f0739a8",
+    "run": 41119010880,
+    "new_targets": 46,
+    "focused": 46,
+    "failed": 0,
+    "skipped": 0,
+    "artifact_id": 13006773940,
+    "sha256": "62ab9617a9f4b6eea2922751584e7b755ad0ff96a51badc9003e3f23590c7875",
+    "downloaded_archive_digest_verified": true
+  },
+  "frontend_acceptance": {
+    "source": "64645b5f60a8756f15eb172a4dc10bb19f0739a8",
+    "run": 41119010880,
+    "RC13_cases": 44,
+    "RC14_cases": 147,
+    "artifact_id": 13007956754,
+    "sha256": "3cfac03c18077c10cd73572eb17bc591fd7422de47a8517b3ad2a5b69391792e",
+    "downloaded_archive_digest_verified": true
+  },
+  "latest_failed_container": {
+    "run": 41119010880,
+    "artifact_id": 13009140051,
+    "sha256": "4909e16323920692b91984fdd7adb3ce496aff580795de3ac852aa6d56dea1bc",
+    "downloaded_archive_digest_verified": true,
+    "failure": "startup retries legacy migration on already-central job with missing moved media",
+    "ninety_file_pre4_baseline_GET_results": [
+      200,
+      200,
+      200
+    ],
+    "pre4_orphan_operations": 0,
+    "original_NAS_first_inventory_exception": "NOT_ESTABLISHED",
+    "four_thousand_and_iPhone": "NOT_RUN"
+  },
+  "pending_run": 41207207207,
+  "migration_fix_target_acceptance": {
+    "source": "83b11dad16626c01460562caec8dd530ad4bbd42",
+    "run": 41121252978,
+    "new_targets": 49,
+    "failed": 0,
+    "skipped": 0,
+    "focused_passed": 67,
+    "focused_failed": 13,
+    "focused_fix_status": "PENDING_RECHECK",
+    "artifact_id": 13008866591,
+    "sha256": "696fe3695f37dce07cdb10cbb435bdfd3463790d6d104f59e6ae08be936f1529",
+    "downloaded_archive_digest_verified": false
+  },
+  "latest_QA_candidate": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
+  "last_gate_failure": {
+    "run": 41122388040,
+    "new_targets_passed": 49,
+    "focused_passed": 70,
+    "focused_failed": 10,
+    "cause": "historical seed checks layout before creating declared catalogue/registry",
+    "fix_commit": "08cee415a6a5c5a926825048c253891216cfd12b",
+    "fix_recheck": "PENDING"
+  },
+  "general_202_probe": {
+    "run": 41190356694,
+    "source": "cefeb5cb147fe75c42f3d0cbf2124ea4610fbfc9",
+    "artifact_id": 13038543693,
+    "sha256": "54ab44c0d4716e0fe94baa5ab31e73b440b6ce5f2b7a563b2b7d570debfda6fc",
+    "downloaded_archive_digest_verified": true,
+    "terminal": "completed",
+    "verified_destination_hash": true,
+    "restart": "READY",
+    "restart_writes_allowed": true,
+    "source_families_before_after": [
+      47,
+      48
+    ],
+    "source_members_before_after": [
+      90,
+      91
+    ],
+    "original_evidence_preserved": true,
+    "archive_bytes_preserved": true,
+    "accepted_as_success": false
+  },
+  "general_history_fix_targets": {
+    "source": "d05c61890205f5c0722883ebb3a7eb984c761d45",
+    "run": 41191231150,
+    "new_targets": 56,
+    "focused": 80,
+    "failed": 0,
+    "skipped": 0,
+    "artifact_id": 13038996100,
+    "sha256": "1646e5873ac0d6ff235f4be8d2f93915ca3a6e3367246007ca20753819406f3e",
+    "downloaded_archive_digest_verified": true
+  },
+  "last_container_gate_failure": {
+    "run": 41191231150,
+    "pre5_live": "PASS",
+    "pre4_live": "PASS",
+    "historical_cases_passed": [
+      "historical",
+      "rc14",
+      "foreign",
+      "three"
+    ],
+    "failure": "released pre.2 job GET write-gated schema check during its own import completion",
+    "candidate_fault": false,
+    "ninety_file_and_4000_iphone": "NOT_RUN"
+  },
+  "thumbnail_get_fix": {
+    "source": "5f741f93f8fdb34535d87f6d71ec79e380ffe940",
+    "evidence": "pre5 live container log: GET thumbnail attempted worker write admission and returned 500",
+    "change": "GET serves existing regular cache or404; only import worker generates cache under write admission",
+    "new_tests": 3,
+    "linux_recheck": "PENDING"
+  },
+  "historical_fixture_retry": {
+    "source": "5f741f93f8fdb34535d87f6d71ec79e380ffe940",
+    "run": 41192396662,
+    "new_targets": 59,
+    "focused": 80,
+    "historical_passed": 236,
+    "historical_failed": 1,
+    "skipped": 0,
+    "cause": "isolated General admission unit test lacked its own registry",
+    "fix_source": "c692190c7ca3a48922cc43724cc240f869ea95fd",
+    "application_changed": false,
+    "artifact_id": 13040160888,
+    "digest": "sha256:0d7b217eaef8d4b18cb68b7b9fc2ac66380a17bcc832713256ca38f0d13ff00c",
+    "downloaded_archive_digest_verified": true
+  },
+  "short_gate_acceptance": {
+    "source": "c692190c7ca3a48922cc43724cc240f869ea95fd",
+    "run": 41193453760,
+    "new_targets": 59,
+    "focused": 82,
+    "failed": 0,
+    "skipped": 0,
+    "artifact_id": 13039478925,
+    "digest": "sha256:04f12abed58ec9bb54a9e222c90390e584189eadb385626fcc3c3e05b09994e3",
+    "downloaded_archive_digest_verified": true
+  },
+  "latest_browser_gate_failure": {
+    "runs": [
+      41193453760,
+      41193996176
+    ],
+    "application_checks_passed": [
+      "real_general_api_and_two_restarts",
+      "real_pre4_inventory_failure_upgrade_original_reservation",
+      "scoped_conflict_real_import_event_sort_two_restarts",
+      "authenticated_scoped_diagnostics",
+      "archives_unchanged"
+    ],
+    "cause": "optional source helper intentionally disabled; exact 503 body checked but page navigation discarded response before asynchronous browser body inspection",
+    "qa_fix": "wait networkidle before navigating; retain exact expected JSON and all other 5xx assertions",
+    "fix_recheck": "PENDING",
+    "container_artifact": {
+      "id": 13039388297,
+      "digest": "sha256:26804554df38a6c092b9b79fbedb101faa1f28971df1a2c60f3f4ff5c83d11fe",
+      "downloaded_archive_digest_verified": true
+    },
+    "frontend_artifact": {
+      "id": 13039028804,
+      "digest": "sha256:27fab0fdfda4de979b62616b2a363c184259ce7d0a160903a8a1829af8a07118",
+      "downloaded_archive_digest_verified": true
+    }
+  },
+  "current_target_acceptance": {
+    "source": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
+    "run": 41194643144,
+    "new_targets": 60,
+    "focused": 82,
+    "failed": 0,
+    "skipped": 0,
+    "artifact_id": 13040405805,
+    "digest": "sha256:88a4098ba8118817918b9417c880f134fc7ba9259b28dd3e098ea00c7d7b858f",
+    "downloaded_archive_digest_verified": true
+  },
+  "current_frontend_acceptance": {
+    "source": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
+    "run": 41194643144,
+    "RC13_cases": 44,
+    "RC14_cases": 147,
+    "artifact_id": 13040415276,
+    "digest": "sha256:bf0f6991e222259c51be5e2148d4985b68a835bfddf16cf93947f04d09c137a4",
+    "downloaded_archive_digest_verified": true
+  },
+  "current_container_acceptance": {
+    "source": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
+    "run": 41194643144,
+    "status": "PASS",
+    "artifact_id": 13040432071,
+    "digest": "sha256:d656fc55af18966b4a244df052ad57b2f215beb69c773ccb9aa8ba3a05547a20",
+    "downloaded_archive_digest_verified": true,
+    "pre5_live_checks": 6,
+    "pre4_live_checks": 4,
+    "historical_cases": 6,
+    "ninety_files": {
+      "status": "PASS",
+      "initial_files": 90,
+      "final_files": 88,
+      "general_files": 3,
+      "immutable_origins_preserved": true,
+      "checks": {
+        "applied_move_correction_local_rejection": "PASS",
+        "archive_copy_correction_local_rejection": "PASS",
+        "day_move_correction_local_rejection": "PASS",
+        "catalogue_hashes_general_copies_and_both_sqlite_integrities": "PASS"
+      }
+    },
+    "four_thousand_families": {
+      "status": "PASS",
+      "count": 4000,
+      "startup_seconds": [
+        5.374493363982765,
+        5.36555710301036
+      ]
+    },
+    "fourteen_iPhone_JPEGs": "PASS",
+    "readonly_archives": "PASS"
+  },
+  "handoff": {
+    "reason": "explicit_user_stop_while_full_backend_runs",
+    "source": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
+    "run": 41194643144,
+    "targeted": "PASS",
+    "frontend": "PASS",
+    "container": "PASS",
+    "backend": "IN_PROGRESS_at_last_observation",
+    "next_step": "Read final run result before any additional test or release action",
+    "five_hour_used_percent": 78,
+    "weekly_used_percent": 40,
+    "parallel_test_runs_started": false,
+    "published": false
+  },
+  "complete_backend_baseline": {
+    "run": 41194643144,
+    "source": "2908eacbf73e891ebd46078cb9ae4af43e0dd454",
+    "artifact_id": 13044081687,
+    "digest": "sha256:7838e1590c892d24deb7a071276353ec35447e985c98b42da050806eacf6b996",
+    "downloaded_archive_digest_verified": true,
+    "tests": 2444,
+    "passed": 2204,
+    "failed": 240,
+    "errors": 0,
+    "skipped": 0,
+    "coverage": "all_eight_partitions_disjoint_and_complete",
+    "groups": {
+      "ambient_registry_fixture_context": 25,
+      "backup_recovery_admission": 8,
+      "domain_sql_authorization": 3,
+      "error_wording_contract": 2,
+      "external_tamper_uses_guarded_connection": 6,
+      "f14_initial_state_contract": 10,
+      "health_without_startup_contract": 1,
+      "historical_completion_and_retry": 4,
+      "independent_operation_scope": 7,
+      "rc11_snapshot_schema_order": 19,
+      "read_view_and_contention_contract": 4,
+      "restore_recovery_and_scope": 33,
+      "runtime_deadline": 2,
+      "schema_read_requests_ddl": 12,
+      "source_text_contract": 2,
+      "startup_domain_recovery_not_reached": 49,
+      "storage_setup_anchor_and_reset": 20,
+      "trash_recovery_and_scope": 27,
+      "worker_resume_queued_or_verifying": 6
+    },
+    "classification": "initial_causal_triage_not_all_causes_resolved",
+    "reports": [
+      "BACKEND-FAILURES.md",
+      "BACKEND-FAILURES.json"
+    ]
+  },
+  "first_backend_correction": {
+    "source": "3404ddcf020e56bd4f82aedf80cec4c69c4753ef",
+    "change": "Existing schema-version tables are read without CREATE DDL; genuine schema writes remain guarded. RC11 fixture schemas precede orphan snapshot.",
+    "new_authorization_tests": 8,
+    "local_syntax_and_actionlint": "PASS",
+    "linux_verification": "PENDING",
+    "run": 41207207207,
+    "full_matrix_started": false
+  },
+  "backend_stabilization_focus": [
+    {
+      "run": 41207207207,
+      "source": "3404ddcf020e56bd4f82aedf80cec4c69c4753ef",
+      "tests": 66,
+      "passed": 62,
+      "failed": 4,
+      "errors": 0,
+      "skipped": 0,
+      "artifact_id": 13045485079,
+      "sha256": "c30a7e62b52bb1c318fb9309ce46633c8a0bf7d559b3b54f4259ab059356d411",
+      "downloaded_archive_digest_verified": true
+    },
+    {
+      "run": 41214162298,
+      "source": "efb500279e34847d0a2dc485422304e945f31c64",
+      "tests": 75,
+      "passed": 73,
+      "failed": 2,
+      "errors": 0,
+      "skipped": 0,
+      "artifact_id": 13047268858,
+      "sha256": "39f54946acf3f887e34e5a0628305fb5cfee1203737bc95cb4e37c7e3844d324",
+      "downloaded_archive_digest_verified": true
+    },
+    {
+      "run": 41215262628,
+      "source": "4a24b2575ef85a61fdbe6b4cc3d72d40c8e8c58a",
+      "tests": 89,
+      "passed": 76,
+      "failed": 13,
+      "errors": 0,
+      "skipped": 0,
+      "artifact_id": 13047866550,
+      "sha256": "c0cd0f203710fb8f0fda138e9f2ba8e4e0cf42625a4db7db98c7e407e1c1ef80",
+      "downloaded_archive_digest_verified": true,
+      "remaining_failures": {
+        "json_stdout_protocol": 8,
+        "missing_fixed_administration_directories_in_fixture": 4,
+        "test_compared_intentionally_updated_journal_as_media": 1
+      }
+    },
+    {
+      "run": 41215645263,
+      "source": "a292b916c1ff6fd032f99a8e6a36dcba616819ea",
+      "tests": 179,
+      "passed": 164,
+      "failed": 15,
+      "errors": 0,
+      "skipped": 0,
+      "artifact_id": 13048875357,
+      "sha256": "5e3db9376c87ba7b2375eaa73c0fd67be73f9b328d7da4da14637e075b31af19",
+      "downloaded_archive_digest_verified": true
+    },
+    {
+      "run": 41217778080,
+      "source": "aeaa7c5ddd6973d3744c6057ed694e3bdc4c117a",
+      "application_source": "99d0f2bd0ce7e7dbd9c4032bbfda5e8dd67f5170",
+      "tests": 264,
+      "passed": 260,
+      "failed": 4,
+      "errors": 0,
+      "skipped": 0,
+      "sqlite_statement_security_contracts": {
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0
+      },
+      "artifact_id": 13049571446,
+      "sha256": "63302fc2692d83a237acfba303051098df85152ddffed06b07aacfcf0016184e",
+      "downloaded_archive_digest_verified": true,
+      "failure_causes": {
+        "invalid_confirmation_unhashable_type": 2,
+        "fixture_missing_fixed_children": 1,
+        "QA_dependency_tinycss2_missing": 1
+      }
+    }
+  ],
+  "latest_focused_qa": {
+    "source": "aeaa7c5ddd6973d3744c6057ed694e3bdc4c117a",
+    "application_source": "99d0f2bd0ce7e7dbd9c4032bbfda5e8dd67f5170",
+    "run": 41217778080,
+    "result": "FAIL",
+    "scope": "small_causal_backend_groups_only",
+    "full_matrix_started": false,
+    "tests": 264,
+    "passed": 260,
+    "failed": 4,
+    "sqlite_statement_security_contracts_passed": 7
+  },
+  "deadline_profile": {
+    "run": 41215816086,
+    "source": "2ad5023eed4e59aaa977a7671947e5e630b71072",
+    "result": "FAIL_DIAGNOSTIC_NOT_ACCEPTANCE",
+    "artifact_id": 13047948572,
+    "sha256": "f5c51c12f6e625dd165d0c83c0258abb58bbc4b7758aea081423555609d37b3c",
+    "downloaded_archive_digest_verified": true,
+    "found_cause": "Repeated full operation-health observation for every SQL authorizer opcode",
+    "after_fix_retest": "PENDING"
+  },
+  "pending_limited_acceptance": [
+    {
+      "run": 41221622586,
+      "source": "bd9451206c6ac447e0d1d71f07fa4ee4263e25c2",
+      "scope": "only technical receipt qualification, original live wipe recovery and existing negative reset cases",
+      "status": "PENDING"
+    }
+  ],
+  "bounded_legacy_diagnosis": {
+    "closure_run": 41219852833,
+    "source": "f0e692473c4dd9bc24db1114a94068b3c87c9bea",
+    "tests": 66,
+    "passed": 65,
+    "failed": 1,
+    "errors": 0,
+    "skipped": 0,
+    "artifact_id": 13050100813,
+    "sha256": "efa22efebbd5b972d7fda4979e350f5ea7ed118309373f9758b83a30534a0b25",
+    "downloaded_archive_digest_verified": true,
+    "unprofiled_deadlines": {
+      "3892_files_seconds": 213.948,
+      "hundred_files_seconds": 80.796,
+      "status": "PASS"
+    },
+    "contracts_run": 41220098240,
+    "contracts_tests_passed": 17,
+    "contracts_artifact_id": 13049483491,
+    "contracts_sha256": "fd574cf0f4af6709218f426cb42729f49ab52dc97f37c8a5503a9f61e9372ef6",
+    "contracts_archive_digest_verified": true
+  },
+  "current_round_scope": "ONLY_UNKNOWN_CONTROL_EVIDENCE_NO_PUBLICATION"
+}

@@ -1,0 +1,51 @@
+name: F15 F17 F18 metadata consistency QA
+on:
+  push:
+    branches: [security/f15-f17-f18-metadata-consistency]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libimage-exiftool-perl
+          python -m pip install -r requirements.txt pytest httpx
+      - name: Record source and environment
+        run: |
+          mkdir -p "$RUNNER_TEMP/f14-qa"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/f14-qa/source.txt"
+          python --version > "$RUNNER_TEMP/f14-qa/environment.txt"
+          uname -a >> "$RUNNER_TEMP/f14-qa/environment.txt"
+          exiftool -ver >> "$RUNNER_TEMP/f14-qa/environment.txt"
+          pip freeze >> "$RUNNER_TEMP/f14-qa/environment.txt"
+      - name: Entire backend suite without fail-fast
+        run: python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" backend
+      - name: Preserve unchanged historical concurrency contracts
+        if: always()
+        run: |
+          for audit_case in f15 f17; do
+            audit_exit=0
+            python qa/metadata_consistency/run_original.py "$GITHUB_WORKSPACE" "$RUNNER_TEMP/metadata-historical/$audit_case" "$audit_case" || audit_exit=$?
+            test "$audit_exit" -le 1
+            test -f "$RUNNER_TEMP/metadata-historical/$audit_case/result.xml"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: metadata-consistency-qa
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/f14-qa/**/*.json
+            ${{ runner.temp }}/f14-qa/**/*.jsonl
+            ${{ runner.temp }}/f14-qa/**/*.xml
+            ${{ runner.temp }}/f14-qa/**/*.log
+            ${{ runner.temp }}/f14-qa/**/*.txt
+            ${{ runner.temp }}/metadata-historical

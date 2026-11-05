@@ -1,0 +1,16 @@
+Bibliothekar 0.50.3 – separates Testimage für vertiefte EN/DE Internationalisierung.
+Quellrevision vor Release-Request: 776295ed8125218833ef22bb20be291fff27b5e2
+PR #19 bleibt Draft. Kein Merge und keine Änderungen an main/latest/v0.40.3.
+Sechs reale iPhone-PWA-Referenzscreenshots gegen alle wesentlichen HTML/JS-Ansichten geprüft.
+Übersetzte Statuskarten, Hilfe-Popovers, dynamische Event-/Archivzähler, Metadata-Correction-Titel,
+UI-bezogene Importtypen Folder Import / SD Card Import / Drive Import und kontextuelle Meldungen.
+Keine Modifikation von Benutzerordnern, Dateinamen, archivierten Ereignisdaten, SQLite oder event.json.
+Für neue Installationen bleiben konfigurierbare Standardstammordner englisch.
+Historische fest kodierte interne Ordnerkonventionen bleiben aus Kompatibilitätsgründen physisch erhalten.
+Vollständige Backend-QA 1015 passed, 6 warnings; isolierter Archivtest PASS auf 776295ed8125218833ef22bb20be291fff27b5e2.
+Neue Screenshot-Tests: tests/backend/test_0503_real_world_english_ui.py.
+Report: docs/0503_I18N_SCREENSHOT_AUDIT.md.
+Publish-Workflow muss erneut vollständige QA + Archivtest auf exakt diesem Commit bestehen.
+Nur ghcr.io/heller-adrian/bibliothekar:patch-0.50.3 veröffentlichen.
+Stable latest, v0.40.3 und bisherige patch-Images bleiben unverändert.
+Kein TrueNAS-Live-Deployment, keine formelle vollständige EN-Abnahme und keine 1.0.0-Freigabe.

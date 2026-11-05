@@ -1,0 +1,24 @@
+{
+  "version": "1.0.0-rc.4",
+  "accepted_base": "2e124fc504b4349ede9b38e958c509f048fcd02c",
+  "accepted_packages": [
+    "40b97622ba8f89af5db771d2694ae9688cb6c448",
+    "1fae16709bf262b82429c3d3d0980f05f2b77ca0",
+    "d02e2a4a88f4100036b5c17a8f03f26811e31c30",
+    "6e22db2162858f5787e4657c3f040f77cc02c447",
+    "fca566ee2c3c4820bab2c29bebe3790627c90416",
+    "d7610205f2c7bc8708e36a130bab896d3ef568d1",
+    "b71a1f5d54a4b1fb90a7b54bec5236bdbfc29c3d",
+    "9a77caf6c74b54c8154b288a5154d9c907b2abc0",
+    "c2a0b1faae53c541ad9fae6b34ffa54083dab0f0"
+  ],
+  "platform": "linux/amd64",
+  "publication_authorized": false,
+  "previous_version": "1.0.0-rc.3",
+  "approved_product_sha256": {
+    "app/main.py": "80c87aff0be957b01decde49dea21a81842a190de3fd877c798637371f0f7258",
+    "app/trash_selective.py": "06029af64b48e03c397a4aba079c923fba0f18f0ea6901f2f428f18f75b52ad0",
+    "app/trash_ui.py": "a87ca5f2c07e65034cc2f12088a972315001dd29ad030504e6ae26bfce92e644"
+  },
+  "approved_product_reason": "User-approved per-path inactive restore reservations; active restores still block every delete; recheck under F11 lock before FD staging; matching HTTP/UI selection admission."
+}

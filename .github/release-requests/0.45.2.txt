@@ -1,0 +1,3 @@
+Freigabeauftrag 0.45.2: vollständige Python-Regression prüfen, danach Docker-Image einmalig bauen und in GHCR veröffentlichen.
+
+Neuer Abnahmelauf nach Korrektur der 6 historischen Regressionstests und dem Metadatenverlauf-Filter.

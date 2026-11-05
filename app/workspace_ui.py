@@ -55,11 +55,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       overflow-x: hidden;
       background: var(--background);
       color: var(--text);
-      font-family:
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
     }
 
     button,
@@ -203,6 +199,8 @@ WORKSPACE_HTML = r"""<!doctype html>
       color: var(--danger);
     }
 
+    .summary > .card { min-width:0; overflow:hidden; }
+    .summary > .card > .muted { display:block; min-width:0; max-width:100%; font-size:clamp(.63rem, .84vw, .85rem); line-height:1.2; white-space:normal!important; overflow-wrap:anywhere; hyphens:auto; }
     .summary {
       display: grid;
       grid-template-columns:
@@ -273,6 +271,48 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     .day-card.without-date {
       border-color: var(--warning);
+      background:
+        color-mix(
+          in srgb,
+          var(--warning) 12%,
+          var(--surface)
+        );
+    }
+
+    .day-card.review-card {
+      grid-template-columns: minmax(0, 1fr) auto;
+      cursor: pointer;
+    }
+
+    .day-card.review-card:hover {
+      border-color: var(--warning);
+      background:
+        color-mix(
+          in srgb,
+          var(--warning) 18%,
+          var(--surface)
+        );
+    }
+
+    .day-card.review-card:focus-visible {
+      outline: 3px solid var(--warning);
+      outline-offset: 3px;
+    }
+
+    .review-card-hint {
+      display: block;
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    .metadata-review-preview {
+      display: grid;
+      gap: 12px;
+    }
+
+    .metadata-review-preview .primary {
+      width: fit-content;
     }
 
     .day-check {
@@ -389,7 +429,14 @@ WORKSPACE_HTML = r"""<!doctype html>
     .event-boundary{display:grid;grid-template-columns:minmax(150px,1.18fr) minmax(140px,.82fr);gap:10px;align-items:end}
     .create-subevents{display:grid;gap:10px;margin-top:4px}
     .create-subevent-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .create-subevent-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}
     .create-subevent-head button{white-space:nowrap;min-height:38px;padding:8px 12px}
+    .subevent-prefix-toggle{min-height:34px!important;padding:6px 10px!important;font-size:.82rem}
+    .subevent-prefix-toggle[aria-pressed="true"]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
+    .date-entry{display:grid;grid-template-columns:minmax(0,1fr) 42px;gap:6px;align-items:center}
+    .date-entry>input{min-width:0}
+    .date-picker-button{width:42px;min-width:42px;padding:0;display:grid;place-items:center}
+
     .create-subevent-card{border:1px solid var(--border);border-radius:12px;background:var(--surface-2);padding:12px}
     .create-subevent-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;align-items:end}
     .create-subevent-top{display:flex;align-items:end;justify-content:space-between;gap:10px}
@@ -486,9 +533,44 @@ WORKSPACE_HTML = r"""<!doctype html>
     @media (max-width:460px){.event-boundary,.create-subevent-boundary{grid-template-columns:1fr}.create-subevent-name{min-width:0;flex:1 1 auto}}
 
     .preview {
-      position: sticky;
-      top: 88px;
       height: fit-content;
+    }
+
+    @media (min-width: 821px) {
+      .preview {
+        position: sticky;
+        top: calc(var(--bk-secondary-sticky-bottom, 141px) + 12px);
+        max-height: calc(100dvh - var(--bk-secondary-sticky-bottom, 141px) - 24px);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .preview-body {
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .preview #structure-preview {
+        min-height: 0;
+        max-height: calc(100dvh - var(--bk-secondary-sticky-bottom, 141px) - 122px);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-gutter: stable;
+      }
+    }
+
+    @media (max-width: 820px) {
+      .preview {
+        position: static;
+        max-height: none;
+        overflow: visible;
+      }
+      .preview-body,
+      .preview #structure-preview {
+        max-height: none;
+        overflow: visible;
+      }
     }
 
     .preview-toggle {
@@ -504,11 +586,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       border-radius: 13px;
       background: var(--surface-2);
       padding: 13px;
-      font-family:
-        ui-monospace,
-        SFMono-Regular,
-        Menlo,
-        monospace;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size: 0.9rem;
       line-height: 1.5;
       white-space: pre;
@@ -517,11 +595,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
     .tree.rich-preview {
       white-space: normal;
-      font-family:
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
     }
     .stored-preview-meta {
       display:grid;
@@ -541,11 +615,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       white-space:pre;
       overflow-wrap:normal;
       overflow-x:hidden;
-      font-family:
-        ui-monospace,
-        SFMono-Regular,
-        Menlo,
-        monospace;
+      font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
       font-size:.88rem;
       line-height:1.5;
       color:var(--text);
@@ -603,7 +673,9 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
     .preview-family-stem { min-width:0; overflow:hidden; text-overflow:ellipsis; }
     .preview-family-time { white-space:nowrap; font-variant-numeric:tabular-nums; }
-    .preview-selection-note { margin-top:9px; color:var(--muted); font-size:.78rem; line-height:1.4; }
+    .preview-selection-note { margin-top:9px; color:var(--muted); font-size:.78rem; line-height:1.4; white-space:normal!important; overflow:visible!important; overflow-wrap:anywhere; word-break:normal; }
+    .preview-selection-note strong { white-space:normal; }
+    .preview-selection-note .preview-period-dates { display:inline; white-space:normal; overflow-wrap:anywhere; }
 
     .timeline-event-card {
       min-width: 0;
@@ -976,6 +1048,19 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
     }
 
+
+/* 0.45.2: Auf dem Handy zuerst Anzahl und Neuladen, darunter Titel und Auswahl. */
+.day-section-header .day-header-controls { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+.day-section-header #day-reload { min-height:34px; padding:6px 10px; }
+@media(max-width:700px){
+  .day-section-header { display:grid !important; grid-template-columns:minmax(0,1fr) auto; grid-template-rows:auto auto; gap:8px 10px; align-items:center; }
+  .day-section-header h2 { grid-column:1; grid-row:2; margin:0; }
+  .day-section-header .day-header-controls { display:contents; }
+  .day-section-header #day-count-label { grid-column:1; grid-row:1; white-space:normal; font-size:.83rem; }
+  .day-section-header #day-reload { grid-column:2; grid-row:1; justify-self:end; }
+  .day-section-header #day-select-all { grid-column:2; grid-row:2; justify-self:end; min-height:34px; }
+}
+
     @media (prefers-reduced-motion: reduce) {
       *,
       *::before,
@@ -1144,7 +1229,201 @@ WORKSPACE_HTML = r"""<!doctype html>
         padding:7px 10px;
       }
     }
-  </style>
+
+    /* 0.54.4: Only the narrow CREATE dialog (including the phone web app).
+       Keep the working 0.54.3 edit-dialog and the wide desktop layout intact. */
+    #event-dialog { container-type:inline-size; container-name:mobile-event-create; }
+    @container mobile-event-create (max-width:620px) {
+      /* Start date | start time and end date | end time, also in new subevents.
+         Later, more specific rules override the old 460px stacking rule. */
+      #event-form .event-boundary,
+      #event-form .create-subevent-boundary {
+        display:grid;
+        grid-template-columns:minmax(0,3fr) minmax(0,2fr) !important;
+        gap:8px;
+        align-items:end;
+      }
+      #event-form .event-boundaries,
+      #event-form .create-subevent-boundaries,
+      #event-form .create-subevent-grid,
+      #event-form .create-subevent-card,
+      #event-form .event-boundary > label,
+      #event-form .create-subevent-boundary > label {
+        min-inline-size:0;
+        max-inline-size:100%;
+        box-sizing:border-box;
+      }
+      /* WKWebKit/Firefox-iOS can add native padding outside the border-box.
+         Match the proven 0.54.2/0.54.3 edit fix only inside this dialog. */
+      #event-form input[type="date"],
+      #event-form input[type="time"] {
+        -webkit-appearance:none !important;
+        appearance:none !important;
+        display:block;
+        box-sizing:border-box !important;
+        inline-size:calc(100% - 2px) !important;
+        width:calc(100% - 2px) !important;
+        min-inline-size:0 !important;
+        min-width:0 !important;
+        max-inline-size:100% !important;
+        max-width:100% !important;
+        padding:0 !important;
+        block-size:48px !important;
+        min-block-size:48px !important;
+        line-height:48px !important;
+        text-align:center;
+      }
+      #event-form input[type="date"]::-webkit-date-and-time-value,
+      #event-form input[type="time"]::-webkit-date-and-time-value,
+      #event-form input[type="date"]::-webkit-datetime-edit,
+      #event-form input[type="time"]::-webkit-datetime-edit {
+        box-sizing:border-box;
+        block-size:100%;
+        min-block-size:100%;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        padding:0;
+        line-height:normal;
+      }
+      /* "Ohne Ereignis": a single selected DAY, with both times BELOW it.
+         Hide the old second date mirror, never change canonical day_key data. */
+      #event-form .no-event-segment-fields {
+        display:grid;
+        grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+        gap:8px;
+        align-items:end;
+      }
+      #event-form .no-event-mobile-range-title,
+      #event-form .no-event-end-date-mirror { display:none !important; }
+      #event-form .no-event-segment-fields > .no-event-day-field {
+        grid-column:1 / -1 !important;
+        grid-row:1 !important;
+        min-width:0;
+      }
+      #event-form .no-event-segment-fields > .no-event-start-field {
+        grid-column:1 !important;
+        grid-row:2 !important;
+        min-width:0;
+      }
+      #event-form .no-event-segment-fields > .no-event-end-field {
+        display:grid;
+        grid-template-columns:minmax(0,1fr);
+        grid-column:2 !important;
+        grid-row:2 !important;
+        min-width:0;
+      }
+      #event-form .no-event-segment-fields .no-event-desktop-caption {
+        display:block !important;
+      }
+      #event-form .no-event-segment-fields > .no-event-segment-remove {
+        grid-column:1 / -1 !important;
+        grid-row:3 !important;
+        justify-self:end;
+        width:auto;
+        min-width:0;
+      }
+      /* Day selection + fixed month/year form one visible date control. */
+      #event-form .no-event-day-controls {
+        display:grid;
+        grid-template-columns:76px minmax(0,1fr);
+        gap:0;
+        border:1px solid var(--border);
+        border-radius:12px;
+        background:var(--surface);
+        overflow:hidden;
+        min-width:0;
+      }
+      #event-form .no-event-day-controls > select,
+      #event-form .no-event-day-controls > input {
+        border:0;
+        border-radius:0;
+        background:transparent;
+        min-width:0;
+        width:100%;
+        padding:10px 8px;
+        box-sizing:border-box;
+      }
+      #event-form .no-event-day-controls > input:disabled {
+        opacity:1;
+        -webkit-text-fill-color:var(--text);
+      }
+    }
+
+    /* 0.55.0: A measured-width fallback for the CREATE editor ONLY.
+       0.54.4 relied on a container query which did not enforce two columns
+       on all Firefox-iOS/mobile-app builds. No-event day rows are untouched.
+       Stronger selector and explicit auto placement prevent old 1fr grids. */
+    #event-dialog.bk-create-pairs #event-form .event-boundary,
+    #event-dialog.bk-create-pairs #event-form .create-subevent-boundary {
+      display:grid !important;
+      grid-template-columns:minmax(0,3fr) minmax(0,2fr) !important;
+      grid-auto-flow:row !important;
+      align-items:end;
+      gap:8px;
+      min-inline-size:0;
+      max-inline-size:100%;
+    }
+    #event-dialog.bk-create-pairs #event-form .event-boundary > label,
+    #event-dialog.bk-create-pairs #event-form .create-subevent-boundary > label {
+      grid-column:auto !important;
+      grid-row:auto !important;
+      inline-size:100%;
+      min-inline-size:0 !important;
+      max-inline-size:100%;
+      box-sizing:border-box;
+    }
+    #event-dialog.bk-create-pairs #event-form .event-boundary input[type="date"],
+    #event-dialog.bk-create-pairs #event-form .event-boundary input[type="time"],
+    #event-dialog.bk-create-pairs #event-form .create-subevent-boundary input[type="date"],
+    #event-dialog.bk-create-pairs #event-form .create-subevent-boundary input[type="time"] {
+      -webkit-appearance:none !important;
+      appearance:none !important;
+      width:calc(100% - 2px) !important;
+      inline-size:calc(100% - 2px) !important;
+      min-inline-size:0 !important;
+      max-inline-size:100% !important;
+      padding:0 !important;
+      box-sizing:border-box !important;
+      text-align:center;
+      block-size:48px;
+      line-height:48px;
+    }
+
+
+  /* RC1: keep matching suggestions compact on phones; details remain available. */
+@media(max-width:820px){
+  .suggestions-panel{padding:12px}
+  .suggestions-panel h2{font-size:1rem;line-height:1.3;margin:0 0 8px}
+  .suggestion-card{padding:10px;gap:8px}
+  .suggestion-head{gap:6px;flex-wrap:wrap}
+  .suggestion-meta{font-size:.8rem;gap:6px}
+  .suggestion-help{font-size:.85rem;margin-bottom:10px}
+}
+
+    .day-statuses { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    #mobile-preview-button { display:none; grid-column:2; justify-self:start; min-height:28px; padding:3px 9px; font-size:.76rem; width:auto; }
+    #mobile-preview-dialog { width:min(95vw,700px); max-height:90dvh; padding:12px; overflow:auto; overscroll-behavior:contain; }
+    .mobile-preview-header { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .mobile-preview-header h2 { margin:0; }
+    #mobile-preview-dialog .preview { display:block; position:static; margin-top:10px; padding:10px; }
+    #mobile-preview-dialog .preview-body, #mobile-preview-dialog #structure-preview { max-height:none; overflow:visible; }
+    @media(max-width:820px) {
+      #mobile-preview-button:not([hidden]) { display:inline-block; min-height:32px; }
+      .day-statuses { grid-column:2; flex-wrap:wrap; min-width:0; }
+      .day-statuses .badge { font-size:clamp(.62rem,2.7vw,.76rem); padding:4px 6px; line-height:1.3; white-space:normal; max-width:100%; box-sizing:border-box; overflow-wrap:anywhere; }
+      .day-statuses #mobile-preview-button { font-size:.72rem; padding:3px 7px; flex-shrink:0; }
+      .timeline-event-statuses #mobile-preview-button { grid-column:1; justify-self:end; }
+      .timeline-event-header > div:first-child { min-width:0; overflow-wrap:anywhere; }
+    }
+    @media(max-width:520px) {
+      .day-card { padding:10px; gap:6px 9px; border-radius:11px; }
+      .day-card .day-main { min-width:0; }
+      .day-card > .badge { justify-self:start; font-size:.72rem; padding:3px 7px; }
+      .day-card .day-name { font-size:.92rem; margin-bottom:3px; }
+      .day-card .day-meta { gap:3px 9px; font-size:.8rem; }
+    }
+</style>
 </head>
 
 <body>
@@ -1204,7 +1483,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     <section id="event-suggestions-panel" class="card suggestions-panel" hidden>
       <h2>Neue Aufnahmen passen zu bestehenden Ereignissen</h2>
-      <p class="muted">Die Aufnahmezeiten passen eindeutig zu bereits vorhandenen Ereignissen. Erst nach deiner Bestätigung werden die neuen Aufnahmen sicher zum passenden Ereignis hinzugefügt.</p>
+      <details class="suggestion-help"><summary>Wie werden passende Ereignisse erkannt?</summary><p class="muted">Die Aufnahmezeiten passen eindeutig zu bereits vorhandenen Ereignissen. Erst nach deiner Bestätigung werden die neuen Aufnahmen sicher zum passenden Ereignis hinzugefügt.</p></details>
       <div id="event-suggestion-list" class="suggestion-list"></div>
       <p id="event-suggestion-status" class="muted" role="status" aria-live="polite"></p>
     </section>
@@ -1293,14 +1572,16 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     <section class="workspace-layout">
       <div>
-        <div class="section-header">
+        <div class="section-header day-section-header">
           <h2>Tagesordner</h2>
 
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+          <div class="day-header-controls">
             <span
               id="day-count-label"
-              class="muted"
+              class="muted day-count-label"
             ></span>
+            <button id="mobile-preview-button" type="button" hidden>Vorschau</button>
+            <button id="day-reload" type="button" title="Dateibestand und Zuordnung erneut prüfen">Neuladen</button>
             <button
               id="day-select-all"
               type="button"
@@ -1337,11 +1618,11 @@ WORKSPACE_HTML = r"""<!doctype html>
           id="preview-body"
           class="preview-body"
         >
-          <h2>Zielstruktur-Vorschau</h2>
+          <h2>Destination structure preview</h2>
 
           <p class="muted">
-            Die Vorschau zeigt nur die Planung.
-            Es werden noch keine Ordner verändert.
+            Die Vorschau zeigt die geplante Struktur oder den tatsächlichen Bestand.
+            Es werden keine Dateien verändert.
           </p>
 
           <div
@@ -1353,6 +1634,10 @@ WORKSPACE_HTML = r"""<!doctype html>
     </section>
   </main>
 
+  <dialog id="mobile-preview-dialog" aria-labelledby="mobile-preview-title">
+    <div class="mobile-preview-header"><h2 id="mobile-preview-title">Vorschau</h2><button id="mobile-preview-close" type="button">Schließen</button></div>
+    <div id="mobile-preview-content"></div>
+  </dialog>
   <dialog id="event-dialog">
     <form
       id="event-form"
@@ -1414,7 +1699,10 @@ WORKSPACE_HTML = r"""<!doctype html>
         <div id="create-subevents" class="create-subevents full-width">
           <div class="create-subevent-head">
             <strong id="create-subevent-heading">Unterereignisse (optional)</strong>
-            <button id="add-create-subevent" type="button">＋ Unterereignis hinzufügen</button>
+            <div class="create-subevent-actions">
+              <button id="subevent-prefix-toggle" type="button" class="subevent-prefix-toggle" hidden>Präfix: an</button>
+              <button id="add-create-subevent" type="button">＋ Unterereignis hinzufügen</button>
+            </div>
           </div>
           <div id="create-subevent-list" style="display:grid;gap:8px"></div>
         </div>
@@ -1489,13 +1777,13 @@ WORKSPACE_HTML = r"""<!doctype html>
   
   <dialog id="cross-backup-membership-dialog">
     <div class="dialog-content">
-      <h2 style="margin-top:0">Weitere Aufnahmen im gewählten Zeitraum</h2>
+      <h2 style="margin-top:0">Weitere Aufnahmen aus ausgeblendeten Sicherungen</h2>
       <p id="cross-backup-membership-summary" class="muted"></p>
       <div id="cross-backup-membership-sources" style="display:grid;gap:9px;margin-top:12px"></div>
       <p class="muted" style="margin-top:14px">
-        Der Sicherungsfilter ist nur eine Ansicht. Wenn du fortfährst, werden
-        alle bereits vorhandenen freien Aufnahmen dieses Zeitraums Bestandteil
-        desselben Ereignisses.
+        Nicht angehakte Tageskarten innerhalb sichtbarer Sicherungen werden automatisch
+        nach Zeitraum einbezogen. Hier werden nur zusätzliche Aufnahmen aus aktuell
+        ausgeblendeten aktiven Sicherungen bestätigt.
       </p>
       <div class="dialog-actions">
         <button id="cross-backup-membership-cancel" type="button">Abbrechen</button>
@@ -1533,7 +1821,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         button.classList.add("visible");
         badge.textContent=String(count);
         badge.classList.toggle("hidden",count===0);
-        panel.innerHTML=count ? `<strong>Offene Aufgaben · ${count}</strong>`+tasks.map(task=>`<a class="global-task-item" href="${String(task.href||'/events').replaceAll('&','&amp;').replaceAll('"','&quot;')}"><strong>${String(task.title||'Aufgabe')}</strong><span>${String(task.detail||'')}</span></a>`).join("") : `<strong>Keine offenen Aufgaben</strong><span class="muted" style="display:block;margin-top:6px">Alles erledigt.</span>`;
+        panel.innerHTML=count ? `<strong>Offene Aufgaben · ${count}</strong>`+tasks.map(task=>{const rawHref=String(task.href||'/events');const safeHref=rawHref.startsWith('/')&&!rawHref.startsWith('//')?rawHref:'/events';return `<a class="global-task-item" href="${escapeHtml(safeHref)}"><strong>${escapeHtml(String(task.title||'Aufgabe'))}</strong><span>${escapeHtml(String(task.detail||''))}</span></a>`;}).join("") : `<strong>Keine offenen Aufgaben</strong><span class="muted" style="display:block;margin-top:6px">Alles erledigt.</span>`;
       } catch (_) {}
     }
     document.getElementById("global-task-fab")?.addEventListener("click",()=>document.getElementById("global-task-panel")?.classList.toggle("open"));
@@ -1558,9 +1846,17 @@ WORKSPACE_HTML = r"""<!doctype html>
     const noEventButton =
       document.getElementById("no-event-button");
     let noEventLabel = "Ohne Ereignis";
+    let globalSubeventDateMode = "start";
+    let globalSubeventIncludeYear = false;
+    let globalSubeventIncludeTime = false;
+    let globalSubeventPrefixEnabled = true;
 
-    function applyNoEventLabel(value) {
-      noEventLabel = String(value || "Ohne Ereignis").trim() || "Ohne Ereignis";
+    function applyEventNamingSettings(value={}) {
+      noEventLabel = String(value.no_event_label || "Ohne Ereignis").trim() || "Ohne Ereignis";
+      globalSubeventDateMode = String(value.subevent_date_mode || "start");
+      globalSubeventIncludeYear = Boolean(value.subevent_include_year);
+      globalSubeventIncludeTime = Boolean(value.subevent_include_time);
+      globalSubeventPrefixEnabled = value.subevent_prefix_enabled !== false;
       if (noEventButton) noEventButton.textContent = noEventLabel;
       if (existingNoEventButton) existingNoEventButton.textContent = "Zu bestehendem " + noEventLabel;
     }
@@ -1568,14 +1864,14 @@ WORKSPACE_HTML = r"""<!doctype html>
     async function loadEventNamingSettings() {
       try {
         const data = await getJson("/api/settings/event-naming");
-        applyNoEventLabel(data.no_event_label);
+        applyEventNamingSettings(data);
       } catch (_) {
-        applyNoEventLabel("Ohne Ereignis");
+        applyEventNamingSettings({});
       }
     }
 
     document.addEventListener("bibliothekar:event-naming-updated", event => {
-      applyNoEventLabel(event.detail?.no_event_label);
+      applyEventNamingSettings(event.detail || {});
     });
 
     const statusElement =
@@ -1703,6 +1999,24 @@ WORKSPACE_HTML = r"""<!doctype html>
       document.getElementById("event-dialog");
     const eventForm =
       document.getElementById("event-form");
+
+    // 0.55.0: check ACTUAL dialog width, not just the viewport/container.
+    // Split-view on iPad and installed web apps can disagree with CSS
+    // viewport queries. Only parent/child date-time pairs are affected.
+    function syncCreateEventCompactPairs() {
+      if (!eventDialog || !eventDialog.open) return;
+      const dialogWidth=eventDialog.getBoundingClientRect().width;
+      const viewportWidth=document.documentElement.clientWidth;
+      const compact=dialogWidth>0 && (dialogWidth<=620 || viewportWidth<=820);
+      eventDialog.classList.toggle("bk-create-pairs", compact);
+    }
+    if (typeof ResizeObserver !== "undefined") {
+      const createDialogWidthObserver=new ResizeObserver(syncCreateEventCompactPairs);
+      createDialogWidthObserver.observe(eventDialog);
+    }
+    window.addEventListener("resize",syncCreateEventCompactPairs);
+
+
     const taskReassignDialog = document.getElementById("task-reassign-dialog");
     const taskReassignBody = document.getElementById("task-reassign-body");
     const taskReassignSubtitle = document.getElementById("task-reassign-subtitle");
@@ -1747,6 +2061,8 @@ WORKSPACE_HTML = r"""<!doctype html>
     const createSubeventHeading=document.getElementById("create-subevent-heading");
     const createSubeventList=document.getElementById("create-subevent-list");
     const addCreateSubevent=document.getElementById("add-create-subevent");
+    const subeventPrefixToggle=document.getElementById("subevent-prefix-toggle");
+    let dialogSubeventPrefixEnabled=true;
     const dialogError=document.getElementById("dialog-error");
 
     const eventStartTime =
@@ -1815,6 +2131,15 @@ WORKSPACE_HTML = r"""<!doctype html>
     let jobs = [];
     let workspace = null;
     let selectedJobIds = new Set();
+    let allActiveBackups = true;
+    const backupSelectionKey="bk-backup-selection:"+(window.__bkLibraryId||"main");
+    try {
+      const saved=JSON.parse(sessionStorage.getItem(backupSelectionKey)||"null");
+      if(saved && typeof saved.allActive==="boolean" && Array.isArray(saved.ids)){
+        allActiveBackups=saved.allActive;
+        selectedJobIds=new Set(saved.ids.filter(id=>typeof id==="string"));
+      }
+    } catch (_) {}
     let selectedDays = new Set();
     let lastSelectedDayKey = null;
     let selectedPreviewEventId = null;
@@ -1842,6 +2167,66 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
+    function validIsoDateText(value) {
+      const text=String(value||"").trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(text))return false;
+      const date=new Date(text+"T12:00:00");
+      return !Number.isNaN(date.getTime()) && date.toISOString().slice(0,10)===text;
+    }
+
+    function openOptionalDatePicker(input) {
+      if(!input)return;
+      const picker=document.createElement("input");
+      picker.type="date";
+      picker.value=validIsoDateText(input.value) ? input.value : "";
+      const min=String(input.dataset.dateMin||input.min||"");
+      const max=String(input.dataset.dateMax||input.max||"");
+      if(min)picker.min=min;
+      if(max)picker.max=max;
+      picker.style.position="fixed";
+      picker.style.left="50%";
+      picker.style.bottom="12px";
+      picker.style.width="2px";
+      picker.style.height="2px";
+      picker.style.opacity=".01";
+      picker.style.zIndex="99999";
+      document.body.appendChild(picker);
+      let finished=false;
+      const cleanup=()=>{
+        if(finished)return;
+        finished=true;
+        setTimeout(()=>picker.remove(),0);
+      };
+      picker.addEventListener("change",()=>{
+        if(picker.value){
+          input.value=picker.value;
+          input.dispatchEvent(new Event("change",{bubbles:true}));
+          input.dispatchEvent(new Event("input",{bubbles:true}));
+        }
+        cleanup();
+      },{once:true});
+      picker.addEventListener("blur",()=>setTimeout(cleanup,250),{once:true});
+      picker.focus({preventScroll:true});
+      try{
+        if(typeof picker.showPicker==="function")picker.showPicker();
+        else picker.click();
+      }catch(_){
+        picker.click();
+      }
+    }
+
+    document.addEventListener("click",event=>{
+      const button=event.target.closest?.("[data-date-picker-target],[data-date-picker-inline]");
+      if(!button)return;
+      event.preventDefault();
+      const id=String(button.dataset.datePickerTarget||"");
+      const input=id
+        ? document.getElementById(id)
+        : button.parentElement?.querySelector("input[type='text']");
+      openOptionalDatePicker(input);
+    });
+
+
     function setStatus(
       message,
       isError = false
@@ -1861,7 +2246,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         Number.isNaN(date.getTime())
           ? String(job.created_at || job.id)
           : new Intl.DateTimeFormat(
-              "de-DE",
+              (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
               {
                 dateStyle: "short",
                 timeStyle: "medium"
@@ -1894,7 +2279,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       );
 
       return new Intl.DateTimeFormat(
-        "de-DE",
+        (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
         {
           weekday: "long",
           day: "2-digit",
@@ -1932,7 +2317,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       return (
         new Intl.NumberFormat(
-          "de-DE",
+          (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
           {
             maximumFractionDigits: 1
           }
@@ -2004,10 +2389,20 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     function confirmCrossBackupMembership(error) {
       const membership=error?.data?.membership || {};
-      const sources=membership.sources || [];
+      const sources=membership.hidden_sources || membership.sources || [];
+      const familyCount=Number(
+        membership.hidden_additional_family_count
+        ?? membership.additional_family_count
+        ?? 0
+      );
+      const fileCount=Number(
+        membership.hidden_additional_file_count
+        ?? membership.additional_file_count
+        ?? 0
+      );
       crossBackupMembershipSummary.textContent =
-        `${Number(membership.additional_family_count||0)} weitere Familien · `
-        + `${Number(membership.additional_file_count||0)} Dateien liegen bereits in aktiven Sicherungen und gehören ebenfalls zu diesem Zeitraum.`;
+        `${familyCount} weitere Familien · `
+        + `${fileCount} Dateien liegen in aktuell ausgeblendeten aktiven Sicherungen und gehören ebenfalls zu diesem Zeitraum.`;
 
       crossBackupMembershipSources.innerHTML=sources.map(source=>{
         const familyRows=(source.families||[]).map(family=>{
@@ -2060,6 +2455,12 @@ WORKSPACE_HTML = r"""<!doctype html>
         applied: "Applied",
         archived: "Archived"
       }[String(status || "")] || "Planned";
+    }
+
+    function selectableBackup(job) {
+      return !(job.state === "completed" && job.workflow_status === "planned"
+        && Number(job.active_family_count) === 0 && Number(job.total_family_count) === 0
+        && !job.error_message);
     }
 
     function renderBackupFilter() {
@@ -2135,6 +2536,12 @@ WORKSPACE_HTML = r"""<!doctype html>
       return [...selectedJobIds][0] || "";
     }
 
+    function visibleActiveJobIds(){
+      return jobs
+        .filter(job=>job.workflow_status!=="archived" && selectedJobIds.has(job.id))
+        .map(job=>String(job.id));
+    }
+
     function payloadForSourceJob(base, jobId) {
       const bucket = sourceGroupsForSelection().get(jobId);
       if (!bucket) return {...base};
@@ -2151,7 +2558,8 @@ WORKSPACE_HTML = r"""<!doctype html>
         ...base,
         selected_intervals: intervals,
         selected_day_keys: dayKeys,
-        selected_family_ids: familyIds
+        selected_family_ids: familyIds,
+        visible_active_job_ids: visibleActiveJobIds()
       };
     }
 
@@ -2169,7 +2577,8 @@ WORKSPACE_HTML = r"""<!doctype html>
           .filter(group => group.start_datetime && group.end_datetime)
           .map(group => ({start_datetime:group.start_datetime,end_datetime:group.end_datetime})),
         selected_day_keys: [...new Set(groups.map(group=>group.day_key).filter(Boolean))].sort(),
-        selected_family_ids: familyIds
+        selected_family_ids: familyIds,
+        visible_active_job_ids: visibleActiveJobIds()
       };
     }
 
@@ -2294,6 +2703,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       const available=[...dayMap.values()].sort((a,b)=>String(a.start_datetime||a.day_key||"").localeCompare(String(b.start_datetime||b.day_key||"")));
       const visibleEvents=[...planningEvents.values()].sort((a,b)=>String(a.start_datetime||"").localeCompare(String(b.start_datetime||"")));
       const timeline=[...visibleEvents,...available].sort((a,b)=>{
+        const aUndated = a.group_type !== "event" && !a.has_date;
+        const bUndated = b.group_type !== "event" && !b.has_date;
+        if (aUndated !== bUndated) return aUndated ? -1 : 1;
         const aa=String(a.start_datetime||a.day_key||"9999");
         const bb=String(b.start_datetime||b.day_key||"9999");
         return aa.localeCompare(bb) || (a.group_type==="event"?-1:1);
@@ -2342,21 +2754,55 @@ WORKSPACE_HTML = r"""<!doctype html>
       };
     }
 
-    async function loadJobs() {
-      setStatus("Arbeitsbestände werden geladen …");
+    function refreshBackupSelection(availableJobs) {
+      selectedJobIds = allActiveBackups
+        ? new Set(availableJobs.filter(job=>job.workflow_status!=="archived").map(job=>job.id))
+        : new Set([...selectedJobIds].filter(id=>availableJobs.some(job=>job.id===id)));
+    }
+
+    function saveBackupSelection() {
+      try { sessionStorage.setItem(backupSelectionKey,JSON.stringify({allActive:allActiveBackups,ids:[...selectedJobIds]})); }
+      catch (_) {}
+    }
+
+    /* PRE_WORKSPACE_CACHE */
+    let workspaceLoadSerial=0, jobsLoadSerial=0;
+
+    async function loadJobs({physicalRefresh=false}={}) {
+      const request=++jobsLoadSerial;
+      const cacheKey = "bk-workspace-jobs-pre:" + (window.__bkLibraryId || "main");
+      if (!jobs.length) {
+        try {
+          const saved = await readWorkspaceSnapshot(cacheKey);
+          if(request!==jobsLoadSerial)return;
+          if (Array.isArray(saved?.jobs)) {
+            jobs = saved.jobs.filter(selectableBackup).filter(job => ["metadata_fixture_analysis","folder_import","sd_import","metadata_general_import","metadata_multiple_import","trash_import"].includes(job.operation) && !(job.operation==="trash_import" && Number(job.total_family_count||0)===0));
+            refreshBackupSelection(jobs);
+            updateTechnicalAnchor(); renderBackupFilter();
+            const ids = [...selectedJobIds];
+            const snapshotKey = "bk-workspace-pre:" + (window.__bkLibraryId || "main") + ":" + ids.map(encodeURIComponent).join(",");
+            const snap = await readWorkspaceSnapshot(snapshotKey);
+            if(request!==jobsLoadSerial)return;
+            if (snap?.statistics && snap?.planning_overview) {
+              workspace = snap; eventSuggestions = snap.event_suggestions || [];
+              renderSummary(); renderEventSuggestions(); renderDays(); renderPlannedActions(); renderSelection();
+            }
+          }
+        } catch (_) {}
+      }
+      if (!workspace?.statistics) setStatus("Arbeitsbestände werden geladen …");
       const data = await getJson("/api/jobs");
-      const previous = new Set(selectedJobIds);
+      if(request!==jobsLoadSerial)return;
+      await writeWorkspaceSnapshot(cacheKey,data,()=>request===jobsLoadSerial);
+      if(request!==jobsLoadSerial)return;
 
       jobs = (data.jobs || [])
-        .filter(job => ["metadata_fixture_analysis","folder_import","sd_import"].includes(job.operation))
+        .filter(selectableBackup)
+        .filter(job => ["metadata_fixture_analysis","folder_import","sd_import","metadata_general_import","metadata_multiple_import","trash_import"].includes(job.operation) && !(job.operation==="trash_import" && Number(job.total_family_count||0)===0))
         .sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
 
-      const active=jobs.filter(job=>job.workflow_status!=="archived");
-      if(previous.size){
-        selectedJobIds=new Set([...previous].filter(id=>jobs.some(job=>job.id===id)));
-      }else{
-        selectedJobIds=new Set(active.map(job=>job.id));
-      }
+      refreshBackupSelection(jobs);
+      saveBackupSelection();
 
       const requestedJob=new URLSearchParams(location.search).get("job");
       if(requestedJob && jobs.some(job=>job.id===requestedJob)){
@@ -2370,17 +2816,31 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       if(!jobs.length){
         setStatus("Noch kein analysierter Arbeitsbestand vorhanden.");
-        await loadWorkspace();
+        await loadWorkspace({physicalRefresh});
         return;
       }
-      await loadWorkspace();
+      await loadWorkspace({physicalRefresh});
     }
 
-    async function loadWorkspace() {
+    let observedImports=null, refreshingAfterImport=false;
+    window.addEventListener("bk-activity-updated", async event => {
+      const active=new Set((event.detail||[]).filter(item=>["import","trash_restore"].includes(item.kind)&&item.active).map(item=>item.id));
+      const finished=observedImports && [...observedImports].some(id=>!active.has(id));
+      observedImports=active;
+      if(finished && !refreshingAfterImport){
+        refreshingAfterImport=true;
+        try { await loadJobs(); } catch(error) { setStatus(error.message,true); }
+        finally { refreshingAfterImport=false; }
+      }
+    });
+
+    async function loadWorkspace({physicalRefresh=false}={}) {
+      const request=++workspaceLoadSerial;
       if (!globalFolderLayout) {
         try { globalFolderLayout = await getJson("/api/settings/event-folder-layout"); }
         catch (_) { globalFolderLayout = {structure_enabled:true,input_path:"Alle",layout:{version:1,nodes:[]}}; }
       }
+      if(request!==workspaceLoadSerial)return;
       const ids=[...selectedJobIds].filter(id=>jobs.some(job=>job.id===id));
       selectedDays.clear();
 
@@ -2396,10 +2856,43 @@ WORKSPACE_HTML = r"""<!doctype html>
         return;
       }
 
-      setStatus("Gemeinsamer Arbeitsbestand wird geladen …");
-      const query=ids.map(encodeURIComponent).join(",");
-      workspace=await getJson(`/api/workspace/summary?jobs=${query}`);
+      const query=ids.sort().map(encodeURIComponent).join(",");
+      const snapshotKey = "bk-workspace-pre:" + (window.__bkLibraryId || "main") + ":" + query;
+      if (!physicalRefresh) {
+        try {
+          const saved = await readWorkspaceSnapshot(snapshotKey);
+          if (request===workspaceLoadSerial && saved && saved.statistics && saved.planning_overview) {
+            workspace = saved;
+            eventSuggestions = saved.event_suggestions || [];
+            renderSummary(); renderEventSuggestions(); renderDays();
+            renderPlannedActions(); renderSelection();
+          }
+        } catch (_) {}
+      }
+      if (!workspace?.statistics || physicalRefresh) setStatus("Gemeinsamer Arbeitsbestand wird geladen …");
+      statusElement.classList.add("bk-loading-status");
+      let refreshWarning = "";
+      try {
+        if (physicalRefresh) {
+          // An explicit refresh is a command. The subsequent projection is a
+          // pure GET, including when the command is currently protected.
+          try {
+            const refreshed=await fetch('/api/workspace/refresh',{method:'POST',credentials:'same-origin'});
+            if (!refreshed.ok) refreshWarning=JSON.stringify((await refreshed.json()).detail || 'Refresh requires review');
+          } catch (error) { refreshWarning=String(error.message || error); }
+        }
+        const fresh=await getJson(
+          `/api/workspace/summary?jobs=${query}&physical_refresh=${physicalRefresh ? "true" : "false"}`
+        );
+        if(request!==workspaceLoadSerial)return;
+        workspace=fresh;
+      } finally {
+        if(request===workspaceLoadSerial)statusElement.classList.remove("bk-loading-status");
+      }
+      if(request!==workspaceLoadSerial)return;
       eventSuggestions=workspace.event_suggestions || [];
+      await writeWorkspaceSnapshot(snapshotKey,workspace,()=>request===workspaceLoadSerial);
+      if(request!==workspaceLoadSerial)return;
 
       updateTechnicalAnchor(jobSelect.value);
       renderSummary();
@@ -2408,12 +2901,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       renderPlannedActions();
       renderSelection();
 
-      const activeCount=ids.filter(id=>jobs.find(job=>job.id===id)?.workflow_status!=="archived").length;
-      setStatus(
-        ids.length===1
-          ? `${workspace.statistics.day_count} Tagesgruppen geladen.`
-          : `${workspace.statistics.day_count} Tagesgruppen aus ${ids.length} Sicherungen geladen${activeCount!==ids.length?" · archivierte Sicherung eingeblendet":""}.`
-      );
+      setStatus(refreshWarning);
     }
 
     function renderEventSuggestions() {
@@ -2441,17 +2929,17 @@ WORKSPACE_HTML = r"""<!doctype html>
         card.innerHTML = `
           <div class="suggestion-head">
             <div>
-              <div class="suggestion-title">${Number(item.family_count || familyIds.length)} neue Familien passen zu ${escapeHtml(item.target_name)}</div>
-              <div class="muted">Diese neuen Aufnahmen liegen vollständig im Zeitraum des bestehenden Ereignisses · Herkunft: ${escapeHtml(item.source_label || "Sicherung")}.</div>
+              <div class="suggestion-title">${Number(item.family_count || familyIds.length)} neue Familien passen zu <span data-bk-preserve-language>${escapeHtml(item.target_name)}</span></div>
             </div>
             <span class="badge ${item.target_status === "archived" ? "warning" : "success"}">${escapeHtml(statusText)}</span>
           </div>
           <div class="suggestion-meta">
             <span>${Number(item.file_count || 0)} Dateien</span>
-            <span>${escapeHtml(item.target_start_datetime)} bis ${escapeHtml(item.target_end_datetime)}</span>
+            <span>${escapeHtml(item.target_start_datetime)} ${bk0511PreviewLabel("bis", "to")} ${escapeHtml(item.target_end_datetime)}</span>
           </div>
           <details class="suggestion-files">
             <summary>Vorschau und Wirkung</summary>
+            <p>Diese neuen Aufnahmen liegen vollständig im Zeitraum des bestehenden Ereignisses · Herkunft: <span data-bk-preserve-language>${escapeHtml(item.source_label || "Sicherung")}</span>.</p>
             <p>${escapeHtml(consequence)}</p>
             <ul>${familyRows}</ul>
             <code>${escapeHtml(item.target_folder_name || "")}</code>
@@ -2479,12 +2967,12 @@ WORKSPACE_HTML = r"""<!doctype html>
               data-planned-event="${escapeHtml(event.id)}"
               data-planned-components="${escapeHtml(JSON.stringify((event.component_events || [{job_id:event.job_id,event_id:event.id,status:event.status}]).filter(component=>component.status==="planned")))}"
               checked>
-            <span>${escapeHtml(event.display_title || event.name)} · ${Number(event.assigned_family_count || 0)} Familien${(event.component_events||[]).length>1?" · mehrere Sicherungen":""}</span>
+            <span><span data-bk-preserve-language>${escapeHtml(event.display_title || event.name)}</span> · <span>${Number(event.assigned_family_count || 0)} Familien${(event.component_events||[]).length>1?" · mehrere Sicherungen":""}</span></span>
           </label>`).join("")
         + reconcileTargets.map(event => `
           <div class="planned-choice">
             <span>↳</span>
-            <span><strong>${escapeHtml(event.display_title || event.name)}</strong> · Ziel einer offenen gemeinsamen Nachsortierung</span>
+            <span><strong data-bk-preserve-language>${escapeHtml(event.display_title || event.name)}</strong> · <span>Ziel einer offenen gemeinsamen Nachsortierung</span></span>
           </div>`).join("");
 
       const families = planned.reduce((sum,event)=>sum+Number(event.assigned_family_count||0),0);
@@ -2553,6 +3041,70 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
+    const mobilePreviewButton = document.getElementById("mobile-preview-button");
+    const mobilePreviewDialog = document.getElementById("mobile-preview-dialog");
+    const previewPanel = document.querySelector("aside.preview");
+    const previewHome = document.createComment("structure preview home");
+    previewPanel.before(previewHome);
+    let previewBodyOverflow = "";
+    let previewInDialog = false;
+    function syncMobilePreviewButton() {
+      const selected = selectedPreviewEventId
+        ? [...document.querySelectorAll("[data-preview-event-id]")].find(node => node.dataset.previewEventId === selectedPreviewEventId)
+        : [...document.querySelectorAll(".day-card.selected")].at(-1);
+      mobilePreviewButton.hidden = !selected;
+      if (selected) {
+        const eventStatus = selected.querySelector(".timeline-event-statuses");
+        const dayStatus = selected.querySelector(".day-statuses");
+        (eventStatus || dayStatus || selected).append(mobilePreviewButton);
+      }
+    }
+    let lastMobilePreviewTap = {key:"", time:0};
+    function mobilePreviewDoubleTap(card, select) {
+      card.addEventListener("click", event => {
+        if (!window.matchMedia("(max-width:820px)").matches || event.target.closest("button,input,a")) return;
+        const now = performance.now();
+        const key = card.dataset.previewEventId || card.dataset.bkSelectionKey;
+        if (key && lastMobilePreviewTap.key === key && now - lastMobilePreviewTap.time < 350) {
+          event.preventDefault(); event.stopImmediatePropagation();
+          Promise.resolve(select()).then(() => mobilePreviewButton.click()).catch(error => setStatus(error.message,true));
+          lastMobilePreviewTap = {key:"", time:0};
+        } else lastMobilePreviewTap = {key, time:now};
+      }, true);
+    }
+    mobilePreviewButton.addEventListener("click", event => {
+      event.preventDefault(); event.stopPropagation();
+      if (mobilePreviewDialog.open) return;
+      previewInDialog = true;
+      document.getElementById("mobile-preview-content").append(previewPanel);
+      previewBody.hidden = false;
+      previewBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      mobilePreviewDialog.showModal();
+      scheduleTreeFit();
+    });
+    function restoreMobilePreview() {
+      if (!previewInDialog) return;
+      previewHome.after(previewPanel);
+      document.body.style.overflow = previewBodyOverflow;
+      previewInDialog = false;
+    }
+    function closeMobilePreview() {
+      restoreMobilePreview();
+      mobilePreviewDialog.close();
+    }
+    document.getElementById("mobile-preview-close").addEventListener("click", closeMobilePreview);
+    mobilePreviewDialog.addEventListener("cancel", event => {
+      event.preventDefault();
+      closeMobilePreview();
+    });
+    mobilePreviewDialog.addEventListener("close", () => {
+      if (!mobilePreviewDialog.open) restoreMobilePreview();
+    });
+    window.matchMedia("(max-width: 820px)").addEventListener("change", event => {
+      if (!event.matches && mobilePreviewDialog.open) closeMobilePreview();
+    });
+
     function setSelectedPreviewEvent(eventId) {
       selectedPreviewEventId = eventId || null;
       document.querySelectorAll("[data-preview-event-id]").forEach(node => {
@@ -2562,6 +3114,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           && node.dataset.previewEventId === selectedPreviewEventId
         );
       });
+      syncMobilePreviewButton();
     }
 
 
@@ -2581,37 +3134,62 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
+    function bk0511PreviewLabel(german, english) {
+      return document.documentElement.dataset.bkLocale === "de" ? german : english;
+    }
+
     function renderStoredEventPreview(data) {
       const event = data?.event || {};
       const start = String(event.start_datetime || "");
       const end = String(event.end_datetime || "");
       const status = workspaceStatusLabel(event.status || "");
-      const kind = event.event_kind === "no_event" ? "Ohne Ereignis" : "Ereignis";
-      const subfolders = event.folder_layout?.structure_enabled === false ? "Direkt im Ereignis" : "Unterordnerstruktur aktiv";
+      const kind = event.event_kind === "no_event"
+        ? bk0511PreviewLabel("Ohne Ereignis", "Unassigned")
+        : bk0511PreviewLabel("Ereignis", "Event");
+      const subfolders = event.folder_layout?.structure_enabled === false
+        ? bk0511PreviewLabel("Direkt im Ereignis", "Directly in event")
+        : bk0511PreviewLabel("Unterordnerstruktur aktiv", "Subfolder structure enabled");
       const dayFolders = event.preserve_day_folders
-        ? "Tagesordner bleiben erhalten"
-        : "Ohne Tagesunterordner";
+        ? bk0511PreviewLabel("Tagesordner bleiben erhalten", "Day folders preserved")
+        : bk0511PreviewLabel("Ohne Tagesunterordner", "Without day subfolders");
       const childCount = Array.isArray(event.child_events) ? event.child_events.length : 0;
       const segmentCount = Array.isArray(event.time_segments) ? event.time_segments.length : 0;
       const details = [
         event.event_kind === "no_event"
-          ? `<div><strong>Datenbank-Zeitraum:</strong> mehrere gespeicherte Zeitsegmente</div>`
-          : `<div><strong>Datenbank-Zeitraum:</strong> von ${escapeHtml(formatStoredDateTime(start))} bis ${escapeHtml(formatStoredDateTime(end))}</div>`,
-        `<div><strong>Status:</strong> ${escapeHtml(status)} · ${escapeHtml(kind)}</div>`,
-        `<div><strong>Ordnerlogik:</strong> ${escapeHtml(dayFolders)} · ${escapeHtml(subfolders)}</div>`,
-        `<div><strong>Zugeordnet:</strong> ${Number(event.assigned_family_count || 0)} Familien</div>`
+          ? `<div><strong>${bk0511PreviewLabel("Datenbank-Zeitraum:", "Database period:")}</strong> ${bk0511PreviewLabel("mehrere gespeicherte Zeitsegmente", "multiple saved time segments")}</div>`
+          : `<div><strong>${bk0511PreviewLabel("Datenbank-Zeitraum:", "Database period:")}</strong> ${bk0511PreviewLabel("von", "from")} ${escapeHtml(formatStoredDateTime(start))} ${bk0511PreviewLabel("bis", "to")} ${escapeHtml(formatStoredDateTime(end))}</div>`,
+        `<div><strong>${bk0511PreviewLabel("Status:", "Status:")}</strong> ${escapeHtml(bk0511PreviewLabel(status, window.BibliothekarI18n?.t?.(status) || status))} · ${escapeHtml(kind)}</div>`,
+        `<div><strong>${bk0511PreviewLabel("Ordnerlogik:", "Folder logic:")}</strong> ${escapeHtml(dayFolders)} · ${escapeHtml(subfolders)}</div>`,
+        `<div><strong>${bk0511PreviewLabel("Zugeordnet:", "Assigned:")}</strong> ${Number(event.assigned_family_count || 0)} ${bk0511PreviewLabel("Familien", "families")}</div>`
       ];
       if (childCount) {
-        details.push(`<div><strong>Unterereignisse:</strong> ${childCount}</div>`);
+        details.push(`<div><strong>${bk0511PreviewLabel("Unterereignisse:", "Subevents:")}</strong> ${childCount}</div>`);
       }
       if (segmentCount) {
-        details.push(`<div><strong>Zeitsegmente:</strong> ${segmentCount}</div>`);
+        details.push(`<div><strong>${bk0511PreviewLabel("Zeitsegmente:", "Time segments:")}</strong> ${segmentCount}</div>`);
       }
+      const physical=data?.physical_state||{};
+      const available=physical.available===true;
+      const planned = !["applied", "archived"].includes(event.status);
+      const actualTree=planned ? String(data.structure_text || "") : available
+        ? String(physical.event_prefix || event.folder_name || "") + "/\n" + String(physical.tree_text||bk0511PreviewLabel("(keine Unterordner gefunden)","(no subfolders found)"))
+        : String(physical.reason||bk0511PreviewLabel("Physischer Bestand nicht prüfbar","Physical inventory unavailable"));
+      const observedPaths=new Set(physical.directories||[]);
+      const removed=(physical.directory_removed||[]).filter(path=>!observedPaths.has(String(path)));
+      const added=(physical.directory_added||[]).filter(path=>!removed.includes(String(path)));
+      const discrepancy=available && (removed.length>0 || added.length>0);
+      const note=discrepancy
+        ? `<div class="muted" role="status">${bk0511PreviewLabel("Physische Abweichung vom gespeicherten Ordnerlayout erkannt.","Physical directory layout differs from the saved event layout.")}`
+           + (removed.length ? `<div>${bk0511PreviewLabel("Fehlende Sollordner:","Missing expected folders:")} <code>${escapeHtml(removed.join(", "))}</code></div>` : "")
+           + (added.length ? `<div>${bk0511PreviewLabel("Zusätzliche IST-Ordner:","Additional physical folders:")} <code>${escapeHtml(added.join(", "))}</code></div>` : "")
+           + `</div>` : "";
       structurePreview.classList.add("rich-preview");
       structurePreview.innerHTML =
-        `<div class="preview-root-title">${escapeHtml(event.name || "Gespeichertes Ereignis")}</div>`
+        `<div class="preview-root-title" data-bk-preserve-language>${escapeHtml(event.name || "Gespeichertes Ereignis")}</div>`
         + `<div class="stored-preview-meta">${details.join("")}</div>`
-        + `<pre class="structure-lines">${escapeHtml(data?.structure_text || "Keine Struktur vorhanden.")}</pre>`;
+        + `<div class="stored-preview-meta"><strong>${planned ? bk0511PreviewLabel("Geplante Zielstruktur","Planned target structure") : bk0511PreviewLabel("Physischer IST-Bestand","Physical actual inventory")}</strong></div>`
+        + `<pre class="structure-lines">${escapeHtml(actualTree)}</pre>`
+        + note;
       previewBody.hidden = false;
       scheduleTreeFit(structurePreview);
     }
@@ -2723,7 +3301,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       return (
         startDate.toLocaleDateString(
-          "de-DE",
+          (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
           {
             day: "2-digit",
             month: "2-digit"
@@ -2731,7 +3309,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         )
         + "–"
         + endDate.toLocaleDateString(
-          "de-DE",
+          (document.documentElement.lang === "de" ? "de-DE" : "en-US"),
           {
             day: "2-digit",
             month: "2-digit",
@@ -2743,9 +3321,9 @@ WORKSPACE_HTML = r"""<!doctype html>
 
 
     function selectableDayKeys() {
-      return availableDayGroups().map(
-        group => group.card_key || group.day_key || "__without_date__"
-      );
+      return availableDayGroups()
+        .filter(group => group.has_date)
+        .map(group => group.card_key || group.day_key);
     }
 
     function updateDaySelectAllButton() {
@@ -2801,13 +3379,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
 
       const availableKeys =
-        new Set(
-          availableDayGroups().map(
-            group =>
-              group.card_key || group.day_key
-              || "__without_date__"
-          )
-        );
+        new Set(selectableDayKeys());
 
       for (
         const selectedKey
@@ -2847,8 +3419,13 @@ WORKSPACE_HTML = r"""<!doctype html>
           card.dataset.previewEventId = group.event_id;
           card.dataset.previewJobId = group.job_id || "";
           card.style.cursor="pointer";
+          mobilePreviewDoubleTap(card, () => openStoredEventPreview(group.event_id, group.job_id || jobSelect.value));
           card.addEventListener("click",()=>{
             openStoredEventPreview(group.event_id, group.job_id || jobSelect.value);
+          });
+          card.addEventListener("dblclick",event=>{
+            event.preventDefault();
+            location.href='/events?job='+encodeURIComponent(group.job_id||jobSelect.value)+'&event='+encodeURIComponent(group.event_id);
           });
 
           const range =
@@ -2952,6 +3529,98 @@ WORKSPACE_HTML = r"""<!doctype html>
           continue;
         }
 
+        if (!group.has_date) {
+          const card = document.createElement("article");
+          card.className = "day-card without-date review-card";
+          card.tabIndex = 0;
+          card.setAttribute("role", "button");
+          card.setAttribute(
+            "aria-label",
+            "Prüffälle ohne Datum – Metadatenkorrektur öffnen"
+          );
+
+          const main = document.createElement("span");
+          main.className = "day-main";
+
+          const name = document.createElement("span");
+          name.className = "day-name";
+          const reviewCount=Number(group.review_required_count||0);
+          const total=Number(group.file_count||0);
+          const readyCount=Number(group.ready_to_sort_file_count||0);
+          name.textContent=reviewCount?'Prüffälle · Ohne Datum':readyCount?'Bereit zum Einsortieren · Ohne Datum':'Ohne Datum';
+
+          const metadata = document.createElement("span");
+          metadata.className = "day-meta";
+          metadata.textContent=(reviewCount?reviewCount+' Prüffälle':'')
+            +(reviewCount&&readyCount?' · ':'')
+            +(readyCount?readyCount+' bereit zum Einsortieren':'');
+
+          const hint = document.createElement("span");
+          hint.className = "review-card-hint";
+          hint.textContent =
+            "Nicht für Ereignisse auswählbar · Doppelklick öffnet die Metadatenkorrektur";
+
+          main.appendChild(name);
+          main.appendChild(metadata);
+          main.appendChild(hint);
+
+          const badge = document.createElement("span");
+          badge.className = "badge "+(reviewCount?'warning':'success');
+          badge.textContent = formatBytes(Number(group.total_size_bytes||0));
+
+          const showReviewPreview = () => {
+            selectedDays.clear();
+            lastSelectedDayKey = null;
+            setSelectedPreviewEvent(null);
+            renderDays();
+            renderSelection();
+
+            selectionLabel.textContent = reviewCount?"Prüffälle":"Bereit zum Einsortieren";
+            newEventButton.disabled = true;
+            noEventButton.disabled = true;
+            existingNoEventButton.disabled = true;
+
+            structurePreview.classList.add("rich-preview");
+            structurePreview.innerHTML = `
+              <div class="metadata-review-preview">
+                <div class="preview-root-title">Prüffälle · Ohne Datum</div>
+                <div class="preview-selection-note">
+                  ${reviewCount?'Diese Dateien benötigen eine Metadatenprüfung.':'Die Metadaten sind bestätigt. Die Dateien müssen noch in den Tagesbestand einsortiert werden.'}
+                </div>
+                <div class="preview-selection-note">
+                  <strong>${Number(group.file_count || 0)} Dateien ·
+                  ${Number(group.family_count || 0)} Familien</strong>
+                  ${reviewCount ? ` · ${reviewCount} Prüffälle` : ""}
+                </div>
+                <button type="button" class="primary" data-open-metadata-review>
+                  Metadatenkorrektur
+                </button>
+              </div>
+            `;
+            structurePreview
+              .querySelector("[data-open-metadata-review]")
+              ?.addEventListener("click", () => {
+                location.href = "/metadata-correction?area=library";
+              });
+          };
+
+          card.addEventListener("click", showReviewPreview);
+          card.addEventListener("dblclick", () => {
+            location.href = "/metadata-correction?area=library";
+          });
+          card.addEventListener("keydown", event => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              showReviewPreview();
+            }
+          });
+
+          card.appendChild(main);
+          card.appendChild(badge);
+          dayList.appendChild(card);
+          continue;
+        }
+
         const key =
           group.card_key || group.day_key
           || "__without_date__";
@@ -2963,6 +3632,13 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         card.className =
           "day-card";
+        card.dataset.bkPwaSelect = "workspace-capture";
+        card.dataset.bkPwaKey = key;
+        card.dataset.bkSelectionKey = key;
+        mobilePreviewDoubleTap(card, () => {
+          selectedDays.add(key); lastSelectedDayKey = key;
+          renderDays(); renderSelection();
+        });
         if (group.released_archive) {
           card.classList.add("released-archive-card");
         }
@@ -2991,6 +3667,27 @@ WORKSPACE_HTML = r"""<!doctype html>
           "day-check";
         checkbox.checked =
           selectedDays.has(key);
+
+        card.addEventListener("bk:pwa-select", event => {
+          const phase = String(event.detail?.phase || "");
+          if (phase === "end") {
+            renderDays();
+            renderSelection();
+            return;
+          }
+
+          const desired = phase === "set"
+            ? Boolean(event.detail?.selected)
+            : true;
+          if (desired) selectedDays.add(key);
+          else selectedDays.delete(key);
+
+          checkbox.checked = desired;
+          card.classList.toggle("selected", desired);
+          lastSelectedDayKey = key;
+          updateDaySelectAllButton();
+          renderSelection();
+        });
 
         checkbox.addEventListener(
           "click",
@@ -3049,13 +3746,6 @@ WORKSPACE_HTML = r"""<!doctype html>
           "day-name";
         name.textContent =
           formatDay(group.day_key) + (group.start_time && (group.start_time !== "00:00" || group.end_time !== "23:59") ? ` · ${group.start_time}–${group.end_time}` : "");
-        if (group.released_archive) {
-          const marker=document.createElement("span");
-          marker.className="badge warning";
-          marker.textContent="Aus Archiv freigeworden";
-          marker.style.marginLeft="8px";
-          name.appendChild(marker);
-        }
         if (group.reassignment_pending || group.released_free) {
           const marker=document.createElement("span");
           marker.textContent="●";
@@ -3151,10 +3841,20 @@ WORKSPACE_HTML = r"""<!doctype html>
               )
             : "Metadaten eindeutig";
 
-        card.appendChild(badge);
+        const statuses=document.createElement("span");
+        statuses.className="day-statuses";
+        if (group.released_archive) {
+          const released=document.createElement('span');
+          released.className='badge warning archive-release-status';
+          released.textContent='Aus Archiv freigeworden';
+          statuses.appendChild(released);
+        }
+        statuses.appendChild(badge);
+        card.appendChild(statuses);
         dayList.appendChild(card);
       }
       updateDaySelectAllButton();
+      syncMobilePreviewButton();
     }
 
 
@@ -3189,6 +3889,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       selectionBar.hidden = false;
 
       const hasSelection = groups.length > 0;
+      syncMobilePreviewButton();
       // 0.16.8: Datum/Uhrzeit sind führend. Eine Tagesauswahl ist nur noch
       // eine bequeme Vorbelegung, aber keine Voraussetzung für neue Ziele.
       newEventButton.disabled = !workspace;
@@ -3219,7 +3920,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         selectedDatedGroups();
 
       let preview =
-        '<div class="preview-root-title">Arbeitsbestand</div><div class="preview-days">';
+        '<div class="preview-root-title">' + (document.documentElement.dataset.bkLocale==="de" ? "Arbeitsbestand" : "Workspace inventory") + '</div><div class="preview-days">';
 
       for (const group of groups) {
         const dayLabel = group.has_date ? formatDay(group.day_key) : "Ohne Datum";
@@ -3249,7 +3950,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       if (dated.length) {
         preview +=
-          `<div class="preview-selection-note"><strong>Auswahlzeitraum:</strong> ${escapeHtml(dated[0].day_key)} bis ${escapeHtml(dated[dated.length - 1].day_key)}</div>`;
+          `<div class="preview-selection-note"><strong>${document.documentElement.dataset.bkLocale==="de" ? "Auswahlzeitraum:" : "Selection period:"}</strong> <span class="preview-period-dates">${escapeHtml(dated[0].day_key)} ${document.documentElement.dataset.bkLocale==="de" ? "bis" : "to"} ${escapeHtml(dated[dated.length - 1].day_key)}</span></div>`;
       }
 
       structurePreview.innerHTML =
@@ -3346,11 +4047,13 @@ WORKSPACE_HTML = r"""<!doctype html>
         if(months.length>1){
           dialogError.hidden=false;
           dialogError.textContent="„Ohne Ereignis“ darf nur innerhalb eines Kalendermonats angelegt werden. Bitte die Monate getrennt zuordnen.";
+          dialogError.dataset.monthRangeError="1";
           saveEventButton.disabled=true;
         }else{
-          if(String(dialogError.textContent||"").includes("Kalendermonats")){
+          if(dialogError.dataset.monthRangeError==="1"){
             dialogError.hidden=true;
             dialogError.textContent="";
+            delete dialogError.dataset.monthRangeError;
           }
           saveEventButton.disabled=false;
         }
@@ -3573,6 +4276,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         createSubevents.hidden=false;
         createSubeventHeading.textContent="Unterereignisse (optional)";
         createSubeventList.innerHTML="";
+        updateSubeventPrefixToggle();
         if (dated.length) {
           eventStartDate.value=dated[0].day_key || String(dated[0].start_datetime||"").slice(0,10);
           eventEndDate.value=dated[dated.length-1].day_key || String(dated[dated.length-1].end_datetime||"").slice(0,10);
@@ -3600,6 +4304,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       eventName.disabled=true;
       createSubeventList.innerHTML="";
       renderExistingSubeventCards(parent);
+      updateSubeventPrefixToggle();
 
       useTimeRange.checked=true;
       useTimeRange.disabled=true;
@@ -3696,9 +4401,10 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     function subeventDayControl(attribute, displayAttribute, selected, label){
+      const bounds=subeventBounds();
       const days=subeventAllowedDays();
       const current=days.includes(selected) ? selected : (days[0]||selected||"");
-      return `<label><span>${escapeHtml(label)}</span><span style="display:grid;grid-template-columns:58px minmax(82px,1fr);gap:6px"><select ${attribute}>${subeventDayOptions(current)}</select><input ${displayAttribute} type="text" value="${escapeHtml(monthYearForIso(current))}" disabled aria-label="Monat und Jahr"></span></label>`;
+      return `<label><span>${escapeHtml(label)}</span><input ${attribute} type="date" min="${escapeHtml(bounds.minDate||"")}" max="${escapeHtml(bounds.maxDate||"")}" value="${escapeHtml(current)}"></label>`;
     }
     function minuteAfter(value){
       const match=/^(\d{2}):(\d{2})$/.exec(String(value||""));
@@ -3754,25 +4460,34 @@ WORKSPACE_HTML = r"""<!doctype html>
       const allowed=subeventAllowedDays();
       if(!bounds.minDate||!bounds.maxDate||!allowed.length)return;
       for(const row of createSubeventList.querySelectorAll("[data-create-subevent]")){
-        for(const [selector,displaySelector] of [
-          ["[data-create-child-start-date]","[data-create-child-start-month-year]"],
-          ["[data-create-child-end-date]","[data-create-child-end-month-year]"],
+        for(const selector of [
+          "[data-create-child-start-date]",
+          "[data-create-child-end-date]",
         ]){
           const control=row.querySelector(selector);
           if(!control)continue;
-          let value=control.value;
-          if(!allowed.includes(value)){
-            if(!value || value<bounds.minDate)value=bounds.minDate;
-            else if(value>bounds.maxDate)value=bounds.maxDate;
-            else value=allowed[0];
-          }
-          control.innerHTML=subeventDayOptions(value);
+          control.min=bounds.minDate;
+          control.max=bounds.maxDate;
+          let value=String(control.value||"");
+          if(!validIsoDateText(value) || value<bounds.minDate)value=bounds.minDate;
+          else if(value>bounds.maxDate)value=bounds.maxDate;
           control.value=value;
-          const display=row.querySelector(displaySelector);
-          if(display)display.value=monthYearForIso(value);
         }
       }
     }
+    function updateSubeventPrefixToggle(){
+      const count=createSubeventList.querySelectorAll("[data-create-subevent]").length;
+      const visible=!createSubevents.hidden && !activeExtension && count>0;
+      subeventPrefixToggle.hidden=!visible;
+      subeventPrefixToggle.textContent=dialogSubeventPrefixEnabled ? "Präfix: an" : "Präfix: aus";
+      subeventPrefixToggle.setAttribute("aria-pressed",dialogSubeventPrefixEnabled ? "true" : "false");
+      const parts=["Datum"];
+      if(globalSubeventDateMode==="range")parts.push("Von–bis");
+      if(globalSubeventIncludeTime)parts.push("Uhrzeit");
+      if(globalSubeventIncludeYear)parts.push("Jahr");
+      subeventPrefixToggle.title="Namenspräfix für Unterereignisse · "+parts.join(" · ");
+    }
+
     function addCreateSubeventCard(value={}){
       const defaults=Object.keys(value||{}).length ? value : nextSubeventDefaults();
       if(!defaults)return;
@@ -3789,7 +4504,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       const defaultEnd=String(defaults.end_time||(
         ed===bounds.maxDate ? bounds.maxTime : "23:59"
       )||"23:59");
-      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Tag 1"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Unterereignis entfernen</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary">${subeventDayControl("data-create-child-start-date","data-create-child-start-month-year",sd,"Beginn")}<label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary">${subeventDayControl("data-create-child-end-date","data-create-child-end-month-year",ed,"Ende")}<label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
+      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Tag 1"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Remove subevent</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary">${subeventDayControl("data-create-child-start-date","data-create-child-start-month-year",sd,"Beginn")}<label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary">${subeventDayControl("data-create-child-end-date","data-create-child-end-month-year",ed,"Ende")}<label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
       const name=row.querySelector("[data-create-child-name]"),summary=row.querySelector("[data-create-child-summary]");
       const syncDayDisplays=()=>{
         for(const [selector,displaySelector] of [
@@ -3802,10 +4517,11 @@ WORKSPACE_HTML = r"""<!doctype html>
         }
       };
       name?.addEventListener("input",()=>{summary.textContent=String(name.value||"").trim()||"Unterereignis";scheduleDialogPreview();});
-      row.querySelector("[data-remove-create-subevent]")?.addEventListener("click",()=>{row.remove();scheduleDialogPreview();});
+      row.querySelector("[data-remove-create-subevent]")?.addEventListener("click",()=>{row.remove();updateSubeventPrefixToggle();scheduleDialogPreview();});
       row.querySelectorAll("input,select").forEach(input=>input.addEventListener("change",()=>{syncDayDisplays();scheduleDialogPreview();}));
       createSubeventList.appendChild(row);
       syncDayDisplays();
+      updateSubeventPrefixToggle();
       name?.focus();
       dialogError.hidden=true;
       dialogError.textContent="";
@@ -3821,12 +4537,13 @@ WORKSPACE_HTML = r"""<!doctype html>
       eventStartDate.value=dated.length?dated[0].day_key:"";eventEndDate.value=dated.length?dated[dated.length-1].day_key:"";eventStartTime.value="00:00";eventEndTime.value="23:59";
       eventStartDate.disabled=false;eventStartTime.disabled=false;eventEndDate.disabled=false;eventEndTime.disabled=false;eventStartDate.removeAttribute("min");eventStartDate.removeAttribute("max");eventEndDate.removeAttribute("min");eventEndDate.removeAttribute("max");
       useTimeRange.checked=!noEvent;useTimeRange.disabled=true;setParentTimeFieldsVisible(true);
-      createSubeventList.innerHTML="";createSubevents.hidden=noEvent;createSubeventHeading.textContent="Unterereignisse (optional)";eventBoundaries.hidden=noEvent;preserveDayFolders.checked=false;preserveDayFolders.disabled=false;preserveDayFoldersRow.hidden=false;createSubfolders.checked=Boolean(globalFolderLayout?.structure_enabled ?? true);createSubfolders.disabled=false;createSubfoldersRow.hidden=false;dialogError.hidden=true;dialogError.textContent="";
+      dialogSubeventPrefixEnabled=globalSubeventPrefixEnabled;
+      createSubeventList.innerHTML="";createSubevents.hidden=noEvent;createSubeventHeading.textContent="Unterereignisse (optional)";eventBoundaries.hidden=noEvent;preserveDayFolders.checked=false;preserveDayFolders.disabled=false;preserveDayFoldersRow.hidden=false;createSubfolders.checked=Boolean(globalFolderLayout?.structure_enabled ?? true);createSubfolders.disabled=false;createSubfoldersRow.hidden=false;dialogError.hidden=true;dialogError.textContent="";updateSubeventPrefixToggle();
       noEventSegmentEditor.hidden=!noEvent;existingNoEventTargetRow.hidden=!existingNoEvent;
       if(existingNoEvent){const months=[...new Set(dated.map(group=>String(group.day_key||"").slice(0,7)).filter(Boolean))];noEventTargetCache=[];if(months.length){try{const d=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/no-event/targets?months=${encodeURIComponent(months[0])}`);noEventTargetCache=d.targets||[];}catch(_){}}const target=noEventTargetCache[0]||null;if(target){existingNoEventTargetRow.hidden=false;existingNoEventTarget.innerHTML=`<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(target.status))}</option>`;existingNoEventTarget.value=target.id;existingNoEventTarget.disabled=true;activateNoEventTarget(target);}else renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));}
       else if(noEvent){renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));await autoAttachExistingNoEventCollection();}
       else{applyAutomaticFreeTimeSuggestion(dated);if(parentCandidates.length)applyExistingParentChoice();}
-      dialogPreview.textContent="Vorschau wird vorbereitet …";dialogPreview.hidden=true;calculatePreviewButton.textContent="Vorschau einblenden";saveResult.hidden=true;saveResult.textContent="";eventDialog.showModal();scheduleDialogPreview();
+      dialogPreview.textContent="Vorschau wird vorbereitet …";dialogPreview.hidden=true;calculatePreviewButton.textContent="Vorschau einblenden";saveResult.hidden=true;saveResult.textContent="";eventDialog.showModal();syncCreateEventCompactPairs();scheduleDialogPreview();
     }
 
     function collectEventPayload() {
@@ -3845,6 +4562,9 @@ WORKSPACE_HTML = r"""<!doctype html>
         selected_day_keys: selectedDatedGroups().map(group => group.day_key),
         existing_parent_event_id: (!["no_event","existing_no_event"].includes(dialogMode) ? (existingParentEvent?.value || null) : null)
       };
+      if (!["no_event","existing_no_event"].includes(dialogMode) && !base.existing_parent_event_id) {
+        base.subevent_prefix_enabled=dialogSubeventPrefixEnabled;
+      }
       const parentId = base.existing_parent_event_id;
       const parent = parentId ? (workspace?.events||[]).find(event=>event.id===parentId) : null;
       if (parent) {
@@ -3920,7 +4640,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         const preserve=Boolean(payload.preserve_day_folders || activeNoEventTarget?.preserve_day_folders);
         const state=activeNoEventTarget?.id
           ? await getJson(`/api/events/${encodeURIComponent(activeNoEventTarget.id)}/folder-layout`)
-          : (globalFolderLayout || {structure_enabled:true,input_path:"Alle",layout:{nodes:[{name:"Alle",children:[]},{name:"Sortiert",children:[]},{name:"Export",children:[]}]}});
+          : (globalFolderLayout || {structure_enabled:true,input_path:"All",layout:{nodes:[{name:"All",children:[]},{name:"Sorted",children:[]},{name:"Export",children:[]}]}});
         const flatten=(nodes,prefix="")=>(nodes||[]).flatMap(node=>{
           const path=prefix?`${prefix}/${node.name}`:String(node.name||"");
           return [path,...flatten(node.children||[],path)];
@@ -3935,7 +4655,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         }
         lines.push("",`Fortführung · ${String(activeNoEventTarget?.status||"")}`);
         for (const segment of all) lines.push(`${segment.day_key} · ${segment.start_time}–${segment.end_time}${newKeys.has(`${segment.day_key}|${segment.start_time}|${segment.end_time}`)?" · NEU":" · bestehend"}`);
-        dialogPreview.textContent=lines.join("\n");
+        dialogPreview.textContent=window.BibliothekarI18n?.previewText?.(lines.join("\n")) ?? lines.join("\n");
         return;
       }
 
@@ -3954,7 +4674,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         const empty=(result.preview.empty_subevents||[]);
         dialogPreview.textContent =
-          result.preview.structure_text
+          (window.BibliothekarI18n?.previewText?.(result.preview.structure_text) ?? result.preview.structure_text)
           + (empty.length
             ? "\n\nHinweis: ohne passende Dateifamilien · "+empty.map(item=>item.name).join(", ")
             : "");
@@ -3962,7 +4682,7 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       } catch (error) {
         dialogPreview.textContent =
-          error.message;
+          window.BibliothekarI18n?.previewText?.(error.message) ?? error.message;
 
       } finally {
         calculatePreviewButton.disabled =
@@ -3971,13 +4691,13 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
 
-    function confirmEmptySubevents(error) {
+    async function confirmEmptySubevents(error) {
       if (error?.data?.confirmation_required !== "empty_subevents") return false;
       const names=(error.data.empty_subevents||[]).map(item=>String(item.name||"Unterereignis"));
       const detail=names.length
         ? "\n\nOhne passende Dateifamilien: "+names.join(", ")
         : "";
-      return window.confirm(
+      return window.BibliothekarI18n.confirmAsync(
         "Mindestens ein Unterereignis enthält aktuell keine passenden Dateifamilien."
         + detail
         + "\n\nDie leere Ordnerstruktur wird trotzdem angelegt. Trotzdem fortfahren?"
@@ -3999,7 +4719,7 @@ WORKSPACE_HTML = r"""<!doctype html>
             current={...current,confirm_cross_backup_membership:true};
             continue;
           }
-          if(confirmEmptySubevents(error)){
+          if(await confirmEmptySubevents(error)){
             current={...current,confirm_empty_subevents:true};
             continue;
           }
@@ -4019,6 +4739,8 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
 
       saveEventButton.disabled = true;
+      saveEventButton.classList.add("bk-busy");
+      saveEventButton.setAttribute("aria-busy", "true");
       calculatePreviewButton.disabled = true;
 
       saveResult.hidden = false;
@@ -4088,6 +4810,13 @@ WORKSPACE_HTML = r"""<!doctype html>
           lastSavedEvent = result.parent_event;
         }
 
+        if (result?.resort_required && result?.event_id) {
+          selectedDays.clear();
+          eventDialog.close();
+          location.href = `/events?job=${encodeURIComponent(result.target_job_id || jobId)}&task=resort:${encodeURIComponent(result.event_id)}`;
+          return;
+        }
+
         if (result?.change_request_id) {
           selectedDays.clear();
           await loadWorkspace();
@@ -4100,7 +4829,12 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         selectedDays.clear();
 
-        await loadWorkspace();
+        const fastPlannedRefresh = (
+          String(result?.status || "") === "planned"
+          && String(result?.parent_event?.status || "") === "planned"
+          && !result?.change_request_id
+        );
+        await loadWorkspace({physicalRefresh: !fastPlannedRefresh});
 
         eventDialog.close();
 
@@ -4123,6 +4857,8 @@ WORKSPACE_HTML = r"""<!doctype html>
 
       } finally {
         saveEventButton.disabled = false;
+        saveEventButton.classList.remove("bk-busy");
+        saveEventButton.removeAttribute("aria-busy");
         calculatePreviewButton.disabled =
           false;
       }
@@ -4133,9 +4869,11 @@ WORKSPACE_HTML = r"""<!doctype html>
     function onBackupFilterChange(event){
       const checkbox=event.target.closest("input[data-backup-filter-job]");
       if(!checkbox)return;
+      allActiveBackups=false;
       const id=String(checkbox.dataset.backupFilterJob||"");
       if(checkbox.checked)selectedJobIds.add(id);
       else selectedJobIds.delete(id);
+      saveBackupSelection();
       updateTechnicalAnchor(jobSelect.value);
       renderBackupFilter();
       loadWorkspace().catch(error=>setStatus(error.message,true));
@@ -4143,14 +4881,18 @@ WORKSPACE_HTML = r"""<!doctype html>
     backupFilterActiveList.addEventListener("change",onBackupFilterChange);
     backupFilterArchivedList.addEventListener("change",onBackupFilterChange);
     backupFilterAll.addEventListener("click",()=>{
+      allActiveBackups=true;
       selectedJobIds=new Set(jobs.filter(job=>job.workflow_status!=="archived").map(job=>job.id));
+      saveBackupSelection();
       backupFilterArchived.open=false;
       updateTechnicalAnchor();
       renderBackupFilter();
       loadWorkspace().catch(error=>setStatus(error.message,true));
     });
     backupFilterNone.addEventListener("click",()=>{
+      allActiveBackups=false;
       selectedJobIds.clear();
+      saveBackupSelection();
       updateTechnicalAnchor();
       renderBackupFilter();
       loadWorkspace().catch(error=>setStatus(error.message,true));
@@ -4172,6 +4914,11 @@ WORKSPACE_HTML = r"""<!doctype html>
 
     // Normale Ereignisse besitzen immer exakte Datum-/Uhrzeitgrenzen.
     addCreateSubevent?.addEventListener("click",()=>addCreateSubeventCard());
+    subeventPrefixToggle?.addEventListener("click",()=>{
+      dialogSubeventPrefixEnabled=!dialogSubeventPrefixEnabled;
+      updateSubeventPrefixToggle();
+      scheduleDialogPreview();
+    });
 
     existingParentEvent?.addEventListener("change", applyExistingParentChoice);
 
@@ -4235,49 +4982,146 @@ WORKSPACE_HTML = r"""<!doctype html>
       scheduleDialogPreview();
     });
 
-    async function applyPlannedEvents() {
-      const selectedInputs=[...plannedEventSelection.querySelectorAll("input[data-planned-event]:checked")];
-      const components=[];
-      const seen=new Set();
-      for(const input of selectedInputs){
-        let rows=[];
-        try{rows=JSON.parse(input.dataset.plannedComponents||"[]");}catch(_){}
-        for(const row of rows){
-          const key=`${row.job_id}:${row.event_id}`;
-          if(!row.job_id||!row.event_id||seen.has(key))continue;
-          seen.add(key);components.push(row);
-        }
-      }
-      if(!components.length)throw new Error("Keine geplanten Ereignisse ausgewählt.");
-      applySavedEventButton.disabled=true;
-      applySavedEventStatus.textContent="Alle ausgewählten Pläne werden geprüft …";
-      const plans=[];
-      for(const component of components){
-        const plan=await getJson(`/api/jobs/${encodeURIComponent(component.job_id)}/events/${encodeURIComponent(component.event_id)}/sort-plan`);
-        if(!plan.summary?.ready)throw new Error(`${plan.event?.name||component.event_id}: ${plan.summary?.blocker_count||1} Blocker.`);
-        plans.push({component,plan});
-      }
-      const familyCount=plans.reduce((sum,item)=>sum+Number(item.plan.summary.family_count||0),0);
-      const fileCount=plans.reduce((sum,item)=>sum+Number(item.plan.summary.file_count||0),0);
-      const ok=window.confirm(`${selectedInputs.length} Ereignis${selectedInputs.length===1?"":"se"} mit ${familyCount} Familien und ${fileCount} Dateien jetzt anwenden?`);
-      if(!ok){applySavedEventButton.disabled=false;applySavedEventStatus.textContent="Nicht angewendet.";return;}
-      for(let index=0;index<plans.length;index+=1){
-        const {component,plan}=plans[index];
-        applySavedEventStatus.textContent=`Teil ${index+1} von ${plans.length} wird angewendet …`;
-        const response=await postJson(
-          `/api/jobs/${encodeURIComponent(component.job_id)}/events/${encodeURIComponent(component.event_id)}/apply-sort`,
-          {plan_token:plan.plan_token,confirmation_phrase:plan.apply_confirmation_phrase}
+    let activeApplyBatchId = "";
+
+    async function pollApplyBatch(batchId) {
+      activeApplyBatchId = String(batchId || "");
+      applySavedEventButton.disabled = true;
+      while (activeApplyBatchId === String(batchId || "")) {
+        const batch = await getJson(
+          `/api/operation-batches/${encodeURIComponent(batchId)}`
         );
-        let run=response.run;
-        while(!run.terminal){
-          applySavedEventStatus.textContent=`Teil ${index+1} von ${plans.length} · ${run.progress_percent||0} %`;
-          await new Promise(resolve=>setTimeout(resolve,800));
-          run=await getJson(`/api/jobs/${encodeURIComponent(component.job_id)}/sort-runs/${encodeURIComponent(run.id)}`);
+        const total = Number(batch.item_count || 0);
+        const done = Number(batch.completed_item_count || 0);
+        const percent = Number(batch.progress_percent || 0);
+        applySavedEventStatus.textContent =
+          `Servervorgang · ${done} von ${total} Ereignissen · ${percent} %`;
+
+        if (batch.terminal) {
+          activeApplyBatchId = "";
+          applySavedEventButton.disabled = false;
+          if (batch.status !== "applied") {
+            throw new Error(
+              batch.error_message
+              || "Mehrfach-Anwendung wurde nicht abgeschlossen."
+            );
+          }
+          applySavedEventStatus.textContent =
+            "Alle ausgewählten Ereignisse wurden serverseitig vollständig angewendet und geprüft.";
+          await loadWorkspace();
+          return batch;
         }
-        if(run.status!=="applied")throw new Error(run.error_message||`Teil ${index+1} wurde nicht abgeschlossen.`);
+
+        await new Promise(resolve => setTimeout(resolve, 800));
       }
-      applySavedEventStatus.textContent="Alle ausgewählten Ereignisbestandteile wurden vollständig angewendet und geprüft.";
-      await loadWorkspace();
+      return null;
+    }
+
+    async function resumeActiveApplyBatch() {
+      if (activeApplyBatchId) return;
+      const data = await getJson("/api/operation-batches/active");
+      const batch = (data.batches || [])[0];
+      if (!batch) return;
+      applySavedEventStatus.textContent =
+        "Laufender Servervorgang wurde wieder aufgenommen …";
+      pollApplyBatch(batch.id).catch(error => {
+        applySavedEventStatus.textContent = error.message;
+        applySavedEventButton.disabled = false;
+      });
+    }
+
+    async function applyPlannedEvents() {
+      const selectedInputs = [
+        ...plannedEventSelection.querySelectorAll(
+          "input[data-planned-event]:checked"
+        )
+      ];
+      const components = [];
+      const seen = new Set();
+
+      for (const input of selectedInputs) {
+        let rows = [];
+        try {
+          rows = JSON.parse(
+            input.dataset.plannedComponents || "[]"
+          );
+        } catch (_) {}
+        for (const row of rows) {
+          const key = `${row.job_id}:${row.event_id}`;
+          if (
+            !row.job_id
+            || !row.event_id
+            || seen.has(key)
+          ) continue;
+          seen.add(key);
+          components.push(row);
+        }
+      }
+
+      if (!components.length) {
+        throw new Error(
+          "Keine geplanten Ereignisse ausgewählt."
+        );
+      }
+
+      applySavedEventButton.disabled = true;
+      applySavedEventStatus.textContent =
+        "Alle ausgewählten Pläne werden geprüft …";
+
+      const plans = [];
+      for (const component of components) {
+        const plan = await getJson(
+          `/api/jobs/${encodeURIComponent(component.job_id)}/events/${encodeURIComponent(component.event_id)}/sort-plan`
+        );
+        if (!plan.summary?.ready) {
+          throw new Error(
+            `${plan.event?.name || component.event_id}: ${plan.summary?.blocker_count || 1} Blocker.`
+          );
+        }
+        plans.push({component, plan});
+      }
+
+      const familyCount = plans.reduce(
+        (sum, item) =>
+          sum + Number(item.plan.summary.family_count || 0),
+        0
+      );
+      const fileCount = plans.reduce(
+        (sum, item) =>
+          sum + Number(item.plan.summary.file_count || 0),
+        0
+      );
+
+      const german = window.BibliothekarI18n?.getLocale?.() === "de";
+      const confirmation = german
+        ? `${selectedInputs.length} Ereignis${selectedInputs.length === 1 ? "" : "se"} mit ${familyCount} Familien und ${fileCount} Dateien jetzt anwenden? Der Server führt den Vorgang auch weiter, wenn diese Seite geschlossen wird.`
+        : `Apply ${selectedInputs.length} event${selectedInputs.length === 1 ? "" : "s"} with ${familyCount} families and ${fileCount} files now? The server will continue the operation even if this page is closed.`;
+      const ok = window.BibliothekarI18n?.confirmAsync
+        ? await window.BibliothekarI18n.confirmAsync(confirmation)
+        : window.confirm(confirmation);
+      if (!ok) {
+        applySavedEventButton.disabled = false;
+        applySavedEventStatus.textContent =
+          "Nicht angewendet.";
+        return;
+      }
+
+      const response = await postJson(
+        "/api/operation-batches/apply-events",
+        {
+          confirmation_phrase:
+            plans[0]?.plan?.apply_confirmation_phrase
+            || "SORTIERUNG ANWENDEN",
+          items: plans.map(({component, plan}) => ({
+            job_id: component.job_id,
+            event_id: component.event_id,
+            plan_token: plan.plan_token
+          }))
+        }
+      );
+
+      window.dispatchEvent(new Event("bk-activity-refresh"));
+      await pollApplyBatch(response.batch.id);
     }
 
     document.addEventListener("bibliothekar:folder-layout-updated", event => {
@@ -4367,6 +5211,16 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
     });
 
+    document.getElementById("day-reload")?.addEventListener("click", async event => {
+      const button = event.currentTarget;
+      button.disabled = true; button.classList.add("bk-busy");
+      try {
+        await loadJobs({physicalRefresh:true});
+        await window.bkForceExternalChangeCheck?.();
+      } catch (error) { setStatus(error.message, true); }
+      finally { button.disabled = false; button.classList.remove("bk-busy"); }
+    });
+
     daySelectAllButton.addEventListener("click", () => {
       const keys = selectableDayKeys();
       const allSelected = keys.length > 0 && keys.every(key => selectedDays.has(key));
@@ -4381,10 +5235,35 @@ WORKSPACE_HTML = r"""<!doctype html>
       renderSelection();
     });
 
+    // Recover server progress without waiting for the complete 4,000-file
+    // workspace view. The separate global activity dock can also poll early.
+    resumeActiveApplyBatch().catch(error => {
+      applySavedEventStatus.textContent = error.message;
+    });
     loadJobs().then(async () => {
       const params = new URLSearchParams(location.search);
       const task = params.get("task") || "";
-      if (task.startsWith("reassign:")) {
+      if (task.startsWith("batch:")) {
+        const wanted = task.slice("batch:".length);
+        const batch = await getJson(
+          `/api/operation-batches/${encodeURIComponent(wanted)}`
+        );
+        if (
+          !batch.terminal
+          && !activeApplyBatchId
+        ) {
+          pollApplyBatch(batch.id).catch(error => {
+            applySavedEventStatus.textContent =
+              error.message;
+            applySavedEventButton.disabled = false;
+          });
+        }
+        postSaveAction.hidden = false;
+        postSaveAction?.scrollIntoView({
+          behavior: "smooth",
+          block: "center"
+        });
+      } else if (task.startsWith("reassign:")) {
         await openTaskReassignment(task.slice("reassign:".length));
       } else if (task.startsWith("planned:")) {
         const wanted=task.slice("planned:".length);
@@ -4417,3 +5296,9 @@ WORKSPACE_HTML = r"""<!doctype html>
 </body>
 </html>
 """
+
+from app.ui_rc13 import workspace_words as _workspace_words
+WORKSPACE_HTML = _workspace_words(WORKSPACE_HTML)
+
+from app.ui_workspace_cache import WORKSPACE_CACHE_JS
+WORKSPACE_HTML = WORKSPACE_HTML.replace("/* PRE_WORKSPACE_CACHE */",WORKSPACE_CACHE_JS)

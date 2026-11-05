@@ -1,0 +1,205 @@
+name: Publish verified Bibliothekar RC14 prerelease
+on:
+  push:
+    branches: [release/v1.0.0-rc.14]
+    paths: [.github/workflows/publish-rc14.yml]
+permissions:
+  contents: write
+  packages: write
+  actions: read
+concurrency:
+  group: bibliothekar-rc14-publish
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/release/v1.0.0-rc.14'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ACCEPTED_SHA: b43d9fb9d957cb817f74e6fee303b6413d91cd38
+      ACCEPTED_QA: '40751837451'
+      IMAGE: ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.14
+      TAG: v1.0.0-rc.14
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fail closed on source changes or occupied release identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/release/v1.0.0-rc.14" --jq .commit.sha)" = "$GITHUB_SHA"
+          test "$(python -c 'from app import __version__;print(__version__)')" = 1.0.0-rc.14
+          git diff --quiet "$ACCEPTED_SHA" "$GITHUB_SHA" -- app tests qa Dockerfile requirements.txt requirements-rc.constraints.txt compose.example.yaml compose.removable.yaml compose.nas-source.yaml
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          approved={'.github/workflows/publish-container.yml','.github/workflows/publish-rc14.yml',
+                    'docs/rc14/verify_release.py','docs/rc14/RELEASE-NOTES.md',
+                    'docs/rc14/UPGRADE-RC13.md','docs/rc14/TEST-REPORT.md'}
+          changed=set(subprocess.check_output(['git','diff','--name-only',
+            'b43d9fb9d957cb817f74e6fee303b6413d91cd38','HEAD'],text=True).splitlines())
+          assert changed==approved, 'Unexpected or missing publisher files: '+repr(changed ^ approved)
+          stable=Path('.github/workflows/publish-container.yml').read_text()
+          assert "      - 'v*'\n      - '!v*-rc.*'" in stable
+          assert '      - main' in stable and 'docker/build-push-action@v6' in stable
+          PY
+          mkdir release-assets
+          gh api "repos/$GITHUB_REPOSITORY" --jq '{full_name,private}' > release-assets/repository-privacy.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTED_QA" > release-assets/accepted-QA.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTED_QA/jobs?per_page=100" > release-assets/accepted-jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTED_QA/artifacts?per_page=100" > release-assets/accepted-artifacts.json
+          # Record existing package visibility without modifying it.
+          gh api "users/heller-adrian/packages/container/bibliothekar" --jq '{name,visibility,package_type}' > release-assets/existing-package.json
+          python - <<'PY'
+          import json,os,urllib.request,urllib.error
+          p=json.load(open('release-assets/existing-package.json'))
+          assert p['name']=='bibliothekar' and p['package_type']=='container' and p['visibility'] in ('private','public')
+          for endpoint in ('git/ref/tags/','releases/tags/'):
+              req=urllib.request.Request('https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/'+endpoint+os.environ['TAG'],
+                  headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              try:
+                  with urllib.request.urlopen(req,timeout=30):pass
+              except urllib.error.HTTPError as e:
+                  if e.code==404:continue
+                  raise
+              raise RuntimeError('Existing tag or release; refusing overwrite: '+endpoint)
+          PY
+      - name: Verify complete exact-source CI evidence and archive original artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$ACCEPTED_QA" --dir "$RUNNER_TEMP/rc14-accepted-evidence"
+          python docs/rc14/verify_release.py
+          tar -czf release-assets/accepted-QA-evidence.tar.gz -C "$RUNNER_TEMP/rc14-accepted-evidence" .
+      - name: Stage release notes, upgrade documents and accepted source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp docs/rc14/RELEASE-NOTES.md release-assets/
+          cp docs/rc14/UPGRADE-RC13.md release-assets/
+          cp docs/rc14/TEST-REPORT.md release-assets/
+          cp docs/rc14/TRUENAS-TEST.md release-assets/
+          cp compose.example.yaml release-assets/compose.rc14.yaml
+          cp compose.removable.yaml compose.nas-source.yaml Dockerfile requirements.txt requirements-rc.constraints.txt release-assets/
+          git archive --format=tar --prefix=bibliothekar-1.0.0-rc.14/ "$ACCEPTED_SHA" | gzip -n > release-assets/bibliothekar-1.0.0-rc.14-tested-source.tar.gz
+          printf 'tested_application=%s\nworkflow_commit=%s\nCI_run=%s\n' "$ACCEPTED_SHA" "$GITHUB_SHA" "$ACCEPTED_QA" > release-assets/SOURCE-IDENTITY.txt
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Reject existing image or unknown registry response
+        shell: bash
+        run: |
+          set -euo pipefail
+          if docker buildx imagetools inspect "$IMAGE" > "$RUNNER_TEMP/rc14-check.out" 2> "$RUNNER_TEMP/rc14-check.err"; then
+            echo 'RC14 GHCR tag exists: refusing overwrite' >&2
+            exit 1
+          fi
+          if ! grep -Eiq 'manifest unknown|name unknown|not found' "$RUNNER_TEMP/rc14-check.err"; then
+            cat "$RUNNER_TEMP/rc14-check.err" >&2
+            exit 1
+          fi
+      - name: Build only tested source and verify all embedded app hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach "$ACCEPTED_SHA"
+          test "$(git rev-parse HEAD)" = "$ACCEPTED_SHA"
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$ACCEPTED_SHA" -t "$IMAGE" .
+          docker run --rm --entrypoint python "$IMAGE" -c 'from app import __version__;assert __version__=="1.0.0-rc.14"'
+          test "$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$ACCEPTED_SHA"
+          python - <<'PY'
+          import os,json,hashlib,subprocess
+          from pathlib import Path
+          source={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in Path('app').rglob('*') if p.is_file()}
+          code='from pathlib import Path;import hashlib,json;r=Path("/opt/kamera");print(json.dumps({str(p.relative_to(r)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (r/"app").rglob("*") if p.is_file()}))'
+          image=json.loads(subprocess.check_output(['docker','run','--rm','--entrypoint','python',os.environ['IMAGE'],'-c',code],text=True))
+          assert image==source, 'Image payload does not match accepted application'
+          Path('release-assets/APP-SHA256.json').write_text(json.dumps(source,indent=2,sort_keys=True)+'\n')
+          PY
+          docker image inspect "$IMAGE" --format '{{.Id}}' > "$RUNNER_TEMP/rc14-image-id"
+      - name: Push only RC14 and verify real digest-bound Docker pull
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE" | tee release-assets/image-push.log
+          DIGEST="$(sed -nE 's/^.*digest: (sha256:[0-9a-f]{64}).*/\1/p' release-assets/image-push.log | tail -1)"
+          test "$(printf %s "$DIGEST" | wc -c)" -eq 71
+          REF="ghcr.io/heller-adrian/bibliothekar@$DIGEST"
+          printf '%s\n' "$REF" > release-assets/IMAGE-DIGEST.txt
+          docker image rm "$IMAGE"
+          docker pull "$REF" | tee release-assets/image-pull.log
+          test "$(cat "$RUNNER_TEMP/rc14-image-id")" = "$(docker image inspect "$REF" --format '{{.Id}}')"
+          test "$(docker image inspect "$REF" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$ACCEPTED_SHA"
+          docker run --rm --entrypoint python "$REF" -c 'from app import __version__;assert __version__=="1.0.0-rc.14"'
+          docker buildx imagetools inspect "$REF" --raw > release-assets/registry-manifest.json
+          ACTUAL="$(sha256sum release-assets/registry-manifest.json | cut -d' ' -f1)"
+          EXPECTED="$(printf %s "$DIGEST" | cut -d: -f2)"
+          test "$ACTUAL" = "$EXPECTED"
+          docker image inspect "$REF" --format '{{json .RepoDigests}}' > release-assets/registry-repodigests.json
+      - name: Digest-bound Compose, final documentation and SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os,re
+          from pathlib import Path
+          root=Path('release-assets');ref=(root/'IMAGE-DIGEST.txt').read_text().strip()
+          p=root/'compose.rc14.yaml';content=p.read_text()
+          tag='ghcr.io/heller-adrian/bibliothekar:1.0.0-rc.14'
+          assert content.count(tag)==1
+          p.write_text(content.replace(tag,ref))
+          for name in ('RELEASE-NOTES.md','TEST-REPORT.md'):
+              p=root/name;content=p.read_text()
+              prefix='https://github.com/'+os.environ['GITHUB_REPOSITORY']+'/blob/'+os.environ['TAG']+'/docs/rc14/'
+              content=re.sub(r'\]\((TRUENAS-TEST\.md|UPGRADE-RC13\.md)\)',lambda m:']('+prefix+m[1]+')',content)
+              content+='\n\nImage: '+ref+'\nTested application: '+os.environ['ACCEPTED_SHA']
+              content+='\nWorkflow commit: '+os.environ['GITHUB_SHA']
+              content+='\nCI: https://github.com/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['ACCEPTED_QA']+'\n'
+              p.write_text(content)
+          PY
+          (cd release-assets && find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          (cd release-assets && sha256sum --check SHA256SUMS)
+      - name: Tag the workflow-only commit and publish verified GitHub prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --quiet "$ACCEPTED_SHA" "$GITHUB_SHA" -- app tests qa Dockerfile requirements.txt requirements-rc.constraints.txt compose.example.yaml compose.removable.yaml compose.nas-source.yaml
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha)" = "$GITHUB_SHA"
+          gh release create "$TAG" --verify-tag --title "$TAG" --prerelease --latest=false --notes-file release-assets/RELEASE-NOTES.md release-assets/*
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > release-assets/release-verification.json
+          python - <<'PY'
+          import os,json
+          from pathlib import Path
+          r=json.loads(Path('release-assets/release-verification.json').read_text())
+          assert r['prerelease'] and not r['draft'] and r['tag_name']==os.environ['TAG']
+          names={a['name'] for a in r['assets']}
+          required={'SHA256SUMS','IMAGE-DIGEST.txt','compose.rc14.yaml','TEST-REPORT.md',
+                    'UPGRADE-RC13.md','TRUENAS-TEST.md','verified-QA-summary.json',
+                    'accepted-QA-evidence.tar.gz','bibliothekar-1.0.0-rc.14-tested-source.tar.gz'}
+          assert required<=names, 'missing release assets: '+repr(required-names)
+          print(r['html_url'])
+          PY
+          mkdir "$RUNNER_TEMP/rc14-release-download"
+          gh release download "$TAG" --dir "$RUNNER_TEMP/rc14-release-download"
+          (cd "$RUNNER_TEMP/rc14-release-download" && sha256sum --check SHA256SUMS)
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = true
+          cat release-assets/IMAGE-DIGEST.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve release diagnostics on success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc14-publication-evidence
+          retention-days: 30
+          path: release-assets/

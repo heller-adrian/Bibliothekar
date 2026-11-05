@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0-pre.5",
+  "base_tag": "v1.0.0-pre.4",
+  "base_commit": "adcc2aa9a444042440ff764be10fe1e42191904d",
+  "publication": "AUTHORIZED_ONLY_AFTER_COMPLETE_ACCEPTANCE",
+  "native_truenas": "NOT_RUN"
+}

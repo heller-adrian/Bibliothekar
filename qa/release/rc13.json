@@ -1,0 +1,6 @@
+{
+  "version": "1.0.0-rc.13",
+  "base_tag": "v1.0.0-rc.12",
+  "base_commit": "671d7e7eb96ff493ae51720bb2769eccd8f9048f",
+  "native_truenas": "NOT_RUN"
+}

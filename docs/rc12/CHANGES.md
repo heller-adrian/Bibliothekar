@@ -1,0 +1,42 @@
+# Geänderte Dateien seit v1.0.0-rc.11
+
+Der Release-Anhang CHANGED-FILES.txt enthält den exakten Git-Diff zum veröffentlichten Commit. Diese Übersicht beschreibt den implementierten RC12-Stand; Veröffentlichung und Ergebnisdokumentation können auf dem Entwicklungszweig weitere Workflow-/Dokumentationsdateien ergänzen.
+
+- `.github/workflows/qa-rc12.yml`
+- `CHANGELOG.md`
+- `Dockerfile`
+- `README.md`
+- `app/__init__.py`
+- `app/appdata.py`
+- `app/container_supervisor.py`
+- `app/main.py`
+- `app/managed_storage_health.py`
+- `app/private_storage_security.py`
+- `app/removable_runtime.py`
+- `app/root_operations.py`
+- `app/source_mount_state.py`
+- `app/storage_bootstrap.py`
+- `app/storage_replacement.py`
+- `app/storage_status.py`
+- `app/storage_warning_ui.py`
+- `app/trash_retention.py`
+- `app/trash_selective.py`
+- `app/ui_shell.py`
+- `compose.example.yaml`
+- `compose.nas-source.yaml`
+- `compose.removable.yaml`
+- `docs/rc12/ARCHITECTURE.md`
+- `docs/rc12/CHANGES.md`
+- `docs/rc12/PROGRESS.md`
+- `docs/rc12/README.md`
+- `docs/rc12/RELEASE-NOTES.md`
+- `docs/rc12/TRUENAS-TEST.md`
+- `docs/rc12/compose.legacy.yaml`
+- `qa/rc11/sitecustomize.py`
+- `qa/rc12/container.py`
+- `qa/rc12/regression.py`
+- `qa/release/rc12.json`
+- `tests/backend/rc12_worker.py`
+- `tests/backend/release_contract.py`
+- `tests/backend/test_rc11_bootstrap.py`
+- `tests/backend/test_rc12_storage.py`

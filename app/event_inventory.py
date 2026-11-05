@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 import hashlib
+import json
 import os
 import stat
 import re
@@ -15,7 +20,7 @@ from app.event_layout import ensure_event_layout_snapshot, layout_role_paths
 from app.physical_state import organization_path_for_event_relative
 
 
-SORT_BRANCHES = {"Alle", "Sortiert", "Export"}
+SORT_BRANCHES = {"Alle", "Sortiert", "All", "Sorted", "Export"}
 IGNORED_EVENT_FILES = {"event.json", ".DS_Store"}
 
 
@@ -29,6 +34,7 @@ def _now() -> str:
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             block = handle.read(1024 * 1024)
@@ -39,6 +45,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _safe_relative(value: str) -> PurePosixPath:
+    validate_active_roots()
     raw = str(value or "").strip().replace("\\", "/").strip("/")
     path = PurePosixPath(raw)
     if (
@@ -59,6 +66,50 @@ def event_root_relative(event: dict[str, Any]) -> PurePosixPath:
             "Ereignis besitzt keinen eindeutigen Jahres-/Ordnerpfad."
         )
     return _safe_relative(PurePosixPath(year, folder).as_posix())
+
+
+def _discover_event_prefix_by_document(
+    root: Path,
+    expected_prefix: PurePosixPath,
+    event_id: str,
+) -> PurePosixPath:
+    """Find a manually renamed event root by its stable event.json identity."""
+    expected_root = root.joinpath(*expected_prefix.parts)
+    if expected_root.exists():
+        return expected_prefix
+    if not expected_prefix.parts:
+        return expected_prefix
+
+    year_root = root / expected_prefix.parts[0]
+    if not year_root.is_dir() or year_root.is_symlink():
+        return expected_prefix
+
+    matches: list[PurePosixPath] = []
+    try:
+        candidates = sorted(year_root.iterdir(), key=lambda path: path.name.casefold())
+    except OSError:
+        return expected_prefix
+
+    for candidate in candidates:
+        if not candidate.is_dir() or candidate.is_symlink():
+            continue
+        document = candidate / "event.json"
+        if not document.is_file() or document.is_symlink():
+            continue
+        try:
+            payload = json.loads(document.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        document_event = payload.get("event") or {}
+        if str(document_event.get("id") or "") != str(event_id):
+            continue
+        try:
+            relative = candidate.relative_to(root)
+        except ValueError:
+            continue
+        matches.append(PurePosixPath(relative.as_posix()))
+
+    return matches[0] if len(matches) == 1 else expected_prefix
 
 
 def _event_and_known_files(
@@ -246,19 +297,21 @@ def _asset_kind(
 
 
 _FILENAME_SCHEMA_RE = re.compile(
-    r"(?<!\d)(?P<date>20\d{6})[_-](?P<time>\d{6})(?!\d)"
+    r"(?<!\d)(?P<date>20\d{6})[_-](?P<time>\d{6})(?P<ms>\d{3})?(?!\d)"
 )
 def _filename_schema_capture_time(filename: str) -> str | None:
-    """Read the canonical JJJJMMTT_HHMMSS timestamp from an export name."""
+    """Parse the canonical whole-second or genuine 3-digit millisecond time."""
     match = _FILENAME_SCHEMA_RE.search(Path(str(filename or "")).stem)
     if match is None:
         return None
     value = match.group("date") + match.group("time")
     try:
         parsed = datetime.strptime(value, "%Y%m%d%H%M%S")
+        if match.group("ms") is not None:
+            parsed = parsed.replace(microsecond=int(match.group("ms")) * 1000)
     except ValueError:
         return None
-    return parsed.isoformat(timespec="seconds")
+    return parsed.isoformat(timespec="microseconds" if match.group("ms") is not None else "seconds")
 
 
 def _filename_family_source(
@@ -324,8 +377,10 @@ def _capture_seconds_apart(left: str | None, right: str | None) -> float | None:
         a = datetime.fromisoformat(str(left or ""))
         b = datetime.fromisoformat(str(right or ""))
         if a.tzinfo is not None:
+            validate_active_roots()
             a = a.astimezone(timezone.utc).replace(tzinfo=None)
         if b.tzinfo is not None:
+            validate_active_roots()
             b = b.astimezone(timezone.utc).replace(tzinfo=None)
         return abs((a - b).total_seconds())
     except (TypeError, ValueError):
@@ -390,6 +445,7 @@ def _best_known_match(
     return None
 
 
+@protect(workspace_arg='storage_root', database_arg='database_path', kind='inventory', error_type=EventInventoryError, operation_wait=1, durable=False)
 def scan_event_inventory(
     database_path: Path,
     storage_root: Path,
@@ -401,6 +457,7 @@ def scan_event_inventory(
     update_known_file_locations: bool = False,
     event_prefix_override: str | PurePosixPath | None = None,
     fast_refresh: bool = False,
+    allow_missing_root: bool = False,
 ) -> dict[str, Any]:
     """Scan the *current* event tree.
 
@@ -408,6 +465,8 @@ def scan_event_inventory(
     every scan and therefore never turns a later manual archive deletion into
     an integrity error by itself.
     """
+    from app.operation_health import read_only
+    if read_only():persist=False
     if root_kind not in {"shared_workspace", "camera_archive"}:
         raise EventInventoryError("Ungültige Ereigniswurzel: " + root_kind)
 
@@ -466,6 +525,11 @@ def scan_event_inventory(
         if event_prefix_override is not None
         else event_root_relative(event)
     )
+    prefix = _discover_event_prefix_by_document(
+        root,
+        prefix,
+        event_id,
+    )
     event_root = root.joinpath(*prefix.parts)
 
     try:
@@ -477,6 +541,11 @@ def scan_event_inventory(
     current = root
     for part in prefix.parts:
         current = current / part
+        if current.is_symlink():
+            raise EventInventoryError(
+                "Symlinks sind als Ereignisordner nicht zulässig: "
+                + current.relative_to(root).as_posix()
+            )
         if not current.exists():
             continue
         info = os.lstat(current)
@@ -486,8 +555,21 @@ def scan_event_inventory(
                 + current.relative_to(root).as_posix()
             )
 
-    physical_files = _iter_regular_event_files(event_root)
-    physical_directories = _iter_regular_event_directories(event_root)
+    # The normal inventory contract remains strict. Only the passive live
+    # consistency scan may treat a *genuinely absent* event directory as an
+    # empty physical inventory. Never confuse an unavailable storage root,
+    # a broken symlink or a non-directory with an intentional deletion.
+    event_root_missing = not event_root.exists()
+    if event_root_missing and allow_missing_root:
+        if not root.is_dir() or root.is_symlink() or event_root.is_symlink():
+            raise EventInventoryError(
+                "Ereignisspeicher ist nicht sicher erreichbar: " + str(root)
+            )
+        physical_files: list[Path] = []
+        physical_directories: list[Path] = []
+    else:
+        physical_files = _iter_regular_event_files(event_root)
+        physical_directories = _iter_regular_event_directories(event_root)
 
     previous_by_relative: dict[str, dict[str, Any]] = {}
     known_by_current_relative: dict[str, dict[str, Any]] = {}
@@ -511,7 +593,7 @@ def scan_event_inventory(
 
     metadata_by_relative: dict[str, dict[str, Any]] = {}
     try:
-        analyzed = analyze_tree(event_root)
+        analyzed = analyze_tree(event_root) if not event_root_missing else {"files": []}
         metadata_by_relative = {
             str(row.get("relative_path") or ""): row
             for row in analyzed.get("files", [])
@@ -920,6 +1002,7 @@ def scan_event_inventory(
     return {
         "event": event,
         "event_root": str(event_root),
+        "event_root_missing": event_root_missing,
         "directories": [
             directory.relative_to(event_root).as_posix()
             for directory in physical_directories

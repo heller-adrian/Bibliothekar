@@ -1,0 +1,6 @@
+Bibliothekar 0.54.4
+Base: patch/0.54.3
+Only narrow create-event dialog CSS: event and subevent start/end date-time pairs side by side, iOS-safe width and vertical centering as in edit; no-event segments display one day selection and start/end times on the next row. Desktop/edit and canonical saved segment data unchanged.
+QA: 1128 backend tests passed, 6 warnings; archive isolation harness passed for pull request #27.
+Publish ghcr.io/heller-adrian/bibliothekar:patch-0.54.4 only after repeating QA on this exact final commit in release workflow.
+No main/latest changes or production data changes.

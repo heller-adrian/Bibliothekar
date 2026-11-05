@@ -1,0 +1,36 @@
+name: Public visibility history inventory (no secret values in logs)
+on:
+  push:
+    branches: [release/1.0.0-public-preparation]
+    paths: [.github/workflows/audit-public-history.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan all reachable local text blobs without displaying matched content
+        run: |
+          set -euo pipefail
+          python3 tools/public_release_audit.py "$RUNNER_TEMP/public-history-scan.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          x=json.loads((Path(os.environ['RUNNER_TEMP'])/'public-history-scan.json').read_text())
+          assert x['scanned_unique_text_blobs'] > 0
+          print('Potential credentials present:',x['potential_credentials_found'])
+          print('Manual review of historic private data required:',x['metadata_manual_review_required'])
+          print('Review of GitHub logs/assets/comments still required:',not x['other_public_surfaces_reviewed'])
+          PY
+      - name: Private scan report, paths only
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-history-finding-paths
+          retention-days: 30
+          path: ${{ runner.temp }}/public-history-scan.json

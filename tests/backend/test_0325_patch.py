@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 import json
 from pathlib import Path
 
@@ -283,12 +285,12 @@ def test_0325_late_resolved_library_database_gets_current_schema(
 
 
 def test_0325_ui_and_version_contract():
-    assert main.DEPLOYMENT_VERSION == "0.40.3"
-    assert "0.40.3 · Kamerakern 0.32.11" in ui_shell._shell_markup(
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
+    assert f'Version <span data-bk-version>{EXPECTED_RELEASE_VERSION}</span>' in ui_shell._shell_markup(
         "workspace",
         "events",
     )
-    assert "SSD-Kopien anlegen" in EVENTS_HTML
+    assert "Arbeitsbereich-Kopien anlegen" in EVENTS_HTML
     assert "/release-copy/create" in EVENTS_HTML
     assert "Schritt 1 von 2" in EVENTS_HTML
     assert "Schritt 2 von 2" in EVENTS_HTML

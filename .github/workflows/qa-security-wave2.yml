@@ -1,0 +1,58 @@
+name: Security wave 2 F11 and R1 QA
+on:
+  push:
+    branches: [integration/1.0.0-security-wave2]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libimage-exiftool-perl
+          python -m pip install -r requirements.txt pytest httpx
+      - name: Record source and environment
+        run: |
+          mkdir -p "$RUNNER_TEMP/f14-qa"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/f14-qa/source.txt"
+          python --version > "$RUNNER_TEMP/f14-qa/environment.txt"
+          uname -a >> "$RUNNER_TEMP/f14-qa/environment.txt"
+          exiftool -ver >> "$RUNNER_TEMP/f14-qa/environment.txt"
+          pip freeze >> "$RUNNER_TEMP/f14-qa/environment.txt"
+      - name: Entire backend suite without fail-fast
+        run: python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" backend
+      - name: Original F11 and R1 on integrated source
+        if: always()
+        run: |
+          python qa/wave2/run_original.py "$GITHUB_WORKSPACE" f11 after
+          python qa/wave2/run_original.py "$GITHUB_WORKSPACE" r1 after
+      - name: Original F11 and R1 on unchanged baseline
+        if: always()
+        run: |
+          git fetch --no-tags --depth=1 origin 35299e900b3aa38a9a45935d2a6d5fd15f75be6f
+          git worktree add --detach "$RUNNER_TEMP/wave2-baseline" 35299e900b3aa38a9a45935d2a6d5fd15f75be6f
+          python qa/wave2/run_original.py "$RUNNER_TEMP/wave2-baseline" f11 before
+          python qa/wave2/run_original.py "$RUNNER_TEMP/wave2-baseline" r1 before
+      - name: F12 actual native publication counterprobe
+        if: always()
+        run: python qa/wave1/run_f12.py "$GITHUB_WORKSPACE" semantic
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-wave2-qa
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/f14-qa/**/*.json
+            ${{ runner.temp }}/f14-qa/**/*.jsonl
+            ${{ runner.temp }}/f14-qa/**/*.xml
+            ${{ runner.temp }}/f14-qa/**/*.log
+            ${{ runner.temp }}/f14-qa/**/*.txt
+            ${{ runner.temp }}/wave1-f12-*
+            ${{ runner.temp }}/wave2-*

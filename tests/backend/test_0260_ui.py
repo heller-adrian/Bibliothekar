@@ -12,11 +12,13 @@ def test_workspace_free_card_and_preview_put_capture_times_on_right():
 
 
 def test_event_card_navigates_directly_and_editor_closes_on_save():
-    assert 'href="/workspace?job=${encodeURIComponent(event._job_id||event.job_id||"")}&task=free"' in EVENTS_HTML
+    assert 'data-reassign-event=' in EVENTS_HTML
+    assert 'href="/workspace?job=${encodeURIComponent(ctx.jobId)}&task=free"' in EVENTS_HTML
     assert 'data-reassign-workspace=' not in EVENTS_HTML
     assert 'a.plan-button { display:inline-flex;' in EVENTS_HTML
     assert 'list-style:none !important' in EVENTS_HTML
     assert 'class="event-card-actions" hidden' in EVENTS_HTML
     assert 'data-view-event=' in EVENTS_HTML
     assert 'function renderEventViewer' in EVENTS_HTML
-    assert 'eventEditDialog.close();\n\n      if (result.archive_manual?' in EVENTS_HTML
+    assert 'showSortPreparation(context.event.name, "Änderungen anwenden")' in EVENTS_HTML
+    assert 'result = await updateEventWithEmptySubeventConfirmation(context, payload);' in EVENTS_HTML

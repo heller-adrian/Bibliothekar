@@ -1,6 +1,8 @@
 """0.27.9: Mehrsicherungs-Antwort und Import-Refresh regressionsfest."""
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from pathlib import Path
 
 from app import main
@@ -10,8 +12,8 @@ from tests.backend.test_0263_event_inventory import NOW
 
 
 def test_0279_release_version():
-    assert main.RELEASE_VERSION == "0.28.7"
-    assert main.api_health()["version"] == "0.28.7"
+    assert main.RELEASE_VERSION == EXPECTED_RELEASE_VERSION
+    assert main.api_health()["version"] == EXPECTED_RELEASE_VERSION
 
 
 def test_0279_cross_backup_accept_api_returns_after_success(tmp_path: Path, monkeypatch):
@@ -84,7 +86,7 @@ def test_0279_cross_backup_accept_api_returns_after_success(tmp_path: Path, monk
 
 def test_0279_import_job_id_declared_before_duplicate_notice():
     source = Path("app/main.py").read_text(encoding="utf-8")
-    render = source[source.index("function renderJob(job)"): ]
+    render = source[source.index("function renderJob(job, isHidden=false)"): ]
     job_id = render.index('const jobId = String(job.job_id || job.id || "");')
     duplicate_notice = render.index("const duplicateNotice = duplicateCount > 0")
     assert job_id < duplicate_notice

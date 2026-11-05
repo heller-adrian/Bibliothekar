@@ -144,46 +144,97 @@ def resolve_payload_membership(
     connection: Any,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """Resolve explicit UI selection to the complete canonical active membership."""
+    """Resolve explicit UI selection to the complete canonical active membership.
+
+    The event interval remains authoritative: unchecked day cards inside that
+    interval are included silently.  A confirmation is only needed for free
+    stock coming from an active backup that is currently hidden by the backup
+    filter.
+    """
     intervals = intervals_for_event_payload(payload)
     selected_ids = sorted({
         int(value) for value in (payload.get("selected_family_ids") or [])
         if int(value) > 0
     })
+    visible_active_job_ids = {
+        str(value)
+        for value in (payload.get("visible_active_job_ids") or [])
+        if str(value)
+    }
     families = global_free_families(connection, intervals)
     canonical_ids = sorted({int(row["family_id"]) for row in families} | set(selected_ids))
     by_id = {int(row["family_id"]): row for row in families}
-    additional_ids = [fid for fid in canonical_ids if fid not in set(selected_ids) and fid in by_id]
+    additional_ids = [
+        fid for fid in canonical_ids
+        if fid not in set(selected_ids) and fid in by_id
+    ]
     additional = [by_id[fid] for fid in additional_ids]
 
-    sources: dict[str, dict[str, Any]] = {}
-    for family in additional:
-        job_id = str(family.get("job_id") or "")
-        source = sources.setdefault(job_id, {
-            "job_id": job_id,
-            "source_label": str(family.get("source_volume_label") or job_id),
-            "family_count": 0,
-            "file_count": 0,
-            "families": [],
-        })
-        source["family_count"] += 1
-        source["file_count"] += int(family.get("file_count") or 0)
-        source["families"].append({
-            "family_id": int(family["family_id"]),
-            "original_stem": str(family.get("original_stem") or family.get("family_key") or ""),
-            "capture_time": str(family.get("selected_capture_time") or "")[:19],
-            "file_count": int(family.get("file_count") or 0),
-            "file_names": list(family.get("file_names") or []),
-        })
+    # Older clients do not send filter provenance. In that case retain the
+    # conservative pre-0.43 confirmation behavior.
+    if visible_active_job_ids:
+        hidden_additional = [
+            row for row in additional
+            if str(row.get("job_id") or "") not in visible_active_job_ids
+        ]
+    else:
+        hidden_additional = list(additional)
 
+    def grouped_sources(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        sources: dict[str, dict[str, Any]] = {}
+        for family in rows:
+            job_id = str(family.get("job_id") or "")
+            source = sources.setdefault(job_id, {
+                "job_id": job_id,
+                "source_label": str(family.get("source_volume_label") or job_id),
+                "family_count": 0,
+                "file_count": 0,
+                "families": [],
+            })
+            source["family_count"] += 1
+            source["file_count"] += int(family.get("file_count") or 0)
+            source["families"].append({
+                "family_id": int(family["family_id"]),
+                "original_stem": str(
+                    family.get("original_stem")
+                    or family.get("family_key")
+                    or ""
+                ),
+                "capture_time": str(
+                    family.get("selected_capture_time") or ""
+                )[:19],
+                "file_count": int(family.get("file_count") or 0),
+                "file_names": list(family.get("file_names") or []),
+            })
+        return sorted(
+            sources.values(),
+            key=lambda row: (row["source_label"].casefold(), row["job_id"]),
+        )
+
+    hidden_ids = sorted(int(row["family_id"]) for row in hidden_additional)
     return {
-        "intervals": [{"start_datetime": a, "end_datetime": b} for a, b in intervals],
+        "intervals": [
+            {"start_datetime": a, "end_datetime": b}
+            for a, b in intervals
+        ],
         "selected_family_ids": selected_ids,
         "canonical_family_ids": canonical_ids,
+        # Total automatic interval expansion, including unchecked cards from
+        # already visible backups.
         "additional_family_ids": additional_ids,
         "additional_family_count": len(additional_ids),
-        "additional_file_count": sum(int(row.get("file_count") or 0) for row in additional),
-        "sources": sorted(sources.values(), key=lambda row: (row["source_label"].casefold(), row["job_id"])),
+        "additional_file_count": sum(
+            int(row.get("file_count") or 0) for row in additional
+        ),
+        "sources": grouped_sources(additional),
+        # Only these rows require the user-facing cross-backup confirmation.
+        "hidden_additional_family_ids": hidden_ids,
+        "hidden_additional_family_count": len(hidden_ids),
+        "hidden_additional_file_count": sum(
+            int(row.get("file_count") or 0) for row in hidden_additional
+        ),
+        "hidden_sources": grouped_sources(hidden_additional),
+        "visible_active_job_ids": sorted(visible_active_job_ids),
     }
 
 

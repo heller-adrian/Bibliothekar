@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, Iterator
 from datetime import datetime, timezone
 import json
 import sqlite3
+import re
 import uuid
+from app.sqlite_retry import WRITE_WAIT_MS, idempotent_write
 
 
 MIGRATION_DIR = Path(__file__).parent / "migrations"
@@ -17,35 +19,46 @@ class DatabaseError(RuntimeError):
 
 
 def connect(database_path: Path) -> sqlite3.Connection:
+    from app.operation_health import read_only, read_connection
+    if read_only():
+        return read_connection(database_path)
     database_path.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
+    from app.sqlite_authorization import Connection
     connection = sqlite3.connect(
         database_path,
-        timeout=30,
+        timeout=WRITE_WAIT_MS.get()/1000,
+        cached_statements=0,
+        factory=Connection,
     )
 
-    connection.row_factory = sqlite3.Row
+    try:
+        connection.row_factory = sqlite3.Row
 
-    connection.execute(
-        "PRAGMA foreign_keys = ON"
-    )
+        connection.execute(
+            "PRAGMA foreign_keys = ON"
+        )
 
-    connection.execute(
-        "PRAGMA journal_mode = WAL"
-    )
+        connection.execute(
+            "PRAGMA journal_mode = WAL"
+        )
 
-    connection.execute(
-        "PRAGMA synchronous = FULL"
-    )
+        connection.execute(
+            "PRAGMA synchronous = FULL"
+        )
 
-    connection.execute(
-        "PRAGMA busy_timeout = 30000"
-    )
+        connection.execute(
+            f"PRAGMA busy_timeout = {WRITE_WAIT_MS.get()}"
+        )
+    except BaseException:
+        connection.close()
+        raise
 
-    return connection
+    from app.operation_health import guard_connection
+    return guard_connection(connection,database_path)
 
 
 @contextmanager
@@ -69,6 +82,13 @@ def database_connection(
 def ensure_schema_version_table(
     connection: sqlite3.Connection,
 ) -> None:
+    # Even CREATE TABLE IF NOT EXISTS invokes SQLite's write authorizer.
+    # Reading an already initialized catalogue must not request DDL authority
+    # while an unrelated or unresolved file operation is protected.
+    if connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_versions'"
+    ).fetchone():
+        return
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS schema_versions (
@@ -138,6 +158,82 @@ def available_migrations() -> list[tuple[int, Path]]:
     return migrations
 
 
+def _apply_trash_root_kind_migration(
+    connection: sqlite3.Connection,
+    version: int,
+) -> None:
+    """Rebuild the files CHECK constraint, preserving all existing columns/FKs."""
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys=OFF")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='files'"
+        ).fetchone()
+        if row is None or not row[0]:
+            raise DatabaseError("Die Tabelle files fehlt für die Papierkorb-Migration.")
+        create_sql = str(row[0])
+        renamed, count = re.subn(
+            r"(?i)^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?files\b",
+            "CREATE TABLE files_trash_upgrade",
+            create_sql,
+            count=1,
+        )
+        if count != 1:
+            raise DatabaseError("Das Schema der Tabelle files ist unbekannt.")
+        upgraded, count = re.subn(
+            r"(current_root_kind\s+IN\s*\(\s*'job_root'\s*,"
+            r"\s*'shared_workspace'\s*,\s*'camera_archive')",
+            r"\1, 'trash'",
+            renamed,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if count != 1:
+            raise DatabaseError("Die Root-Kind-Constraint ist unbekannt.")
+        definitions = [
+            str(record[0])
+            for record in connection.execute(
+                """SELECT sql FROM sqlite_master
+                   WHERE tbl_name='files'
+                     AND type IN ('index','trigger')
+                     AND sql IS NOT NULL
+                   ORDER BY type,name"""
+            ).fetchall()
+        ]
+        connection.execute(upgraded)
+        columns = [
+            str(item[1])
+            for item in connection.execute("PRAGMA table_info(files)").fetchall()
+        ]
+        if not columns:
+            raise DatabaseError("Die bestehenden Dateispalten fehlen.")
+        column_list = ",".join('"' + name.replace('"', '""') + '"' for name in columns)
+        connection.execute(
+            f"INSERT INTO files_trash_upgrade ({column_list}) "
+            f"SELECT {column_list} FROM files"
+        )
+        connection.execute("DROP TABLE files")
+        connection.execute("ALTER TABLE files_trash_upgrade RENAME TO files")
+        for sql in definitions:
+            connection.execute(sql)
+        if connection.execute("PRAGMA foreign_key_check").fetchall():
+            raise DatabaseError("Fremdschlüsselprüfung nach Papierkorb-Migration fehlgeschlagen.")
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            raise DatabaseError("SQLite-Integrität nach Papierkorb-Migration: " + str(integrity))
+        connection.execute(
+            "INSERT INTO schema_versions(version,applied_at) VALUES (?,datetime('now'))",
+            (version,),
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+
 def apply_migration(
     connection: sqlite3.Connection,
     version: int,
@@ -151,6 +247,10 @@ def apply_migration(
         raise DatabaseError(
             f"Migration ist leer: {path}"
         )
+
+    if version == 48:
+        _apply_trash_root_kind_migration(connection, version)
+        return
 
     try:
         connection.executescript(
@@ -191,6 +291,16 @@ def initialize_database(
         current = applied_versions(
             connection
         )
+
+        # Never start an older binary on a database created by a newer release.
+        # Applying known migrations cannot make a future schema compatible.
+        known_versions = {version for version, _path in migrations}
+        unsupported_versions = sorted(current - known_versions)
+        if unsupported_versions:
+            raise DatabaseError(
+                "Diese Datenbank verwendet nicht unterstützte, neuere "
+                "Migrationsversionen: " + ", ".join(map(str, unsupported_versions))
+            )
 
         newly_applied: list[int] = []
 
@@ -272,6 +382,7 @@ def create_job(
     source_volume_label: str | None = None,
     source_signature: str | None = None,
     source_device_id: str | None = None,
+    reimport_of_job_id: str | None = None,
 ) -> dict[str, Any]:
     now = utc_now_iso()
 
@@ -295,6 +406,7 @@ def create_job(
                 source_volume_label,
                 source_signature,
                 source_device_id,
+                duplicate_of_job_id,
                 created_at,
                 updated_at
             )
@@ -314,6 +426,7 @@ def create_job(
                 ?,
                 ?,
                 ?,
+                ?,
                 ?
             )
             """,
@@ -327,6 +440,7 @@ def create_job(
                 source_volume_label,
                 source_signature,
                 source_device_id,
+                reimport_of_job_id,
                 now,
                 now,
             ),
@@ -353,6 +467,7 @@ def find_folder_import_by_identity(
     source_fingerprint: str | None = None,
     exclude_job_id: str | None = None,
     include_active: bool = True,
+    include_completed: bool = True,
 ) -> dict[str, Any] | None:
     conditions = ["operation = 'folder_import'"]
     values: list[Any] = []
@@ -366,9 +481,11 @@ def find_folder_import_by_identity(
     if not identity_parts:
         return None
     conditions.append("(" + " OR ".join(identity_parts) + ")")
-    states = ["completed"]
+    states = ["completed"] if include_completed else []
     if include_active:
         states += ["queued", "copying", "verifying", "backup_verified", "analyzing_metadata", "organizing"]
+    if not states:
+        return None
     conditions.append("state IN (" + ",".join("?" for _ in states) + ")")
     values.extend(states)
     if exclude_job_id:
@@ -376,7 +493,7 @@ def find_folder_import_by_identity(
         values.append(exclude_job_id)
     with database_connection(database_path) as connection:
         row = connection.execute(
-            "SELECT * FROM jobs WHERE " + " AND ".join(conditions) + " ORDER BY created_at ASC LIMIT 1",
+            "SELECT * FROM jobs WHERE " + " AND ".join(conditions) + " ORDER BY CASE WHEN state='completed' THEN 1 ELSE 0 END, created_at ASC, id LIMIT 1",
             values,
         ).fetchone()
     return row_to_job(row) if row is not None else None
@@ -388,27 +505,27 @@ def set_job_source_identity(
     *,
     source_signature: str,
     source_fingerprint: str,
+    allow_completed_duplicate: bool = False,
 ) -> dict[str, Any]:
-    duplicate = find_folder_import_by_identity(
-        database_path,
-        source_fingerprint=source_fingerprint,
-        exclude_job_id=job_id,
-        include_active=True,
-    )
-    if duplicate is not None:
-        with database_connection(database_path) as connection:
-            connection.execute(
-                "UPDATE jobs SET duplicate_of_job_id = ?, source_signature = ?, source_fingerprint = ?, updated_at = ? WHERE id = ?",
-                (duplicate["id"], source_signature, source_fingerprint, utc_now_iso(), job_id),
-            )
-        raise DatabaseError(
-            "Diese Quelle wurde bereits importiert: " + str(duplicate["id"])
-        )
+    # Serialize identity publication before any filesystem publication. A
+    # second worker cannot pass the same active fingerprint simultaneously.
     with database_connection(database_path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        states = ["queued", "copying", "verifying", "backup_verified", "analyzing_metadata", "organizing"]
+        if not allow_completed_duplicate:
+            states.append("completed")
+        duplicate = connection.execute(
+            "SELECT id FROM jobs WHERE operation='folder_import' AND source_fingerprint=? AND id<>? AND state IN (" + ",".join("?" for _ in states) + ") ORDER BY created_at,id LIMIT 1",
+            (source_fingerprint,job_id,*states),
+        ).fetchone()
         connection.execute(
-            "UPDATE jobs SET source_signature = ?, source_fingerprint = ?, updated_at = ? WHERE id = ?",
-            (source_signature, source_fingerprint, utc_now_iso(), job_id),
+            "UPDATE jobs SET source_signature=?,source_fingerprint=?,updated_at=? WHERE id=?",
+            (source_signature,source_fingerprint,utc_now_iso(),job_id),
         )
+        if duplicate is not None:
+            connection.execute("UPDATE jobs SET duplicate_of_job_id=? WHERE id=?",(duplicate["id"],job_id))
+    if duplicate is not None:
+        raise DatabaseError("Diese Quelle wird bereits verarbeitet: " + str(duplicate["id"]))
     job = get_job(database_path, job_id)
     if job is None:
         raise DatabaseError(f"Auftrag fehlt nach Quellenidentität: {job_id}")
@@ -507,7 +624,7 @@ def _job_workflow_states(connection: sqlite3.Connection) -> dict[str, dict[str, 
                 FROM files f
                 WHERE f.family_id IN ({ph})
                   AND f.current_root_kind='shared_workspace'
-                  AND COALESCE(f.current_relative_path,'') NOT LIKE 'Freigewordene Archivdateien/%'""",
+                  AND COALESCE(f.current_relative_path,'') NOT LIKE 'Freigewordene Archivdateien/%' AND COALESCE(f.current_relative_path,'') NOT LIKE 'Released Archive Files/%'""",
             tuple(family_ids),
         ).fetchall()
         active_ids = {int(row["family_id"]) for row in active_rows if row["family_id"] is not None}
@@ -569,6 +686,7 @@ def list_database_jobs(
             """
             SELECT *
             FROM jobs
+            WHERE operation <> 'sd_recheck'
             ORDER BY created_at DESC, id DESC
             LIMIT ?
             """,
@@ -625,6 +743,7 @@ def list_imported_media_origins(
                 f.job_id,
                 f.original_relative_path,
                 f.current_relative_path,
+                f.current_root_kind, f.sha256_current, f.size_bytes AS current_size_bytes,
                 f.original_filename,
                 COALESCE(f.source_size_bytes, f.size_bytes) AS size_bytes,
                 f.sha256_original AS sha256,
@@ -644,6 +763,7 @@ def claim_next_job(
     database_path: Path,
     *,
     operation: str | None = None,
+    job_id: str | None = None,
 ) -> dict[str, Any] | None:
     connection = connect(
         database_path
@@ -654,12 +774,19 @@ def claim_next_job(
             "BEGIN IMMEDIATE"
         )
 
-        if operation is None:
+        if job_id is not None:
+            row=connection.execute("SELECT * FROM jobs WHERE state='queued' AND id=? AND operation='folder_import'",(job_id,)).fetchone()
+        elif operation is None:
             row = connection.execute(
                 """
                 SELECT *
                 FROM jobs
                 WHERE state = 'queued'
+                  AND NOT (operation='sd_recheck' AND stage='waiting_for_import'
+                    AND EXISTS (SELECT 1 FROM jobs AS publishing
+                      WHERE publishing.operation='folder_import'
+                        AND publishing.state IN ('queued','copying','verifying','backup_verified',
+                          'analyzing_metadata','organizing','interrupted')))
                 ORDER BY created_at ASC, id ASC
                 LIMIT 1
                 """
@@ -670,6 +797,11 @@ def claim_next_job(
                 SELECT *
                 FROM jobs
                 WHERE state = 'queued'
+                  AND NOT (operation='sd_recheck' AND stage='waiting_for_import'
+                    AND EXISTS (SELECT 1 FROM jobs AS publishing
+                      WHERE publishing.operation='folder_import'
+                        AND publishing.state IN ('queued','copying','verifying','backup_verified',
+                          'analyzing_metadata','organizing','interrupted')))
                   AND operation = ?
                 ORDER BY created_at ASC, id ASC
                 LIMIT 1
@@ -680,6 +812,20 @@ def claim_next_job(
         if row is None:
             connection.commit()
             return None
+
+        # A conflicted job stays queued. Never claim it and subsequently fail
+        # outside its worker's protected body, leaving an artificial running job.
+        from app import root_operations as ro
+        owner=ro._registered(database_path)
+        if owner is not None:
+            from app.operation_health import require_write
+            from app.operation_scopes import job_resources
+            try:
+                require_write(owner['workspace_root'],candidate={
+                    '_resources':job_resources(owner['library_id'],str(row['operation']))})
+            except ro.RootOperationError:
+                connection.rollback()
+                return None
 
         now = utc_now_iso()
         job_id = str(row["id"])
@@ -737,6 +883,7 @@ def claim_next_job(
         connection.close()
 
 
+@idempotent_write
 def update_job_progress(
     database_path: Path,
     job_id: str,
@@ -1738,6 +1885,7 @@ def list_job_families(
     ]
 
 
+@idempotent_write
 def update_import_file_paths(
     database_path: Path,
     job_id: str,
@@ -1985,6 +2133,14 @@ def list_job_day_groups(
 
             WHERE job_id = ?
               AND selected_capture_time IS NOT NULL
+              AND COALESCE(current_root_kind,'job_root') <> 'trash'
+              AND NOT (
+                  current_root_kind='shared_workspace'
+                  AND (
+                      current_relative_path IN ('Ohne_Datum','No Date')
+                      OR (current_relative_path LIKE 'Ohne_Datum/%' OR current_relative_path LIKE 'No Date/%')
+                  )
+              )
               {exclusion_sql}
 
             GROUP BY
@@ -2024,7 +2180,17 @@ def list_job_day_groups(
             FROM files
 
             WHERE job_id = ?
-              AND selected_capture_time IS NULL
+              AND COALESCE(current_root_kind,'job_root') <> 'trash'
+              AND (
+                  selected_capture_time IS NULL
+                  OR (
+                      current_root_kind='shared_workspace'
+                      AND (
+                          current_relative_path IN ('Ohne_Datum','No Date')
+                          OR (current_relative_path LIKE 'Ohne_Datum/%' OR current_relative_path LIKE 'No Date/%')
+                      )
+                  )
+              )
               {exclusion_sql}
             """,
             (job_id, *exclusion_params),
@@ -2454,6 +2620,7 @@ def create_planned_event(
     preview: dict[str, Any],
     *,
     ignore_event_ids: set[str] | None = None,
+    transaction_connection: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     """
     Store a server-validated event plan.
@@ -2611,12 +2778,13 @@ def create_planned_event(
         for _ in requested_family_ids
     )
 
-    with database_connection(
-        database_path
+    with (
+        database_connection(database_path)
+        if transaction_connection is None
+        else nullcontext(transaction_connection)
     ) as connection:
-        connection.execute(
-            "BEGIN IMMEDIATE"
-        )
+        if transaction_connection is None:
+            connection.execute("BEGIN IMMEDIATE")
 
         job = connection.execute(
             """
@@ -3050,12 +3218,18 @@ def create_planned_event(
                     extension_details['extension_start'],
                     extension_details['extension_end'],
                     now,
+                    naming=preview.get("folder_naming"),
                 )
                 for row in family_rows:
                     connection.execute('UPDATE event_assignments SET event_id=? WHERE family_id=? AND event_id=?',
                         (assignment_target(parent_event_id,children,str(row['selected_capture_time'])[:19]),row['id'],assignment_event_id))
             else:
-                organizational=normalize_subevents(preview['subevents'],parent_start,parent_end)
+                organizational=normalize_subevents(
+                    preview['subevents'],
+                    parent_start,
+                    parent_end,
+                    naming=preview.get("folder_naming"),
+                )
                 children=store_subevents(connection,parent_event_id,organizational,now)
                 for row in family_rows:
                     connection.execute('UPDATE event_assignments SET event_id=? WHERE family_id=? AND event_id=?',
@@ -3151,7 +3325,9 @@ def create_planned_event(
             ),
         )
 
-        connection.commit()
+        # The owner of the shared SQLite connection commits all dependent state.
+        if transaction_connection is None:
+            connection.commit()
 
         parent_row = connection.execute(
             """
@@ -3744,6 +3920,7 @@ def update_event_definition(
     app_version: str | None = None,
     cascade_confirmed: bool = False,
     allow_archived_manual: bool = False,
+    guided_structure_change_id: str | None = None,
 ) -> dict[str, Any]:
     """Edit an event transactionally; keep parent/child and index consistent.
 
@@ -3799,7 +3976,11 @@ def update_event_definition(
             raise ValueError("Archivierte Ereignisse können nicht mehr bearbeitet werden.")
 
         from app.event_structure_changes import assert_no_open_structure_change
-        assert_no_open_structure_change(connection, event_id)
+        assert_no_open_structure_change(
+            connection, event_id,
+            guided_change_id=guided_structure_change_id,
+            preview=preview,
+        )
 
         status = str(event["status"])
         is_applied = status == "applied" and event["applied_at"] is not None
@@ -3908,6 +4089,15 @@ def update_event_definition(
                     "folder_unchanged": True, "applied_event": is_applied,
                 }, ensure_ascii=False), now),
             )
+            if is_applied and workspace_path is not None:
+                # BA-01: The durable repair intent and event revision are one
+                # SQLite commit. If the process crashes before event.json is
+                # replaced, startup can safely regenerate exactly this revision.
+                from app.event_document_sync import queue_event_document_sync
+                queue_event_document_sync(
+                    connection, job_id, event_id,
+                    int(event["revision"] or 1) + 1, now=now,
+                )
             connection.commit()
             row = connection.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
             metadata_result = {
@@ -3915,13 +4105,22 @@ def update_event_definition(
                 "resort_required": False, "removed_family_ids": [],
                 "reassignment_required": False,
             }
-            if workspace_path is not None:
-                from app.event_document import build_event_document_from_db, write_event_document
-                document = build_event_document_from_db(database_path, workspace_path, job_id, event_id)
-                if document is not None:
-                    document["resort_required"] = False
-                    metadata_result["event_document"] = str(
-                        write_event_document(workspace_path, document, app_version=app_version)
+            if workspace_path is not None and is_applied:
+                from app.event_document_sync import sync_event_document_task
+                sync_result = sync_event_document_task(
+                    database_path, workspace_path, event_id,
+                    app_version=app_version,
+                )
+                if sync_result["status"] == "completed":
+                    metadata_result["event_document"] = sync_result.get("path")
+                    metadata_result["event_document_sync_pending"] = False
+                else:
+                    # The edit was already committed. Do not raise a fake
+                    # pre-commit error or force the user to resubmit the stale
+                    # expected_revision. Make the durable pending work visible.
+                    metadata_result["event_document_sync_pending"] = True
+                    metadata_result["event_document_sync_error"] = str(
+                        sync_result.get("error") or "event.json konnte nicht synchronisiert werden"
                     )
             return metadata_result
         requested_ids = sorted({int(v) for v in preview.get("selected_family_ids", [])})
@@ -4114,7 +4313,7 @@ def update_event_definition(
                 raise ValueError("Mindestens eine Familie liegt außerhalb der neuen Zeitdefinition.")
 
         mutation_id = None
-        if is_applied or (cascade_result and status in {"draft", "planned"}):
+        if (is_applied and not guided_structure_change_id) or (cascade_result and status in {"draft", "planned"}):
             affected_ids = [event_id]
             if cascade_result:
                 affected_ids.extend(str(v) for v in (cascade_result.get("affected_event_ids") or []))
@@ -4130,7 +4329,7 @@ def update_event_definition(
             """UPDATE events SET name = ?, start_datetime = ?, end_datetime = ?, folder_name = ?,
                event_kind = ?, preserve_day_folders = ?, notes = ?, revision = revision + 1,
                resort_required = ?, updated_at = ?, edited_at = ? WHERE id = ?""",
-            (clean_name, parent_start, parent_end, str(preview["parent_folder"]), str(preview["event_kind"]), int(bool(preview["preserve_day_folders"])), clean_notes, int(is_applied), now, now, event_id),
+            (clean_name, parent_start, parent_end, str(preview["parent_folder"]), str(preview["event_kind"]), int(bool(preview["preserve_day_folders"])), clean_notes, int(is_applied and not guided_structure_change_id), now, now, event_id),
         )
 
         if event_kind == "no_event":
@@ -4144,8 +4343,27 @@ def update_event_definition(
         organizational = list(preview.get('subevents') or [])
         if preview.get('child_folder') and not organizational:
             organizational=[{'name':preview['child_event_name'],'start_datetime':assignment_start,'end_datetime':assignment_end}]
-        organizational=normalize_subevents(organizational,parent_start,parent_end)
+        organizational=normalize_subevents(
+            organizational,
+            parent_start,
+            parent_end,
+            naming=preview.get("folder_naming"),
+        )
         children=store_subevents(connection,event_id,organizational,now)
+        if guided_structure_change_id:
+            # Removed physical child leaves must not survive as ghost folders
+            # in event.json or in the destination structure preview.
+            retained_children = {str(child["id"]) for child in children}
+            for old_child in connection.execute(
+                "SELECT leaf_key FROM event_leaf_folder_layouts WHERE parent_event_id=?",
+                (event_id,),
+            ).fetchall():
+                stable = str(old_child["leaf_key"]).split("@", 1)[0]
+                if stable != event_id and stable not in retained_children:
+                    connection.execute(
+                        "DELETE FROM event_leaf_folder_layouts WHERE parent_event_id=? AND leaf_key=?",
+                        (event_id, str(old_child["leaf_key"])),
+                    )
         assignment_rows=[(assignment_target(event_id,children,str(row['selected_capture_time'])[:19]),int(row['id']),'date_time_range',now) for row in rows]
         assignment_event_id = event_id
         # 0.26.11: A planned definition is only database planning. Saving an
@@ -4289,6 +4507,31 @@ def update_event_definition(
                 "applied_event": is_applied,
             }, ensure_ascii=False, sort_keys=True), now),
         )
+        if guided_structure_change_id:
+            # The physical file moves have *already* happened and were
+            # cryptographically verified by the guided preflight. Do not
+            # enqueue a second sort/physical mutation of the same event.
+            if is_applied:
+                from app.event_document_sync import queue_event_document_sync
+                queue_event_document_sync(connection, job_id, event_id, int(event["revision"] or 1) + 1, now=now)
+            # Finish the reviewed manual task atomically with the canonical
+            # event edit. A failed editor transaction leaves the task intact.
+            connection.execute(
+                """UPDATE event_structure_changes
+                   SET status='completed',updated_at=?,completed_at=?,error_message=NULL
+                   WHERE id=? AND event_id=? AND status='blocked'""",
+                (now, now, guided_structure_change_id, event_id),
+            )
+            connection.execute(
+                """INSERT INTO audit_log(
+                    job_id,action,entity_type,entity_id,details_json,created_at
+                ) VALUES (?,'manual_structure_guided_edit','event',?,?,?)""",
+                (job_id, event_id, json.dumps({
+                    "change_id":guided_structure_change_id,
+                    "mutation_id":mutation_id,
+                    "removed_subevents":True,
+                }, sort_keys=True), now),
+            )
         connection.commit()
         row = connection.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
 
@@ -4304,7 +4547,7 @@ def update_event_definition(
         "event": dict(row),
         "structural_changed": True,
         "assigned_family_ids": requested_ids,
-        "resort_required": bool(is_applied),
+        "resort_required": bool(is_applied and not guided_structure_change_id),
         "removed_family_ids": removed_ids,
         "reassignment_required": False,
         "cascade": cascade_result,
@@ -4315,6 +4558,9 @@ def update_event_definition(
 
     # A structural applied edit stores SOLL only in SQLite.  Its final portable
     # document is written after the explicitly confirmed physical reconcile.
+    if workspace_path is not None and guided_structure_change_id and is_applied:
+        from app.event_document_sync import recover_event_document_sync_tasks
+        recover_event_document_sync_tasks(database_path, workspace_path)
     if workspace_path is not None and not is_applied:
         from app.event_document import (
             build_event_document_from_db,
@@ -4580,6 +4826,7 @@ def assign_free_families_to_existing_no_event(
         "status": "assigned",
         "event_id": effective_event_id,
         "canonical_target_event_id": str(target["id"]),
+        "target_job_id": str(target["job_id"]),
         "assigned_family_count": len(selected),
         "family_ids": [fid for fid, _, _ in selected],
         "source_job_ids": source_job_ids,
@@ -4644,13 +4891,14 @@ def list_no_event_month_targets(database_path: Path, month_keys: list[str], pref
     return result
 
 
-def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
+def list_global_tasks(database_path: Path, *, eligible_family_ids: set[int] | None = None) -> list[dict[str, Any]]:
     """Open user-visible work across all jobs.
 
     These tasks are deliberately derived from durable DB state so closing a
     dialog or reloading a page can never make pending work disappear.
     """
     tasks: list[dict[str, Any]] = []
+    eligibility = '' if eligible_family_ids is None else (' AND ff.id IN ('+','.join(str(int(i)) for i in sorted(eligible_family_ids))+')' if eligible_family_ids else ' AND 0')
     with database_connection(database_path) as connection:
         # Veraltete Neu-Zuordnungen sind keine Aufgaben. Sie entstehen z. B.,
         # wenn eine Familie spaeter wieder direkt einem gueltigen Ereignis
@@ -4663,6 +4911,24 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
         cleaned += reconcile_released_free_markers(connection)
         if cleaned:
             connection.commit()
+        # A failed durable event.json write must remain visible in the
+        # global task list until a later startup/retry repairs it.
+        for document_task in connection.execute(
+            """SELECT task.event_id,task.job_id,task.status,e.name AS event_name
+               FROM event_document_sync_tasks task
+               JOIN events e ON e.id=task.event_id
+               WHERE task.status IN ('pending','blocked')
+               ORDER BY task.updated_at,task.event_id"""
+        ).fetchall():
+            tasks.append({
+                'kind': 'event_document_sync',
+                'job_id': document_task['job_id'],
+                'event_id': document_task['event_id'],
+                'title': 'Ereignisdokument prüfen',
+                'detail': str(document_task['event_name']) + ' · event.json-Synchronisierung offen',
+                'count': 1,
+                'href': f"/events?job={document_task['job_id']}",
+            })
         active_reconcile_event_ids: set[str] = set()
         for active in connection.execute(
             """SELECT details_json FROM sort_runs
@@ -4818,16 +5084,37 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                 'href': f"/workspace?job={row['job_id']}&task=planned:{row['id']}",
             })
 
+        # Applied events are not finished until their camera archive verification
+        # has completed. Keep one actionable task per active root event.
+        for row in connection.execute(
+            """SELECT e.id,e.job_id,e.name FROM events e
+               WHERE e.parent_event_id IS NULL AND e.status='applied'
+                 AND COALESCE(TRIM(e.linkage_kind),'')=''
+                 AND NOT EXISTS (
+                   SELECT 1 FROM sort_runs sr
+                   WHERE sr.event_id=e.id
+                     AND sr.status IN ('queued','verifying','moving','finalizing','rolling_back')
+                 )
+               ORDER BY e.updated_at"""
+        ).fetchall():
+            tasks.append({
+                'kind':'archive_pending','job_id':row['job_id'],
+                'event_id':row['id'],'title':'Ereignis archivieren',
+                'detail':str(row['name']),'count':1,
+                'href':f"/events?job={row['job_id']}",
+            })
+
         # Nach einer abgeschlossenen Archivänderung liegen herausgefallene
         # Familien wieder sicher im SSD-Arbeitsbereich. Sie besitzen bewusst
         # keinen separaten Neu-Zuordnungsauftrag mehr, sollen aber als offene
         # Aufgabe sichtbar bleiben, bis sie über „Aufnahmen“ neu verplant sind.
         for row in connection.execute(
-            """SELECT MIN(marker.job_id) AS anchor_job_id,
+            f"""SELECT MIN(marker.job_id) AS anchor_job_id,
                       COUNT(DISTINCT marker.family_id) AS n
                FROM released_free_families marker
                JOIN file_families ff ON ff.id=marker.family_id
                WHERE ff.selected_capture_time IS NOT NULL
+                 {eligibility}
                  AND NOT EXISTS (
                    SELECT 1 FROM event_assignments ea
                    JOIN events e ON e.id=ea.event_id
@@ -4838,7 +5125,7 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                    SELECT 1 FROM files f
                    WHERE f.family_id=marker.family_id
                      AND f.current_root_kind='shared_workspace'
-                     AND f.current_relative_path LIKE 'Freigewordene Archivdateien/%'
+                     AND (f.current_relative_path LIKE 'Freigewordene Archivdateien/%' OR f.current_relative_path LIKE 'Released Archive Files/%')
                  )
                HAVING COUNT(DISTINCT marker.family_id) > 0"""
         ).fetchall():
@@ -4868,8 +5155,8 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                JOIN files f ON f.family_id=ff.id AND f.job_id=ff.job_id
                WHERE f.current_root_kind='shared_workspace'
                  AND (
-                   f.current_relative_path='Ohne_Datum'
-                   OR f.current_relative_path LIKE 'Ohne_Datum/%'
+                   f.current_relative_path IN ('Ohne_Datum','No Date')
+                   OR (f.current_relative_path LIKE 'Ohne_Datum/%' OR f.current_relative_path LIKE 'No Date/%')
                  )
                  AND NOT EXISTS (
                    SELECT 1 FROM event_assignments ea
@@ -4904,9 +5191,10 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                 "href": "/metadata-correction?area=library",
             })
 
-        # Freie Familien sind nur dann eine Aufgabe, wenn sie nicht bereits aus
-        # einer Ereignisänderung stammen (diese besitzen oben ihre eigene
-        # Neu-Zuordnungsaufgabe). So entstehen keine Doppelmeldungen.
+        # Freie Familien folgen den normalen Workspace-Tageskarten.
+        # Nur echte offene Neu-Zuordnungen oder gesondert angezeigte
+        # Archivfreigaben werden ausgeschlossen; ein alter gewöhnlicher
+        # released_free-Marker darf die Sammelaufgabe nicht unterdrücken.
         # Metadatenkorrekturen werden global nur pro Bereich gebündelt.
         # Einzeldateien bleiben auf der Metadatenseite nachvollziehbar, blähen
         # aber den allgemeinen Aufgabenindikator nicht mehr auf.
@@ -4953,18 +5241,51 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                 "href": f"/metadata-correction?area={area}",
             })
 
-        for row in connection.execute(
-            """SELECT ff.job_id, COALESCE(j.source_volume_label,ff.job_id) AS label, COUNT(*) AS n
+        placement = connection.execute(
+            """SELECT COUNT(*) AS n,
+                      SUM(CASE WHEN repairable=1 THEN 1 ELSE 0 END) AS repairable_n,
+                      SUM(CASE WHEN root_kind='camera_archive' THEN 1 ELSE 0 END) AS archive_n
+               FROM external_change_notices
+               WHERE status='open' AND action_required=1"""
+        ).fetchone()
+        placement_n = int(placement["n"] or 0)
+        if placement_n:
+            detail = (
+                f"{placement_n} Abweichung"
+                + ("" if placement_n == 1 else "en")
+                + " zwischen physischem Bestand und fachlicher Zuordnung"
+            )
+            archive_n = int(placement["archive_n"] or 0)
+            if archive_n:
+                detail += (
+                    f" · {archive_n} im schreibgeschützten Archiv"
+                )
+            tasks.append({
+                "kind": "placement_conflicts",
+                "title": "Dateizuordnung prüfen",
+                "detail": detail,
+                "count": 1,
+                "conflict_count": placement_n,
+                "repairable_count": int(placement["repairable_n"] or 0),
+                "archive_count": archive_n,
+                "href": "/workspace?task=placement-conflicts",
+            })
+
+        row = connection.execute(
+            f"""SELECT COUNT(*) AS n,
+                      COUNT(DISTINCT ff.job_id) AS job_count,
+                      MIN(COALESCE(j.source_volume_label,ff.job_id)) AS only_label
                FROM file_families ff JOIN jobs j ON j.id=ff.job_id
                WHERE ff.selected_capture_time IS NOT NULL
+                 {eligibility}
                  AND NOT EXISTS (
                    SELECT 1 FROM files undated_file
                    WHERE undated_file.family_id=ff.id
                      AND undated_file.job_id=ff.job_id
                      AND undated_file.current_root_kind='shared_workspace'
                      AND (
-                       undated_file.current_relative_path='Ohne_Datum'
-                       OR undated_file.current_relative_path LIKE 'Ohne_Datum/%'
+                       undated_file.current_relative_path IN ('Ohne_Datum','No Date')
+                       OR (undated_file.current_relative_path LIKE 'Ohne_Datum/%' OR undated_file.current_relative_path LIKE 'No Date/%')
                      )
                  )
                  AND NOT EXISTS (
@@ -4979,17 +5300,36 @@ def list_global_tasks(database_path: Path) -> list[dict[str, Any]]:
                  AND NOT EXISTS (
                    SELECT 1 FROM released_free_families marker
                    WHERE marker.job_id=ff.job_id AND marker.family_id=ff.id
-                 )
-               GROUP BY ff.job_id,j.source_volume_label
-               HAVING COUNT(*) > 0
-               ORDER BY MAX(j.updated_at) DESC"""
-        ).fetchall():
+                     AND COALESCE(marker.archive_origin,0)=1
+                     AND EXISTS (
+                       SELECT 1 FROM files released
+                       WHERE released.family_id=ff.id
+                         AND released.current_root_kind='shared_workspace'
+                         AND (released.current_relative_path LIKE 'Freigewordene Archivdateien/%'
+                           OR released.current_relative_path LIKE 'Released Archive Files/%')
+                     )
+                 )"""
+        ).fetchone()
+        unassigned_count = int(row["n"] or 0) if row is not None else 0
+        if unassigned_count:
+            job_count = int(row["job_count"] or 0)
+            suffix = (
+                f" · {row['only_label']}"
+                if job_count == 1 and str(row["only_label"] or "").strip()
+                else " · freier Tagesbestand"
+            )
             tasks.append({
-                'kind': 'unassigned_families', 'job_id': row['job_id'],
-                'title': 'Noch nicht zugeordnet',
-                'detail': f"{int(row['n'])} Familie" + ('' if int(row['n']) == 1 else 'n') + f" · {row['label']}",
-                'count': 1,
-                'href': f"/workspace?job={row['job_id']}&task=free",
+                "kind": "unassigned_families",
+                "title": "Noch nicht zugeordnet",
+                "detail": (
+                    f"{unassigned_count} Familie"
+                    + ("" if unassigned_count == 1 else "n")
+                    + suffix
+                ),
+                "count": 1,
+                "family_count": unassigned_count,
+                "job_count": job_count,
+                "href": "/workspace?task=free",
             })
     return tasks
 

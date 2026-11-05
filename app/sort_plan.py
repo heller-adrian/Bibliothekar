@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.managed_directory_names import directory_name as managed_directory_name
+
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -45,6 +47,46 @@ def _layout_directories_at_leaf(leaf: PurePosixPath, layout_state: dict[str, Any
         str(leaf / PurePosixPath(relative))
         for relative in leaf_layout_directories(layout_state)
     }
+
+
+def _reapply_original_child_folder_names(
+    database_path: Path,
+    job_id: str,
+    event_id: str,
+) -> set[str]:
+    """Read OLD child folders from the pending mutation, not the new SOLL.
+
+    Structural edits can remove or rename children before physical reconcile.
+    The current event rows therefore cannot describe the still-existing source
+    hierarchy. An absent/corrupt snapshot must not be guessed from folder names.
+    """
+    with database_connection(database_path) as connection:
+        rows = connection.execute(
+            """SELECT original_state_json FROM event_mutations
+               WHERE job_id=?
+                 AND status IN ('pending_reassignment','pending_apply')
+               ORDER BY created_at DESC,id DESC""",
+            (job_id,),
+        ).fetchall()
+    for row in rows:
+        try:
+            original = json.loads(str(row["original_state_json"] or "{}"))
+        except (TypeError, ValueError):
+            continue
+        original_events = list(original.get("events") or [])
+        if not any(
+            str(event.get("id") or "") == event_id
+            and not event.get("parent_event_id")
+            for event in original_events
+        ):
+            continue
+        return {
+            str(event.get("folder_name") or "")
+            for event in original_events
+            if str(event.get("parent_event_id") or "") == event_id
+            and str(event.get("folder_name") or "")
+        }
+    return set()
 
 
 def _observed_organization_path(
@@ -621,6 +663,8 @@ def build_event_sort_plan(
     """
 
     workspace_root = _resolve_workspace_root(workspace_path)
+    from app.archive_staging import staging_directory_name
+    staging_name = staging_directory_name(shared_work_root(workspace_root))
 
     # 0.28.0: Sicherung ist Herkunft, nicht Ereignisidentität. Alte
     # /api/jobs/...-Routen bleiben als Kompatibilität erhalten, aber der
@@ -817,6 +861,7 @@ def build_event_sort_plan(
                         ON ff.id = f.family_id
 
                     WHERE f.family_id IN ({family_placeholders})
+                      AND COALESCE(f.current_root_kind,'job_root') <> 'trash'
 
                     ORDER BY
                         ff.selected_capture_time,
@@ -847,6 +892,7 @@ def build_event_sort_plan(
                         ON ff.id = f.family_id
 
                     WHERE f.id IN ({file_placeholders})
+                      AND COALESCE(f.current_root_kind,'job_root') <> 'trash'
 
                     ORDER BY f.original_relative_path
                     """,
@@ -904,6 +950,7 @@ def build_event_sort_plan(
                         record_family_id,
                         capture_value,
                         physical=True,
+                        release_name=managed_directory_name(workspace_backup_root(workspace_root),'released_archive'),
                     )
                     if record_family_id is not None
                     else None
@@ -915,7 +962,14 @@ def build_event_sort_plan(
                             connection,
                             capture_value,
                             physical=True,
-                            include_event_ids=(event_id,) if not allow_reapply else (),
+                            # Reapply moves to the NEW saved event definition.
+                            # The old segments remain the source filesystem
+                            # occupancy until the transaction completes, but
+                            # must not block the new free-stock destinations.
+                            # include_event_ids tells the physical layout
+                            # resolver to use the committed SOLL segments for
+                            # this event only; other events remain occupied.
+                            include_event_ids=(event_id,),
                         )
                     )
                 except FreeStockLayoutError as error:
@@ -951,7 +1005,7 @@ def build_event_sort_plan(
                 and all(
                     str(row.get("current_root_kind") or "") == "shared_workspace"
                     and str(row.get("current_relative_path") or "").replace("\\", "/").startswith(
-                        "Freigewordene Archivdateien/"
+                        ("Freigewordene Archivdateien/", "Released Archive Files/")
                     )
                     for row in assigned_source_rows
                 )
@@ -984,6 +1038,9 @@ def build_event_sort_plan(
         ).is_file()
         for row in file_rows
     )
+
+    from app.root_operations import attest_legacy_plan_view
+    attest_legacy_plan_view(database_path, workspace_root, target_root, central_stock_root)
 
     legacy_source_root: Path | None = None
     legacy_source_field = ""
@@ -1089,7 +1146,7 @@ def build_event_sort_plan(
         # correct modern location, not at a long-gone import directory.
         if (
             declared_root_kind == "shared_workspace"
-            or relative.as_posix().startswith("Freigewordene Archivdateien/")
+            or relative.as_posix().startswith(("Freigewordene Archivdateien/", "Released Archive Files/"))
         ):
             return central_stock_root, central_candidate, "central_stock"
         if legacy_source_root is not None:
@@ -1150,10 +1207,10 @@ def build_event_sort_plan(
         # 0.27.0: Die manuelle Archiv-Erweiterung liegt unter der kanonischen
         # Ereignishülle. Mehrere Nachtraege duerfen dort zusammenlaufen; echte
         # Dateikollisionen bleiben durch den No-Overwrite-Plan blockiert.
-        physical_parent_parts = ["Später zuordnen", parent_folder]
+        physical_parent_parts = [staging_name, parent_folder]
     else:
         physical_parent_parts = (
-            ["Später zuordnen", f"{parent_folder} - {job_token}"]
+            [staging_name, f"{parent_folder} - {job_token}"]
             if collision_redirected
             else [parent_folder]
         )
@@ -1175,6 +1232,12 @@ def build_event_sort_plan(
         str(child.get("folder_name") or "") for child in child_definitions
         if str(child.get("folder_name") or "")
     }
+    if allow_reapply:
+        # Source hierarchy is the mutation's OLD event graph. Without this,
+        # removing "Teil 04" would preserve "Teil 04/Alle" as a custom path.
+        child_folder_names.update(
+            _reapply_original_child_folder_names(database_path, job_id, event_id)
+        )
 
     blockers: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -1459,7 +1522,7 @@ def build_event_sort_plan(
             file_preserve_day_folders = False
         elif reassignment:
             target_folder = _safe_component(
-                reassignment.get("target_folder_name") or "Später zuordnen",
+                reassignment.get("target_folder_name") or staging_name,
                 "Zielereignisordner",
             )
             target_linkage = str(reassignment.get("target_linkage_kind") or "")
@@ -1470,7 +1533,7 @@ def build_event_sort_plan(
             elif target_linkage == "applied_followup":
                 destination_parts = [year, "Nachträge", f"{target_folder} - {job_token}"]
             elif target_linkage == "archived_manual" or str(reassignment.get("target_status") or "") == "archived":
-                destination_parts = ["Später zuordnen", year, target_folder]
+                destination_parts = [staging_name, year, target_folder]
             else:
                 destination_parts = [year, target_folder]
             file_preserve_day_folders = bool(reassignment.get("target_preserve_day_folders"))
@@ -1480,7 +1543,7 @@ def build_event_sort_plan(
             # unter Arbeitsbereich. Die Jahresordner entstehen nur innerhalb
             # dieses Bereichs, damit die normalen Jahresordner auch langfristig
             # ausschließlich echte Ereignisse enthalten.
-            destination_parts = ["Später zuordnen", year, *physical_parent_parts[1:]]
+            destination_parts = [staging_name, year, *physical_parent_parts[1:]]
         else:
             destination_parts = [year, *physical_parent_parts]
 
@@ -1676,6 +1739,9 @@ def build_event_sort_plan(
             blockers.append({
                 "code": "target_exists",
                 "file_id": file_id,
+                "source_relative_path": str(source_relative),
+                "destination_relative_path": str(destination_relative),
+                "duplicate_content_verified": False,
                 "message": (
                     "Am Ziel existiert bereits ein anderer Eintrag: "
                     + str(destination_relative)
@@ -2566,8 +2632,15 @@ def build_event_sort_plan(
     duplicate_destinations.sort(key=lambda paths: paths[0].casefold())
 
     for paths in duplicate_destinations:
+        conflicting = [entry for entry in [*entries, *asset_entries]
+                       if str(entry['destination_relative_path']).casefold() == paths[0].casefold()]
         blockers.append({
             "code": "duplicate_destination",
+            "sources": [{k: entry.get(k) for k in (
+                'file_id', 'family_id', 'source_relative_path', 'destination_relative_path',
+                'stored_sha256', 'expected_size_bytes', 'sha256_verified_now')}
+                for entry in conflicting],
+            "duplicate_content_verified": False,
             "message": (
                 "Mehrere Quelldateien würden denselben Zielpfad verwenden "
                 "(Groß-/Kleinschreibung zählt auf dem NAS nicht als Unterschied): "

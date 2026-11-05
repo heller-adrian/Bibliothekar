@@ -1,0 +1,6 @@
+[
+  "tests/backend/test_f12_no_clobber.py::test_linux_cross_filesystem_refuses_without_copy_fallback",
+  "tests/backend/test_rc6_handoff.py",
+  "tests/backend/test_rc5_practice_followup.py",
+  "tests/backend/test_rc4_sd_recheck.py"
+]

@@ -1,0 +1,2 @@
+Freigabeauftrag 0.45.3: vollständige Backendtests und TrueNAS-Compose-Validierung; bei Erfolg genau ein Container-Build in GHCR.
+Änderungen: Importkarten, Hellmodus, Aktionszeile auf dem Handy, Hover, Suchfeld und Fußabstand. Keine Datenbankänderungen.

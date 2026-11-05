@@ -13,9 +13,10 @@ import os
 
 from app.database import database_connection
 from app.free_stock_layout import released_origin_directory
+from app.managed_directory_names import directory_path
 from app.workspace_layout import backup_root
 
-ROOT_NAME = "Freigewordene Archivdateien"
+ROOT_NAME = "Released Archive Files"
 
 
 class ReleasedArchiveMaintenanceError(RuntimeError):
@@ -51,7 +52,7 @@ def normalize_released_archive_stock_for_days(
     days: list[str] | set[str] | tuple[str, ...],
 ) -> dict[str, Any]:
     work_root = backup_root(workspace_path).resolve(strict=False)
-    release_root = (work_root / ROOT_NAME).resolve(strict=False)
+    release_root = directory_path(work_root, "released_archive").resolve(strict=False)
     release_root.mkdir(parents=True, exist_ok=True)
     wanted_days = sorted({str(value)[:10] for value in days if str(value)})
     if not wanted_days:
@@ -92,6 +93,7 @@ def normalize_released_archive_stock_for_days(
                 family_id,
                 str(row.get("selected_capture_time") or ""),
                 physical=True,
+                release_name=release_root.name,
             )
             if target is not None:
                 targets[family_id] = target

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from app.source_filter import should_ignore_source_path
 from zoneinfo import ZoneInfo
 import json
@@ -194,6 +194,7 @@ def candidate_definition(
             ("QuickTime:Track1:MediaCreateDate", 60, "medium"),
             ("QuickTime:Track1:TrackCreateDate", 70, "medium"),
             ("XMP:XMP-xmp:CreateDate", 80, "medium"),
+            ("File:System:FileCreateDate", 850, "low"),
             ("File:System:FileModifyDate", 900, "low"),
         ]
 
@@ -209,6 +210,7 @@ def candidate_definition(
             ("EXIF:ExifIFD:CreateDate", 30, "high"),
             ("XMP:XMP-xmp:CreateDate", 40, "medium"),
             ("EXIF:IFD0:ModifyDate", 100, "low"),
+            ("File:System:FileCreateDate", 850, "low"),
             ("File:System:FileModifyDate", 900, "low"),
         ]
 
@@ -217,10 +219,12 @@ def candidate_definition(
 
 def run_exiftool(
     source_root: Path,
+    *,
+    progress_callback: Callable[[int, int], None] | None = None,
+    cancellation_callback: Callable[[], None] | None = None,
 ) -> list[dict[str, Any]]:
-    command = [
+    common = [
         "exiftool",
-        "-r",
         "-json",
         "-G0:1",
         "-a",
@@ -228,6 +232,8 @@ def run_exiftool(
         "-api",
         "QuickTimeUTC=1",
         "-DateTimeOriginal",
+        "-SubSecTimeOriginal",
+        "-SubSecTimeDigitized",
         "-OffsetTimeOriginal",
         "-CreateDate",
         "-Make",
@@ -244,87 +250,127 @@ def run_exiftool(
         "-FileModifyDate",
         "-FileName",
         "-Directory",
-        "-ext",
-        "RAF",
-        "-ext",
-        "DNG",
-        "-ext",
-        "CR2",
-        "-ext",
-        "CR3",
-        "-ext",
-        "NEF",
-        "-ext",
-        "ARW",
-        "-ext",
-        "ORF",
-        "-ext",
-        "RW2",
-        "-ext",
-        "JPG",
-        "-ext",
-        "JPEG",
-        "-ext",
-        "PNG",
-        "-ext",
-        "TIF",
-        "-ext",
-        "TIFF",
-        "-ext",
-        "HEIC",
-        "-ext",
-        "HEIF",
-        "-ext",
-        "MOV",
-        "-ext",
-        "MP4",
-        "-ext",
-        "M4V",
-        "-ext",
-        "AVI",
-        "-ext",
-        "MTS",
-        "-ext",
-        "M2TS",
-        "-ext",
-        "XMP",
-        str(source_root),
     ]
 
-    result = subprocess.run(
-        command,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    def execute(
+        command: list[str],
+    ) -> list[dict[str, Any]]:
+        if cancellation_callback is None:
+            result = subprocess.run(
+                command, check=False, capture_output=True, text=True,
+            )
+        else:
+            # Nur den zu diesem Import gehörenden ExifTool-Kindprozess beenden.
+            cancellation_callback()
+            process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                while True:
+                    cancellation_callback()
+                    try:
+                        out, err = process.communicate(timeout=0.5)
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
+                result = subprocess.CompletedProcess(command, process.returncode, out, err)
+                cancellation_callback()
+            except BaseException:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.communicate(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.communicate()
+                raise
+        if result.returncode not in {0, 1}:
+            raise MetadataError(
+                "ExifTool konnte nicht ausgeführt werden: "
+                + result.stderr.strip()
+            )
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise MetadataError(
+                "ExifTool lieferte ungültiges JSON."
+            ) from error
+        if not isinstance(data, list):
+            raise MetadataError(
+                "ExifTool-Ausgabe besitzt ein unerwartetes Format."
+            )
+        return data
 
-    if result.returncode not in {
-        0,
-        1,
-    }:
-        raise MetadataError(
-            "ExifTool konnte nicht ausgeführt werden: "
-            + result.stderr.strip()
+    if progress_callback is None:
+        command = [
+            *common,
+            "-r",
+            "-ext", "RAF",
+            "-ext", "DNG",
+            "-ext", "CR2",
+            "-ext", "CR3",
+            "-ext", "NEF",
+            "-ext", "ARW",
+            "-ext", "ORF",
+            "-ext", "RW2",
+            "-ext", "JPG",
+            "-ext", "JPEG",
+            "-ext", "PNG",
+            "-ext", "TIF",
+            "-ext", "TIFF",
+            "-ext", "HEIC",
+            "-ext", "HEIF",
+            "-ext", "MOV",
+            "-ext", "MP4",
+            "-ext", "M4V",
+            "-ext", "AVI",
+            "-ext", "MTS",
+            "-ext", "M2TS",
+            "-ext", "XMP",
+            str(source_root),
+        ]
+        return execute(command)
+
+    paths = [
+        path
+        for path in sorted(source_root.rglob("*"))
+        if path.is_file()
+        and classify_media(path) != "other"
+        and not should_ignore_source_path(
+            source_root,
+            path,
+        )
+    ]
+    total = len(paths)
+    if not paths:
+        progress_callback(0, 0)
+        return []
+
+    entries: list[dict[str, Any]] = []
+    # Ein Chunk begrenzt die Prozesszahl, liefert aber bei großen Karten
+    # trotzdem sichtbaren, echten Fortschritt während der ExifTool-Phase.
+    chunk_size = 160
+    for offset in range(0, total, chunk_size):
+        if cancellation_callback is not None:
+            cancellation_callback()
+        chunk = paths[
+            offset : offset + chunk_size
+        ]
+        entries.extend(
+            execute(
+                [
+                    *common,
+                    *(str(path) for path in chunk),
+                ]
+            )
+        )
+        progress_callback(
+            min(offset + len(chunk), total),
+            total,
         )
 
-    try:
-        data = json.loads(
-            result.stdout
-        )
-
-    except json.JSONDecodeError as error:
-        raise MetadataError(
-            "ExifTool lieferte ungültiges JSON."
-        ) from error
-
-    if not isinstance(data, list):
-        raise MetadataError(
-            "ExifTool-Ausgabe besitzt ein "
-            "unerwartetes Format."
-        )
-
-    return data
-
+    return entries
 
 def _candidate_rule(
     tag_name: str,
@@ -353,6 +399,8 @@ def _candidate_rule(
             return (70, "medium")
         if group == "XMP" and leaf == "CreateDate":
             return (80, "medium")
+        if group == "File" and leaf == "FileCreateDate":
+            return (850, "low")
         if group == "File" and leaf == "FileModifyDate":
             return (900, "low")
         return None
@@ -368,9 +416,42 @@ def _candidate_rule(
             return (40, "medium")
         if group == "EXIF" and leaf == "ModifyDate":
             return (100, "low")
+        if group == "File" and leaf == "FileCreateDate":
+            return (850, "low")
         if group == "File" and leaf == "FileModifyDate":
             return (900, "low")
     return None
+
+
+_CANDIDATE_LABELS_DE = {
+    "DateTimeOriginal": "Aufnahmezeit",
+    "CreateDate": "Erstellungszeit",
+    "CreationDate": "Aufnahme-/Erstellungszeit",
+    "MediaCreateDate": "Medien-Erstellungszeit",
+    "TrackCreateDate": "Spur-Erstellungszeit",
+    "ModifyDate": "Änderungszeit",
+    "FileCreateDate": "Datei-Erstellungszeit",
+    "FileModifyDate": "Datei-Änderungszeit",
+}
+
+
+def _candidate_display(tag_name: str, confidence: str, priority: int) -> dict[str, Any]:
+    leaf = str(tag_name).rsplit(":", 1)[-1]
+    label = _CANDIDATE_LABELS_DE.get(leaf, leaf)
+    trust = {"high": "hoch", "medium": "mittel", "low": "niedrig"}.get(
+        str(confidence), "nicht nutzbar"
+    )
+    base = {"high": 90, "medium": 70, "low": 35}.get(str(confidence), 0)
+    # Deterministisch: bei gleicher Vertrauensklasse gewinnt die etablierte
+    # Kandidatenpriorität. Kein Modell/Heuristikdienst ist beteiligt.
+    score = max(0, base - min(max(int(priority), 0), 999) // 100)
+    return {
+        "source_type": leaf,
+        "label_de": label,
+        "technical_tag": str(tag_name),
+        "trust_label": trust,
+        "trust_score": score,
+    }
 
 
 def build_candidates(
@@ -385,6 +466,26 @@ def build_candidates(
             continue
         priority, confidence = rule
         raw_text = str(raw_value).strip()
+
+        # EXIF often stores actual fractions in a separate SubSecTime tag.
+        # Preserve them; never derive fractions from filesystem timestamps.
+        leaf = str(tag_name).rsplit(":", 1)[-1]
+        if str(tag_name).startswith("EXIF:") and leaf in {"DateTimeOriginal", "CreateDate"}:
+            subsec = "SubSecTimeOriginal" if leaf == "DateTimeOriginal" else "SubSecTimeDigitized"
+            fraction = next(
+                (str(value).strip().lstrip(".")
+                 for key, value in metadata.items()
+                 if str(key).startswith("EXIF:") and str(key).endswith(":" + subsec)
+                 and value is not None
+                 and re.fullmatch(r"\.?\d{1,6}", str(value).strip())),
+                "",
+            )
+            if fraction and not re.search(r":\d{2}\.\d+(?:Z|[+-]\d{2}:\d{2})?$", raw_text):
+                suffix = re.search(r"(Z|[+-]\d{2}:\d{2})$", raw_text)
+                if suffix:
+                    raw_text = raw_text[:suffix.start()] + "." + fraction + raw_text[suffix.start():]
+                else:
+                    raw_text += "." + fraction
 
         if (
             str(tag_name).startswith("EXIF:")
@@ -406,6 +507,7 @@ def build_candidates(
 
         parsed = parse_exiftool_datetime(raw_text)
 
+        effective_confidence = confidence if parsed is not None else "unusable"
         candidates.append({
             "metadata_group": str(tag_name).split(":", 1)[0],
             "tag_name": str(tag_name),
@@ -416,14 +518,11 @@ def build_candidates(
                 else None
             ),
             "priority": priority,
-            "confidence": (
-                confidence
-                if parsed is not None
-                else "unusable"
-            ),
+            "confidence": effective_confidence,
             "usable": parsed is not None,
             "is_selected": False,
             "conflicts_with_selected": False,
+            **_candidate_display(str(tag_name), effective_confidence, priority),
         })
 
     candidates.sort(
@@ -521,6 +620,8 @@ def analyze_tree(
     source_root: Path,
     *,
     include_other: bool = True,
+    progress_callback: Callable[[int, int], None] | None = None,
+    cancellation_callback: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     if not source_root.is_dir():
         raise MetadataError(
@@ -528,7 +629,9 @@ def analyze_tree(
         )
 
     exif_entries = run_exiftool(
-        source_root
+        source_root,
+        progress_callback=progress_callback,
+        cancellation_callback=cancellation_callback,
     )
 
     metadata_by_path: dict[str, dict[str, Any]] = {}
@@ -549,6 +652,8 @@ def analyze_tree(
     files: list[dict[str, Any]] = []
 
     for path in sorted(source_root.rglob("*")):
+        if cancellation_callback is not None:
+            cancellation_callback()
         if should_ignore_source_path(source_root, path):
             continue
         if not path.is_file():
@@ -642,6 +747,29 @@ def analyze_tree(
             member["selected_capture_time"]
             for member in strong_members
         }
+
+        # Camera pairs can share a second while only the RAW stores real
+        # fractional EXIF seconds. Accept one unambiguous fractional value;
+        # differing real fractional values remain an explicit family conflict.
+        if len(strong_times) > 1:
+            # A JPEG may only record whole seconds while its paired RAW
+            # records actual fractional EXIF seconds. Inherit the unique
+            # precise value, including on high-confidence whole-second files,
+            # only if all camera instants share that UTC second.
+            instants = {
+                datetime.fromisoformat(value).astimezone(timezone.utc)
+                .replace(microsecond=0)
+                for value in strong_times
+            }
+            precise = {value for value in strong_times if "." in value[:26]}
+            if len(instants) == 1 and len(precise) == 1:
+                precise_value = next(iter(precise))
+                for member in strong_members:
+                    if member["selected_capture_time"] != precise_value:
+                        member["selected_capture_time"] = precise_value
+                        member["selected_capture_source"] = "family_subsecond_inheritance"
+                        member["inherited_from_family"] = True
+                strong_times = {precise_value}
 
         if len(strong_times) == 1:
             family_time = next(

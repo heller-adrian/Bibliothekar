@@ -1,0 +1,3 @@
+Freigabeauftrag 0.45.4: Nach erfolgreicher Backend-QA das Patch-Container-Image ghcr.io/heller-adrian/bibliothekar:patch-0.45.4 bauen und in GitHub Container Registry veröffentlichen.
+Änderungen: zuverlässiger ausgeblendeter Importverlauf, korrigierte Importdetails, sanfte Hover-Effekte, kompakter Ereignisabstand und anklickbare Hilfetexte. Keine Datenbankmigration.
+Nur Patchbranch; weder main noch latest aktualisieren.

@@ -1,0 +1,81 @@
+name: Targeted pre2 metadata rollback acceptance
+on:
+  push:
+    branches: [codex/pre2-metadata-abort-recovery]
+    paths-ignore: ['docs/**', 'README.md', 'CHANGELOG.md']
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: pre2-metadata-acceptance
+  cancel-in-progress: false
+jobs:
+  metadata-recovery:
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: pre2-${{ github.run_id }}
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: ${{ github.workspace }}/pre2-${{ github.run_id }}
+      PRE1_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:cbaa863fb6173736bcd43e917de994fadba3d05cc69c1688c618fad21d8a17b8
+      RC14_IMAGE: ghcr.io/heller-adrian/bibliothekar@sha256:86991ef46f1f29a990b63ea3983b1193adfe378247d1202e41fdfd7e21d44b9b
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: pre2-${{ github.run_id }}
+      - name: Isolated targeted regression suite
+        run: |
+          set -euo pipefail
+          QA_WORK="$(mktemp -d "$RUNNER_TEMP/bibliothekar-pre2.XXXXXXXX")"
+          printf 'QA_WORK=%s\n' "$QA_WORK" >> "$GITHUB_ENV"
+          python3 -m venv "$QA_WORK/venv"
+          "$QA_WORK/venv/bin/pip" install -q -r requirements.txt -c requirements-rc.constraints.txt pytest httpx
+          "$QA_WORK/venv/bin/python" -m pytest -q --junitxml="$QA_WORK/regressions.xml" \
+            tests/backend/test_pre2_metadata_abort.py tests/backend/test_0500_metadata_swap_recovery.py \
+            tests/backend/test_pre_metadata.py tests/backend/test_pre_metadata_retry.py \
+            tests/backend/test_pre_startup_performance.py tests/backend/test_f14_root_operations.py \
+            tests/backend/test_rc13_provenance.py tests/backend/test_rc12_storage.py \
+            tests/backend/test_0332_patch.py tests/backend/test_0333_patch.py 2>&1 | tee "$QA_WORK/regressions.log"
+      - name: Local test image and immutable historical images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir "$QA_WORK/docker"
+          export DOCKER_CONFIG="$QA_WORK/docker"
+          printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG" >> "$GITHUB_ENV"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          IMAGE="bibliothekar-pre2-qa:$GITHUB_RUN_ID"
+          docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .
+          printf 'IMAGE=%s\n' "$IMAGE" >> "$GITHUB_ENV"
+          docker pull "$PRE1_IMAGE"
+          docker pull "$RC14_IMAGE"
+          docker image inspect "$IMAGE" > "$QA_WORK/candidate-image.json"
+      - name: Real refusal, historical upgrade, HTTP login, restart and SIGKILL
+        run: |
+          set -euo pipefail
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre2/container.py 2>&1 | tee "$QA_WORK/container.log"
+      - name: Four thousand families and original fourteen corrected JPEGs
+        run: |
+          set -euo pipefail
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre/startup_container.py 2>&1 | tee "$QA_WORK/startup.log"
+          RUNNER_TEMP="$QA_WORK" python3 qa/pre/container.py 2>&1 | tee "$QA_WORK/iphone.log"
+      - name: Preserve evidence
+        if: always() && env.QA_WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pre2-metadata-evidence
+          retention-days: 30
+          path: |
+            ${{ env.QA_WORK }}/*.json
+            ${{ env.QA_WORK }}/*.xml
+            ${{ env.QA_WORK }}/*.log
+            ${{ env.QA_WORK }}/pre2-general/*.log
+      - name: Remove only temporary registry credential file
+        if: always() && env.DOCKER_CONFIG != ''
+        run: rm -f "$DOCKER_CONFIG/config.json"

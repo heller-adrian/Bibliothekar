@@ -3,14 +3,14 @@ set -Eeuo pipefail
 
 QA_ROOT="${QA_ROOT:-/mnt/storage/ki-workspace/hermes/bibliothekar-qa}"
 ARCHIVE_ROOT="${KAMERA_QA_ARCHIVE_ROOT:-$QA_ROOT/archive-test-library}"
-RUN_ID="${QA_RUN_ID:-$(date '+%Y-%m-%d_%H%M%S')_0.21.2_ARCHIVE}"
+RUN_ID="${QA_RUN_ID:-$(date '+%Y-%m-%d_%H%M%S')_CURRENT_ARCHIVE}"
 RUN_ROOT="$QA_ROOT/runs/$RUN_ID"
 SOURCE_ROOT="${1:-/mnt/storage/backup/kamera-sd-karten/DEEPTEST_SD_02}"
 QA_PORT="${QA_PORT:-31044}"
 CONTAINER_NAME="${QA_CONTAINER_NAME:-bibliothekar-hermes-archive-qa}"
 
-EXPECTED_REVISION="627c5515e533e167e45354ccaa71f988f104ae08"
-IMAGE="ghcr.io/heller-adrian/bibliothekar@sha256:27554d9f6cc2b8a67f77cf01e856b837423974dca0cb6d6e03e8bc5cdb5dddb6"
+EXPECTED_REVISION="${QA_EXPECTED_REVISION:?QA_EXPECTED_REVISION (Commit SHA) muss gesetzt sein}"
+IMAGE="${QA_IMAGE:?QA_IMAGE (Image aus demselben Commit) muss gesetzt sein}"
 PRODUCTION_ARCHIVE="/mnt/storage/fotos/Kamerabibliothek"
 PRODUCTION_DATABASE="/mnt/apps/appdata/kamera-automatisierung/database"
 APP_DATABASE="$RUN_ROOT/database"
@@ -129,6 +129,18 @@ cat > "$APP_CONFIG/settings.json" <<'JSON'
 }
 JSON
 
+# BA-03: A real QA owner password is required in the isolated container.
+# Stored only inside the fresh QA directory (never in Git, logs or prod).
+python3 - "$APP_CONFIG/admin-password" <<'PY_AUTH_SECRET'
+import secrets
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+with p.open("x", encoding="utf-8") as handle:
+    handle.write(secrets.token_urlsafe(36) + "\n")
+p.chmod(0o600)
+PY_AUTH_SECRET
+
 SOURCE_STAT_BEFORE="$(stat -c '%d:%i:%s:%Y' "$SOURCE_ROOT")"
 mkdir -p "$SOURCE_COPY"
 rsync -rt --safe-links --no-owner --no-group --protect-args "$SOURCE_ROOT/" "$SOURCE_COPY/"
@@ -144,7 +156,9 @@ FILE_COUNT="$(find "$SOURCE_COPY" -type f | wc -l | tr -d ' ')"
 [[ "$FILE_COUNT" -gt 0 ]] || blocked "Die Testkopie enthält keine Dateien: $SOURCE_COPY"
 
 say "QA: ziehe unveränderliches Produktimage $IMAGE"
-docker pull "$IMAGE" >/dev/null
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  docker pull "$IMAGE" >/dev/null
+fi
 IMAGE_REVISION="$(docker image inspect "$IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
 [[ "$IMAGE_REVISION" == "$EXPECTED_REVISION" ]] || blocked "Image-Revision stimmt nicht: erwartet $EXPECTED_REVISION, erhalten $IMAGE_REVISION"
 
@@ -169,6 +183,8 @@ docker run -d \
   --security-opt no-new-privileges:true \
   -p "127.0.0.1:${QA_PORT}:8080" \
   -e "KAMERA_CONFIG=$APP_CONFIG/settings.json" \
+  -e "BIBLIOTHEKAR_ADMIN_PASSWORD_FILE=$APP_CONFIG/admin-password" \
+  -e "BIBLIOTHEKAR_COOKIE_SECURE=false" \
   -e "KAMERA_DATABASE_DIR=$APP_DATABASE" \
   -e "KAMERA_WORKSPACE=$APP_WORKSPACE" \
   -e "KAMERA_LOG_DIR=$APP_LOGS" \
@@ -178,6 +194,7 @@ docker run -d \
   -e "KAMERA_NAS_SOURCE_ROOT=$APP_NAS" \
   -e "KAMERA_POOL_PROBE=$APP_POOL_PROBE" \
   -e "KAMERA_SOURCE_HELPER_URL=http://127.0.0.1:9" \
+  -e "KAMERA_SOURCE_HELPER_ENABLED=false" \
   -e "BIBLIOTHEKAR_QA_MODE=archive-e2e" \
   -e "PYTHONDONTWRITEBYTECODE=1" \
   -v "$ARCHIVE_ROOT:$ARCHIVE_ROOT:rw" \
@@ -220,6 +237,58 @@ fi
 
 docker logs "$CONTAINER_NAME" > "$RUN_ROOT/app.log" 2>&1 || true
 [[ -f "$APP_DATABASE/kamera.sqlite3" ]] || fail "Eigene QA-SQLite-DB wurde nicht angelegt: $APP_DATABASE/kamera.sqlite3"
+
+# BA-03: exercise the actual built app (not a mocked TestClient).
+# Only QA paths are mounted; the valid write probe uses intentionally
+# invalid input, expected to fail validation without creating anything.
+docker exec -i "$CONTAINER_NAME" python - "$APP_CONFIG/admin-password" <<'PY_AUTH_E2E' || fail "Echte API-Authentisierung/CSRF im isolierten Container fehlgeschlagen"
+import http.cookiejar
+import json
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+base = "http://127.0.0.1:8080"
+secret = Path(sys.argv[1]).read_text(encoding="utf-8").strip()
+jar = http.cookiejar.CookieJar()
+client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+def request(path, method="GET", payload=None, *, csrf=None, origin=None):
+    headers = {}
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+    if csrf is not None:
+        headers["X-Bibliothekar-CSRF"] = csrf
+    if origin is not None:
+        headers["Origin"] = origin
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    req = urllib.request.Request(base + path, data=data, headers=headers, method=method)
+    try:
+        with client.open(req, timeout=10) as response:
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+
+assert request("/api/libraries") == 401, "Unauthenticated API unexpectedly available"
+assert request("/auth/login", "POST", {"password": "invalid"},
+               origin=base) == 401, "Wrong owner password accepted"
+assert request("/auth/login", "POST", {"password": secret},
+               origin=base) == 200, "Owner login failed"
+assert request("/api/libraries") == 200, "Authorized library discovery failed"
+cookies = {cookie.name: cookie.value for cookie in jar}
+assert "bibliothekar_session" in cookies and "bibliothekar_csrf" in cookies
+csrf = cookies["bibliothekar_csrf"]
+assert request("/api/libraries", "POST", {}) == 403, "CSRF-less write permitted"
+assert request("/api/libraries", "POST", {}, csrf=csrf,
+               origin="http://foreign.example") == 403, "Foreign-origin write permitted"
+assert request("/api/libraries", "POST", {}, csrf=csrf,
+               origin=base) == 422, "Correctly authenticated write did not reach validation"
+assert request("/auth/logout", "POST", csrf=csrf,
+               origin=base) == 200, "Logout failed"
+assert request("/api/libraries") == 401, "Revoked cookie remains authorized"
+print("PASS: real built container login, auth, CSRF, origin, logout")
+PY_AUTH_E2E
 
 cat > "$RUN_ROOT/isolation.json" <<JSON
 {

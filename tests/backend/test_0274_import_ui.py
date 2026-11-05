@@ -47,7 +47,7 @@ def test_0274_disclosure_triangles_are_large_and_uniform():
     shell = (ROOT / "app" / "ui_shell.py").read_text()
     assert 'grid-template-columns:22px minmax(0,1fr) auto !important' in events
     assert 'width:22px;\n      font-size:19px' in events
-    assert 'body[data-bk-area="import"] details > summary::before' in shell
+    assert 'body[data-bk-area="import"] main details > summary::before' in shell
     assert 'font-size: 18px' in shell
 
 
@@ -78,7 +78,15 @@ def test_0274_removable_drive_root_and_subfolder_use_same_safe_import_endpoint(
     monkeypatch.setattr(app_main, "DATABASE_FILE", db)
     monkeypatch.setattr(app_main, "WORKSPACE_PATH", workspace)
     monkeypatch.setattr(app_main, "REMOVABLE_ROOT", removable)
+    # Im GitHub-Runner stehen oft weniger als die produktive
+    # 20-GiB-Sicherheitsreserve zur Verfügung.
+    monkeypatch.setattr(app_main, "load_settings", lambda: {
+        "storage": {"safety_reserve_gib": 0, "processing_buffer_percent": 10}
+    })
 
+    from app import sd_recheck
+    # Synthetic mount model; writable-device refusal has separate counterprobes.
+    monkeypatch.setattr(sd_recheck, "read_only", lambda path: True)
     listing = app_main.api_source_folders("removable", "DRIVE-1")
     assert listing["relative_path"] == "DRIVE-1"
     assert any(item["relative_path"] == "DRIVE-1/Auswahl" for item in listing["directories"])
@@ -93,6 +101,10 @@ def test_0274_removable_drive_root_and_subfolder_use_same_safe_import_endpoint(
     assert whole["job"]["source_path"] == str(drive.resolve())
     assert whole["job"]["source_device_id"] == "DRIVE-1"
 
+    # Finish the first technical check through the real cancellation API before
+    # choosing another folder on the same device. Preserve both path contracts.
+    cancelled = app_main.api_cancel_import(whole["job"]["id"])
+    assert cancelled.status_code == 202 and json.loads(cancelled.body)["cancelled"]
     folder_response = app_main.api_run_folder_import({
         "source_root_key": "removable",
         "source_relative_path": "DRIVE-1/Auswahl",

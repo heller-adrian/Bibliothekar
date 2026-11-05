@@ -1,3 +1,4 @@
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
 import hashlib
 from pathlib import Path
 
@@ -34,6 +35,7 @@ def _seed_initial_sort(tmp_path: Path):
     incoming.mkdir(parents=True)
     work.mkdir(parents=True)
     initialize_database(db)
+    provision_legacy_storage(workspace)
 
     payload = b"initial-sort"
     source = incoming / "IMG.JPG"

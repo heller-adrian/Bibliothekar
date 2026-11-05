@@ -1,0 +1,9 @@
+[
+  "tests/backend/test_rc7_reset_states.py",
+  "tests/backend/test_f14_fixed_storage.py::test_f14_real_new_install_startup_and_three_restarts",
+  "tests/backend/test_f14_fixed_storage.py::test_f14_sigkill_during_initialization_preserves_pending_evidence",
+  "tests/backend/test_f14_fixed_storage.py::test_f14_four_empty_directories_are_not_a_startup_mount_certificate",
+  "tests/backend/test_f14_fixed_storage.py::test_f14_fresh_schema_vs_used_empty_catalogue",
+  "tests/backend/test_f14_fixed_storage.py::test_fresh_technical_schema_starts_with_english_event_defaults",
+  "tests/backend/test_f14_fixed_storage.py::test_f14_three_actual_startups_do_not_recreate_missing_established_root"
+]

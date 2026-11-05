@@ -1,4 +1,8 @@
 from __future__ import annotations
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
+
+from app.archive_staging import staging_directory_name
+from app.workspace_layout import shared_work_root
 
 from pathlib import Path
 
@@ -33,6 +37,7 @@ from tests.backend.test_0263_event_inventory import (
 
 def _seed_applied_workspace(db: Path, workspace: Path) -> tuple[Path, int]:
     initialize_database(db)
+    provision_legacy_storage(workspace)
     ensure_workspace_layout(workspace)
     work_root = shared_work_root(workspace)
     with database_connection(db) as connection:
@@ -456,7 +461,7 @@ def test_0283_legacy_manual_archive_helper_does_not_block_next_archive_change(tm
 
     spec = required_event_document_for_request(db, cr_id)
     assert spec is not None
-    staged = workspace / "Arbeitsbereich" / "Später zuordnen" / spec["target_relative_path"]
+    staged = shared_work_root(workspace) / staging_directory_name(shared_work_root(workspace)) / spec["target_relative_path"]
     assert staged.is_file()
     assert staged.read_bytes() != legacy_payload
 
@@ -469,6 +474,7 @@ def _seed_archived_layout_event(
     structure_enabled: bool,
 ) -> tuple[Path, int, dict]:
     initialize_database(db)
+    provision_legacy_storage(workspace)
     ensure_workspace_layout(workspace)
     with database_connection(db) as connection:
         seed_job(connection)
@@ -729,7 +735,7 @@ def test_0283_archived_structure_off_finishes_without_followup_manual_task(tmp_p
 
     spec = required_event_document_for_request(db, cr_id)
     assert spec is not None
-    staged_document = workspace / "Arbeitsbereich" / "Später zuordnen" / spec["target_relative_path"]
+    staged_document = shared_work_root(workspace) / staging_directory_name(shared_work_root(workspace)) / spec["target_relative_path"]
     assert staged_document.is_file()
     (archive / spec["target_relative_path"]).write_bytes(staged_document.read_bytes())
 

@@ -1,0 +1,6 @@
+Bibliothekar 0.54.3
+Base: patch/0.54.2
+Only CSS change: editing parent and child events shows start date/time and end date/time as compact side-by-side pairs; WebKit native date/time values vertically centered.
+Preserve the 0.54.2 appearance, padding and 2px width overflow fix.
+QA: 1125 backend tests passed, 6 warnings, archive isolation harness passed on pull request #26.
+Publish ghcr.io/heller-adrian/bibliothekar:patch-0.54.3 after repeated release QA. Do not change main, latest or production data.

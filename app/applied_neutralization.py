@@ -224,20 +224,48 @@ def restore_neutralized_files(connection: Any, workspace_path: Path, mutation_ro
         dst = root.joinpath(*old_rel.parts).resolve(strict=False)
         if not _inside(src, root) or not _inside(dst, root):
             raise ValueError("Eine neutralisierte Datei verlässt den Arbeitsbereich.")
-        if not src.exists() or not src.is_file() or src.is_symlink():
-            raise ValueError("Neutralisierte Datei fehlt; Änderung kann nicht sicher verworfen werden: " + str(src))
-        if dst.exists() or dst.is_symlink():
-            raise ValueError("Alter Ereignispfad ist bereits belegt; Änderung kann nicht sicher verworfen werden: " + str(dst))
+
         expected = str(item.get("sha256") or "")
-        if int(src.stat().st_size) != int(item.get("size_bytes") or 0) or not expected or _sha256(src) != expected:
-            raise ValueError("Neutralisierte Datei stimmt nicht mehr mit dem gespeicherten Zustand überein: " + str(src))
-        prepared.append((item, src, dst))
+        size = int(item.get("size_bytes") or 0)
+        src_exists = src.exists() or src.is_symlink()
+        dst_exists = dst.exists() or dst.is_symlink()
+        if src.is_symlink() or dst.is_symlink():
+            raise ValueError("Symbolische Links sind bei der Rücknahme verboten.")
+        if src_exists:
+            if not src.is_file() or not expected or int(src.stat().st_size) != size or _sha256(src) != expected:
+                raise ValueError("Neutralisierte Datei stimmt nicht mit dem gespeicherten Zustand überein: " + str(src))
+            if dst_exists:
+                # Neustart zwischen os.link() und unlink(): beide Namen
+                # müssen wirklich dasselbe geprüfte Inode referenzieren.
+                if not dst.is_file() or (
+                    src.stat().st_dev, src.stat().st_ino
+                ) != (
+                    dst.stat().st_dev, dst.stat().st_ino
+                ):
+                    raise ValueError("Alter Ereignispfad ist bereits fremd belegt: " + str(dst))
+                mode = "linked"
+            else:
+                mode = "move"
+        elif dst_exists and dst.is_file():
+            # Ein vor dem Prozessabbruch vollständig verschobenes Original
+            # gilt als bereits restauriert, nachdem Größe und SHA stimmen.
+            if not expected or int(dst.stat().st_size) != size or _sha256(dst) != expected:
+                raise ValueError("Bereits wiederhergestellte Datei stimmt nicht überein: " + str(dst))
+            mode = "restored"
+        else:
+            raise ValueError("Neutralisierte Datei fehlt an beiden Pfaden: " + str(src))
+        prepared.append((item, src, dst, mode))
+
     moved=[]
     try:
-        for item,src,dst in prepared:
-            _move_same_filesystem(src,dst)
-            moved.append((item,src,dst))
-        for item,_,_ in prepared:
+        for item,src,dst,mode in prepared:
+            if mode == "move":
+                _move_same_filesystem(src,dst)
+                moved.append((item,src,dst))
+            elif mode == "linked":
+                src.unlink()
+                moved.append((item,src,dst))
+        for item,_,_,_ in prepared:
             connection.execute(
                 "UPDATE files SET current_relative_path=?,current_root_kind='shared_workspace' WHERE id=? AND job_id=?",
                 (str(item["old_relative_path"]), int(item["file_id"]), str(mutation_row["job_id"])),

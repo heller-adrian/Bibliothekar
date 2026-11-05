@@ -1,56 +1,46 @@
-# Release-Verfahren
+# Release-Verfahren – Bibliothekar
 
-Bibliothekar verwendet zwei klar getrennte Kanäle.
+Es gibt genau zwei getrennte Containerkanäle. **Das Stable-Image `latest` darf erst nach bestandener Freigabeprüfung geändert werden.**
 
-## Entwicklung
+## Entwicklung und Patch-Testimages
 
-Entwicklung und Abnahme erfolgen auf `patch/<version>`.
+- Entwicklung auf einem `patch/*`-Branch; der Branch allein ist **keine** stabile Freigabe.
+- Die Backend-QA läuft für Pull Requests oder über `workflow_dispatch`. Ein beliebiger Quell-Push auf `patch/*` veröffentlicht **kein** Image.
+- Ein Patch-Image wird nur nach einer ausdrücklich eingecheckten Datei unter `.github/release-requests/` über `.github/workflows/publish-patch-request.yml` gebaut.
+- Das Image wird dann ausschließlich mit `patch-<version>` versehen; es überschreibt niemals `latest`.
+- Für den Archiv-E2E muss das Testimage aus **genau demselben Commit** gebaut und anhand des OCI-Labels `org.opencontainers.image.revision` kontrolliert werden.
 
-Ein Push auf einen Patch-Branch:
+## Stable-Freigabe
 
-- führt die vollständige Backend-QA aus,
-- baut ein GHCR-Testimage,
-- veröffentlicht einen Branch-Tag wie `patch-0.40.2`,
-- verändert weder `latest` noch den stabilen GitHub-Release.
+Vor dem Merge nach `main` **müssen** alle P0-Datenintegritäts-, Sicherheits- und Wiederanlauf-Gates einschließlich SD-Karten-Import erfüllt sein. Grün gemeldete gewöhnliche Backend-Tests ersetzen keine Crash-/Recovery-Abnahme.
 
-## Veröffentlichung
+Ein genehmigter Stable-Publish:
 
-Der freigegebene Commit wird nach `main` übernommen.
+1. prüft Compose und führt alle Backend-Tests aus;
+2. liest die neue SemVer aus `app/__init__.py`;
+3. bricht **vor dem Docker-Build** ab, wenn `v<version>` schon existiert;
+4. baut das Image aus dem freigegebenen Git-Commit;
+5. veröffentlicht `latest`, `<version>` und `v<version>` mit zugehörigem Image-Digest;
+6. erzeugt einen neuen **unveränderlichen** Git-Tag `v<version>` und anschließend den GitHub-Release. Bestehende Tags oder Releases dürfen nicht heimlich überschrieben werden.
 
-Ein erfolgreicher Publish-Lauf auf `main`:
+Achtung: Das Publizieren des Images und das Anlegen des Git-Tags sind technisch zwei Schritte. Schlägt der zweite Schritt fehl, muss der Release-Betreiber den Zustand prüfen und korrigieren; keinesfalls einen bereits veröffentlichten Versionstag mit `--force` verschieben.
 
-1. validiert Compose und führt die vollständige Backend-QA aus,
-2. liest die Version aus `app/__init__.py`,
-3. baut genau diesen Commit,
-4. veröffentlicht
-   - `ghcr.io/heller-adrian/bibliothekar:latest`,
-   - `ghcr.io/heller-adrian/bibliothekar:<version>`,
-   - `ghcr.io/heller-adrian/bibliothekar:v<version>`,
-5. setzt den Git-Tag `v<version>` auf denselben Commit,
-6. erstellt bzw. aktualisiert den GitHub-Release als stabilen Release.
+## Version und Testpflichten
 
-`latest` wird ausschließlich von `main` geschrieben.
+`app/__init__.py`, die `RELEASE_VERSION`- und `DEPLOYMENT_VERSION`-Konstanten in `app/main.py`, die sichtbare Versionsanzeige und das Compose-Beispiel müssen denselben Entwicklungsstand ausweisen.
 
-## Versionsregel
-
-Vor einer Freigabe muss `app/__init__.py` exakt die neue SemVer-Version enthalten, zum Beispiel:
+Beispiel:
 
 ```python
-__version__ = "0.40.2"
+__version__ = "0.50.0"
 ```
 
-Patch-Branches dürfen dieselbe Versionsnummer während der Abnahme tragen. Erst die Übernahme nach `main` macht sie zum stabilen Release.
+Ein Entwicklungsbranch mit dieser Nummer ist **nicht** automatisch ein Release. Die Version gilt erst nach dem erfolgreichen Merge in `main` und dem eindeutigen Veröffentlichungslauf als stabil.
 
-## TrueNAS
+## TrueNAS und Wechselmedien
 
-Normale Installationen verwenden:
+Für installierte stable Custom Apps ist `ghcr.io/heller-adrian/bibliothekar:latest` vorgesehen. Für reproduzierbare Updates/Rollbacks möglichst einen geprüften Image-Digest bzw. festen Versionstag benutzen.
 
-```text
-ghcr.io/heller-adrian/bibliothekar:latest
-```
+Bei einem App-/Discover-Migrationslauf die vorhandenen Host-Path-Datasets und dieselben Containerpfade für `/config`, `/database`, `/workspace`, `/logs`, `/main-library` und `/sources/nas` beibehalten. Alte und neue Instanzen dürfen nicht parallel auf die SQLite-Datenbanken zugreifen.
 
-Für Rollback oder reproduzierbare Installationen kann stattdessen ein fester Tag verwendet werden:
-
-```text
-ghcr.io/heller-adrian/bibliothekar:0.40.1
-```
+**Der SD-Karten-Import direkt über TrueNAS muss funktionsfähig bleiben.** Katalog-Kompatibilität darf nicht durch die stille Entfernung der Geräteerkennung erreicht werden. Der notwendige Gerätezugriff und das privilegierte Helper-Sicherheitsmodell bedürfen einer gesonderten Sicherheits- und TrueNAS-Freigabe.

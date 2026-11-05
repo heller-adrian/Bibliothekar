@@ -1,0 +1,57 @@
+{
+  "status": "TARGETED_LINUX_ACCEPTED_NOT_RELEASED",
+  "tested_commit": "bc997133254ff60ec6151c9023f8e6d5dbde6c32",
+  "application_commit": "d64bfba83af80bfe79dfce80ccfc017cf49aad12",
+  "run": 41564118139,
+  "artifact_id": 13197748512,
+  "artifact_sha256": "aaac1c8b9ca0fce75553514929b8260e60b7fe83dd558bf192b468c2e10cafcc",
+  "backend": {
+    "tests": 98,
+    "pass": 98,
+    "fail": 0,
+    "error": 0,
+    "skip": 0,
+    "run": 41562234548,
+    "source": "d64bfba83af80bfe79dfce80ccfc017cf49aad12",
+    "artifact_id": 13197717109,
+    "artifact_sha256": "c2e537bda5d1eb1a5c3889060ad2f5033697b7ec32e8a9d382a0216b46a15446",
+    "unchanged_source_trees_reverified": true
+  },
+  "browser_offline_cases": 13,
+  "browser_live_cases": 8,
+  "container_checks": 6,
+  "downloaded_artifact_independently_sha256_verified": true,
+  "uploaded_manifest_files_hash_checked": 34,
+  "full_backend_matrix": "NOT_RUN",
+  "native_new_TrueNAS_NFSv4": "NOT_RUN",
+  "new_no_event_full_HTTP_restart_flow": "NOT_RUN_reproduced_via_real_program_functions",
+  "genuine_DNG_1_7_write": "NOT_SUPPORTED_NOT_TESTED",
+  "privilege_profile_implementation": "NOT_IMPLEMENTED_analysis_only",
+  "real_NAS_collision_byte_identity": "UNKNOWN_requires_read_only_evidence",
+  "earlier_runs": [
+    {
+      "id": 41562116273,
+      "status": "FAIL",
+      "pass": 96,
+      "fail": 2,
+      "cause": "missing_committed_diagnostic_fields"
+    },
+    {
+      "id": 41562234548,
+      "status": "FAIL",
+      "backend": "98_PASS",
+      "cause": "runner_browser_libatk_missing"
+    },
+    {
+      "id": 41563117206,
+      "status": "FAIL",
+      "browser": "13_PASS",
+      "cause": "test_PRE4_IMAGE_missing"
+    },
+    {
+      "id": 41563394465,
+      "status": "FAIL",
+      "cause": "old_browser_selector_assumed_only_one_diagnosis_summary"
+    }
+  ]
+}

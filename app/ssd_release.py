@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -9,6 +13,7 @@ import os
 import stat
 import uuid
 
+from app.ssd_archive_guard import ArchiveGuard
 from app.archive_transfer import ArchiveVerificationError, verify_event_archive
 from app.archive_locations import ArchiveLocationError, archive_path_without_symlinks
 from app.database import database_connection
@@ -28,6 +33,7 @@ def _now() -> str:
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
 
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             block = handle.read(1024 * 1024)
@@ -39,6 +45,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _safe_relative(value: Any) -> PurePosixPath:
+    validate_active_roots()
     raw = str(value or "").strip().replace("\\", "/")
     path = PurePosixPath(raw)
 
@@ -71,6 +78,7 @@ def _fsync_directory(path: Path) -> None:
     if hasattr(os, "O_DIRECTORY"):
         flags |= os.O_DIRECTORY
 
+    validate_active_roots()
     descriptor = os.open(path, flags)
     try:
         os.fsync(descriptor)
@@ -121,7 +129,7 @@ def _latest_completed_release(
     raw = result.pop("details_json", None)
     result["details"] = json.loads(raw) if raw else None
     result["released"] = True
-    result["message"] = "SSD-Bestand wurde bereits freigegeben."
+    result["message"] = "Arbeitsbereich-Bestand wurde bereits freigegeben."
     return result
 
 
@@ -194,7 +202,7 @@ def _validate_event_tree(
     for row in files:
         if str(row.get("current_root_kind")) != "shared_workspace":
             raise SsdReleaseError(
-                "Mindestens eine Datei liegt nicht mehr im SSD-Arbeitsbereich."
+                "Mindestens eine Datei liegt nicht mehr im Arbeitsbereich."
             )
 
         relative = _safe_relative(
@@ -246,7 +254,7 @@ def _validate_event_tree(
         sample = ", ".join(sorted(unexpected)[:5])
         raise SsdReleaseError(
             "Im Ereignisordner liegen nicht erfasste Dateien oder Einträge. "
-            "SSD-Freigabe wurde gesperrt: " + sample
+            "Arbeitsbereich-Freigabe wurde gesperrt: " + sample
         )
 
     missing = sorted(tracked - existing)
@@ -366,7 +374,13 @@ def _verify_regular_file(
     expected_size: int,
     expected_sha256: str,
     label: str,
+    *,
+    archive_guard: ArchiveGuard | None = None,
+    archive_relative: PurePosixPath | None = None,
 ) -> tuple[os.stat_result, str]:
+    if archive_guard is not None:
+        checked = archive_guard.verify(archive_relative, expected_size, expected_sha256)
+        return checked, expected_sha256
     before = os.lstat(path)
 
     if not stat.S_ISREG(before.st_mode):
@@ -420,6 +434,7 @@ def _remove_empty_event_tree(event_root: Path, work_root: Path) -> list[str]:
         if not _is_release_companion_file(entry):
             remaining_unexpected.append(str(entry.relative_to(work_root)))
             continue
+        validate_active_roots()
         entry.unlink()
         _fsync_directory(entry.parent)
         removed.append(str(entry.relative_to(work_root)))
@@ -436,6 +451,7 @@ def _remove_empty_event_tree(event_root: Path, work_root: Path) -> list[str]:
         for name in directories:
             child = current_path / name
             try:
+                validate_active_roots()
                 child.rmdir()
                 _fsync_directory(child.parent)
                 removed.append(str(child.relative_to(work_root)))
@@ -443,6 +459,7 @@ def _remove_empty_event_tree(event_root: Path, work_root: Path) -> list[str]:
                 pass
 
     try:
+        validate_active_roots()
         event_root.rmdir()
         _fsync_directory(event_root.parent)
         removed.append(str(event_root.relative_to(work_root)))
@@ -477,7 +494,7 @@ def _finalize_release(
         ).fetchone()
 
         if release is None:
-            raise SsdReleaseError("SSD-Freigabelauf wurde nicht gefunden.")
+            raise SsdReleaseError("Arbeitsbereich-Freigabelauf wurde nicht gefunden.")
 
         operations = connection.execute(
             """SELECT * FROM event_ssd_release_files
@@ -496,7 +513,7 @@ def _finalize_release(
             for row in all_operations
         ):
             raise SsdReleaseError(
-                "Nicht alle SSD-Dateien wurden sicher freigegeben."
+                "Nicht alle Arbeitsbereich-Dateien wurden sicher freigegeben."
             )
 
         file_ids = [int(row["file_id"]) for row in operations]
@@ -570,7 +587,7 @@ def _finalize_release(
             UPDATE jobs
             SET state = 'completed',
                 stage = 'event_ssd_released',
-                progress_message = 'SSD-Bestand vollständig freigegeben und geprüft.',
+                progress_message = 'Arbeitsbereich-Bestand vollständig freigegeben und geprüft.',
                 error_message = NULL,
                 updated_at = ?,
                 finished_at = COALESCE(finished_at, ?)
@@ -606,11 +623,236 @@ def _finalize_release(
     result["released"] = True
     result["message"] = (
         "Kamerabibliothek erneut vollständig geprüft und "
-        "SSD-Bestand einschließlich XMP/Export sicher freigegeben."
+        "Arbeitsbereich-Bestand einschließlich XMP/Export sicher freigegeben."
     )
     return result
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='ssd', error_type=SsdReleaseError)
+def finalize_manually_moved_event_if_verified(
+    database_path: Path,
+    workspace_path: Path,
+    archive_root: Path,
+    job_id: str,
+    event_id: str,
+    verification: dict[str, Any],
+) -> dict[str, Any]:
+    """Finalize an applied event that was physically moved to the archive.
+
+    This is intentionally narrower than the normal SSD release: it runs only
+    when the archive verification is fully green and the event has no physical
+    files left in its workspace tree. The completed release journal therefore
+    records an already-released source instead of deleting anything.
+    """
+    if not bool(verification.get("verified")):
+        return {
+            **verification,
+            "manual_archive_finalized": False,
+        }
+
+    event, files = _event_and_files(
+        database_path,
+        job_id,
+        event_id,
+    )
+    if str(event.get("status") or "") != "applied":
+        return {
+            **verification,
+            "manual_archive_finalized": False,
+        }
+
+    work_root = shared_work_root(
+        workspace_path
+    ).resolve(strict=False)
+    archive_root = archive_root.expanduser().resolve(
+        strict=False
+    )
+
+    try:
+        workspace_inventory = scan_event_inventory(
+            database_path,
+            work_root,
+            job_id,
+            event_id,
+            root_kind="shared_workspace",
+            persist=True,
+            update_known_file_locations=False,
+            fast_refresh=False,
+        )
+    except EventInventoryError as exc:
+        if "Ereignisordner wurde nicht gefunden" not in str(exc):
+            raise SsdReleaseError(str(exc)) from exc
+        workspace_inventory = {"files": []}
+
+    try:
+        archive_inventory = scan_event_inventory(
+            database_path,
+            archive_root,
+            job_id,
+            event_id,
+            root_kind="camera_archive",
+            persist=True,
+            update_known_file_locations=False,
+            fast_refresh=False,
+        )
+    except EventInventoryError as exc:
+        raise SsdReleaseError(str(exc)) from exc
+
+    # Sobald noch irgendeine reale Ereignisdatei im Arbeitsbereich liegt,
+    # bleibt der normale zweistufige Workflow "prüfen -> Arbeitsbereich freigeben" aktiv.
+    if list(workspace_inventory.get("files") or []):
+        return {
+            **verification,
+            "manual_archive_finalized": False,
+        }
+
+    archive_by_file_id = {
+        int(item["known_file_id"]): item
+        for item in (archive_inventory.get("files") or [])
+        if item.get("known_file_id") is not None
+    }
+    prepared: list[dict[str, Any]] = []
+    for row in files:
+        file_id = int(row["file_id"])
+        observed = archive_by_file_id.get(file_id)
+        if observed is None:
+            raise SsdReleaseError(
+                "Manuelle Archivübernahme kann nicht abgeschlossen werden: "
+                f"Datei {row.get('original_filename') or file_id} fehlt im Archiv."
+            )
+        expected_size = int(row.get("size_bytes") or 0)
+        expected_sha = _expected_hash(row)
+        if (
+            int(observed.get("size_bytes") or -1) != expected_size
+            or str(observed.get("sha256") or "") != expected_sha
+        ):
+            raise SsdReleaseError(
+                "Manuelle Archivübernahme kann nicht abgeschlossen werden: "
+                f"Datei {row.get('original_filename') or file_id} weicht im Archiv ab."
+            )
+        prepared.append({
+            "file_id": file_id,
+            "relative": _safe_relative(
+                row.get("current_relative_path")
+                or row.get("original_relative_path")
+            ),
+            "archive_relative": _safe_relative(
+                observed.get("relative_path")
+            ),
+            "source": work_root.joinpath(
+                *_safe_relative(
+                    row.get("current_relative_path")
+                    or row.get("original_relative_path")
+                ).parts
+            ),
+            "size_bytes": expected_size,
+            "expected_sha256": expected_sha,
+            "asset_kind": "camera_original",
+        })
+
+    if not prepared:
+        raise SsdReleaseError(
+            "Manuelle Archivübernahme enthält keine prüfbaren Kameraoriginale."
+        )
+
+    completed = _latest_completed_release(
+        database_path,
+        job_id,
+        event_id,
+    )
+    if completed is not None:
+        return {
+            **verification,
+            **completed,
+            "manual_archive_finalized": True,
+        }
+
+    release_id = _create_release_run(
+        database_path,
+        job_id,
+        event_id,
+        str(verification["id"]),
+        work_root,
+        archive_root,
+        prepared,
+        [],
+    )
+    now = _now()
+    with database_connection(database_path) as connection:
+        for row in prepared:
+            connection.execute(
+                """UPDATE event_ssd_release_files
+                   SET status='already_released',
+                       actual_source_size_bytes=NULL,
+                       actual_source_sha256=NULL,
+                       actual_archive_size_bytes=?,
+                       actual_archive_sha256=?,
+                       verified_at=?,
+                       deleted_at=?,
+                       error_message=NULL
+                   WHERE release_id=? AND file_id=?""",
+                (
+                    int(row["size_bytes"]),
+                    str(row["expected_sha256"]),
+                    now,
+                    now,
+                    release_id,
+                    int(row["file_id"]),
+                ),
+            )
+        connection.execute(
+            """UPDATE event_ssd_releases
+               SET status='finalizing',
+                   verified_source_count=0,
+                   verified_archive_count=?,
+                   deleted_file_count=0,
+                   deleted_size_bytes=0,
+                   details_json=?,
+                   updated_at=?
+               WHERE id=?""",
+            (
+                len(prepared),
+                json.dumps(
+                    {
+                        "manual_archive_move": True,
+                        "source_already_absent": True,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                now,
+                release_id,
+            ),
+        )
+
+    final = _finalize_release(
+        database_path,
+        release_id,
+        job_id,
+        event_id,
+        [],
+    )
+    with database_connection(database_path) as connection:
+        from app.external_changes import resolve_notice_key
+        resolve_notice_key(
+            connection,
+            f"archive-transfer:{event_id}",
+            now=_now(),
+        )
+
+    return {
+        **verification,
+        **final,
+        "manual_archive_finalized": True,
+        "message": (
+            "Archiv vollständig per Größe und SHA-256 geprüft. "
+            "Der bereits manuell verschobene Ereignisbestand wurde als "
+            "archiviert übernommen."
+        ),
+    }
+
+
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='ssd', error_type=SsdReleaseError)
 def release_event_ssd(
     database_path: Path,
     workspace_path: Path,
@@ -638,21 +880,21 @@ def release_event_ssd(
         ).fetchone()
     if int(pending["n"] or 0) > 0 or active_mutation is not None:
         raise SsdReleaseError(
-            "SSD-Freigabe gesperrt: In dieser Sicherung ist noch eine Ereignisänderung bzw. Neu-Zuordnung offen. "
+            "Arbeitsbereich-Freigabe gesperrt: In dieser Sicherung ist noch eine Ereignisänderung bzw. Neu-Zuordnung offen. "
             "Bitte zuerst alle freien Familien zuordnen und die Nachsortierung abschließen."
         )
 
     if int(event.get("resort_required") or 0):
         raise SsdReleaseError(
-            "SSD-Freigabe gesperrt: Für dieses Ereignis ist noch eine Nachsortierung offen."
+            "Arbeitsbereich-Freigabe gesperrt: Für dieses Ereignis ist noch eine Nachsortierung offen."
         )
     if str(event.get("status")) == "archived":
         raise SsdReleaseError(
-            "Ereignis ist bereits archiviert, aber ein abgeschlossener SSD-Freigabelauf fehlt."
+            "Ereignis ist bereits archiviert, aber ein abgeschlossener Arbeitsbereich-Freigabelauf fehlt."
         )
     if str(event.get("status")) != "applied":
         raise SsdReleaseError(
-            "Nur ein angewendetes Ereignis kann von der SSD freigegeben werden."
+            "Nur ein angewendetes Ereignis kann von der Arbeitsbereich freigegeben werden."
         )
 
     archive_root = archive_root.expanduser().resolve(strict=False)
@@ -662,13 +904,16 @@ def release_event_ssd(
     work_root = shared_work_root(workspace_path).resolve(strict=False)
     open_release = _latest_open_release(database_path, job_id, event_id)
 
+    verification_options = {"workspace_path": workspace_path}
+    if open_release is not None:
+        verification_options["resume_release_id"] = str(open_release["id"])
     try:
         verification = verify_event_archive(
             database_path,
             archive_root,
             job_id,
             event_id,
-            workspace_path=workspace_path,
+            **verification_options,
         )
     except ArchiveVerificationError as exc:
         raise SsdReleaseError(str(exc)) from exc
@@ -798,7 +1043,9 @@ def release_event_ssd(
                 "asset_kind": str(stored["asset_kind"]),
             })
 
+    archive_guard = None
     try:
+        archive_guard = ArchiveGuard(archive_root, [row["archive_relative"] for row in prepared + asset_prepared])
         with database_connection(database_path) as connection:
             connection.execute(
                 """
@@ -824,7 +1071,8 @@ def release_event_ssd(
             expected_size = int(row["size_bytes"])
             expected_hash = str(row["expected_sha256"])
             _archive_stat, archive_hash = _verify_regular_file(
-                archive, expected_size, expected_hash, "Archivdatei"
+                archive, expected_size, expected_hash, "Archivdatei",
+                archive_guard=archive_guard, archive_relative=archive_rel,
             )
 
             source_exists = source.exists() or source.is_symlink()
@@ -835,6 +1083,7 @@ def release_event_ssd(
                 )
             elif open_release is None:
                 raise SsdReleaseError("SSD-Datei fehlt: " + str(source))
+            row["source_present_for_run"] = source_exists
 
             with database_connection(database_path) as connection:
                 connection.execute(
@@ -872,7 +1121,8 @@ def release_event_ssd(
             expected_size = int(row["size_bytes"])
             expected_hash = str(row["expected_sha256"])
             _archive_stat, archive_hash = _verify_regular_file(
-                archive, expected_size, expected_hash, "Archivdatei"
+                archive, expected_size, expected_hash, "Archivdatei",
+                archive_guard=archive_guard, archive_relative=archive_rel,
             )
 
             source_exists = source.exists() or source.is_symlink()
@@ -883,6 +1133,7 @@ def release_event_ssd(
                 )
             elif open_release is None:
                 raise SsdReleaseError("SSD-Datei fehlt: " + str(source))
+            row["source_present_for_run"] = source_exists
 
             with database_connection(database_path) as connection:
                 connection.execute(
@@ -956,27 +1207,39 @@ def release_event_ssd(
                     expected_hash,
                     "SSD-Datei vor dem Löschen",
                 )
+                archive_guard.verify(row["archive_relative"], expected_size, expected_hash, source_stat)
                 current = os.lstat(source)
                 if (
                     int(current.st_dev),
                     int(current.st_ino),
                     int(current.st_mtime_ns),
                     int(current.st_size),
+                    int(current.st_ctime_ns),
+                    int(current.st_nlink),
+                    int(current.st_mode),
                 ) != (
                     int(source_stat.st_dev),
                     int(source_stat.st_ino),
                     int(source_stat.st_mtime_ns),
                     int(source_stat.st_size),
+                    int(source_stat.st_ctime_ns),
+                    int(source_stat.st_nlink),
+                    int(source_stat.st_mode),
                 ):
                     raise SsdReleaseError(
                         "SSD-Datei änderte sich unmittelbar vor dem Löschen: " + str(source)
                     )
+                validate_active_roots()
+                # Final non-atomic gate: external writers can still race unlink.
+                archive_guard.check()
                 source.unlink()
                 _fsync_directory(source.parent)
                 status_value = "deleted"
                 deleted_count += 1
                 deleted_bytes += expected_size
             else:
+                if row.get("source_present_for_run"):
+                    raise SsdReleaseError("Eine in diesem Lauf geprüfte SSD-Datei ist unerwartet verschwunden; weitere Löschungen gesperrt: " + str(source))
                 status_value = "already_released"
 
             with database_connection(database_path) as connection:
@@ -1006,6 +1269,8 @@ def release_event_ssd(
                     (deleted_count, deleted_bytes, _now(), release_id),
                 )
 
+            archive_guard.check()
+
         for row in prepared:
             delete_source(row, asset=False)
         for row in asset_prepared:
@@ -1017,8 +1282,9 @@ def release_event_ssd(
                 (_now(), release_id),
             )
 
+        archive_guard.check()
         removed = _remove_empty_event_tree(event_root, work_root)
-        return _finalize_release(
+        result = _finalize_release(
             database_path,
             release_id,
             job_id,
@@ -1026,9 +1292,16 @@ def release_event_ssd(
             removed,
         )
 
+        archive_guard.check()
+        return result
+
     except Exception as error:
-        _mark_release_failed(database_path, release_id, str(error))
-        if isinstance(error, SsdReleaseError):
-            raise
-        raise SsdReleaseError(str(error)) from error
+        message = ("SSD-Freigabe gestoppt: " + str(error) +
+                   " Noch vorhandene SSD-Dateien bleiben erhalten. Bereits entfernte Dateien werden nicht wiederhergestellt. "
+                   "Eine erneute Freigabe benötigt einen neuen Auftrag und vollständige Prüfung.")
+        _mark_release_failed(database_path, release_id, message)
+        raise SsdReleaseError(message) from error
+    finally:
+        if archive_guard is not None:
+            archive_guard.close()
 

@@ -6,12 +6,14 @@ from typing import Any
 import json
 
 from app.database import database_connection
+from app.sqlite_retry import idempotent_write
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+@idempotent_write
 def upsert_backup_lifecycle(
     database_path: Path,
     *,

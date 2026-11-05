@@ -1,0 +1,5 @@
+Bibliothekar 0.47.6 – separates Patch-Testimage veröffentlichen.
+Basis: patch/0.47.5; vollständige Backend-QA 924 bestanden, 5 Warnungen, Archiv-Isolationstest bestanden.
+Änderungen: vorhandene Archivordner nie als komplette zu ersetzende Ordner anbieten; einzelne neu hinzukommende Dateien getrennt von event.json ausweisen; Rückänderungsdialog-Pfad über alle Schritte gültig; SSD-Arbeitsbereich-Freigabe als persistenter eigenständiger Hintergrundauftrag mit Wiederaufnahme nach Neustart und Fortschrittsanzeige; ausdrücklich bestätigter Archiv-Notausstieg mit unverändertem Archivbestand, revisionssicher dokumentiertem Istzustand und Sperre des ungeklärten Ereignisses. Entsperrung nur nach vollständiger Prüfung des ursprünglichen Archivbestands.
+Wichtig: Permanenter Verlust von Originaldateien wird durch diesen Patch nicht automatisch aus der Datenbank entfernt und nicht als erfolgreich wiederhergestellt gemeldet; separate manuelle Bereinigung ist erforderlich.
+Keine produktive Datenmigration über die reguläre neue Schema-Migration hinaus; keine automatische Dateiänderung im Archiv; main/latest nicht verändern.

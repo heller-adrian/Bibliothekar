@@ -9,11 +9,12 @@ import os
 
 from app.archive_staging import (
     BRANCHES,
-    STAGING_DIRECTORY_NAME,
+    staging_directory_name,
     describe_archive_change_staging_for_request,
 )
 from app.event_change_request import get_event_change_files, get_event_change_request
 from app.archive_release_stock import describe_archive_release_stock
+from app.workspace_layout import shared_work_root
 
 
 class ArchiveChangeAssistantError(RuntimeError):
@@ -107,7 +108,12 @@ def _collapse_copy_roots(
             continue
         if not suffix.parts:
             continue
-        result.add(root / suffix.parts[0])
+        top_level = root / suffix.parts[0]
+        # A folder already present in the archive must NEVER be offered as a
+        # whole-folder copy: Finder could replace its existing contents.
+        # The individual incoming files will be listed by copy_files below.
+        if not _safe_archive_path(archive_root, top_level.as_posix()).is_dir():
+            result.add(top_level)
     return sorted(path.as_posix() for path in result)
 
 
@@ -227,6 +233,9 @@ def build_archive_change_assistant(
         database_path, archive_root, cr_id
     )
     release_stock = describe_archive_release_stock(database_path, cr_id)
+    from app.managed_directory_names import directory_name
+    from app.workspace_layout import backup_root
+    release_stock['release_directory_name']=directory_name(backup_root(workspace_path),"released_archive")
 
     status = str(cr.get("status") or "")
     delete_event = bool(cr.get("delete_event") or 0)
@@ -235,7 +244,32 @@ def build_archive_change_assistant(
     )
     target_root = str(description.get("target_root") or "")
     current_root = str(description.get("current_root") or "")
-    helper_root = str(description.get("prepared_structure_path") or "")
+    helper_root = str(cr.get("prepared_structure_path") or description.get("prepared_structure_path") or "")
+    # Use the physical workspace name, never the historical public constant.
+    # A prepared request retains its persisted staging path across upgrades.
+    work_root = shared_work_root(workspace_path).resolve(strict=False)
+    staging_name = staging_directory_name(work_root)
+    if helper_root:
+        helper_path = PurePosixPath(helper_root.replace(chr(92), "/"))
+        helper_parts = helper_path.parts
+        if (
+            helper_path.is_absolute()
+            or ".." in helper_parts
+            or len(helper_parts) < 3
+            or helper_parts[0] not in {"Später zuordnen", "Assign Later"}
+        ):
+            raise ArchiveChangeAssistantError("Invalid persisted archive staging path.")
+        persisted_name = helper_parts[0]
+        persisted_root = work_root / persisted_name
+        if persisted_root.is_symlink():
+            raise ArchiveChangeAssistantError("Archive staging path must not be a symlink.")
+        if persisted_root.is_dir():
+            staging_name = persisted_name
+        elif status == "aenderbar_bestaetigt":
+            raise ArchiveChangeAssistantError(
+                "The prepared archive staging folder no longer exists. "
+                "Refresh and verify the request before following any Finder instructions."
+            )
     missing = list(description.get("missing_directories") or [])
     obsolete = list(description.get("obsolete_directories") or [])
     event_document = description.get("event_document")
@@ -267,8 +301,12 @@ def build_archive_change_assistant(
         )
 
     operations: list[dict[str, Any]] = []
+    folder_removal = {"qualified":False}
+    if delete_event and release_stock.get("copy_verified"):
+        from app.archive_delete_guidance import qualify_event_folder
+        folder_removal=qualify_event_folder(database_path,archive_root,workspace_path,cr_id,release_stock)
 
-    if delete_event and (
+    if delete_event and folder_removal.get("qualified") and (
         not bool(release_stock.get("required"))
         or bool(release_stock.get("archive_removed"))
     ):
@@ -343,7 +381,7 @@ def build_archive_change_assistant(
                 copy_state = "done" if directory_done and file_done else "pending"
 
             helper_sources = [
-                f"{work_display_root}/{STAGING_DIRECTORY_NAME}/{value}"
+                f"{work_display_root}/{staging_name}/{value}"
                 for value in copy_roots
             ]
             helper_items = list(names)
@@ -352,7 +390,7 @@ def build_archive_change_assistant(
                 document_rel = str(event_document.get("target_relative_path") or "")
                 if document_rel:
                     helper_sources.append(
-                        f"{work_display_root}/{STAGING_DIRECTORY_NAME}/{document_rel}"
+                        f"{work_display_root}/{staging_name}/{document_rel}"
                     )
                     helper_items.append("event.json")
                     includes_event_document = True
@@ -402,7 +440,7 @@ def build_archive_change_assistant(
         for row in remaining_workspace:
             source = _parent_dir(
                 row.get("workspace_staging_path")
-                or f"{STAGING_DIRECTORY_NAME}/{row.get('new_path') or ''}"
+                or f"{staging_name}/{row.get('new_path') or ''}"
             )
             target = _parent_dir(row.get("new_path"))
             grouped_workspace.setdefault((source, target), []).append(row)
@@ -455,7 +493,7 @@ def build_archive_change_assistant(
             operations.append({
                 "kind": "replace_event_document",
                 "title": "Aktuelle event.json ins Archiv übernehmen",
-                "source": f"{work_display_root}/{STAGING_DIRECTORY_NAME}/{target_rel}",
+                "source": f"{work_display_root}/{staging_name}/{target_rel}",
                 "target": f"{archive_display_root}/{target_rel}",
                 "items": ["event.json"],
                 "file_count": 1,
@@ -560,6 +598,24 @@ def build_archive_change_assistant(
                     "state": "pending" if scan_live else None,
                 })
 
+    # Presentation only: keep the existing physical completion verification.
+    if status != "aenderbar_vorschlagen" and not release_stock.get("required") and event_document:
+        from app.archive_reversal import _manifest_path, _read_json
+        from app.archive_rename_guidance import qualify_rename
+        try:
+            baseline = _read_json(_manifest_path(workspace_path, cr_id))
+            compact = qualify_rename(
+                archive_root, rows, current_document=baseline.get("event_json"),
+                replacement=work_root / staging_name / str(event_document["target_relative_path"]),
+                replacement_meta=event_document, document_target=event_document["target_relative_path"],
+                archive_label=archive_display_root, work_root=work_root, work_label=work_display_root,
+                known_directories=baseline.get("original_directories") or [],
+            )
+            if compact:
+                operations = compact
+        except (OSError, ValueError, KeyError, RuntimeError):
+            pass  # Missing/ambiguous evidence retains the detailed instructions.
+
     if status == "aenderbar_vorschlagen" and preparation_required:
         phase = "prepare"
     elif (
@@ -583,6 +639,7 @@ def build_archive_change_assistant(
         "live_refreshed": bool(scan_live),
         "preparation": {
             "helper_root": f"{work_display_root}/{helper_root}" if helper_root else "",
+            "staging_root": f"{work_display_root}/{staging_name}",
             "incoming_file_count": int(description.get("incoming_file_count") or 0),
             "missing_directories": missing,
             "helper_directories": list(description.get("helper_directories") or []),
@@ -595,10 +652,11 @@ def build_archive_change_assistant(
                 f"{int(release_stock.get('file_count') or 0)} freigewordene Archivdateien"
             ),
         },
-        "release_stock": release_stock,
+        "release_stock": {**release_stock,"folder_removal":folder_removal},
         "path_labels": {
             "archive_root": archive_display_root,
             "work_root": work_display_root,
+            "staging_root": f"{work_display_root}/{staging_name}",
             "backup_root": backup_display_root,
         },
         "operations": operations,

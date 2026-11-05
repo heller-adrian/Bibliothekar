@@ -1,0 +1,2 @@
+# Test-only CSS parser; not part of the application image.
+tinycss2==1.4.0

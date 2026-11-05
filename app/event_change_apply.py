@@ -6,6 +6,10 @@ ausgeführt hat, und aktualisiert anschließend ausschließlich die Datenbank.
 """
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -34,6 +38,7 @@ def _now() -> str:
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
+    validate_active_roots()
     with path.open("rb") as handle:
         while True:
             block = handle.read(1024 * 1024)
@@ -44,6 +49,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _safe_archive_path(archive_root: Path, relative_value: Any) -> Path:
+    validate_active_roots()
     raw = str(relative_value or "").strip().replace("\\", "/")
     try:
         return archive_path_without_symlinks(archive_root, raw)
@@ -115,6 +121,7 @@ def _collision_verified_archive_target(
     return resolved, relative
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=EventChangeApplyError, db_only_if_no_roots=True)
 def confirm_event_change(
     database_path: Path,
     cr_id: str,
@@ -310,13 +317,21 @@ def cancel_event_change(
     if workspace_path is not None:
         from app.archive_staging import cleanup_archive_change_staging
         from app.archive_release_stock import cleanup_archive_release_stock
+        from app.archive_release_stock import ArchiveReleaseStockError
+        # Return copies must be removed BEFORE helper material is discarded.
+        # A failure must leave the original request active and retryable.
+        try:
+            release_cleanup = cleanup_archive_release_stock(
+                database_path, workspace_path, cr_id, archive_root=archive_root
+            )
+        except ArchiveReleaseStockError as error:
+            raise EventChangeApplyError(
+                "Verwerfen noch nicht abgeschlossen: " + str(error)
+            ) from error
+        cleanup_warnings.extend(release_cleanup.get("warnings") or [])
         cleanup_archive_change_staging(
             database_path, workspace_path, cr_id, remove_originals=False
         )
-        release_cleanup = cleanup_archive_release_stock(
-            database_path, workspace_path, cr_id
-        )
-        cleanup_warnings.extend(release_cleanup.get("warnings") or [])
         try:
             from app.archive_reversal import cleanup_archive_reversal
             cleanup_archive_reversal(workspace_path, cr_id)
@@ -337,6 +352,7 @@ def cancel_event_change(
         "cleanup_warnings": cleanup_warnings,
     }
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=EventChangeApplyError)
 def verify_event_change(
     database_path: Path,
     cr_id: str,
@@ -694,6 +710,7 @@ def verify_event_change(
     }
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=EventChangeApplyError)
 def finish_event_change(
     database_path: Path,
     cr_id: str,
@@ -1001,6 +1018,7 @@ def finish_event_change(
                 import uuid
                 child_id=str(segment.get("id") or ("EVENT_"+uuid.uuid4().hex.upper()))
                 seg_start=segment.get('start_datetime') or f"{start_date}T{segment['start_time']}:00"; seg_end=segment.get('end_datetime') or f"{end_date}T{segment['end_time']}:59"
+                validate_active_roots()
                 folder=str(segment.get("folder_name") or segment.get("folder") or f"{segment['start_time'].replace(':','-')} - {segment['end_time'].replace(':','-')} - {segment['name']}")
                 connection.execute(
                     """INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,applied_at,archived_at,notes,edited_at,timeline_model)
@@ -1177,6 +1195,30 @@ def finish_event_change(
                 now,
             ),
         )
+        guided_id = str(cr.get("guided_structure_change_id") or "")
+        if guided_id:
+            # Only a completely verified archive edit may acknowledge its
+            # originating manual structure task. Never acknowledge on proposal,
+            # confirmation, failed verification or a cancelled change request.
+            from app.event_structure_changes import EventStructureChangeError
+            updated = connection.execute(
+                """UPDATE event_structure_changes
+                   SET status='completed', updated_at=?, completed_at=?, error_message=NULL
+                   WHERE id=? AND event_id=? AND root_kind='camera_archive'
+                     AND status='blocked'""",
+                (now, now, guided_id, str(cr["event_id"])),
+            )
+            if updated.rowcount != 1:
+                raise EventChangeApplyError(
+                    "The originating manual archive task changed; reload before finalizing."
+                )
+            connection.execute(
+                """INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at)
+                   VALUES (?,'manual_archive_structure_guided_edit','event',?,?,?)""",
+                (str(cr["job_id"]), str(cr["event_id"]),
+                 json.dumps({"change_request_id":cr_id,"structure_change_id":guided_id},sort_keys=True),
+                 now),
+            )
         connection.commit()
 
     ssd_cleanup = {

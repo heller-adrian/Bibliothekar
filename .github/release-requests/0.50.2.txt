@@ -1,0 +1,14 @@
+Bibliothekar 0.50.2 – ausschließlich separates English-first UI Testimage.
+Ausgangspunkt: geprüfter 0.50.1-Patch, Audit PR #19 weiterhin Draft.
+Source vor Release-Anforderung: ec996118ef57f731f7d8051776c01a4b985b1470.
+Keine produktiven TrueNAS-Daten in QA. Keine Migration produktiver Ordner.
+Englisch Standard bei frischen Installationen, deutschsprachige Altinstallation bleibt unverändert.
+UI-Sprachschalter EN/DE, Archivänderungen und Meldungen, native Confirm/Alert/Prompt,
+dynamische UI-Texte, englische Datums-/Zahlenanzeige.
+Englische Standardordner: SD Card Backups, Library Workspaces, Metadata Correction, Trash; No Event.
+Historische technische Unterordner werden aus Kompatibilitätsgründen nicht umbenannt.
+Vollständige QA (pytest Backend und isolierter Archivcontainer) im Publish-Workflow ist Pflicht.
+Nur ghcr.io/heller-adrian/bibliothekar:patch-0.50.2 veröffentlichen.
+Image aus exakt diesem Release-Request-Commit bauen und unveränderlichen OCI-Digest protokollieren.
+Bestehende patch-0.50.0, patch-0.50.1, main, latest und stabile v0.40.3 unberührt.
+Keine 1.0.0-/Stable-/TrueNAS-Discover-Freigabe und kein Merge.

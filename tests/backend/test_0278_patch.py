@@ -1,6 +1,8 @@
 """0.27.8: Sicherungsstatus, globale Duplikate und Arbeitsbereichsvertrag."""
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
 from pathlib import Path
 import hashlib
 
@@ -47,7 +49,7 @@ def _family(connection, job_id: str, stem: str, content: bytes) -> int:
 
 
 def test_0278_release_version():
-    assert main.RELEASE_VERSION == "0.28.7"
+    assert main.RELEASE_VERSION == EXPECTED_RELEASE_VERSION
     assert main.api_health()["version"] == main.RELEASE_VERSION
 
 

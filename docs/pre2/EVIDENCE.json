@@ -1,0 +1,45 @@
+{
+  "source_commit": "ff1cdf3557b87e5f390f8c1f71abe179ac9d4a52",
+  "application_tree": "959a2661715604aa73cf0cf408b2c7ce8170ea2d",
+  "qa_run": 40957407776,
+  "qa_result": "SUCCESS",
+  "artifact_id": 12933834151,
+  "artifact_sha256": "46a5015aaacf31c5307bfa2a5c9d2b34efe3594ba88073121748e60a4f201668",
+  "artifact_download_verified": true,
+  "linux_regressions": {
+    "passed": 148,
+    "failed": 0,
+    "skipped": 0
+  },
+  "new_metadata_cases": 32,
+  "container_cases": [
+    "historic pre.1 and future refusal with restart",
+    "foreign bytes remain blocked",
+    "actual web-process SIGKILL and same-nonce recovery"
+  ],
+  "startup_4000_two_libraries_seconds": [
+    6.023,
+    5.732
+  ],
+  "corrected_iphone_jpegs": 14,
+  "iphone_offset": "+13:00",
+  "native_truenas": "NOT_RUN",
+  "real_DNG_1_7": "NOT_RUN",
+  "publication": "NOT_AUTHORIZED_NOT_PERFORMED",
+  "artifact_files": {
+    "candidate-image.json": "4771b0628f1300ac3d1ccadeac0339d186c624ca2e8876c5bc6b83bf834f5f6e",
+    "container.log": "7db244ecc47be14a9bcf15c316ce82b0def25c21e1284539e320f618f6c35e8f",
+    "iphone.log": "42cac5c0d19084f077a44a25f8cad7b2a51698fa67714cf6d5f8c7a4a52d84b1",
+    "pre-container.log": "faab2821e089c2fa9a444e015202eb1c87987d96a89a6637335f8039f60ac11d",
+    "pre-evidence.json": "afc116ce0996ac033b88c7b7433b0d27d3c44b35f37589bf830e7e6a13b17710",
+    "pre2-evidence.json": "79eca2d3c9021aa40aca3c579aefbc980eb407a6d6f7c42654e813c9bca722ec",
+    "pre2-general/crash.log": "50e45d59fc4bb4a8de2418df3f550663679a027ce6ec4a66834c9a5b2787e5b8",
+    "pre2-general/foreign.log": "d3febda132273f80512df5485a265a9a52cdbb01bb53d7ba5fa59319c00dda45",
+    "pre2-general/historical.log": "19b6c63dbf80f3f1fb8371b1067ae6d73fad56dfc2d3e5d3367b6af95594ac54",
+    "regressions.log": "ff183695dc85bd6b8380be01fae2a8d14c390d34393bcd815c71b6ae381076a3",
+    "regressions.xml": "0997dbfd44f94e19a58f590c88e8a29b89548b8c269549e8df6ebb3d8e95eb26",
+    "startup-container.log": "dbeca3da1336c461e61a1f83ff593151d9e66036bf40f6cc2cca558163ebb10c",
+    "startup-evidence.json": "b4f4ca4a6dab7b24ffe30bb6397a79553750e07554b26e301c9b0118efc5027a",
+    "startup.log": "72c96bbb7fadce2dfc5e831f8f918816f0b849d19229cd6dd2b4bc736c40d0ef"
+  }
+}

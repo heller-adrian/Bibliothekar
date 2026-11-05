@@ -201,7 +201,8 @@ def test_0332_metadata_api_expected_error_is_not_internal_server_error(monkeypat
     monkeypatch.setattr(main, "create_metadata_correction", fail)
 
     with pytest.raises(HTTPException) as captured:
-        main.api_prepare_metadata_correction({
+        # Test only route error translation; F14 admission has its own fixture tests.
+        main.api_prepare_metadata_correction.__wrapped__({
             "area": "general",
             "relative_path": "test.jpg",
             "proposed_datetime": "2026-07-21T17:30:08",

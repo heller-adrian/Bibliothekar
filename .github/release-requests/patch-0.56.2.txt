@@ -1,0 +1,6 @@
+Publish patch-0.56.2 after successful recovery stability acceptance.
+Code commit: 9b757ccd308198f22a3e65da0ca6a16f825985ae
+Backend QA: https://github.com/heller-adrian/Bibliothekar/actions/runs/38603739598
+Linux backend: 1281 PASS, no FAIL/SKIP/XFAIL; isolated archive container harness PASS.
+Original Phase 3: 65 PASS, including all 13 former FAIL and 2 former BLOCKED.
+The publish workflow repeats the complete backend gate before building and pushing.

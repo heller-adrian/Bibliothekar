@@ -1,0 +1,1 @@
+Validate patch/0.55.3 with the full backend and frontend QA suite, including setup brand/EN-DE, health diagnostics, desktop standalone loading/cursor, safe General path resolution, and iPhone PWA task/menu tap + import disk icon. Publish patch-0.55.3 container only after all checks pass; do not change any TrueNAS installation or user data.

@@ -178,7 +178,7 @@ Der Stop-Harness löscht absichtlich weder QA-DB noch QA-Archivdaten. Erst nach 
 
 ## Vollständigkeits-Gate
 
-Am Ende des gesamten 0.21.2-QA-Laufs muss für **jede** Test-ID aus `TEST_MATRIX.md` genau ein Status `PASS`, `FAIL`, `BLOCKED` oder `SKIPPED` in `results.json` vorliegen.
+Am Ende des gesamten aktueller geprüfter Commit-QA-Laufs muss für **jede** Test-ID aus `TEST_MATRIX.md` genau ein Status `PASS`, `FAIL`, `BLOCKED` oder `SKIPPED` in `results.json` vorliegen.
 
 Beispielprüfung:
 
@@ -189,3 +189,8 @@ python qa/validate_results.py \
 ```
 
 Der Validator schlägt fehl, sobald eine Test-ID fehlt, eine unbekannte ID vorkommt, T080–T088 als tatsächlich ausgeführt gemeldet werden ohne bestandenes Isolations-Gate oder ein als PASS gemeldeter Archivtest keinen vollständigen bestandenen Dateisystemnachweis besitzt.
+
+
+### Revision des Testcontainers (ab Audit-Branch 0.50.0)
+
+Der Start benötigt `QA_IMAGE` (zuvor aus genau dem zu prüfenden Git-Commit gebaut) und `QA_EXPECTED_REVISION` (Commit-SHA). Ohne beide Variablen bricht der Test ab. Damit wird kein historisches 0.21.2-Image mehr stillschweigend geprüft. Für einen lokalen Test das Image mit `--build-arg SOURCE_REVISION=<SHA>` bauen und den Digest/Revision-Label kontrollieren.

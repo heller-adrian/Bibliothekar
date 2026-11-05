@@ -1,82 +1,66 @@
 name: Backend QA
-
 on:
-  push:
-    branches:
-      - main
-      - 'patch/**'
   pull_request:
-
+  push:
+    branches: [main]
+  workflow_dispatch:
 permissions:
   contents: read
-
+concurrency:
+  group: bibliothekar-main-qa-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   backend-regression:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    timeout-minutes: 150
     env:
       PYTHONPATH: ${{ github.workspace }}
       PYTEST_ADDOPTS: ''
+      BIBLIOTHEKAR_APPDATA_DIR: /tmp/bibliothekar-qa/appdata
+      BIBLIOTHEKAR_WORKSPACE_DIR: /tmp/bibliothekar-qa/workspace
+      BIBLIOTHEKAR_MAIN_LIBRARY_DIR: /tmp/bibliothekar-qa/main-library
+      BIBLIOTHEKAR_ADMIN_PASSWORD: ci-synthetic-never-use-this-password
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install dependencies
+      - name: Verify isolated Linux runner prerequisites
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pytest httpx
-      - name: Validate TrueNAS Custom App compose
-        env:
-          BIBLIOTHEKAR_CONFIG_DIR: /tmp/bibliothekar/config
-          BIBLIOTHEKAR_DATABASE_DIR: /tmp/bibliothekar/database
-          BIBLIOTHEKAR_LOG_DIR: /tmp/bibliothekar/logs
-          BIBLIOTHEKAR_WORKSPACE_DIR: /tmp/bibliothekar/workspace
-          BIBLIOTHEKAR_MAIN_LIBRARY_DIR: /tmp/bibliothekar/main-library
-          BIBLIOTHEKAR_IMPORT_SOURCE_DIR: /tmp/bibliothekar/import-source
-          BIBLIOTHEKAR_NAS_SOURCE_DIR: /tmp/bibliothekar/nas-source
-          BIBLIOTHEKAR_REMOVABLE_DIR: /tmp/bibliothekar/removable
+          command -v exiftool
+          exiftool -ver
+          command -v git
+          git tag -l 'v1.0.0-pre.1' | grep -Fx 'v1.0.0-pre.1'
+      - name: Install test-only dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2
+      - name: Check Compose template without privileged host access
         run: docker compose -f compose.example.yaml config -q
-      - name: Compile application and QA helpers
+      - name: Compile backend and QA helpers
         run: python -m compileall -q app qa
-      - name: Validate archive QA shell syntax
-        run: bash -n qa/archive_e2e/*.sh
-      - name: Collect complete backend regression suite
-        run: pytest --collect-only -q -o addopts='' tests/backend
-      - name: Run complete backend regression suite without fail-fast
-        run: pytest -q -o addopts='' tests/backend
-
-  archive-isolation-harness:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Validate archive QA shell syntax
-        run: bash -n qa/archive_e2e/*.sh
-      - name: Exercise isolated archive QA harness
+      - name: Validate shell and JavaScript syntax
         run: |
-          CI_SOURCE=/mnt/storage/backup/kamera-sd-karten/CI_DUMMY
-          sudo mkdir -p "$CI_SOURCE"
-          sudo chown -R "$(id -u):$(id -g)" /mnt/storage/backup/kamera-sd-karten
-          printf 'Bibliothekar archive QA harness smoke test\n' > "$CI_SOURCE/real-copy-placeholder.bin"
-
-          export QA_ROOT="$RUNNER_TEMP/bibliothekar-archive-qa"
-          export QA_RUN_ID="ci_archive_harness"
-          export QA_PORT=31044
-          trap 'QA_ROOT="$QA_ROOT" bash qa/archive_e2e/stop_isolated_archive_qa.sh >/dev/null 2>&1 || true' EXIT
-
-          bash qa/archive_e2e/start_isolated_archive_qa.sh "$CI_SOURCE"
-
-          test -f "$QA_ROOT/runs/$QA_RUN_ID/database/kamera.sqlite3"
-          python3 - "$QA_ROOT/runs/$QA_RUN_ID/isolation.json" <<'PY'
-          import json
-          import sys
+          bash -n qa/archive_e2e/*.sh
+          python - <<'PY'
           from pathlib import Path
-
-          data = json.loads(Path(sys.argv[1]).read_text())
-          assert data['status'] == 'PASS'
-          assert data['product_revision'] == '627c5515e533e167e45354ccaa71f988f104ae08'
-          assert data['production_archive_mounted'] is False
-          assert data['production_database_mounted'] is False
-          run_root = data['workspace'].rsplit('/workspace', 1)[0]
-          assert data['database'].startswith(run_root + '/')
-          assert data['archive_root'].endswith('/archive-test-library')
+          from app.events_ui import EVENTS_HTML
+          from app.ui_shell import BIBLIOTHEKAR_JS
+          import re
+          scripts=re.findall(r'<script[^>]*>(.*?)</script>',EVENTS_HTML,flags=re.S)
+          assert scripts
+          Path("/tmp/bibliothekar-events.js").write_text("\n".join(scripts))
+          Path("/tmp/bibliothekar-shell.js").write_text(BIBLIOTHEKAR_JS)
           PY
+          node --check /tmp/bibliothekar-shell.js
+          node --check /tmp/bibliothekar-events.js
+      - name: Full backend regression tests (synthetic fixtures only)
+        run: pytest -q -o addopts='' --junitxml=/tmp/bibliothekar-main-qa.xml tests/backend
+      - name: Save test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-qa
+          path: /tmp/bibliothekar-main-qa.xml

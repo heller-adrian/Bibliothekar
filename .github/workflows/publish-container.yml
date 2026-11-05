@@ -4,10 +4,8 @@ on:
   push:
     branches:
       - main
-      - 'patch/**'
-    tags:
-      - 'v*'
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: write
@@ -23,36 +21,66 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
+      - name: Require authorized ref and new release request for patch publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/heads/main) ;;
+            refs/heads/patch/*)
+              if [[ "$GITHUB_EVENT_NAME" != "push" ]]; then
+                echo 'Patch builds require explicit release-request push.' >&2
+                exit 1
+              fi
+              if ! git diff-tree --root --no-commit-id --diff-filter=AM --name-only -r "$GITHUB_SHA" |
+                  grep -Eq '^\.github/release-requests/[^/]+\.txt$'; then
+                echo 'No added or modified release request in triggering commit.' >&2
+                exit 1
+              fi
+              ;;
+            *) echo "Unauthorized release ref: $GITHUB_REF" >&2; exit 1 ;;
+          esac
+
       - name: Validate TrueNAS Custom App compose
         env:
-          BIBLIOTHEKAR_CONFIG_DIR: /tmp/bibliothekar/config
-          BIBLIOTHEKAR_DATABASE_DIR: /tmp/bibliothekar/database
-          BIBLIOTHEKAR_LOG_DIR: /tmp/bibliothekar/logs
+          BIBLIOTHEKAR_APPDATA_DIR: /tmp/bibliothekar/appdata
           BIBLIOTHEKAR_WORKSPACE_DIR: /tmp/bibliothekar/workspace
           BIBLIOTHEKAR_MAIN_LIBRARY_DIR: /tmp/bibliothekar/main-library
-          BIBLIOTHEKAR_IMPORT_SOURCE_DIR: /tmp/bibliothekar/import-source
-          BIBLIOTHEKAR_NAS_SOURCE_DIR: /tmp/bibliothekar/nas-source
-          BIBLIOTHEKAR_REMOVABLE_DIR: /tmp/bibliothekar/removable
+          BIBLIOTHEKAR_ADMIN_PASSWORD: release-check-only-not-a-real-secret
         run: docker compose -f compose.example.yaml config -q
+
+      - name: Install metadata regression dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y libimage-exiftool-perl
 
       - name: Complete QA before publishing
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          pip install -r requirements.txt pytest httpx
+          pip install -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2
           python -m compileall -q app qa
           bash -n qa/archive_e2e/*.sh
-          pytest -q -o addopts='' tests/backend
+          pytest -q -o addopts='' --junitxml=/tmp/bibliothekar-qa.xml tests/backend
+
+      - name: Retain QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-qa
+          path: |
+            /tmp/bibliothekar-qa.xml
+            /tmp/pytest-of-*/pytest-*/0562-evidence
 
       - name: Read application version
         id: version
@@ -68,6 +96,18 @@ jobs:
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Reject an existing stable version tag
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" >/dev/null; then
+            echo "Stable version v${VERSION} already exists; refusing to overwrite its image or tag." >&2
+            exit 1
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -85,10 +125,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=tag
             type=raw,value=${{ steps.version.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=v${{ steps.version.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=patch-${{ steps.version.outputs.version }}-${{ github.sha }},enable=${{ startsWith(github.ref, 'refs/heads/patch/') }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push image
@@ -97,6 +136,8 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            SOURCE_REVISION=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
@@ -114,8 +155,8 @@ jobs:
 
           TAG="v${VERSION}"
 
-          git tag -f "${TAG}" "${GITHUB_SHA}"
-          git push origin "refs/tags/${TAG}" --force
+          git tag "${TAG}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${TAG}"
 
           cat > /tmp/release-body.md <<EOF
           Bibliothekar ${TAG}
@@ -132,13 +173,7 @@ jobs:
           ${GITHUB_SHA}
           EOF
 
-          if RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>/dev/null)"; then
-            RELEASE_ID="$(printf '%s' "${RELEASE_JSON}" | jq -r '.id')"
-            gh api               --method PATCH               "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"               -f target_commitish="${GITHUB_SHA}"               -F draft=false               -F prerelease=false               --raw-field make_latest=true               --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
-            echo "Updated stable release ${TAG}."
-          else
-            gh api               --method POST               "repos/${GITHUB_REPOSITORY}/releases"               -f tag_name="${TAG}"               -f target_commitish="${GITHUB_SHA}"               -f name="${TAG}"               -F draft=false               -F prerelease=false               --raw-field make_latest=true               --raw-field body="$(cat /tmp/release-body.md)" >/dev/null
-            echo "Created stable release ${TAG}."
-          fi
+          # Published stable releases are immutable; never rewrite an existing tag or release.
+          gh release create "${TAG}" --title "${TAG}" --notes-file /tmp/release-body.md --latest
 
           echo "Stable release ${TAG} points to ${GITHUB_SHA}."

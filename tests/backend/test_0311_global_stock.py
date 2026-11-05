@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+
+from tests.backend.legacy_storage_fixture import provision_legacy_storage
+
 from pathlib import Path
 import hashlib
 
@@ -131,6 +135,7 @@ def test_0311_main_migration_moves_only_free_stock_to_central(tmp_path):
     database = tmp_path / "database" / "kamera.sqlite3"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     layout = ensure_workspace_layout(workspace)
     initialize_database(database)
 
@@ -223,6 +228,8 @@ def test_0311_projection_is_idempotent_and_keeps_local_family_ids(tmp_path):
         data=data,
     )
 
+    with database_connection(source) as connection:
+        connection.execute("UPDATE jobs SET state='completed'")
     first = project_import_job(source, target, "GLOBAL_IMPORT")
     second = project_import_job(source, target, "GLOBAL_IMPORT")
 
@@ -253,7 +260,7 @@ def test_0311_settings_contract_has_four_tabs_scroll_and_rounding():
     assert "scrollbar-gutter: stable" in css
     assert "#bk-settings-dialog input" in css
     assert "border-radius: 11px" in css
-    assert main.DEPLOYMENT_VERSION == "0.40.3"
+    assert main.DEPLOYMENT_VERSION == EXPECTED_RELEASE_VERSION
 
 
 
@@ -262,6 +269,7 @@ def test_0311_released_family_refreshes_stale_projection_from_central_stock(tmp_
     other_db = tmp_path / "database" / "business.sqlite3"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     layout = ensure_workspace_layout(workspace)
     initialize_database(main_db)
     initialize_database(other_db)
@@ -284,6 +292,8 @@ def test_0311_released_family_refreshes_stale_projection_from_central_stock(tmp_
         capture_time="2026-10-01T12:00:00",
         data=data,
     )
+    with database_connection(main_db) as connection:
+        connection.execute("UPDATE jobs SET state='completed'")
     project_import_job(main_db, other_db, "GLOBAL_RELEASE")
 
     with database_connection(other_db) as connection:
@@ -322,6 +332,7 @@ def test_0311_claim_reconcile_releases_stale_owned_claim_after_event_delete(tmp_
     workspace = tmp_path / "workspace"
     archive = tmp_path / "archive"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     archive.mkdir()
     layout = ensure_workspace_layout(workspace)
     initialize_database(database)
@@ -399,6 +410,7 @@ def test_0311_central_sync_does_not_overwrite_locally_applied_path(tmp_path):
     other_db = tmp_path / "database" / "business.sqlite3"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    provision_legacy_storage(workspace)
     ensure_workspace_layout(workspace)
     initialize_database(main_db)
     initialize_database(other_db)
@@ -421,6 +433,8 @@ def test_0311_central_sync_does_not_overwrite_locally_applied_path(tmp_path):
         capture_time="2026-10-01T10:00:00",
         data=data,
     )
+    with database_connection(main_db) as connection:
+        connection.execute("UPDATE jobs SET state='completed'")
     project_import_job(main_db, other_db, "OWNED_LOCAL")
 
     with database_connection(other_db) as connection:

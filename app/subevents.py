@@ -2,10 +2,22 @@
 from datetime import datetime
 import uuid
 
+from app.event_naming import normalize_event_naming, render_subevent_folder_name
 
-def normalize_subevents(values, start, end):
+
+def _legacy_subevent_naming():
+    naming = normalize_event_naming({})
+    naming["subevent_prefix_mode"] = "legacy_datetime_range"
+    naming["subevent_prefix_enabled"] = True
+    return naming
+
+
+def normalize_subevents(values, start, end, naming=None):
     result=[]
+    effective_naming = _legacy_subevent_naming() if naming is None else naming
     for value in values or []:
+        if any(value.get(key) for key in ("subevents","children","child_events")):
+            raise ValueError("Verschachtelte Unter-Unterereignisse werden nicht unterstützt.")
         name=str(value.get('name') or '').strip()
         if not name or any(x in name for x in ('/','\\','\0')):
             raise ValueError('Ein Unterereignis benötigt einen gültigen Namen.')
@@ -16,9 +28,22 @@ def normalize_subevents(values, start, end):
         datetime.fromisoformat(a);datetime.fromisoformat(b)
         if not start<=a<=b<=end:
             raise ValueError('Unterereignisse müssen innerhalb des durchgehenden Elternzeitraums liegen.')
-        result.append({'id':value.get('id'),'name':name,'start_datetime':a,'end_datetime':b,
-            'start_time':a[11:16],'end_time':b[11:16],
-            'folder_name':f"{a[5:16].replace('T',' ').replace(':','-')} - {b[5:16].replace('T',' ').replace(':','-')} - {name}"})
+        result.append({
+            'id':value.get('id'),
+            'name':name,
+            'start_datetime':a,
+            'end_datetime':b,
+            'start_time':a[11:16],
+            'end_time':b[11:16],
+            'folder_name':render_subevent_folder_name(
+                event_name=name,
+                start_datetime=a,
+                end_datetime=b,
+                naming=effective_naming,
+                parent_start_datetime=start,
+                parent_end_datetime=end,
+            ),
+        })
     result.sort(key=lambda x:(x['start_datetime'],x['end_datetime']))
     if any(a['end_datetime']>=b['start_datetime'] for a,b in zip(result,result[1:])):
         raise ValueError('Organisatorische Unterereignisse dürfen sich nicht überschneiden.')
@@ -58,7 +83,7 @@ def store_subevents(connection,event_id,segments,now):
     return result
 
 
-def append_extension_subevents(connection,event_id,segments,extension_start,extension_end,now):
+def append_extension_subevents(connection,event_id,segments,extension_start,extension_end,now,naming=None):
     """Append new child events only inside one newly added parent interval."""
     if not segments:
         return []
@@ -67,7 +92,9 @@ def append_extension_subevents(connection,event_id,segments,extension_start,exte
         raise ValueError('Ereignis wurde nicht gefunden.')
     parent=dict(parent_row)
     try:
-        new_segments=normalize_subevents(segments,extension_start,extension_end)
+        new_segments=normalize_subevents(
+            segments,extension_start,extension_end,naming=naming
+        )
     except ValueError as exc:
         if 'durchgehenden Elternzeitraums' in str(exc):
             raise ValueError(
@@ -85,7 +112,7 @@ def append_extension_subevents(connection,event_id,segments,extension_start,exte
             'start_datetime':row['start_datetime'],'end_datetime':row['end_datetime']
         } for row in existing],
         *new_segments,
-    ],str(parent['start_datetime'])[:19],str(parent['end_datetime'])[:19])
+    ],str(parent['start_datetime'])[:19],str(parent['end_datetime'])[:19],naming=naming)
     result=[]
     for segment in new_segments:
         cid='EVENT_'+uuid.uuid4().hex.upper()

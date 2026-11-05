@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.archive_staging import staging_directory_name
+from app.workspace_layout import shared_work_root
+
 from pathlib import Path
 
 import pytest
@@ -35,7 +38,7 @@ def test_0284_successful_archive_change_removes_helper_tree_with_finder_metadata
     confirm_event_change(db, cr_id, archive, workspace)
 
     helper_root = (
-        workspace / "Arbeitsbereich" / "Später zuordnen" / "2026" / folder
+        shared_work_root(workspace) / staging_directory_name(shared_work_root(workspace)) / "2026" / folder
     )
     assert (helper_root / "event.json").is_file()
 
@@ -51,7 +54,7 @@ def test_0284_successful_archive_change_removes_helper_tree_with_finder_metadata
 
     assert not helper_root.exists()
     assert not helper_root.parent.exists()
-    assert (workspace / "Arbeitsbereich" / "Später zuordnen").is_dir()
+    assert (shared_work_root(workspace) / staging_directory_name(shared_work_root(workspace))).is_dir()
 
 
 @pytest.mark.parametrize(
@@ -102,7 +105,7 @@ def test_0284_archive_verification_accepts_os_collision_names(
     spec = required_event_document_for_request(db, cr_id)
     assert spec is not None
     staged_document = (
-        workspace / "Arbeitsbereich" / "Später zuordnen" / spec["target_relative_path"]
+        shared_work_root(workspace) / staging_directory_name(shared_work_root(workspace)) / spec["target_relative_path"]
     )
     (archive / spec["target_relative_path"]).write_bytes(staged_document.read_bytes())
 

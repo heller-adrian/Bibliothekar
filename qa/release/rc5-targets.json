@@ -1,0 +1,3 @@
+[
+  "tests/backend/test_rc4_private_retention.py::test_actual_worker_failure_after_persisted_identity_auto_finalizes"
+]

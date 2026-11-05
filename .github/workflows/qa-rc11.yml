@@ -1,0 +1,73 @@
+name: RC11 isolated safety acceptance
+on:
+  push:
+    branches: [release/v1.0.0-rc.11]
+    paths-ignore: ["docs/**", "README.md", "CHANGELOG.md", ".github/workflows/publish-rc11.yml", "qa/rc11/container.py", "qa/rc11/admin_adopt_worker.py", "qa/rc11/sitecustomize.py", ".github/workflows/qa-rc11-container.yml", ".github/workflows/qa-rc11.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: rc11-acceptance
+  cancel-in-progress: true
+jobs:
+  regression:
+    name: Regression (${{ matrix.group }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [baseline, bootstrap, retention, history]
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned application and QA dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libimage-exiftool-perl
+          pip install -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2==1.4.0
+      - name: Run isolated matrix partition
+        run: python qa/rc11/regression.py '${{ matrix.group }}'
+      - name: Retain regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc11-regression-${{ matrix.group }}
+          retention-days: 14
+          path: ${{ runner.temp }}/f14-qa/targets/results
+  acceptance:
+    name: Container acceptance
+    needs: regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      IMAGE: bibliothekar:rc11-acceptance
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build local acceptance image without publishing
+        run: docker build --platform linux/amd64 --build-arg SOURCE_REVISION="$GITHUB_SHA" -t "$IMAGE" .
+      - name: Verify candidate identity
+        run: docker run --rm --entrypoint python "$IMAGE" -c 'from app import __version__; assert __version__=="1.0.0-rc.11"'
+      - name: Real supervisor, uid568, HTTP, RO mounts and crash recovery
+        run: python qa/rc11/container.py
+      - name: Retain acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc11-isolated-acceptance
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/rc11-evidence.json
+            ${{ runner.temp }}/rc11-container-logs
+      - name: Record source and scope
+        if: success()
+        run: |
+          printf 'Accepted source: %s\nLinux container QA; native TrueNAS ACL acceptance remains a separate gate.\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

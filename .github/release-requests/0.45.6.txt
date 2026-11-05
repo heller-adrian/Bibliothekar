@@ -1,0 +1,2 @@
+Freigabeauftrag 0.45.6: Nach erfolgreicher Backend-QA (886 bestanden, Archiv-Isolation erfolgreich) das Patch-Container-Image ghcr.io/heller-adrian/bibliothekar:patch-0.45.6 bauen und in GitHub Container Registry veröffentlichen.
+Änderungen: Phasen-Badge rechts oben in ausgeklappten Importdetails, abgestufter Hover-Kontrast ausschließlich im Light-Theme, iOS-Wackelanimation auf Karteninhalt statt Kartenrand. Keine SQLite-Migration; main/latest unverändert.

@@ -37,6 +37,19 @@ def _load_family_stats(
                 ff.selected_capture_time,
                 ff.capture_time_confidence,
 
+                MAX(
+                    CASE
+                        WHEN f.current_root_kind='shared_workspace'
+                         AND (
+                             f.current_relative_path='Ohne_Datum'
+                             OR f.current_relative_path LIKE 'Ohne_Datum/%'
+                             OR f.current_relative_path='No Date'
+                             OR f.current_relative_path LIKE 'No Date/%'
+                         )
+                        THEN 1 ELSE 0
+                    END
+                ) AS physically_undated,
+
                 COUNT(f.id) AS file_count,
 
                 COALESCE(
@@ -60,6 +73,7 @@ def _load_family_stats(
             LEFT JOIN files AS f
                 ON f.family_id = ff.id
                AND f.job_id = ff.job_id
+               AND COALESCE(f.current_root_kind,'job_root') <> 'trash'
 
             WHERE ff.job_id = ?
 
@@ -68,6 +82,12 @@ def _load_family_stats(
                 ff.family_key,
                 ff.selected_capture_time,
                 ff.capture_time_confidence
+
+            HAVING COUNT(f.id) > 0
+                OR NOT EXISTS (
+                    SELECT 1 FROM files any_file
+                    WHERE any_file.family_id=ff.id
+                )
 
             ORDER BY
                 ff.selected_capture_time,
@@ -86,6 +106,9 @@ def _load_family_stats(
             "capture_time_confidence": row[
                 "capture_time_confidence"
             ],
+            "physically_undated": bool(
+                row["physically_undated"]
+            ),
             "day_key": _day_key(
                 row["selected_capture_time"]
             ),
@@ -293,7 +316,7 @@ def _released_archive_family_ids(
                JOIN files f ON f.family_id=marker.family_id
                WHERE marker.job_id=?
                  AND f.current_root_kind='shared_workspace'
-                 AND f.current_relative_path LIKE 'Freigewordene Archivdateien/%'""",
+                 AND (f.current_relative_path LIKE 'Freigewordene Archivdateien/%' OR f.current_relative_path LIKE 'Released Archive Files/%')""",
             (job_id,),
         ).fetchall()
     return {int(row["family_id"]) for row in rows}
@@ -336,7 +359,7 @@ def list_global_released_archive_groups(
                      SELECT 1 FROM files rf
                      WHERE rf.family_id=ff.id
                        AND rf.current_root_kind='shared_workspace'
-                       AND rf.current_relative_path LIKE 'Freigewordene Archivdateien/%'
+                       AND (rf.current_relative_path LIKE 'Freigewordene Archivdateien/%' OR rf.current_relative_path LIKE 'Released Archive Files/%')
                  )
                GROUP BY marker.job_id,marker.family_id,
                         marker.released_start_datetime,marker.released_end_datetime,
@@ -753,6 +776,32 @@ def list_job_planning_overview(
         if int(family["family_id"]) not in assigned_family_ids
         and int(family["family_id"]) not in released_archive_ids
     ]
+
+    # Der freie Aufnahmenbestand folgt dem physischen IST. Eine Familie unter
+    # Ohne_Datum darf trotz noch bekannter Aufnahmezeit nicht gleichzeitig
+    # weiter als normaler Tagesbestand erscheinen. Ereignisgruppen behalten
+    # dagegen ihre gespeicherte Aufnahmezeit.
+    available_families = [
+        (
+            {
+                **family,
+                "selected_capture_time": None,
+                "day_key": None,
+                "has_date": False,
+            }
+            if bool(family.get("physically_undated"))
+            else family
+        )
+        for family in available_families
+    ]
+    total_by_day = defaultdict(int)
+    for family in family_stats:
+        key = (
+            None
+            if bool(family.get("physically_undated"))
+            else family.get("day_key")
+        )
+        total_by_day[key] += 1
 
     available_day_groups = interval_cards(database_path, job_id, available_families, total_by_day)
 

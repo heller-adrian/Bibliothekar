@@ -50,10 +50,13 @@ def _event_counts(
     ph = ",".join("?" for _ in family_ids)
     values = connection.execute(
         f"""SELECT COUNT(*) AS file_count,
+                   COUNT(DISTINCT family_id) AS family_count,
                    COALESCE(SUM(size_bytes),0) AS total_size_bytes,
                    COALESCE(SUM(CASE WHEN review_status='required' THEN 1 ELSE 0 END),0)
                      AS review_required_count
-            FROM files WHERE family_id IN ({ph})""",
+            FROM files
+            WHERE family_id IN ({ph})
+              AND COALESCE(current_root_kind,'job_root') <> 'trash'""",
         tuple(family_ids),
     ).fetchone()
     released_assets = {"file_count": 0, "total_size_bytes": 0}
@@ -70,7 +73,7 @@ def _event_counts(
             "total_size_bytes": int(asset_values["total_size_bytes"] or 0),
         }
     return {
-        "family_count": len(family_ids),
+        "family_count": int(values["family_count"] or 0),
         "file_count": (
             int(values["file_count"] or 0)
             + int(released_assets["file_count"])
@@ -196,6 +199,19 @@ def _visible_events(
     return events, groups
 
 
+def _workspace_group_sort_key(item: dict[str, Any]) -> tuple[int, str, int]:
+    """Keep undated review stock before the chronological event/day timeline."""
+    undated_day = (
+        str(item.get("group_type") or "") != "event"
+        and not bool(item.get("has_date"))
+    )
+    return (
+        0 if undated_day else 1,
+        str(item.get("start_datetime") or item.get("day_key") or "9999"),
+        0 if item.get("group_type") == "event" else 1,
+    )
+
+
 def _merge_available(items: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     for job_id, group in items:
@@ -219,6 +235,7 @@ def _merge_available(items: list[tuple[str, dict[str, Any]]]) -> list[dict[str, 
         current["file_count"] = int(current.get("file_count") or 0) + int(group.get("file_count") or 0)
         current["family_count"] = int(current.get("family_count") or 0) + int(group.get("family_count") or 0)
         current["total_size_bytes"] = int(current.get("total_size_bytes") or 0) + int(group.get("total_size_bytes") or 0)
+        current["ready_to_sort_file_count"] = int(current.get("ready_to_sort_file_count") or 0) + int(group.get("ready_to_sort_file_count") or 0)
         current["review_required_count"] = int(current.get("review_required_count") or 0) + int(group.get("review_required_count") or 0)
         current["family_ids"] = sorted(set([*(current.get("family_ids") or []), *(group.get("family_ids") or [])]))
         current["families"].extend({**family, "job_id": job_id} for family in (group.get("families") or []))
@@ -228,7 +245,7 @@ def _merge_available(items: list[tuple[str, dict[str, Any]]]) -> list[dict[str, 
         current["partially_assigned"] = bool(current.get("partially_assigned") or group.get("partially_assigned"))
     return sorted(
         merged.values(),
-        key=lambda item: str(item.get("start_datetime") or item.get("day_key") or "9999"),
+        key=_workspace_group_sort_key,
     )
 
 
@@ -238,20 +255,28 @@ def build_global_workspace_summary(
     workspace_path: Path | None = None,
     *,
     excluded_family_ids_by_job: dict[str, set[int]] | None = None,
+    availability_root: Path | None = None,
 ) -> dict[str, Any]:
     selected = {str(value) for value in selected_job_ids if str(value)}
     jobs = [get_job(database_path, value) for value in sorted(selected)]
-    jobs = [job for job in jobs if job is not None]
+    jobs = [job for job in jobs if job is not None and job.get('state')=='completed']
 
     available_items: list[tuple[str, dict[str, Any]]] = []
     day_groups: list[dict[str, Any]] = []
     time_segments: list[dict[str, Any]] = []
     reviews: list[dict[str, Any]] = []
+    eligible = None
+    if availability_root is not None:
+        from app.inventory_availability import available_families
+        eligible=available_families(database_path,availability_root)
     for job in jobs:
         job_id = str(job["id"])
         excluded = set(
             (excluded_family_ids_by_job or {}).get(job_id, set())
         )
+        if eligible is not None:
+            with database_connection(database_path) as c:
+                excluded |= {int(r[0]) for r in c.execute('SELECT id FROM file_families WHERE job_id=?',(job_id,)) if int(r[0]) not in eligible}
         overview = list_job_planning_overview(
             database_path,
             job_id,
@@ -278,13 +303,20 @@ def build_global_workspace_summary(
         selected,
         workspace_path=workspace_path,
     )
+    # Display count from committed correction state, never total minus review.
+    with database_connection(database_path) as connection:
+        ready = {int(row[0]): int(row[1]) for row in connection.execute(
+            "SELECT family_id,COUNT(*) FROM files WHERE review_status='corrected' "
+            "AND metadata_write_status='written' AND selected_capture_time IS NOT NULL "
+            "GROUP BY family_id"
+        )}
+    for _job, group in available_items:
+        group["ready_to_sort_file_count"] = (0 if group.get("has_date") else
+            sum(ready.get(int(fid),0) for fid in group.get("family_ids") or []))
     available = _merge_available(available_items)
     timeline = sorted(
         [*event_groups, *available],
-        key=lambda item: (
-            str(item.get("start_datetime") or item.get("day_key") or "9999"),
-            0 if item.get("group_type") == "event" else 1,
-        ),
+        key=_workspace_group_sort_key,
     )
 
     day_keys: set[str] = set()

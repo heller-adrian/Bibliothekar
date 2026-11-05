@@ -7,6 +7,10 @@ physisch verändert; sie werden als manueller Anteil gemeldet.
 """
 from __future__ import annotations
 
+from app.root_operations import protect, validate_active_roots
+
+
+
 from collections import deque
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -412,6 +416,7 @@ def build_workspace_reconcile_plan(database_path: Path, job_id: str, anchor_even
     }
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='plan', error_type=SortApplyError, durable=False)
 def prepare_workspace_reconcile_run(database_path: Path,job_id:str,anchor_event_id:str,workspace_path:Path,*,expected_plan_token:str,confirmation_phrase:str)->dict[str,Any]:
     if confirmation_phrase != CONFIRMATION_PHRASE: raise SortApplyError("Die ausdrückliche Bestätigung für den Arbeitsbereich-Abgleich fehlt.")
     plan=build_workspace_reconcile_plan(database_path,job_id,anchor_event_id,workspace_path)
@@ -461,8 +466,10 @@ def prepare_workspace_reconcile_run(database_path: Path,job_id:str,anchor_event_
     return get_sort_run(database_path,job_id,run_id)
 
 
+@protect(workspace_arg='workspace_path', database_arg='database_path', kind='sort', error_type=SortApplyError)
 def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path:Path)->None:
     moved=[]; created=[]
+    database_finalized = False
     try:
         with database_connection(database_path) as c:
             run=c.execute("SELECT * FROM sort_runs WHERE id=?",(run_id,)).fetchone()
@@ -502,6 +509,7 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
         with database_connection(database_path) as c: c.execute("UPDATE sort_runs SET status='moving',phase='Direkter IST→SOLL-Abgleich im SSD-Arbeitsbereich',updated_at=? WHERE id=?",(_now(),run_id))
         for f in plan['files']:
             if f['status']!='move': continue
+            validate_active_roots()
             src=Path(f['source_absolute_path']); dst=Path(f['destination_absolute_path']); dst.parent.mkdir(parents=True,exist_ok=True)
             _move_without_overwrite(src,dst,f); moved.append((src,dst,int(f['file_id']),int(f['expected_size_bytes']),str(f['stored_sha256'])))
             if _sha256_file(dst)!=str(f['stored_sha256']): raise SortApplyError("Zielprüfung fehlgeschlagen: "+str(dst))
@@ -510,6 +518,7 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                 c.execute("UPDATE sort_runs SET moved_file_count=moved_file_count+1,moved_bytes=moved_bytes+?,updated_at=? WHERE id=?",(int(f['expected_size_bytes']),_now(),run_id))
         for a in plan.get('assets') or []:
             if a.get('status')!='move': continue
+            validate_active_roots()
             src=Path(a['source_absolute_path']); dst=Path(a['destination_absolute_path']); dst.parent.mkdir(parents=True,exist_ok=True)
             _move_without_overwrite(src,dst,a); moved.append((src,dst,None,int(a['expected_size_bytes']),str(a.get('stored_sha256') or '')))
             if _sha256_file(dst)!=str(a.get('stored_sha256') or ''): raise SortApplyError("Zielprüfung der Zusatzdatei fehlgeschlagen: "+str(dst))
@@ -592,7 +601,21 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                 'plan_token': str(run['plan_token']),
                 'run_kind': str(run['run_kind'] or 'reapply'),
             }
+            # BA-07: The canonical SQLite paths, mutation completion and
+            # "applied" receipt are one durable transaction. If the process
+            # crashes afterwards, recovery must NEVER move files backwards.
+            from app.event_mutation import mark_job_mutation_completed
+            mark_job_mutation_completed(c, job_id)
+            c.execute(
+                "UPDATE sort_runs SET status='applied',phase='Dateipfade bestätigt; Dokumentabschluss läuft',completed_at=?,updated_at=? WHERE id=?",
+                (now,now,run_id),
+            )
+            c.execute(
+                "INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'workspace_reconciliation_applied','sort_run',?,?,?)",
+                (job_id,run_id,_json_details(receipt),now),
+            )
             c.commit()
+            database_finalized = True
         # Solange diese Nacharbeiten laufen, bleibt der Run absichtlich
         # "finalizing". Dadurch ignoriert der Strukturwächter Bibliothekars
         # eigene, noch nicht vollständig abgeschlossene Dateisystemänderung.
@@ -644,19 +667,22 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
                 "UPDATE sort_runs SET status='applied',phase=?,error_message=?,completed_at=?,updated_at=? WHERE id=?",
                 (phase,str(metadata_error) if metadata_error is not None else None,done,done,run_id),
             )
-            # The source event may be deleted above. sort_runs.event_id still has
-            # the historical ON DELETE CASCADE FK, so the run row can vanish in
-            # the same transaction. This audit receipt is intentionally event-
-            # independent and lets polling report the verified success.
-            c.execute(
-                "INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'workspace_reconciliation_applied','sort_run',?,?,?)",
-                (job_id,run_id,_json_details({**receipt,'metadata_error':str(metadata_error) if metadata_error is not None else None}),done),
-            )
-            from app.event_mutation import mark_job_mutation_completed
-            mark_job_mutation_completed(c, job_id)
+            # A prior transaction already committed the independent success
+            # receipt and mutation completion. Only enrich the metadata phase
+            # here; this second commit is not part of the file-move transaction.
+            if metadata_error is not None:
+                c.execute(
+                    "INSERT INTO audit_log(job_id,action,entity_type,entity_id,details_json,created_at) VALUES (?,'workspace_reconciliation_metadata_error','sort_run',?,?,?)",
+                    (job_id,run_id,_json_details({'metadata_error':str(metadata_error)}),done),
+                )
             c.commit()
     except Exception as exc:
-        # Roll back physical moves in reverse order. Database paths are only finalized after all moves succeed.
+        # Once the canonical paths are durably committed, a physical rollback
+        # would destroy DB/filesystem consistency. Let a follow-up metadata
+        # repair handle post-commit errors without moving any original bytes.
+        if database_finalized:
+            raise
+        # Before the canonical commit, reverse physical moves in order.
         for src,dst,_,expected_size,expected_sha in reversed(moved):
             try:
                 _rollback_one(
@@ -674,6 +700,7 @@ def execute_workspace_reconcile_run(database_path:Path,run_id:str,workspace_path
         # manuell angelegte Ordner sehen.
         for directory in sorted(set(created), key=lambda path: len(path.parts), reverse=True):
             try:
+                validate_active_roots()
                 directory.rmdir()
                 if directory.parent.exists():
                     _fsync_directory(directory.parent)

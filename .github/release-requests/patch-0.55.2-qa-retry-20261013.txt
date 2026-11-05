@@ -1,0 +1,1 @@
+Re-run full backend QA after compatibility fix for Node browser mocks, updated progressive-loading assertions, and library-safe early navigation links. Publish patch-0.55.2 only if all tests pass. Preserve full page navigation and all user data.

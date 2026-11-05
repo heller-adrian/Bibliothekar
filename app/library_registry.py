@@ -186,17 +186,27 @@ def _now() -> str:
 
 
 def _connect(path: Path) -> sqlite3.Connection:
+    from app.operation_health import read_only, read_connection
+    if read_only():
+        return read_connection(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path, timeout=30)
+    from app.sqlite_authorization import Connection
+    connection = sqlite3.connect(path, timeout=30, cached_statements=0, factory=Connection)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     connection.execute("PRAGMA journal_mode = WAL")
     connection.execute("PRAGMA synchronous = FULL")
     connection.execute("PRAGMA busy_timeout = 30000")
-    return connection
+    # Registry transactions share the same workspace write barrier.
+    from app.operation_health import guard_registry_connection
+    return guard_registry_connection(connection,path)
 
 
 def _ensure_registry_schema_table(connection: sqlite3.Connection) -> None:
+    if connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='registry_schema_versions'"
+    ).fetchone():
+        return
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS registry_schema_versions (
@@ -361,6 +371,10 @@ def _absolute(path: Path, field: str) -> str:
     return str(resolved)
 
 
+from app.root_operations import guard_registry_paths, guard_database_relink
+
+
+@guard_registry_paths
 def register_library(
     registry_path: Path,
     *,
@@ -373,6 +387,7 @@ def register_library(
     is_main: bool = False,
     is_active: bool = True,
     settings: dict[str, Any] | None = None,
+    _expected_roots: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     clean_id = str(library_id or "").strip()
     clean_name = " ".join(str(display_name or "").split()).strip()
@@ -564,6 +579,7 @@ def adopt_main_library(
         is_main=True,
         is_active=True,
         settings=settings,
+        _expected_roots=({key: str(existing[key]) for key in ("workspace_root", "work_root", "archive_root", "database_path", "is_active", "is_registered")} if existing else None),
     )
 
 
@@ -683,9 +699,11 @@ def update_library_settings(
         is_main=bool(existing["is_main"]),
         is_active=bool(existing["is_active"]),
         settings=current,
+        _expected_roots=({key: str(existing[key]) for key in ("workspace_root", "work_root", "archive_root", "database_path", "is_active", "is_registered")} if existing else None),
     )
 
 
+@guard_database_relink
 def update_library_database_path(
     registry_path: Path,
     library_id: str,
@@ -799,6 +817,7 @@ def update_library_paths(
             **dict(existing.get("settings") or {}),
             "paths_updated_at": _now(),
         },
+        _expected_roots=({key: str(existing[key]) for key in ("workspace_root", "work_root", "archive_root", "database_path", "is_active", "is_registered")} if existing else None),
     )
 
 
@@ -824,6 +843,7 @@ def set_library_active(
         is_main=bool(existing["is_main"]),
         is_active=bool(active),
         settings=dict(existing.get("settings") or {}),
+        _expected_roots=({key: str(existing[key]) for key in ("workspace_root", "work_root", "archive_root", "database_path", "is_active", "is_registered")} if existing else None),
     )
 
 
@@ -871,45 +891,9 @@ def remove_library_registration(
         connection.close()
 
 
-def unregister_library(
-    registry_path: Path,
-    library_id: str,
-) -> dict[str, Any]:
-    existing = get_library(registry_path, library_id, active_only=False)
-    if existing is None:
-        raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
-    if existing.get("is_main"):
-        raise LibraryRegistryError("Die Hauptbibliothek kann nicht abgemeldet werden.")
-
-    now = _now()
-    connection = _connect(registry_path)
-    try:
-        connection.execute("BEGIN IMMEDIATE")
-        cursor = connection.execute(
-            """
-            UPDATE libraries
-            SET is_active = 0,
-                is_registered = 0,
-                deactivated_at = COALESCE(deactivated_at, ?),
-                unregistered_at = ?,
-                updated_at = ?
-            WHERE library_id = ?
-            """,
-            (now, now, now, str(library_id)),
-        )
-        if cursor.rowcount != 1:
-            raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
-
-    result = get_library(registry_path, library_id, active_only=False)
-    if result is None:
-        raise LibraryRegistryError("Bibliothek wurde nicht gefunden.")
-    return result
+def unregister_library(registry_path: Path, library_id: str, *, confirmation: str = '') -> dict[str, Any]:
+    from app.library_retirement import remove
+    return remove(registry_path,library_id,confirmation)
 
 
 def get_source_backup(
@@ -1061,7 +1045,7 @@ def register_source_backup(
         connection.execute("BEGIN IMMEDIATE")
         existing = connection.execute(
             """
-            SELECT source_kind, source_identity, backup_path, created_at
+            SELECT source_kind, source_identity, backup_path, metadata_json, created_at
             FROM source_backups
             WHERE backup_id = ?
             """,
@@ -1128,15 +1112,41 @@ def register_source_backup(
                     and clean_identity == metadata_library + ":" + physical_identity
                     and existing_path == clean_path
                 )
-                if not safe_legacy_upgrade:
+                # 0.54.1: Earlier import registration could have used
+                # the job's stale source_path/source_device_id while the
+                # persisted job already contained the measured SHA signature.
+                # Reconcile only this exact, provenance-matched legacy case.
+                # Arbitrary changed source identities remain forbidden.
+                try:
+                    old_metadata = json.loads(str(existing["metadata_json"] or "{}"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    old_metadata = {}
+                old_metadata = old_metadata if isinstance(old_metadata, dict) else {}
+                fallback_identity = str((metadata or {}).get("legacy_import_identity") or "")
+                matching_main_job = (
+                    metadata_library == MAIN_LIBRARY_ID
+                    and str((metadata or {}).get("job_id") or "")
+                    and str(old_metadata.get("library_id") or "") == metadata_library
+                    and str(old_metadata.get("job_id") or "") == str((metadata or {}).get("job_id") or "")
+                    and clean_backup_id == metadata_library + ":" + str((metadata or {}).get("job_id"))
+                )
+                safe_stale_import_upgrade = (
+                    existing_kind == clean_kind == "import"
+                    and matching_main_job
+                    and existing_path == clean_path
+                    and fallback_identity
+                    and existing_identity == fallback_identity
+                    and clean_identity == physical_identity
+                    and clean_identity != fallback_identity
+                )
+                if not (safe_legacy_upgrade or safe_stale_import_upgrade):
                     raise LibraryRegistryError(
                         "Eine bestehende Backup-ID darf nicht auf eine andere "
                         "Quelle umgebunden werden."
                     )
-                # 0.32.8-Kompatibilitätsmigration: Der alte Eintrag war bereits
-                # bibliotheksspezifisch in seiner Backup-ID, nur die Identität
-                # war noch nicht namespaced. Alle physischen Merkmale müssen
-                # deshalb unverändert sein.
+                # Both legacy upgrades preserve the same backup ID,
+                # original source path and proven job ownership; no files
+                # or ownership claims are changed.
                 connection.execute(
                     """
                     UPDATE source_backups
@@ -1428,13 +1438,22 @@ def register_source_media(
             raise LibraryRegistryError("Quelldatei verweist auf unbekannte Sicherung.")
 
         existing = connection.execute(
-            "SELECT media_id, sha256, created_at FROM source_media WHERE backup_id=? AND relative_path=?",
+            "SELECT media_id, sha256, size_bytes, media_type, created_at FROM source_media WHERE backup_id=? AND relative_path=?",
             (clean_backup, clean_relative),
         ).fetchone()
-        if existing is not None and str(existing["sha256"]).lower() != clean_sha:
+        if existing is not None and (
+            str(existing["sha256"]).lower() != clean_sha
+            or int(existing["size_bytes"]) != max(0,int(size_bytes or 0))
+            or str(existing["media_type"] or "") != str(media_type or "").strip()
+        ):
             raise LibraryRegistryError(
                 "Eine bekannte Quelldatei darf nicht still durch anderen Inhalt ersetzt werden."
             )
+
+        if existing is not None:
+            row=connection.execute("SELECT * FROM source_media WHERE media_id=?",(existing["media_id"],)).fetchone()
+            connection.commit()
+            return dict(row)
 
         connection.execute(
             """
@@ -1495,10 +1514,14 @@ def register_source_family_members(
         if family is None:
             raise LibraryRegistryError("Quellfamilie wurde nicht gefunden.")
 
-        connection.execute(
-            "DELETE FROM source_family_members WHERE source_family_key=?",
-            (clean_family,),
-        )
+        existing = [str(row[0]) for row in connection.execute(
+            "SELECT media_id FROM source_family_members WHERE source_family_key=? ORDER BY member_order,media_id",
+            (clean_family,))]
+        if existing:
+            if set(existing) != set(unique_media):
+                raise LibraryRegistryError("source_inventory_conflict: original source family members are immutable: " + clean_family)
+            connection.commit()
+            return len(existing)
         now = _now()
         for order, media_id in enumerate(unique_media):
             media = connection.execute(

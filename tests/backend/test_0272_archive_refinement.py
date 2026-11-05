@@ -19,7 +19,7 @@ def test_0272_event_document_is_staged_and_required_in_real_workspace_flow(tmp_p
     spec = required_event_document_for_request(db, cr_id)
     assert spec is not None
     staged = workspace / "Arbeitsbereich" / "Später zuordnen" / spec["target_relative_path"]
-    assert staged.is_file()
+    assert staged.is_file(), [str(path) for path in workspace.rglob("event.json")]
     before = verify_event_change(db, cr_id, archive, workspace)
     assert before["complete"] is False
     assert before["event_document"]["status"] == "missing"

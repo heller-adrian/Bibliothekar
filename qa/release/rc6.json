@@ -1,0 +1,22 @@
+{
+  "version": "1.0.0-rc.6",
+  "previous_version": "1.0.0-rc.5",
+  "accepted_base": "34de39fbf4906e0582858d0b7d6a79ec282196c4",
+  "accepted_tree": "f5e2be9e7309668b679b02ffb549ffe0b96399d6",
+  "accepted_packages": [
+    "62db66fab6f066116b36ed67dc29e4eb7f4f9034",
+    "34de39fbf4906e0582858d0b7d6a79ec282196c4"
+  ],
+  "version_files": [
+    "app/__init__.py",
+    "app/main.py",
+    "app/ui_shell.py"
+  ],
+  "platform": "linux/amd64",
+  "publication_authorized": false,
+  "approved_correction_sha256": {
+    "app/database.py": "12863b0decd1ef99ebc5f8f02f0a9b29a15c8502372e726fa21445de0715d01c",
+    "app/sd_recheck.py": "01eb1d6a52465412a787f882e189d45e2529a8f0c73eeb7333f0d8d3b588e806"
+  },
+  "approved_correction_reason": "RC6 reproduced concurrent different sources: defer handoff while an import publishes, rehash after its epoch changes; exact file hashes recorded after review."
+}

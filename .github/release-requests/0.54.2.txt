@@ -1,0 +1,6 @@
+Bibliothekar 0.54.2
+Base: patch/0.54.1
+Scope: Confine native iOS Firefox/Safari date and time controls within event and subevent edit dialog by scoped appearance reset, zero padding, and content-box-safe width.
+Quality: 1122 backend tests passed, 6 warnings, archive isolation harness successful on PR #25.
+Publish ghcr.io/heller-adrian/bibliothekar:patch-0.54.2 only after repeating QA in the release workflow.
+Keep main, latest, production data and patch/0.54.1 unchanged.

@@ -1,0 +1,26 @@
+         64441645 function calls (64440622 primitive calls) in 108.294 seconds
+
+   Ordered by: cumulative time
+   List reduced from 315 to 18 due to restriction <18>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.003    0.003  108.294  108.294 global_library_inventory.py:190(backfill_library_inventory)
+   1001/1   14.232    0.014  108.266  108.266 source_provenance.py:38(qualify_origins)
+     2001   36.787    0.018   52.020    0.026 source_provenance.py:16(registry_origins)
+  1001000    2.554    0.000   18.344    0.000 global_library_inventory.py:34(family_content_fingerprint)
+  2021013   17.346    0.000   17.346    0.000 {method 'execute' of 'sqlite3.Connection' objects}
+     1001    2.276    0.002    7.903    0.008 global_library_inventory.py:161(_database_family_rows)
+  1001000    1.744    0.000    7.341    0.000 __init__.py:183(dumps)
+  1003000    1.145    0.000    6.019    0.000 {built-in method builtins.sorted}
+  1002000    1.022    0.000    5.833    0.000 __init__.py:299(loads)
+  1001000    1.558    0.000    5.193    0.000 encoder.py:183(encode)
+  2002000    2.922    0.000    4.872    0.000 global_library_inventory.py:35(<genexpr>)
+     5004    0.009    0.000    4.786    0.001 {built-in method builtins.next}
+     4004    0.007    0.000    4.709    0.001 database.py:57(database_connection)
+  1002000    1.665    0.000    4.431    0.000 decoder.py:340(decode)
+     2002    0.003    0.000    3.307    0.002 contextlib.py:136(__enter__)
+     2002    0.024    0.000    3.298    0.002 database.py:21(connect)
+ 13014012    3.049    0.000    3.049    0.000 {method 'get' of 'dict' objects}
+  1001000    2.993    0.000    2.993    0.000 encoder.py:205(iterencode)
+
+

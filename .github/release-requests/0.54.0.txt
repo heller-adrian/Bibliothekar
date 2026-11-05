@@ -1,0 +1,7 @@
+Bibliothekar 0.54.0
+Base: patch/0.53.2
+Changes: Mobile event editor sizing; centered compact background progress; automatic success expiry; persistent errors; non-destructive DE/EN Clear action.
+Publish the patch-0.54.0 image only after the repository's complete QA has passed.
+No update to main or latest.
+
+Second QA-gated publication request after aligning three historical locale version assertions.

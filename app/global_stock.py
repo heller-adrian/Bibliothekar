@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+def _is_staging_path(value: str) -> bool:
+    normalized = str(value or "").replace("\\", "/").strip("/")
+    return any(
+        normalized == prefix or normalized.startswith(prefix + "/")
+        for prefix in ("Später zuordnen", "Assign Later")
+    )
+
+
 from pathlib import Path
 from typing import Any
 
@@ -61,7 +69,7 @@ def project_import_job(
 
     with database_connection(source_database) as source:
         raw_job = source.execute(
-            "SELECT * FROM jobs WHERE id=? AND kind='sd_import'",
+            "SELECT * FROM jobs WHERE id=? AND kind='sd_import' AND state='completed'",
             (str(job_id),),
         ).fetchone()
         if raw_job is None:
@@ -193,19 +201,7 @@ def project_all_imports(
 
 
 
-def propagate_corrected_family(
-    source_database: Path,
-    database_paths: list[Path],
-    *,
-    job_id: str,
-    family_key: str,
-) -> dict[str, int]:
-    """Mirror a verified metadata correction into every library projection.
-
-    The physical central-stock file exists only once. Library databases keep
-    their own local row IDs, therefore the stable mapping is job_id +
-    family_key + original_relative_path.
-    """
+def _corrected_family_projection(source_database: Path, job_id: str, family_key: str):
     with database_connection(source_database) as source:
         family = source.execute(
             """SELECT selected_capture_time,capture_time_confidence,status
@@ -234,6 +230,24 @@ def propagate_corrected_family(
             ).fetchall()
         ]
 
+    return family, files
+
+
+def propagate_corrected_family(
+    source_database: Path,
+    database_paths: list[Path],
+    *,
+    job_id: str,
+    family_key: str,
+) -> dict[str, int]:
+    """Mirror a verified metadata correction into every library projection.
+
+    The physical central-stock file exists only once. Library databases keep
+    their own local row IDs, therefore the stable mapping is job_id +
+    family_key + original_relative_path.
+    """
+    _corrected_family_projection(source_database, job_id, family_key)
+
     updated_databases = 0
     updated_files = 0
     source_resolved = source_database.resolve(strict=False)
@@ -241,10 +255,17 @@ def propagate_corrected_family(
     for raw in database_paths:
         target_path = Path(raw).resolve(strict=False)
         key = str(target_path)
-        if key in seen or target_path == source_resolved or not target_path.is_file():
+        if key in seen or target_path == source_resolved:
             continue
+        if not target_path.is_file():
+            raise GlobalStockError("Metadaten-Zieldatenbank fehlt: " + str(target_path))
         seen.add(key)
         with database_connection(target_path) as target:
+            # Acquire the target writer before sampling the authoritative source.
+            # A delayed older propagator can never commit its earlier snapshot
+            # after a newer projection has already committed to this target.
+            target.execute("BEGIN IMMEDIATE")
+            family, files = _corrected_family_projection(source_database, job_id, family_key)
             target_family = target.execute(
                 "SELECT id FROM file_families WHERE job_id=? AND family_key=?",
                 (str(job_id), str(family_key)),
@@ -304,6 +325,7 @@ def migrate_main_free_stock_to_central(
     workspace_path: Path,
     *,
     main_work_root: Path | None = None,
+    excluded_family_ids: set[int] | None = None,
 ) -> dict[str, int]:
     """Move legacy free/planned Main files from Arbeitsbereich to central stock.
 
@@ -340,6 +362,7 @@ def migrate_main_free_stock_to_central(
                     f.size_bytes,
                     f.sha256_current,
                     f.sha256_original,
+                    j.working_path AS job_working_path,
                     EXISTS (
                         SELECT 1
                         FROM event_assignments ea
@@ -351,8 +374,13 @@ def migrate_main_free_stock_to_central(
                               (ea.family_id IS NOT NULL AND ea.family_id=f.family_id)
                               OR (ea.file_id IS NOT NULL AND ea.file_id=f.id)
                           )
-                    ) AS belongs_to_applied
+                    ) AS belongs_to_applied,
+                    EXISTS (
+                        SELECT 1 FROM event_reapply_removed_families pending
+                        WHERE pending.job_id=f.job_id AND pending.family_id=f.family_id
+                    ) AS pending_reconcile
                 FROM files f
+                JOIN jobs j ON j.id=f.job_id
                 WHERE f.current_root_kind='shared_workspace'
                   AND COALESCE(TRIM(f.current_relative_path),'') <> ''
                 ORDER BY f.id
@@ -364,8 +392,14 @@ def migrate_main_free_stock_to_central(
     already = 0
     kept_applied = 0
     kept_staging = 0
+    already_central = 0
 
+    excluded = set(excluded_family_ids or ())
     for row in rows:
+        # Main retains projections of families owned/reserved elsewhere.
+        # Their saved paths are not evidence of local legacy files to migrate.
+        if row["family_id"] is not None and int(row["family_id"]) in excluded:
+            continue
         relative = Path(str(row["current_relative_path"]))
         if relative.is_absolute() or ".." in relative.parts:
             raise GlobalStockError(
@@ -373,11 +407,20 @@ def migrate_main_free_stock_to_central(
             )
 
         normalized = relative.as_posix()
-        if normalized == "Später zuordnen" or normalized.startswith("Später zuordnen/"):
+        if _is_staging_path(normalized):
             kept_staging += 1
             continue
-        if bool(row["belongs_to_applied"]):
+        if bool(row["belongs_to_applied"]) or bool(row["pending_reconcile"]):
             kept_applied += 1
+            continue
+
+        # New imports and completed legacy migrations already route this job
+        # to central stock. Its later media changes are inventory/domain
+        # matters, not a reason to repeat an old work-root file migration.
+        # Do not infer a replacement location or claim any missing byte valid.
+        routed=str(row.get('job_working_path') or '')
+        if routed and Path(routed).expanduser().absolute()==central:
+            already_central += 1
             continue
 
         source = work / relative
@@ -418,6 +461,7 @@ def migrate_main_free_stock_to_central(
         "already_migrated": already,
         "kept_applied": kept_applied,
         "kept_staging": kept_staging,
+        "already_central": already_central,
     }
 
 
@@ -468,8 +512,7 @@ def synchronize_central_stock_projections(
                 continue
             normalized = relative.as_posix()
             if (
-                normalized == "Später zuordnen"
-                or normalized.startswith("Später zuordnen/")
+                _is_staging_path(normalized)
             ):
                 continue
             candidate = (central / relative).resolve(strict=False)
@@ -684,8 +727,7 @@ def synchronize_central_stock_projections(
 
                 current = str(row.get("current_relative_path") or "")
                 if (
-                    current == "Später zuordnen"
-                    or current.startswith("Später zuordnen/")
+                    _is_staging_path(current)
                 ):
                     continue
 

@@ -206,8 +206,12 @@ def _compute_event_plan(
             raise EventChangeRequestError("Unterereignisse dürfen sich zeitlich nicht überschneiden.")
     if preview.get('subevents'):
         from app.subevents import normalize_subevents
-        normalized_child_segments=normalize_subevents(preview['subevents'],
-            f"{preview['start_date']}T{preview.get('start_time') or '00:00'}:00",f"{preview['end_date']}T{preview.get('end_time') or '23:59'}:59")
+        normalized_child_segments=normalize_subevents(
+            preview['subevents'],
+            f"{preview['start_date']}T{preview.get('start_time') or '00:00'}:00",
+            f"{preview['end_date']}T{preview.get('end_time') or '23:59'}:59",
+            naming=preview.get("folder_naming"),
+        )
         normalized_child_segments=[{**s,'folder':s['folder_name']} for s in normalized_child_segments]
     preserve_day_folders = bool(preview.get("preserve_day_folders"))
     start_date = str(preview.get("start_date") or str(event["start_datetime"] or "")[:10])
@@ -815,6 +819,7 @@ def propose_event_change(
     notes: str = "",
     archive_root: Path | None = None,
     workspace_path: Path | None = None,
+    guided_structure_change_id: str | None = None,
 ) -> dict[str, Any]:
     """Change-Request fuer ein archiviertes Ereignis vorschlagen.
 
@@ -850,6 +855,11 @@ def propose_event_change(
             no_event_segment_overlaps,
         )
         from app.archive_reassignment_segments import proposed_ranges
+        from app.archive_recovery import assert_not_quarantined
+        try:
+            assert_not_quarantined(connection, event_id)
+        except ValueError as error:
+            raise EventChangeRequestError(str(error)) from error
         if preview.get("child_segments"):
             raise EventChangeRequestError(
                 "Getrennte Belegungssegmente sind für normale Ereignisse nicht zulässig."
@@ -917,6 +927,12 @@ def propose_event_change(
     # ChangeRequest erstellen
     with database_connection(database_path) as connection:
         connection.execute('BEGIN IMMEDIATE')
+        if guided_structure_change_id:
+            from app.event_structure_changes import validate_guided_structure_edit
+            validate_guided_structure_edit(
+                connection, event_id, guided_structure_change_id, preview,
+                expected_root_kind="camera_archive",
+            )
         from app.event_timeline import assert_editable_normal, continuous_event_overlaps, no_event_segment_overlaps
         from app.archive_reassignment_segments import proposed_ranges
         if preview.get('child_segments'):
@@ -926,6 +942,11 @@ def propose_event_change(
         for a,b in proposed_ranges(preview):
             if continuous_event_overlaps(connection,job_id,a,b,exclude_event_id=event_id) or no_event_segment_overlaps(connection,job_id,a,b,exclude_event_id=event_id):
                 raise EventChangeRequestError('Die Änderung überschneidet sich mit belegter Zeit. Bitte zuerst das andere Ereignis bearbeiten.')
+        from app.archive_recovery import assert_not_quarantined
+        try:
+            assert_not_quarantined(connection, event_id)
+        except ValueError as error:
+            raise EventChangeRequestError(str(error)) from error
         # Pruefe, ob bereits ein aktiver Auftrag existiert
         existing = connection.execute(
             "SELECT id, version FROM event_change_requests "
@@ -1003,7 +1024,7 @@ def propose_event_change(
             ),
         )
 
-        connection.execute('UPDATE event_change_requests SET time_model_version=2 WHERE id=?',(cr_id,))
+        connection.execute('UPDATE event_change_requests SET time_model_version=2, guided_structure_change_id=? WHERE id=?',(guided_structure_change_id,cr_id))
         # Datei-Bestaetigungen (loeschen/bewegen/behalten) fuer jede Familie
         for family_plan in plan["families_with_plans"]:
             fid = family_plan["family_id"]
@@ -1250,6 +1271,11 @@ def propose_archived_event_deletion(
             raise EventChangeRequestError(
                 "Nur archivierte Ereignisse benötigen diesen manuellen Löschauftrag."
             )
+        from app.archive_recovery import assert_not_quarantined
+        try:
+            assert_not_quarantined(connection, event_id)
+        except ValueError as error:
+            raise EventChangeRequestError(str(error)) from error
         existing = connection.execute(
             """SELECT id FROM event_change_requests
                WHERE event_id=? AND status IN ('aenderbar_vorschlagen','aenderbar_bestaetigt')

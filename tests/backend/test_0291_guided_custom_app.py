@@ -1,3 +1,6 @@
+
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+from tests.backend.default_constant_fixture import shipped_constants
 from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
 
@@ -11,8 +14,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def test_0291_keeps_frozen_camera_core_and_bumps_only_deployment():
     assert main.APP_VERSION == PACKAGE_VERSION
-    assert main.RELEASE_VERSION == "0.28.7"
-    assert tuple(map(int, main.DEPLOYMENT_VERSION.split("."))) >= (0, 29, 1)
+    assert main.RELEASE_VERSION == EXPECTED_RELEASE_VERSION
+    assert tuple(map(int, main.DEPLOYMENT_VERSION.split("-", 1)[0].split("."))) >= (0, 29, 1)
 
 
 def test_0291_image_starts_single_container_supervisor_as_root():
@@ -22,10 +25,11 @@ def test_0291_image_starts_single_container_supervisor_as_root():
     assert 'CMD ["uvicorn", "app.main:app"' not in dockerfile
 
 
-def test_0291_supervisor_separates_root_helper_from_web_uid():
+def test_0291_supervisor_separates_root_helper_from_web_uid(monkeypatch):
+    for name,value in shipped_constants(container_supervisor,["WEB_UID","WEB_GID","HELPER_ENABLED"]).items():monkeypatch.setattr(container_supervisor,name,value)
     assert container_supervisor.WEB_UID == 568
     assert container_supervisor.WEB_GID == 568
-    assert container_supervisor.HELPER_ENABLED is True
+    assert container_supervisor.HELPER_ENABLED is False  # optional privileged helper requires opt-in
     assert container_supervisor.web_command()[-3:] == [
         "0.0.0.0",
         "--port",
@@ -38,7 +42,8 @@ def test_0291_supervisor_separates_root_helper_from_web_uid():
     ]
 
 
-def test_0291_source_helper_mounts_directly_without_host_namespace():
+def test_0291_source_helper_mounts_directly_without_host_namespace(monkeypatch):
+    for name,value in shipped_constants(source_helper,["MOUNT_ROOT","HOST_MOUNT_ROOT"]).items():monkeypatch.setattr(source_helper,name,value)
     helper_source = (REPO_ROOT / "app" / "source_helper.py").read_text()
     assert "nsenter" not in helper_source
     assert str(source_helper.MOUNT_ROOT) == "/sources/removable"
@@ -49,15 +54,20 @@ def test_0291_source_helper_mounts_directly_without_host_namespace():
 
 def test_0291_compose_is_one_service_and_guided_custom_app_compatible():
     compose = (REPO_ROOT / "compose.example.yaml").read_text()
-    assert "ghcr.io/heller-adrian/bibliothekar:patch-" in compose
+    assert ("ghcr.io/heller-adrian/bibliothekar:" + EXPECTED_RELEASE_VERSION) in compose
     assert "\n  source-helper:" not in compose
     assert "pid: host" not in compose
     assert "network_mode:" not in compose
     assert 'user: "0:0"' in compose
-    assert "privileged: true" in compose
-    assert "KAMERA_SOURCE_HELPER_ENABLED: \"true\"" in compose
-    assert "${BIBLIOTHEKAR_REMOVABLE_DIR}:/sources/removable\n" in compose
-    assert "${BIBLIOTHEKAR_REMOVABLE_DIR}:/sources/removable:ro" not in compose
+    import yaml
+    base=yaml.safe_load(compose)['services']['bibliothekar']
+    removable=yaml.safe_load((REPO_ROOT/'compose.removable.yaml').read_text())['services']['bibliothekar']
+    assert not base.get('privileged',False)
+    assert base['environment']['KAMERA_SOURCE_HELPER_ENABLED']=='false'
+    assert removable['privileged'] is True
+    assert removable['environment']['KAMERA_SOURCE_HELPER_ENABLED']=='true'
+    assert '/run/udev:/run/udev:ro' in removable['volumes']
+    assert all(row['target']!='/sources/removable' for row in base['volumes'])
 
 
 def test_0291_removable_media_are_still_forced_read_only():

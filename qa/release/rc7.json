@@ -1,0 +1,17 @@
+{
+  "version": "1.0.0-rc.7",
+  "previous_version": "1.0.0-rc.6",
+  "accepted_base": "8f2dc28e554a20dcfe3ae02d23d0a1229475701e",
+  "accepted_tree": "cf8c06d8bf071b79ec21b9dd0cbb986815466528",
+  "accepted_packages": [
+    "d1caf00c9ce1f5a5ba4f026b957edb6a9a4c2234",
+    "8f2dc28e554a20dcfe3ae02d23d0a1229475701e"
+  ],
+  "version_files": [
+    "app/__init__.py",
+    "app/main.py",
+    "app/ui_shell.py"
+  ],
+  "platform": "linux/amd64",
+  "publication_authorized_after_targeted_pass": true
+}

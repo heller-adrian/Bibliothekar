@@ -1,11 +1,10 @@
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
 
 ENV \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TZ=Europe/Berlin \
-    KAMERA_SOURCE_HELPER_ENABLED=true \
-    KAMERA_REMOVABLE_MOUNT_ROOT=/sources/removable \
+    KAMERA_SOURCE_HELPER_ENABLED=false \
     KAMERA_DEVICE_NODE_ROOT=/dev/bibliothekar \
     KAMERA_WEB_UID=568 \
     KAMERA_WEB_GID=568
@@ -22,33 +21,37 @@ RUN apt-get update \
         util-linux \
     && rm -rf /var/lib/apt/lists/*
 
+ARG SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.revision="${SOURCE_REVISION}"
+
 WORKDIR /opt/kamera
 
 COPY requirements.txt /opt/kamera/requirements.txt
+COPY requirements-rc.constraints.txt /opt/kamera/requirements-rc.constraints.txt
 
 RUN pip install \
         --no-cache-dir \
         --disable-pip-version-check \
-        -r /opt/kamera/requirements.txt
+        -r /opt/kamera/requirements.txt \
+        -c /opt/kamera/requirements-rc.constraints.txt
 
 COPY app /opt/kamera/app
 
 RUN mkdir -p \
+        /appdata \
         /config \
         /database \
         /logs \
         /workspace \
         /main-library \
-        /sources/import \
         /sources/nas \
         /sources/removable \
     && chown -R 568:568 \
-        /opt/kamera \
         /config \
         /database \
         /logs \
         /workspace \
-        /sources
+        /sources/nas
 
 # 0.31.0 startet absichtlich als root: nur der interne Quellen-Helper
 # benoetigt Mount-/Geraeterechte. Der Supervisor startet die eigentliche

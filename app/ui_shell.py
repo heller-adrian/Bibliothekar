@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from html import escape
 import re
+from app.library_runtime import get_current_library
+from app.ui_i18n import I18N_UI_JS
 
 
 BIBLIOTHEKAR_CSS = r"""
@@ -916,6 +918,38 @@ html[data-bk-theme="light"] .bk-tab:not(.active) {
   }
 }
 
+@keyframes bk-spin {
+  to { transform: rotate(360deg); }
+}
+button.bk-busy,
+.bk-busy {
+  cursor: progress !important;
+}
+button.bk-busy::after {
+  content: "";
+  width: 14px;
+  height: 14px;
+  margin-left: 8px;
+  display: inline-block;
+  vertical-align: -2px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: bk-spin .7s linear infinite;
+}
+.bk-loading-status::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+  display: inline-block;
+  vertical-align: -2px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: bk-spin .7s linear infinite;
+}
+
 .bk-dialog {
   width: min(560px, calc(100vw - 28px));
   border: 1px solid var(--bk-line);
@@ -985,6 +1019,14 @@ body[data-bk-area="assistant"] main > .card {
   padding: 16px 18px !important;
 }
 
+[data-bk-archive-review]:focus {
+  outline: none;
+}
+[data-bk-archive-review]:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, currentColor 70%, transparent) !important;
+}
+
 .bk-help {
   position: relative;
   width: 25px !important;
@@ -1035,6 +1077,8 @@ body.bibliothekar-redesign .import-panel {
   margin-bottom: 5px;
 }
 .bk-import-head h2 { margin: 0; }
+.bk-import-history-title { cursor:pointer; }
+@media(max-width:700px){.bk-import-history-title + .bk-help{display:none}}
 body[data-bk-area="import"] .import-panel {
   border-left: 4px solid var(--bk-red) !important;
 }
@@ -1232,20 +1276,20 @@ body.bibliothekar-redesign #sd-card-status {
 .bk-source-pane > h3:first-child {
   margin-top: 0;
 }
-body[data-bk-area="import"] details > summary {
+body[data-bk-area="import"] main details > summary {
   list-style: none !important;
   display: grid !important;
   grid-template-columns: 20px minmax(0,1fr) !important;
   align-items: center !important;
   gap: 7px !important;
 }
-body[data-bk-area="import"] details > summary::-webkit-details-marker {
+body[data-bk-area="import"] main details > summary::-webkit-details-marker {
   display: none !important;
 }
-body[data-bk-area="import"] details > summary::marker {
+body[data-bk-area="import"] main details > summary::marker {
   content: "" !important;
 }
-body[data-bk-area="import"] details > summary::before {
+body[data-bk-area="import"] main details > summary::before {
   content: "▸";
   display: block;
   width: 20px;
@@ -1254,7 +1298,7 @@ body[data-bk-area="import"] details > summary::before {
   text-align: center;
   color: currentColor;
 }
-body[data-bk-area="import"] details[open] > summary::before {
+body[data-bk-area="import"] main details[open] > summary::before {
   content: "▾";
 }
 body[data-bk-area="import"] .drive-actions {
@@ -1818,7 +1862,10 @@ BIBLIOTHEKAR_0311_CSS = r"""
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 13px 14px;
+  min-height: 46px;
+  box-sizing: border-box;
+  padding: 11px 14px;
+  line-height: 1.25;
   font-weight: 800;
 }
 .bk-settings-card > summary::-webkit-details-marker,
@@ -1872,9 +1919,17 @@ BIBLIOTHEKAR_0311_CSS = r"""
 }
 .bk-settings-preview-case pre {
   margin:8px 0 0;
+  padding:0 !important;
+  border:0 !important;
+  background:transparent !important;
+  color:var(--bk-ink) !important;
   white-space:pre-wrap;
   overflow-wrap:anywhere;
-  font: .86rem/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font: .86rem/1.45 Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+#bk-settings-dialog .bk-settings-preview-case {
+  background:var(--bk-surface-2) !important;
+  color:var(--bk-ink) !important;
 }
 #bk-library-management-list .bk-library-card {
   padding:0 !important;
@@ -2382,13 +2437,13 @@ BIBLIOTHEKAR_0350_CSS = r"""
   }
 
   html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card {
-    grid-template-columns: auto minmax(0, 1fr) auto !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
     gap: 8px !important;
     padding: 10px !important;
   }
 
   html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card > .badge {
-    grid-column: auto !important;
+    grid-column: 2 !important;
     margin: 0 !important;
     font-size: .7rem;
     padding: 4px 7px;
@@ -3028,12 +3083,7 @@ BIBLIOTHEKAR_0353_CSS = r"""
   letter-spacing: 0;
   white-space: normal;
 }
-@media (hover: hover) and (pointer: fine) {
-  .bk-title-help:hover::after,
-  .bk-title-help:focus-visible::after {
-    display: inline-block;
-  }
-}
+/* Hilfen werden ausschließlich durch die Klickklasse .is-open geöffnet. */
 .bk-title-help.is-open::after {
   display: inline-block;
 }
@@ -3449,6 +3499,149 @@ BIBLIOTHEKAR_0356_CSS = r"""
     transform: none !important;
   }
 }
+
+"""
+
+BIBLIOTHEKAR_0423_CSS = r"""
+/* 0.48.0: animate only an inset shadow, not rounded borders or badges. */
+@keyframes bk-pwa-select-wobble {
+  0%, 100% { box-shadow: inset 0 0 0 0 rgba(75,155,226,0); }
+  45% { box-shadow: inset 0 0 0 2px rgba(75,155,226,.26); }
+}
+
+@media (max-width: 820px) {
+  html[data-bk-display-mode="standalone"] [data-bk-pwa-select] {
+    -webkit-touch-callout: none;
+  }
+
+  html[data-bk-display-mode="standalone"] [data-bk-pwa-select].bk-pwa-select-wobble {
+    animation: bk-pwa-select-wobble .28s ease-out;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.review-card {
+    grid-template-columns: minmax(0, 1fr) minmax(72px, 88px) !important;
+    align-items: center !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="workspace"] .day-card.review-card > .badge {
+    min-width: 0 !important;
+    max-width: 88px !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    text-align: center !important;
+    justify-content: center !important;
+    line-height: 1.1 !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file {
+    min-width: 0 !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file:not(.selectable):not([data-multi-file]) {
+    grid-template-columns: minmax(0, 1fr) minmax(72px, 92px) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file.selectable {
+    grid-template-columns: auto minmax(0, 1fr) minmax(72px, 92px) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] [data-multi-file].meta-file {
+    grid-template-columns: auto minmax(0, 1fr) minmax(72px, 92px) !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file > span:not(.badge),
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file strong,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file small {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-file > .badge {
+    min-width: 0 !important;
+    max-width: 92px !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    text-align: center !important;
+    justify-content: center !important;
+    line-height: 1.12 !important;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-detail-card,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #multi-detail-card {
+    display: none;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog #meta-detail-card,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog #multi-detail-card {
+    display: block;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog {
+    position: fixed;
+    inset: auto 0 0 0;
+    width: 100%;
+    max-width: none;
+    max-height: min(88dvh, 760px);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 22px 22px 0 0;
+    background: var(--bk-surface, #fff);
+    color: var(--bk-ink, #172235);
+    box-shadow: 0 -18px 48px rgb(0 0 0 / .20);
+    overflow: hidden;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog::backdrop {
+    background: rgb(10 20 30 / .38);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-mobile-dialog-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--bk-line, #ccd2d8);
+    background: color-mix(in srgb, var(--bk-surface, #fff) 96%, transparent);
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-mobile-dialog-head strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-mobile-dialog-close {
+    flex: 0 0 auto;
+    min-width: 42px;
+    min-height: 42px;
+    padding: 0 12px;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-mobile-dialog-body {
+    max-height: calc(min(88dvh, 760px) - 67px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 12px 14px calc(18px + env(safe-area-inset-bottom));
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] .meta-mobile-dialog-body > .meta-card {
+    margin: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+}
 """
 
 BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
@@ -3499,11 +3692,420 @@ BIBLIOTHEKAR_BOOTSTRAP_JS = r"""
 """
 
 
+BIBLIOTHEKAR_0424_CSS = r"""
+/* 0.48.0: former translating keyframe override removed. */
+
+@media (max-width: 820px) {
+  html[data-bk-display-mode="standalone"] [data-bk-pwa-select] {
+    position: relative;
+    will-change: auto;
+  }
+
+  html[data-bk-display-mode="standalone"] [data-bk-pwa-select].bk-pwa-select-wobble {
+    animation: bk-pwa-select-wobble .28s ease-out;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html[data-bk-display-mode="standalone"] [data-bk-pwa-select].bk-pwa-select-wobble {
+      animation: none !important;
+    }
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog[open] {
+    box-sizing: border-box;
+    color: var(--bk-ink, #172235);
+    background: var(--bk-surface, #fff);
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.full-detail[open] {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: 0;
+    width: 100dvw;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    overflow: hidden;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.full-detail::backdrop {
+    background: rgb(10 20 30 / .28);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.compact-selection[open] {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset: auto 10px calc(72px + env(safe-area-inset-bottom)) 10px;
+    width: auto;
+    max-width: none;
+    max-height: 44dvh;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--bk-line, #ccd2d8);
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 12px 38px rgb(0 0 0 / .24);
+    z-index: 6200;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog .meta-mobile-dialog-head {
+    flex: 0 0 auto;
+    padding:
+      max(12px, env(safe-area-inset-top))
+      14px
+      12px;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.compact-selection .meta-mobile-dialog-head {
+    padding: 10px 12px;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog .meta-mobile-dialog-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: auto;
+    padding: 12px 14px calc(96px + env(safe-area-inset-bottom));
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.compact-selection .meta-mobile-dialog-body {
+    padding: 10px 12px 14px;
+  }
+
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.compact-selection #meta-detail-card > strong:first-child,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.compact-selection #multi-detail-card > strong:first-child,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.full-detail #meta-detail-card > strong:first-child,
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"] #meta-mobile-dialog.full-detail #multi-detail-card > strong:first-child {
+    display: none;
+  }
+}
+"""
+
+BIBLIOTHEKAR_0425_CSS = r"""
+@media (max-width: 820px) {
+  /* 0.48.0: never promote a selectable card's rounded border. */
+  html[data-bk-display-mode="standalone"] [data-bk-pwa-select] {
+    will-change: auto;
+  }
+
+  html[data-bk-display-mode="standalone"] [data-bk-pwa-select].bk-pwa-select-wobble {
+    will-change: auto;
+  }
+
+  /* A non-modal selection sheet must never make the last metadata rows
+   * unreachable. JS writes the measured sheet height into the CSS variable.
+   */
+  html[data-bk-display-mode="standalone"] body[data-bk-area="metadata"].bk-meta-selection-sheet-open main {
+    padding-bottom:
+      calc(
+        90px
+        + env(safe-area-inset-bottom)
+        + var(--bk-meta-selection-sheet-height, 44dvh)
+        + 18px
+      ) !important;
+  }
+}
+"""
+
 BIBLIOTHEKAR_JS = r"""
 (() => {
   const root = document.documentElement;
   const pageUrl = new URL(window.location.href);
   const bkLibraryId = window.__bkLibraryId || pageUrl.searchParams.get("library") || "main";
+
+  const bkPwaQuickSelectEnabled = () => (
+    root.dataset.bkDisplayMode === "standalone"
+    && Boolean(window.matchMedia?.("(max-width: 820px)")?.matches)
+  );
+  let bkPwaSelectGesture = null;
+  let bkPwaSuppressClickUntil = 0;
+
+  function bkPwaCardKey(card) {
+    if (!card) return "";
+    return String(
+      card.dataset.bkPwaKey
+      || card.dataset.bkSelectionKey
+      || card.dataset.metaFile
+      || card.dataset.multiFile
+      || ""
+    );
+  }
+
+  function bkPwaGroupCards(group) {
+    return [...document.querySelectorAll("[data-bk-pwa-select]")]
+      .filter(card => String(card.dataset.bkPwaSelect || "") === String(group || ""));
+  }
+
+  function bkPwaFindCard(group, key) {
+    return bkPwaGroupCards(group)
+      .find(card => bkPwaCardKey(card) === String(key || "")) || null;
+  }
+
+  function bkPwaCardSelected(card) {
+    if (!card) return false;
+    if (card.classList.contains("selected")) return true;
+    if (card.getAttribute("aria-selected") === "true") return true;
+    const checkbox = card.querySelector('input[type="checkbox"]');
+    return Boolean(checkbox?.checked);
+  }
+
+  function bkPwaSelectPulse(card) {
+    if (!card) return;
+    card.classList.remove("bk-pwa-select-wobble");
+    void card.offsetWidth;
+    card.classList.add("bk-pwa-select-wobble");
+    window.setTimeout(() => card.classList.remove("bk-pwa-select-wobble"), 320);
+  }
+
+  function bkPwaDispatchSelect(card, phase, selected=null) {
+    if (!card) return;
+    card.dispatchEvent(new CustomEvent("bk:pwa-select", {
+      bubbles: false,
+      detail: {
+        phase,
+        selected,
+        key: bkPwaCardKey(card)
+      }
+    }));
+    if (phase !== "end") {
+      const live = bkPwaFindCard(
+        String(card.dataset.bkPwaSelect || ""),
+        bkPwaCardKey(card)
+      ) || card;
+      bkPwaSelectPulse(live);
+    }
+  }
+
+  function bkPwaSelectionSafeBounds() {
+    const stickyHeight = Number.parseFloat(
+      getComputedStyle(root).getPropertyValue("--bk-shell-sticky-height")
+    ) || 62;
+    return {
+      top: Math.max(92, stickyHeight + 34),
+      bottom: window.innerHeight - 104
+    };
+  }
+
+  function bkPwaNearestCard(group, x, y) {
+    const bounds = bkPwaSelectionSafeBounds();
+    const cards = bkPwaGroupCards(group)
+      .map(card => ({card, rect: card.getBoundingClientRect()}))
+      .filter(item => (
+        item.rect.bottom > 0
+        && item.rect.top < window.innerHeight
+      ));
+    if (!cards.length) return null;
+
+    const safeCards = cards.filter(item => (
+      item.rect.top >= bounds.top
+      && item.rect.bottom <= bounds.bottom
+    ));
+    const direct = document.elementFromPoint(x, y)
+      ?.closest?.("[data-bk-pwa-select]");
+    if (
+      direct
+      && String(direct.dataset.bkPwaSelect || "") === String(group || "")
+    ) {
+      const directRect = direct.getBoundingClientRect();
+      if (
+        directRect.top >= bounds.top
+        && directRect.bottom <= bounds.bottom
+      ) {
+        return direct;
+      }
+    }
+
+    const candidates = safeCards.length ? safeCards : cards;
+    candidates.sort((a, b) => {
+      const aY = Math.max(a.rect.top, Math.min(y, a.rect.bottom));
+      const bY = Math.max(b.rect.top, Math.min(y, b.rect.bottom));
+      const aX = Math.max(a.rect.left, Math.min(x, a.rect.right));
+      const bX = Math.max(b.rect.left, Math.min(x, b.rect.right));
+      return (
+        Math.hypot(x - aX, y - aY)
+        - Math.hypot(x - bX, y - bY)
+      );
+    });
+    return candidates[0]?.card || null;
+  }
+
+  function bkPwaApplyRange(gesture, currentKey) {
+    if (!gesture?.active || !currentKey) return;
+    const cards = bkPwaGroupCards(gesture.group);
+    const keys = cards.map(bkPwaCardKey);
+    const startIndex = keys.indexOf(gesture.startKey);
+    const currentIndex = keys.indexOf(String(currentKey));
+    if (startIndex < 0 || currentIndex < 0) return;
+
+    const lo = Math.min(startIndex, currentIndex);
+    const hi = Math.max(startIndex, currentIndex);
+    const nextRange = new Set(keys.slice(lo, hi + 1));
+    const changedKeys = new Set([
+      ...gesture.rangeKeys,
+      ...nextRange
+    ]);
+
+    for (const key of changedKeys) {
+      const wasInRange = gesture.rangeKeys.has(key);
+      const isInRange = nextRange.has(key);
+      if (wasInRange === isInRange) continue;
+
+      const card = bkPwaFindCard(gesture.group, key);
+      if (!card) continue;
+      const desired = isInRange
+        ? true
+        : Boolean(gesture.baseline.get(key));
+      bkPwaDispatchSelect(card, "set", desired);
+    }
+
+    gesture.rangeKeys = nextRange;
+    gesture.lastKey = String(currentKey);
+  }
+
+  function bkPwaUpdateGesturePoint(gesture) {
+    if (!gesture?.active) return;
+    const card = bkPwaNearestCard(
+      gesture.group,
+      gesture.lastX,
+      gesture.lastY
+    );
+    if (!card) return;
+    const key = bkPwaCardKey(card);
+    if (!key) return;
+    bkPwaApplyRange(gesture, key);
+  }
+
+  function bkPwaAutoScrollSpeed(y) {
+    const topEdge = Math.max(
+      92,
+      Number.parseFloat(
+        getComputedStyle(root).getPropertyValue("--bk-shell-sticky-height")
+      ) || 92
+    ) + 34;
+    const bottomEdge = window.innerHeight - 104;
+    if (y < topEdge) {
+      const ratio = Math.min(1, (topEdge - y) / 92);
+      return -(5 + ratio * 17);
+    }
+    if (y > bottomEdge) {
+      const ratio = Math.min(1, (y - bottomEdge) / 92);
+      return 5 + ratio * 17;
+    }
+    return 0;
+  }
+
+  function bkPwaSelectionFrame() {
+    const gesture = bkPwaSelectGesture;
+    if (!gesture?.active) return;
+    const speed = bkPwaAutoScrollSpeed(gesture.lastY);
+    if (speed) {
+      window.scrollBy(0, speed);
+    }
+    bkPwaUpdateGesturePoint(gesture);
+    gesture.frame = window.requestAnimationFrame(bkPwaSelectionFrame);
+  }
+
+  function bkPwaFinishGesture() {
+    const gesture = bkPwaSelectGesture;
+    if (!gesture) return;
+    window.clearTimeout(gesture.timer);
+    if (gesture.frame) window.cancelAnimationFrame(gesture.frame);
+    if (gesture.active) {
+      const card = bkPwaFindCard(
+        gesture.group,
+        gesture.lastKey || gesture.startKey
+      ) || bkPwaFindCard(gesture.group, gesture.startKey);
+      bkPwaDispatchSelect(card, "end", null);
+      bkPwaSuppressClickUntil = Date.now() + 650;
+      document.body?.classList.remove("bk-pwa-selecting");
+    }
+    bkPwaSelectGesture = null;
+  }
+
+  document.addEventListener("touchstart", event => {
+    if (!bkPwaQuickSelectEnabled() || event.touches.length !== 1) return;
+    if (event.target.closest("button,input,select,textarea,a")) return;
+    const card = event.target.closest("[data-bk-pwa-select]");
+    if (!card) return;
+    const touch = event.touches[0];
+    const group = String(card.dataset.bkPwaSelect || "");
+    const startKey = bkPwaCardKey(card);
+    if (!group || !startKey) return;
+
+    const gesture = {
+      group,
+      startKey,
+      lastKey: startKey,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      lastX: touch.clientX,
+      lastY: touch.clientY,
+      active: false,
+      timer: null,
+      frame: null,
+      baseline: new Map(),
+      rangeKeys: new Set()
+    };
+    gesture.timer = window.setTimeout(() => {
+      if (bkPwaSelectGesture !== gesture) return;
+      gesture.active = true;
+      for (const item of bkPwaGroupCards(group)) {
+        gesture.baseline.set(
+          bkPwaCardKey(item),
+          bkPwaCardSelected(item)
+        );
+      }
+      gesture.rangeKeys = new Set([startKey]);
+      document.body?.classList.add("bk-pwa-selecting");
+      bkPwaDispatchSelect(
+        bkPwaFindCard(group, startKey) || card,
+        "start",
+        true
+      );
+      gesture.frame = window.requestAnimationFrame(bkPwaSelectionFrame);
+      try { window.navigator.vibrate?.(12); } catch (_) {}
+    }, 380);
+    bkPwaSelectGesture = gesture;
+  }, {passive: true, capture: true});
+
+  document.addEventListener("touchmove", event => {
+    const gesture = bkPwaSelectGesture;
+    if (!gesture || event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    gesture.lastX = touch.clientX;
+    gesture.lastY = touch.clientY;
+    if (!gesture.active) {
+      const dx = touch.clientX - gesture.startX;
+      const dy = touch.clientY - gesture.startY;
+      if (Math.hypot(dx, dy) > 11) {
+        window.clearTimeout(gesture.timer);
+        bkPwaSelectGesture = null;
+      }
+      return;
+    }
+    event.preventDefault();
+    bkPwaUpdateGesturePoint(gesture);
+  }, {passive: false, capture: true});
+
+  document.addEventListener("touchend", bkPwaFinishGesture, {passive: true, capture: true});
+  document.addEventListener("touchcancel", bkPwaFinishGesture, {passive: true, capture: true});
+  document.addEventListener("click", event => {
+    if (Date.now() >= bkPwaSuppressClickUntil) return;
+    if (!event.target.closest("[data-bk-pwa-select]")) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
 
   function bkLibraryHref(href, libraryId=bkLibraryId) {
     try {
@@ -3522,7 +4124,6 @@ BIBLIOTHEKAR_JS = r"""
     link.setAttribute("href", bkLibraryHref(link.getAttribute("href")));
   });
 
-  const bkTitleHelpMedia = window.matchMedia?.("(hover: none), (pointer: coarse)");
   const bkTitleHelpTriggers = [...document.querySelectorAll("[data-bk-title-help]")];
 
   function bkCloseTitleHelps(except=null) {
@@ -3543,7 +4144,6 @@ BIBLIOTHEKAR_JS = r"""
 
   bkTitleHelpTriggers.forEach(trigger => {
     trigger.addEventListener("click", event => {
-      if (!(bkTitleHelpMedia?.matches || root.dataset.bkDisplayMode === "standalone")) return;
       event.preventDefault();
       event.stopPropagation();
       bkToggleTitleHelp(trigger);
@@ -3570,7 +4170,7 @@ BIBLIOTHEKAR_JS = r"""
       currentLibraryName.textContent = name;
       currentLibraryName.title = name;
     } catch (_) {
-      currentLibraryName.textContent = bkLibraryId === "main" ? "Hauptbibliothek" : bkLibraryId;
+      // Serverseitig eingeblendeten Bibliotheksnamen bei Netzfehler beibehalten.
       currentLibraryName.title = currentLibraryName.textContent;
     }
   }
@@ -3739,7 +4339,7 @@ BIBLIOTHEKAR_JS = r"""
     if (!response.ok) {
       const detail = data.detail;
       if (detail && typeof detail === "object") {
-        throw new Error((detail.errors || []).join("\n") || "Prüfung fehlgeschlagen.");
+        throw new Error((detail.errors || []).join("\n") || detail.reason || (detail.issues || detail.storage_health?.issues || []).map(i=>String(i.path||'')+': '+String(i.detail||i.code||'')).join('\n') || "Prüfung fehlgeschlagen.");
       }
       throw new Error(String(detail || "Anfrage fehlgeschlagen."));
     }
@@ -3806,7 +4406,7 @@ BIBLIOTHEKAR_JS = r"""
           ? '<button type="button" data-bk-library-activate class="bk-positive-action">Aktivieren</button>'
           : '<button type="button" data-bk-library-deactivate>Deaktivieren</button>'
       ))
-      +(row.is_main?'':'<button type="button" data-bk-library-unregister class="danger-button">Abmelden</button>')
+      +(row.is_main?'':'<button type="button" data-bk-library-unregister class="danger-button">Bibliothek entfernen</button>')
       +'</div><div class="bk-library-status" data-bk-library-status></div></div></details>';
   }
 
@@ -3878,7 +4478,7 @@ BIBLIOTHEKAR_JS = r"""
         } catch (error) { setLibraryCardStatus(card, error.message); }
       });
       card.querySelector("[data-bk-library-deactivate]")?.addEventListener("click", async () => {
-        if (!confirm("Bibliothek deaktivieren? Dateien, Datenbank und Archiv bleiben erhalten.")) return;
+        if (!(await window.BibliothekarI18n.confirmAsync("Bibliothek deaktivieren? Dateien, Datenbank und Archiv bleiben erhalten."))) return;
         try {
           await bkJson("/api/libraries/"+encodeURIComponent(id)+"/deactivate", {method:"POST"});
           if (id === bkLibraryId) {
@@ -3895,9 +4495,9 @@ BIBLIOTHEKAR_JS = r"""
         } catch (error) { setLibraryCardStatus(card, error.message); }
       });
       card.querySelector("[data-bk-library-unregister]")?.addEventListener("click", async () => {
-        if (!confirm("Bibliothek abmelden? Es werden keine Dateien, keine Datenbank und kein Archiv gelöscht.")) return;
+        if (!(await window.BibliothekarI18n.confirmAsync("Bibliothek entfernen? Archiv, Datenbank und Arbeitsordner bleiben erhalten. Historische Besitznachweise werden aufbewahrt. Späterer Wiedereinzug nur über Folder Import."))) return;
         try {
-          await bkJson("/api/libraries/"+encodeURIComponent(id)+"/unregister", {method:"POST"});
+          await bkJson("/api/libraries/"+encodeURIComponent(id)+"/unregister", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirmation:'REMOVE LIBRARY'})});
           if (id === bkLibraryId) {
             window.location.assign(bkLibraryHref(window.location.pathname, "main"));
             return;
@@ -3983,15 +4583,22 @@ BIBLIOTHEKAR_JS = r"""
 
   function bkRenderStorageSettings(data) {
     if (!storageSettings || !data) return;
-    const setValue=(id,value)=>{const node=document.getElementById(id);if(node)node.value=String(value||"");};
     const setText=(id,value)=>{const node=document.getElementById(id);if(node)node.textContent=String(value||"");};
-    setValue("bk-storage-backup-name", data.backup_directory_name);
-    setValue("bk-storage-workspaces-name", data.workspaces_directory_name);
-    setValue("bk-storage-metadata-name", data.metadata_directory_name);
     setText("bk-storage-workspace-root", data.workspace_root || "/workspace");
-    setText("bk-storage-backup-preview", "SD-Kartensicherungen: " + String(data.backup_root || ""));
-    setText("bk-storage-workspaces-preview", "Arbeitsbereiche: " + String(data.workspaces_root || ""));
-    setText("bk-storage-metadata-preview", "Metadatenkorrektur: " + String(data.metadata_root || ""));
+    const t=value=>window.BibliothekarI18n?.t?.(value)||value;
+    const descriptions = [
+      ["backup", "SD-Kartensicherungen", data.backup_root, "Zentraler Aufnahmebestand und geprüfte Rückkehrkopien aus dem Archiv."],
+      ["workspaces", "Bibliotheks-Arbeitsbereiche", data.workspaces_root, "Unabhängige Arbeitsordner der registrierten Bibliotheken."],
+      ["metadata", "Metadatenkorrektur", data.metadata_root, "Temporäre, geprüfte Metadatenkorrekturen; Allgemein und Stapelkorrektur."],
+      ["trash", "Papierkorb", data.trash_root, "Zurückgehaltene Dateien bis zur ausdrücklich bestätigten endgültigen Löschung."]
+    ];
+    for (const [id,label,path,purpose] of descriptions) {
+      const node=document.getElementById("bk-storage-"+id+"-preview");
+      if(!node)continue;
+      const title=document.createElement("strong"),code=document.createElement("code"),help=document.createElement("small");
+      title.textContent=t(label);code.textContent=String(path||"");help.textContent=t(purpose);
+      node.replaceChildren(title,document.createElement("br"),code,document.createElement("br"),help);
+    }
   }
 
   async function bkLoadStorageSettings() {
@@ -4005,28 +4612,6 @@ BIBLIOTHEKAR_JS = r"""
       if(status){status.textContent=error.message;status.className="bk-library-status is-error";}
     }
   }
-
-  document.getElementById("bk-storage-save")?.addEventListener("click", async () => {
-    const status=document.getElementById("bk-storage-status");
-    if(status){status.textContent="Pfade werden geprüft und gespeichert …";status.className="bk-library-status";}
-    try {
-      const data=await bkJson("/api/settings/storage-paths", {
-        method:"PUT",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          backup_directory_name:document.getElementById("bk-storage-backup-name")?.value || "",
-          workspaces_directory_name:document.getElementById("bk-storage-workspaces-name")?.value || "",
-          metadata_directory_name:document.getElementById("bk-storage-metadata-name")?.value || "",
-        }),
-      });
-      const refreshed=await bkJson("/api/settings/storage-paths");
-      bkRenderStorageSettings(refreshed);
-      if(status){status.textContent="Gespeichert. App-eigene Ordner wurden sicher aktualisiert; externe TrueNAS-Mounts bleiben unverändert.";status.className="bk-library-status is-ok";}
-      await bkRefreshLibraryManagement();
-    } catch(error) {
-      if(status){status.textContent=error.message;status.className="bk-library-status is-error";}
-    }
-  });
 
   document.querySelector("[data-bk-open-settings]")?.addEventListener("click", bkLoadStorageSettings);
 
@@ -4181,21 +4766,33 @@ BIBLIOTHEKAR_JS = r"""
     const year=document.getElementById("bk-event-include-year");
     const time=document.getElementById("bk-event-include-time");
     const collectionYear=document.getElementById("bk-no-event-include-year");
-    if(label)label.value=String(data.no_event_label||"Ohne Ereignis");
+    const subeventRange=document.getElementById("bk-subevent-date-range");
+    const subeventYear=document.getElementById("bk-subevent-include-year");
+    const subeventTime=document.getElementById("bk-subevent-include-time");
+    const subeventEnabled=document.getElementById("bk-subevent-prefix-enabled");
+    if(label)label.value=String(data.no_event_label||(document.documentElement.dataset.bkLocale==="de"?"Ohne Ereignis":"No Event"));
     if(range)range.checked=String(data.date_mode||"start")==="range";
     if(year)year.checked=Boolean(data.include_year);
     if(time)time.checked=Boolean(data.include_time);
     if(collectionYear)collectionYear.checked=Boolean(data.no_event_include_year);
+    if(subeventRange)subeventRange.checked=String(data.subevent_date_mode||"start")==="range";
+    if(subeventYear)subeventYear.checked=Boolean(data.subevent_include_year);
+    if(subeventTime)subeventTime.checked=Boolean(data.subevent_include_time);
+    if(subeventEnabled)subeventEnabled.checked=data.subevent_prefix_enabled!==false;
     bkUpdateSettingsPreview();
   }
 
-  function bkPreviewStructure(parentFolder) {
+  function bkPreviewStructure(parentFolder, childFolder="") {
     const enabled=Boolean(folderLayoutState?.structure_enabled);
     const nodes=folderLayoutState?.layout?.nodes||[];
     const inputPath=String(folderLayoutState?.input_path||"");
     const lines=["2026"];
-    const parentInput=enabled && !inputPath ? "  [Input]" : "";
+    const parentInput=enabled && !inputPath && !childFolder ? "  [Input]" : "";
     lines.push("└── "+parentFolder+parentInput);
+    if(childFolder){
+      const childInput=enabled && !inputPath ? "  [Input]" : "";
+      lines.push("    └── "+childFolder+childInput);
+    }
     if(!enabled || !nodes.length)return lines.join("\n");
 
     function walk(items,prefix,pathPrefix){
@@ -4209,18 +4806,24 @@ BIBLIOTHEKAR_JS = r"""
         walk(node.children||[],prefix+(last?"    ":"│   "),path);
       });
     }
-    walk(nodes,"    ","");
+    walk(nodes,childFolder?"        ":"    ","");
     return lines.join("\n");
   }
 
   function bkUpdateSettingsPreview() {
     const preview=document.getElementById("bk-event-naming-preview");
     if(!preview)return;
-    const label=String(document.getElementById("bk-no-event-label")?.value||"Ohne Ereignis").trim()||"Ohne Ereignis";
+    const defaultCollectionLabel=document.documentElement.dataset.bkLocale==="de"?"Ohne Ereignis":"No Event";
+    const label=String(document.getElementById("bk-no-event-label")?.value||defaultCollectionLabel).trim()||defaultCollectionLabel;
     const range=Boolean(document.getElementById("bk-event-date-range")?.checked);
     const year=Boolean(document.getElementById("bk-event-include-year")?.checked);
     const time=Boolean(document.getElementById("bk-event-include-time")?.checked);
     const collectionYear=Boolean(document.getElementById("bk-no-event-include-year")?.checked);
+    const subeventRange=Boolean(document.getElementById("bk-subevent-date-range")?.checked);
+    const subeventYear=Boolean(document.getElementById("bk-subevent-include-year")?.checked);
+    const subeventTime=Boolean(document.getElementById("bk-subevent-include-time")?.checked);
+    const subeventEnabled=Boolean(document.getElementById("bk-subevent-prefix-enabled")?.checked);
+
     const d1=year?"2026-07-20":"07-20";
     const d2=year?"2026-07-21":"07-21";
     let datePart=range ? d1+"–"+d2 : d1;
@@ -4229,15 +4832,27 @@ BIBLIOTHEKAR_JS = r"""
         ? d1+" 14-00–"+d2+" 18-30"
         : d1+" · 14-00–18-30";
     }
-    const normal=datePart+" - Urlaub";
+    const englishExample=document.documentElement.dataset.bkLocale !== "de";
+    const normal=datePart+" - "+(englishExample?"Vacation":"Urlaub");
+
+    const sd1=subeventYear?"2026-07-20":"07-20";
+    const sd2=subeventYear?"2026-07-21":"07-21";
+    let subeventPart=subeventRange ? sd1+"–"+sd2 : sd1;
+    if(subeventTime){
+      subeventPart=subeventRange
+        ? sd1+" 14-00–"+sd2+" 18-30"
+        : sd1+" · 14-00–18-30";
+    }
+    const subevent=(subeventEnabled ? subeventPart+" - " : "")+(englishExample?"City visit":"Stadtbesuch");
     const collection=(collectionYear?"2026-07":"07")+" - "+label;
+
     preview.innerHTML=
       '<div class="bk-settings-preview-grid">'
-      +'<div class="bk-settings-preview-case"><strong>Normales Ereignis</strong><pre>'+bkEscape(bkPreviewStructure(normal))+'</pre></div>'
+      +'<div class="bk-settings-preview-case"><strong>Normales Ereignis</strong><pre>'+bkEscape(bkPreviewStructure(normal,subevent))+'</pre></div>'
       +'<div class="bk-settings-preview-case"><strong>Sammelordner</strong><pre>'+bkEscape(bkPreviewStructure(collection))+'</pre></div>'
       +'</div>';
   }
-
+  window.addEventListener("bk-language-changed", bkUpdateSettingsPreview);
   async function bkLoadEventNaming() {
     if(!eventNamingSettings)return;
     const status=document.getElementById("bk-event-naming-status");
@@ -4248,7 +4863,7 @@ BIBLIOTHEKAR_JS = r"""
     }catch(error){if(status)status.textContent=error.message;}
   }
 
-  ["bk-no-event-label","bk-event-date-range","bk-event-include-year","bk-event-include-time","bk-no-event-include-year"].forEach(id=>{
+  ["bk-no-event-label","bk-event-date-range","bk-event-include-year","bk-event-include-time","bk-no-event-include-year","bk-subevent-date-range","bk-subevent-include-year","bk-subevent-include-time","bk-subevent-prefix-enabled"].forEach(id=>{
     document.getElementById(id)?.addEventListener("input",bkUpdateSettingsPreview);
     document.getElementById(id)?.addEventListener("change",bkUpdateSettingsPreview);
   });
@@ -4264,11 +4879,15 @@ BIBLIOTHEKAR_JS = r"""
           include_year:Boolean(document.getElementById("bk-event-include-year")?.checked),
           include_time:Boolean(document.getElementById("bk-event-include-time")?.checked),
           no_event_include_year:Boolean(document.getElementById("bk-no-event-include-year")?.checked),
+          subevent_date_mode:Boolean(document.getElementById("bk-subevent-date-range")?.checked)?"range":"start",
+          subevent_include_year:Boolean(document.getElementById("bk-subevent-include-year")?.checked),
+          subevent_include_time:Boolean(document.getElementById("bk-subevent-include-time")?.checked),
+          subevent_prefix_enabled:Boolean(document.getElementById("bk-subevent-prefix-enabled")?.checked),
         })
       });
       bkRenderEventNaming(data);
       document.dispatchEvent(new CustomEvent("bibliothekar:event-naming-updated",{detail:data}));
-      if(status)status.textContent="Gespeichert. Die Einstellung gilt nur für neue Ereignisse und Sammelordner.";
+      if(status)status.textContent="Gespeichert. Die Einstellung gilt nur für neue Ereignisse, Unterereignisse und Sammelordner.";
     }catch(error){if(status)status.textContent=error.message;}
   });
   document.querySelector("[data-bk-open-settings]")?.addEventListener("click", bkLoadEventNaming);
@@ -4315,23 +4934,43 @@ BIBLIOTHEKAR_JS = r"""
     const countNodes = document.querySelectorAll("[data-bk-task-count]");
     const panel = document.getElementById("bk-task-panel");
     try {
-      const response = await fetch("/api/tasks", {cache: "no-store"});
+      const response = await fetch("/api/tasks", {cache:"no-store", headers:{"X-Bibliothekar-Library":bkLibraryId}});
       if (!response.ok) throw new Error();
       const data = await response.json();
       const tasks = data.tasks || [];
       const count = Number(data.count || 0);
       countNodes.forEach(node => { node.textContent = String(count); });
       if (panel) {
+        const escTask = value => String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll('"', "&quot;");
+
+        const taskEntry = task => {
+          let detail=String(task.detail||"");
+          if(document.documentElement.dataset.bkLocale!=="de" && task.kind==="event_structure_change"){
+            detail=detail.replace("manuelle Ordner-/Dateiänderung erkannt","manual folder/file change detected")
+              .replace("Archiv · event.json ersetzen und prüfen","Archive · replace and verify event.json")
+              .replace("Prüfung erforderlich","review required");
+          }
+          return '<a class="bk-task-entry" href="' +
+            bkLibraryHref(task.href || "/events")
+              .replaceAll("&", "&amp;")
+              .replaceAll('"', "&quot;") +
+            '" style="display:block;padding:10px;border-radius:10px;color:inherit;text-decoration:none"><strong style="display:block">' +
+            escTask(task.title || "Aufgabe") +
+            '</strong><span style="color:var(--bk-muted);font-size:.9rem">' +
+            escTask(detail) +
+            '</span></a>';
+        };
+
         panel.innerHTML = count
-          ? '<strong style="display:block;padding:7px 9px">Offene Aufgaben · ' + count + '</strong>' +
-            tasks.map(task => '<a class="bk-task-entry" href="' +
-              bkLibraryHref(task.href || "/events").replaceAll("&", "&amp;").replaceAll('"', "&quot;") +
-              '" style="display:block;padding:10px;border-radius:10px;color:inherit;text-decoration:none"><strong style="display:block">' +
-              String(task.title || "Aufgabe").replaceAll("<", "&lt;") +
-              '</strong><span style="color:var(--bk-muted);font-size:.9rem">' +
-              String(task.detail || "").replaceAll("<", "&lt;") +
-              '</span></a>').join("")
+          ? '<strong style="display:block;padding:7px 9px">Offene Aufgaben · ' +
+            count +
+            '</strong>' +
+            tasks.map(taskEntry).join("")
           : '<div style="padding:10px"><strong>Keine offenen Aufgaben</strong><div style="color:var(--bk-muted);margin-top:5px">Alles erledigt.</div></div>';
+
       }
       const hasStructureTask = tasks.some(task => task.kind === "event_structure_change");
       if (hasStructureTask && !structureTaskAutoOpened) {
@@ -4343,55 +4982,658 @@ BIBLIOTHEKAR_JS = r"""
     }
   }
   refreshTasks();
-  setInterval(refreshTasks, 30000);
+  setInterval(refreshTasks, 5000);
+
+  const externalChangeDialog = document.getElementById("bk-external-change-dialog");
+  const externalChangeTitle = document.getElementById("bk-external-change-title");
+  const externalChangeLead = document.getElementById("bk-external-change-lead");
+  const externalChangeList = document.getElementById("bk-external-change-list");
+  const externalChangeActions = document.getElementById("bk-external-change-actions");
+  // Prevent a concurrently scheduled poll from reopening the modal while
+  // the acknowledgement request is still in flight.
+  let bkExternalDismissInFlight = false;
+  let bkExternalNoticeGeneration = 0;
+
+  function bkEscapeNotice(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  }
+
+  async function bkExternalState() {
+    const response = await fetch(
+      "/api/external-change-notices/state",
+      {cache: "no-store"}
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(
+        data.detail || "Dateisystemhinweise konnten nicht geladen werden."
+      );
+    }
+    return data;
+  }
+
+  async function bkAcknowledgeNotices(ids) {
+    const response = await fetch(
+      "/api/external-change-notices/acknowledge",
+      {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({notice_ids: ids})
+      }
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(
+        data.detail || "Hinweis konnte nicht bestätigt werden."
+      );
+    }
+    return data;
+  }
+
+  // Keep persisted German notices and their structured paths in SQLite intact.
+  // Render known notice codes in English; unknown legacy diagnostics remain
+  // accessible as an original technical record rather than being mistranslated.
+  function bk0511NoticeLanguage(de,en) {
+    return document.documentElement.dataset.bkLocale === "de" ? de : en;
+  }
+
+  function bk0511NoticePresentation(row,field) {
+    const source=String(row[field]||"");
+    const kind=String(row.kind||"");
+    const details=row.details||{};
+    // Structured identity is authoritative in BOTH locales. This also
+    // distinguishes a filename change from a genuine placement conflict.
+    if(kind==="filename_rename") {
+      if(field==="title") return bk0511NoticeLanguage("Datei umbenannt","File renamed");
+      const oldPath=String(details.expected_relative_path||"");
+      const newPath=String(details.observed_relative_path||row.relative_path||"");
+      const oldName=oldPath.split("/").pop();
+      const newName=newPath.split("/").pop();
+      return bk0511NoticeLanguage(
+        "Die Datei wurde im gleichen Ordner umbenannt. Alter Dateiname: ","The file was renamed in the same folder. Previous filename: "
+      )+oldName+bk0511NoticeLanguage(". Neuer Dateiname: ",". Current filename: ")+newName+".";
+    }
+    if(document.documentElement.dataset.bkLocale === "de") return source;
+    const translated=window.BibliothekarI18n?.t?.(source) || source;
+    if(translated !== source) return translated;
+    if(field==="title") {
+      const titles={
+        placement_conflict:"File assigned to the wrong location",
+        filename_rename:"File renamed",
+        archive_transfer_candidate:"Potential archive transfer detected",
+        missing_file:"File missing from inventory",
+        external_event_deleted:"Event folder deleted externally"
+      };
+      return titles[kind] || "File inventory notice";
+    }
+    const observed=String(details.observed_relative_path||row.relative_path||"");
+    const expected=String(details.expected_relative_path||"");
+    if(kind==="filename_rename"){
+      return "A known file was renamed externally. Confirm whether to accept the filename or restore it."
+        +(expected ? " Previous: "+expected+"." : "")
+        +(observed ? " Current: "+observed+"." : "");
+    }
+    if(kind==="placement_conflict"){
+      return "This file is in a location inconsistent with its event assignment."
+        +(observed ? " Actual: "+observed+"." : "")
+        +(expected ? " Expected: "+expected+"." : "");
+    }
+    if(kind==="archive_transfer_candidate")
+      return "Camera files have been found in the archive. Verify the archive before completing this event.";
+    return "An external file inventory change was detected.";
+  }
+
+  function bkNoticeRows(rows, required) {
+    if (!rows.length) return "";
+    const visible = rows.slice(0, 8);
+    const items = visible.map(row => {
+      const detail = bkEscapeNotice(bk0511NoticePresentation(row,"detail"));
+      const archiveButton = (
+        !required
+        && row.kind === "archive_transfer_candidate"
+        && row.details?.event_id
+        && row.details?.job_id
+      ) ? (
+        '<button type="button" class="bk-positive-action" ' +
+        'data-bk-archive-review="' +
+        bkEscapeNotice(row.id) +
+        '" data-bk-archive-job="' +
+        bkEscapeNotice(row.details.job_id) +
+        '" data-bk-archive-event="' +
+        bkEscapeNotice(row.details.event_id) +
+        '">Archiv prüfen</button>'
+      ) : "";
+      const renameButtons = required && row.kind === "filename_rename"
+        ? (["shared_workspace","central_stock"].includes(row.root_kind)
+          ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">' +
+            '<button type="button" class="bk-positive-action" data-bk-rename-accept="' +
+               bkEscapeNotice(row.id) + '">' +
+               bk0511NoticeLanguage("Umbenennung übernehmen","Accept rename") + '</button>' +
+            '<button type="button" data-bk-rename-undo="' + bkEscapeNotice(row.id) + '">' +
+               bk0511NoticeLanguage("Rückgängig machen","Undo rename") + '</button></div>'
+          : '<p style="margin-top:8px;color:var(--bk-muted)">' +
+            bk0511NoticeLanguage(
+              "Archiv schreibgeschützt: bitte Dateinamen manuell korrigieren und Bestand erneut prüfen.",
+              "Archive is read-only: correct the filename manually, then rescan."
+            ) + '</p>')
+        : "";
+      return (
+        '<div style="padding:10px 0;border-bottom:1px solid var(--bk-line)">' +
+        '<strong style="display:block">' +
+        bkEscapeNotice(bk0511NoticePresentation(row,"title")) +
+        '</strong>' +
+        '<span style="display:block;color:var(--bk-muted);font-size:.9rem;line-height:1.4;margin-top:3px">' +
+        detail +
+        '</span>' +
+        (archiveButton
+          ? '<div style="margin-top:8px">' + archiveButton + '</div>'
+          : '') +
+        renameButtons +
+        '</div>'
+      );
+    }).join("");
+    if (rows.length <= visible.length) return items;
+    return (
+      items +
+      '<details style="margin-top:8px"><summary>' +
+      (rows.length - visible.length) +
+      bk0511NoticeLanguage(' weitere anzeigen',' more notices')+'</summary><div style="margin-top:6px">' +
+      // Keep action controls available for every row, not only the first
+      // eight. Nested chunks still terminate because each consumes 8 items.
+      bkNoticeRows(rows.slice(visible.length), required) +
+      '</div></details>'
+    );
+  }
+
+  async function bkRenderExternalChanges({
+    forceRequired = false
+  } = {}) {
+    if (!externalChangeDialog || bkExternalDismissInFlight) return;
+    const generation = bkExternalNoticeGeneration;
+    const state = await bkExternalState();
+    if(bkExternalDismissInFlight || generation !== bkExternalNoticeGeneration) return;
+    const requiredRows = state.required || [];
+    const unseenRequired = state.unseen_required || [];
+    const infoRows = state.unseen_informational || [];
+
+    const showRequired = Boolean(
+      requiredRows.length
+      && (forceRequired || unseenRequired.length)
+    );
+    const showInfo = Boolean(infoRows.length);
+    if (!showRequired && !showInfo) {
+      if (externalChangeDialog.open) externalChangeDialog.close();
+      return;
+    }
+
+    const displayedRequired = showRequired ? requiredRows : [];
+    const displayedInfo = showInfo ? infoRows : [];
+    const allRows = [...displayedRequired, ...displayedInfo];
+    const combined = displayedRequired.length && displayedInfo.length;
+
+    externalChangeTitle.textContent = combined
+      ? bk0511NoticeLanguage("Dateibestand und Zuordnung prüfen","Review file inventory and assignments")
+      : displayedRequired.length
+        ? bk0511NoticeLanguage("Dateizuordnung prüfen","Review file assignments")
+        : (
+          displayedInfo.some(row => row.kind === "archive_transfer_candidate")
+            ? bk0511NoticeLanguage("Änderung im Dateibestand erkannt","File inventory change detected")
+            : bk0511NoticeLanguage("Dateibestand aktualisiert","File inventory updated")
+        );
+    externalChangeLead.textContent = combined
+      ? bk0511NoticeLanguage("Bibliothekar hat gleichzeitig fachliche Zuordnungsabweichungen und weitere externe Bestandsänderungen erkannt.","Bibliothekar detected both assignment conflicts and other external inventory changes.")
+      : displayedRequired.length
+        ? (
+          displayedRequired.every(row=>row.kind==="filename_rename")
+            ? bk0511NoticeLanguage(
+                "Datei umbenannt. Die Änderung bleibt als Aufgabe offen, bis du sie übernimmst oder rückgängig machst.",
+                "File renamed. The change remains an open task until you accept or undo it."
+              )
+            : displayedRequired.length === 1
+              ? bk0511NoticeLanguage("Eine Datei liegt an einem fachlich unpassenden Ort. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als Aufgabe offen.","One file is in the wrong location. The actual location was detected; an assignment task remains open.")
+              : bk0511NoticeLanguage(displayedRequired.length + " Dateien liegen an fachlich unpassenden Orten. Der physische IST-Zustand wurde erkannt; die Zuordnung bleibt als eine Aufgabe offen.",displayedRequired.length + " files are in the wrong locations. The actual state was detected; an assignment task remains open.")
+        )
+        : (
+          displayedInfo.length === 1
+            ? bk0511NoticeLanguage("Bibliothekar hat eine externe Änderung übernommen.","Bibliothekar accepted one external change.")
+            : bk0511NoticeLanguage("Bibliothekar hat " + displayedInfo.length + " externe Änderungen übernommen.","Bibliothekar accepted " + displayedInfo.length + " external changes.")
+        );
+
+    externalChangeList.innerHTML = (
+      displayedRequired.length
+        ? (
+          (combined ? '<div style="font-weight:800;margin:2px 0 4px">Zuordnung prüfen</div>' : '') +
+          bkNoticeRows(displayedRequired, true)
+        )
+        : ""
+    ) + (
+      displayedInfo.length
+        ? (
+          (combined ? '<div style="font-weight:800;margin:14px 0 4px">Weitere Bestandsänderungen</div>' : '') +
+          bkNoticeRows(displayedInfo, false)
+        )
+        : ""
+    );
+
+    // File renames stay unresolved until the user chooses one of these two
+    // explicit actions. Neither the inventory scan nor acknowledgement adopts.
+    for (const control of externalChangeList.querySelectorAll(
+      "[data-bk-rename-accept], [data-bk-rename-undo]"
+    )) {
+      control.addEventListener("click", async event => {
+        const button = event.currentTarget;
+        const accept = button.hasAttribute("data-bk-rename-accept");
+        const noticeId = button.getAttribute(
+          accept ? "data-bk-rename-accept" : "data-bk-rename-undo"
+        );
+        button.disabled = true;
+        try {
+          const endpoint = accept ? "accept-rename" : "repair";
+          const response = await fetch(
+            "/api/external-change-notices/" + encodeURIComponent(noticeId) + "/" + endpoint,
+            {method:"POST"}
+          );
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.detail || "Dateiumbenennung konnte nicht geprüft werden.");
+          await refreshTasks();
+          await bkRenderExternalChanges({forceRequired:true});
+        } catch (error) {
+          button.disabled = false;
+          externalChangeLead.textContent = String(error.message || error);
+        }
+      });
+    }
+
+    const forcedRepair = displayedRequired.some(
+      row => Boolean(row.details?.force_repair) && row.kind !== "filename_rename"
+    );
+    const onlyRenames=displayedRequired.length>0 && !displayedInfo.length
+      && displayedRequired.every(row=>row.kind==="filename_rename");
+    const closeRename=document.getElementById("bk-external-rename-close");
+    if(closeRename) closeRename.hidden=!onlyRenames;
+
+    if (displayedRequired.length) {
+      const repairable = displayedRequired.some(row => row.repairable);
+      externalChangeActions.innerHTML = onlyRenames ? "" : (
+        (repairable
+          ? '<button type="button" class="bk-positive-action" id="bk-external-repair-all">Änderungen rückgängig machen</button>'
+          : '') +
+        (!forcedRepair
+          ? '<button type="button" id="bk-external-ignore">Ignorieren</button>'
+          : '')
+      );
+
+      document.getElementById("bk-external-repair-all")?.addEventListener(
+        "click",
+        async event => {
+          const repairButton = event.currentTarget;
+          repairButton.disabled = true;
+          repairButton.classList.add("bk-busy");
+          repairButton.setAttribute("aria-busy", "true");
+          try {
+            const response = await fetch(
+              "/api/external-change-notices/repair-all",
+              {method: "POST"}
+            );
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              throw new Error(
+                data.detail || "Die Änderungen konnten nicht vollständig zurückgesetzt werden."
+              );
+            }
+            const failed = Array.isArray(data.skipped) ? data.skipped : [];
+            if (failed.length) {
+              const rootLabel = kind => kind === "central_stock"
+                ? "SD-Kartensicherungen"
+                : kind === "shared_workspace"
+                  ? "Arbeitsbereich"
+                  : "Archiv";
+              externalChangeLead.textContent =
+                "Automatisches Rückgängigmachen fehlgeschlagen. Die Aufgabe bleibt offen.";
+              const failureHtml = failed.map(item => {
+                const expected = [rootLabel(item.expected_root_kind), item.expected_relative_path]
+                  .filter(Boolean).join(" / ");
+                return '<div style="padding:11px;border:1px solid var(--bk-danger);border-radius:11px;margin-bottom:9px">' +
+                  '<strong style="display:block;color:var(--bk-danger)">Nicht automatisch zurückgesetzt</strong>' +
+                  '<span style="display:block;margin-top:5px">' + bkEscapeNotice(item.reason || "Unbekannter Fehler") + '</span>' +
+                  (expected
+                    ? '<span style="display:block;color:var(--bk-muted);margin-top:5px">Erwarteter Sollort: <code>' + bkEscapeNotice(expected) + '</code></span>'
+                    : '') +
+                  '<span style="display:block;color:var(--bk-muted);margin-top:5px">Du kannst die Datei notfalls selbst an den Sollort zurücklegen und danach erneut prüfen.</span>' +
+                  '</div>';
+              }).join("");
+              externalChangeList.insertAdjacentHTML("afterbegin", failureHtml);
+              repairButton.textContent = "Erneut prüfen";
+              repairButton.disabled = false;
+              await refreshTasks();
+              return;
+            }
+            if (displayedInfo.length) {
+              await bkAcknowledgeNotices(displayedInfo.map(row => row.id));
+            }
+            externalChangeDialog.close();
+            await refreshTasks();
+          } catch (error) {
+            externalChangeLead.textContent =
+              "Automatisches Rückgängigmachen fehlgeschlagen. Die Aufgabe bleibt offen.";
+            externalChangeList.insertAdjacentHTML(
+              "afterbegin",
+              '<div style="padding:11px;border:1px solid var(--bk-danger);border-radius:11px;margin-bottom:9px">' +
+              '<strong style="display:block;color:var(--bk-danger)">Reparatur fehlgeschlagen</strong>' +
+              '<span style="display:block;margin-top:5px">' + bkEscapeNotice(error.message) + '</span>' +
+              '<span style="display:block;color:var(--bk-muted);margin-top:5px">Bitte den angezeigten Sollort prüfen, die Datei bei Bedarf manuell zurücklegen und danach erneut prüfen.</span>' +
+              '</div>'
+            );
+            repairButton.textContent = "Erneut prüfen";
+            repairButton.disabled = false;
+          } finally {
+            repairButton.classList.remove("bk-busy");
+            repairButton.removeAttribute("aria-busy");
+          }
+        }
+      );
+
+      (document.getElementById("bk-external-ignore") || (onlyRenames ? closeRename : null))?.addEventListener(
+        "click",
+        async event => {
+          // currentTarget is cleared by DOM after the first await. Capture
+          // it synchronously to prevent a silent TypeError on Confirm.
+          const dismissButton = event.currentTarget;
+          const renameOnly = displayedRequired.length > 0 &&
+            displayedRequired.every(row => row.kind === "filename_rename");
+          const ok = await window.BibliothekarI18n.confirmAsync(
+            renameOnly
+              ? bk0511NoticeLanguage(
+                "Dialog schließen? Die Dateiumbenennung bleibt unter Aufgaben offen und kann später übernommen oder rückgängig gemacht werden.",
+                "Dismiss this dialog? The rename stays in Tasks and can still be accepted or undone later."
+              )
+              : bk0511NoticeLanguage(
+                "Die physische Ablage bleibt vorerst bestehen. Die Aufgabe bleibt bis zur Korrektur offen. Wirklich ignorieren?",
+                "Keep the current file location for now? The task remains open until the problem is corrected. Dismiss?"
+              )
+          );
+          if (!ok) return;
+          dismissButton.disabled = true;
+          bkExternalDismissInFlight = true;
+          ++bkExternalNoticeGeneration;
+          // Immediate visible response after the user's Confirm. A rejected
+          // acknowledgement restores the dialog, never silently loses tasks.
+          externalChangeDialog.close();
+          try {
+            const after = await bkAcknowledgeNotices(allRows.map(row => row.id));
+            const remainingUnseen = new Set((after.unseen_required||[]).map(row=>String(row.id)));
+            if(allRows.some(row=>remainingUnseen.has(String(row.id)))){
+              throw new Error(bk0511NoticeLanguage(
+                "Der Hinweis konnte nicht dauerhaft bestätigt werden.",
+                "The notice could not be acknowledged persistently."
+              ));
+            }
+            // A task deeplink must not force the same acknowledged modal
+            // open again after a page reload. The task itself is preserved.
+            const url = new URL(window.location.href);
+            if(url.searchParams.get("task")==="placement-conflicts"){
+              url.searchParams.delete("task");
+              history.replaceState(null,"",url.pathname+(url.search||"")+url.hash);
+            }
+            await refreshTasks();
+          } catch (error) {
+            dismissButton.disabled = false;
+            alert(error.message);
+            if(!externalChangeDialog.open) externalChangeDialog.showModal();
+          } finally {
+            bkExternalDismissInFlight = false;
+          }
+        }
+      );
+    } else {
+      externalChangeActions.innerHTML =
+        '<button type="button" class="bk-positive-action" id="bk-external-info-close">Hinweis schließen</button>';
+      document.getElementById("bk-external-info-close")?.addEventListener(
+        "click",
+        async event => {
+          event.currentTarget.disabled = true;
+          try {
+            await bkAcknowledgeNotices(displayedInfo.map(row => row.id));
+            externalChangeDialog.close();
+          } catch (error) {
+            event.currentTarget.disabled = false;
+            alert(error.message);
+          }
+        }
+      );
+    }
+
+    externalChangeList.querySelectorAll(
+      "[data-bk-archive-review]"
+    ).forEach(button => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await bkAcknowledgeNotices(allRows.map(row => row.id));
+        } catch (_) {}
+        const job = button.dataset.bkArchiveJob || "";
+        const eventId = button.dataset.bkArchiveEvent || "";
+        const target = bkLibraryHref(
+          "/transfer?verify_job=" +
+          encodeURIComponent(job) +
+          "&verify_event=" +
+          encodeURIComponent(eventId)
+        );
+        window.location.assign(target);
+      });
+    });
+
+    externalChangeDialog.addEventListener(
+      "cancel",
+      event => event.preventDefault(),
+      {once: true}
+    );
+    if (!externalChangeDialog.open) externalChangeDialog.showModal();
+  }
+
+  const externalTaskRequested = (
+    new URLSearchParams(location.search).get("task")
+    === "placement-conflicts"
+  );
+  bkRenderExternalChanges({
+    forceRequired: externalTaskRequested
+  }).catch(() => {});
+
+  window.bkForceExternalChangeCheck = () => bkRenderExternalChanges({forceRequired:true});
+
+  // Der eigentliche Dateisystemscan läuft seitenbezogen (z. B. beim Laden
+  // des Arbeitsbestands). Deshalb wird der Hinweiszustand kurz danach noch
+  // einmal beobachtet: ein beim selben Reload neu erkannter Ordnerverlust
+  // oder Zuordnungskonflikt erscheint ohne einen zweiten Browser-Reload.
+  setInterval(() => {
+    if (!externalChangeDialog?.open) {
+      bkRenderExternalChanges().catch(() => {});
+    }
+  }, 2500);
 
   function syncShellStickyHeight() {
     const shell=document.querySelector(".bk-shell");
     if(!shell)return;
     const standalone=root.dataset.bkDisplayMode === "standalone";
+    const compactPwa=standalone && Boolean(window.matchMedia?.("(max-width: 820px)")?.matches);
     const bridge=standalone
       ? 0
       : (parseFloat(getComputedStyle(shell).getPropertyValue("--bk-page-bridge-height"))||0);
-    root.style.setProperty("--bk-shell-sticky-height", Math.ceil(shell.getBoundingClientRect().height + bridge) + "px");
+    // Die PWA hat keinen sichtbaren Markenkopf mehr. Auch die Sticky-
+    // Höhenvariable muss null sein, sonst bleiben unsichtbare Abstände.
+    const shellHeight=compactPwa ? 0 : Math.ceil(shell.getBoundingClientRect().height + bridge);
+    root.style.setProperty("--bk-shell-sticky-height", shellHeight + "px");
+
+    const subnav=document.querySelector(".bk-workspace-subnav");
+    const subnavHeight=subnav
+      ? Math.ceil(subnav.getBoundingClientRect().height)
+      : 0;
+    root.style.setProperty(
+      "--bk-secondary-sticky-bottom",
+      (shellHeight + subnavHeight) + "px"
+    );
   }
   syncShellStickyHeight();
   window.addEventListener("resize", syncShellStickyHeight);
+  if(typeof ResizeObserver==="function"){
+    const stickyObserver=new ResizeObserver(()=>syncShellStickyHeight());
+    const shell=document.querySelector(".bk-shell");
+    const subnav=document.querySelector(".bk-workspace-subnav");
+    if(shell)stickyObserver.observe(shell);
+    if(subnav)stickyObserver.observe(subnav);
+  }
   if(document.fonts?.ready)document.fonts.ready.then(syncShellStickyHeight).catch(()=>{});
 
+  // Der gehoverte Reiter wird beim Pressen nicht mehr auf seine Ruhelage entlassen.
+  // Touch: 0 -> -8px; Maus: Hover -3px -> Klick -8px.
+  // 0.55.1: iPhone's bottom dock activates when touched, before page loading.
+  let bkDockNavigationStarted = false;
+  const bkDockLinks = [...document.querySelectorAll(".bk-pwa-dock a.bk-pwa-nav-item[data-area]")];
+  const bkDockCurrentArea = document.body?.dataset.bkArea || "";
+  const bkDockPwa = () => root.dataset.bkDisplayMode === "standalone";
+  function bkDockReset() {
+    bkDockLinks.forEach(item => {
+      item.classList.remove("is-navigating");
+      item.classList.toggle("active", item.dataset.area === bkDockCurrentArea);
+    });
+  }
+  function bkDockActivate(link) {
+    if (!bkDockPwa() || link.dataset.area === bkDockCurrentArea || bkDockNavigationStarted) return;
+    bkDockLinks.forEach(item => {
+      item.classList.toggle("active", item === link);
+      item.classList.toggle("is-navigating", item === link);
+    });
+  }
+  bkDockLinks.forEach(link => {
+    link.addEventListener("pointerdown", event => {
+      if (event.button!==0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      bkDockActivate(link);
+    }, {passive:true});
+    let start=null;
+    link.addEventListener("touchstart", event => {
+      if (event.touches.length!==1) return;
+      start={x:event.touches[0].clientX,y:event.touches[0].clientY};
+      bkDockActivate(link);
+    }, {passive:true});
+    link.addEventListener("touchmove", event => {
+      if (!start || event.touches.length!==1) return;
+      const t=event.touches[0];
+      if (Math.hypot(t.clientX-start.x,t.clientY-start.y)>12) {
+        start=null;
+        if (!bkDockNavigationStarted) bkDockReset();
+      }
+    }, {passive:true});
+    link.addEventListener("touchcancel",()=>{start=null;if(!bkDockNavigationStarted)bkDockReset();},{passive:true});
+    link.addEventListener("pointercancel",()=>{if(!bkDockNavigationStarted)bkDockReset();});
+    link.addEventListener("click",event=>{
+      if (!bkDockPwa() || event.defaultPrevented || event.button!==0
+          || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if(link.dataset.area===bkDockCurrentArea){event.preventDefault();bkDockReset();return;}
+      event.preventDefault();
+      if(bkDockNavigationStarted)return;
+      const href=link.href;
+      if(!href){bkDockReset();return;}
+      bkDockActivate(link);
+      bkDockNavigationStarted=true;
+      root.dataset.bkNavLoading="true";
+      try{sessionStorage.setItem("bk-tab-navigation-0451",JSON.stringify({
+        href,area:link.dataset.area,at:Date.now()
+      }));}catch(_){}
+      // One frame to paint the highlighted dock; no fetch or timeout gate.
+      requestAnimationFrame(()=>window.location.assign(href));
+    });
+  });
+  window.addEventListener("pageshow",event=>{
+    if(!event.persisted)return;
+    bkDockNavigationStarted=false;
+    bkDockReset();
+  });
+
+  let bkTabNavigationStarted = false;
+  const bkTabReducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
   document.querySelectorAll(".bk-tab").forEach(tab => {
+    let pressReset = null;
+    const cancelPress = () => {
+      if (pressReset) window.clearTimeout(pressReset);
+      pressReset = null;
+      if (!tab.classList.contains("is-navigating")) tab.classList.remove("bk-tab-pressing");
+    };
+    tab.addEventListener("pointerdown", event => {
+      if (tab.classList.contains("active") || event.button !== 0 || bkTabReducedMotion()
+          || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      tab.classList.add("bk-tab-pressing");
+      if (pressReset) window.clearTimeout(pressReset);
+    });
+    tab.addEventListener("pointerup", () => {
+      // Klick wird unmittelbar nach pointerup ausgelöst; danach erst zurücksetzen.
+      if (pressReset) window.clearTimeout(pressReset);
+      pressReset = window.setTimeout(cancelPress, 450);
+    });
+    tab.addEventListener("pointercancel", cancelPress);
+    tab.addEventListener("dragstart", cancelPress);
     tab.addEventListener("click", event => {
       if (
-        tab.classList.contains("active")
-        || event.defaultPrevented
-        || event.button !== 0
-        || event.metaKey
-        || event.ctrlKey
-        || event.shiftKey
-        || event.altKey
-        || matchMedia("(prefers-reduced-motion: reduce)").matches
-      ) {
-        return;
-      }
-
+        tab.classList.contains("active") || bkTabNavigationStarted
+        || event.defaultPrevented || event.button !== 0
+        || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
+      ) return;
       const href = tab.href;
       if (!href) return;
-
       event.preventDefault();
-      tab.classList.add("is-navigating");
-      window.setTimeout(() => {
+      bkTabNavigationStarted = true;
+      const pwa = root.dataset.bkDisplayMode === "standalone";
+      if (pwa) root.dataset.bkNavLoading = "true";
+      tab.classList.add("is-navigating", "bk-tab-pressing");
+      try {
+        sessionStorage.setItem("bk-tab-navigation-0451", JSON.stringify({
+          href, area: tab.dataset.area, at: Date.now()
+        }));
+      } catch (_) {}
+      // Do not hold back page navigation for animation: iPhone PWA must respond instantly.
+      // Yield one visible animation frame for the loading indicator, then navigate.
+      // No network fetch or page-readiness gate is introduced here.
+      if (pwa) {
+        requestAnimationFrame(() => requestAnimationFrame(() => window.location.assign(href)));
+      } else {
+        // Desktop retains its classic hover/press/arrival transitions, with no overlay.
         window.location.assign(href);
-      }, 105);
+      }
     });
+  });
+
+  // Der Zielreiter startet hoch und fährt erst nach dem ersten Paint auf seine
+  // reguläre aktive Position. Das verhindert einen zweiten Hoch-Runter-Hub.
+  if (root.dataset.bkNavArriving) {
+    const area = root.dataset.bkNavArriving;
+    const target = document.querySelector('.bk-tab.active[data-area="' + area + '"]');
+    if (!target || bkTabReducedMotion()) {
+      delete root.dataset.bkNavArriving;
+    } else {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        delete root.dataset.bkNavArriving;
+      }));
+    }
+  }
+  window.addEventListener("pageshow", event => {
+    if (!event.persisted) return;
+    bkTabNavigationStarted = false;
+    document.querySelectorAll(".bk-tab").forEach(tab => {
+      tab.classList.remove("is-navigating", "bk-tab-pressing");
+    });
+    delete root.dataset.bkNavArriving;
+    delete root.dataset.bkNavLoading;
+    try { sessionStorage.removeItem("bk-tab-navigation-0451"); } catch (_) {}
   });
 
   fetch("/api/health", {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(data => {
     if (!data) return;
     document.querySelectorAll("[data-bk-version]").forEach(node => {
       const deployment = data.deployment_version || data.version || "";
-      const core = data.version || "";
-      node.textContent = deployment && core && deployment !== core
-        ? `${deployment} · Kern ${core}`
-        : deployment;
+      node.textContent = deployment;
     });
   }).catch(() => {});
 })();
@@ -4399,14 +5641,14 @@ BIBLIOTHEKAR_JS = r"""
 
 
 def _shell_markup(active_area: str, subarea: str | None) -> str:
-    active = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
+    active = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
     heading_map = {
         ("import", None): (
             "Import & Prüfung",
             "Quellen einlesen, sicher prüfen und für den Arbeitsbereich vorbereiten.",
         ),
         ("workspace", "captures"): (
-            "Aufnahmen",
+            "Medien",
             "Freie Aufnahmen ordnen und Ereignisse aus dem Arbeitsbestand bilden.",
         ),
         ("workspace", "events"): (
@@ -4416,6 +5658,10 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         ("archive", None): (
             "Archiv",
             "Archivierung prüfen, abschließen und spätere Änderungen nachvollziehen.",
+        ),
+        ("trash", None): (
+            "Papierkorb",
+            "Manuell ausgesonderte Dateien und Ordner im gemeinsamen Kamera-Arbeitsbereich.",
         ),
         ("assistant", None): (
             "Bibliothekar Assistent",
@@ -4461,14 +5707,14 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         subnav = f"""
 <div class="bk-workspace-subnav" data-bk-workspace-subarea="{escape(subarea or 'root')}" aria-label="Arbeitsbereich">
   <div class="bk-workspace-links">
-    <a href="/workspace" class="{'active' if subarea == 'captures' else ''}">Aufnahmen</a>
+    <a href="/workspace" class="{'active' if subarea == 'captures' else ''}">Medien</a>
     <a href="/events" class="{'active' if subarea == 'events' else ''}">Ereignisse</a>
   </div>
   {dock_slot}
 </div>
 """
 
-    compact_help_areas = {"import", "workspace", "archive", "metadata"}
+    compact_help_areas = {"import", "workspace", "archive", "metadata", "trash"}
     heading_title_markup = (
         f'<h1 class="bk-title-help" tabindex="0" role="button" aria-expanded="false" '
         f'data-bk-title-help data-help="{escape(heading_subtitle)}">{escape(heading_title)}</h1>'
@@ -4497,11 +5743,13 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 
     return f"""
 <header class="bk-shell">
-  <a class="bk-brand" href="/" aria-label="Bibliothekar Startseite">
-    <span class="bk-mark" aria-hidden="true"><span class="y"></span><span class="r"></span><span class="b"></span></span>
-    <span class="bk-brand-copy">
-      <span class="bk-brand-title">Bibliothekar</span>
-      <span id="bk-current-library-name" class="bk-brand-library">Bibliothek …</span>
+  <a class="bk-brand bk-brand-new" href="/" aria-label="Bibliothekar Startseite">
+    <span class="bk-brand-art">
+      <img class="bk-brand-image"
+           src="/assets/bibliothekar-logo-v3.svg?v=0.56.2"
+           width="165" height="45" alt="Bibliothekar"
+           decoding="async" draggable="false">
+      <span id="bk-current-library-name" class="bk-brand-library">{escape((get_current_library().display_name if get_current_library() else "Hauptbibliothek"))}</span>
     </span>
   </a>
 
@@ -4517,9 +5765,6 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <span class="bk-task-label">Aufgaben</span>
       <span id="bk-task-count" class="bk-task-count" data-bk-task-count>0</span>
     </button>
-    <a class="bk-shell-button bk-assistant-button{' active' if active == 'assistant' else ''}" href="/assistant" aria-label="Bibliothekar Assistent" title="Bibliothekar Assistent">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg>
-    </a>
     <button id="bk-menu-button" class="bk-shell-button bk-menu-button" type="button" aria-label="Menü">☰</button>
 
     <div id="bk-task-panel" class="bk-task-panel" hidden></div>
@@ -4533,13 +5778,13 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>
         <span>Bibliothek wechseln</span>
       </button>
+      <a href="/trash">
+        <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 10v7M14 10v7"/></svg></span>
+        <span>Papierkorb</span>
+      </a>
       <a href="/metadata-correction">
         <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5M16.5 13.5l2 2M18.5 13.5l-2 2"/></svg></span>
         <span>Metadatenkorrektion</span>
-      </a>
-      <a href="/assistant">
-        <span class="bk-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg></span>
-        <span>Assistent</span>
       </a>
       <div class="bk-menu-separator"></div>
       <button type="button" data-bk-open-about>
@@ -4552,7 +5797,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 
 <nav class="bk-pwa-dock" aria-label="Web-App-Navigation">
   <a class="bk-pwa-nav-item{' active' if active == 'import' else ''}" data-area="import" href="/">
-    <span class="bk-pwa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="12" rx="1.5"/><path d="M8 21h8M12 17v4"/></svg></span>
+    <span class="bk-pwa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M4 14.5h16M7.5 17h.01M11 17h.01M7 9h10"/></svg></span>
     <span class="bk-pwa-label">Import</span>
   </a>
   <a class="bk-pwa-nav-item{' active' if active == 'workspace' else ''}" data-area="workspace" href="/workspace">
@@ -4575,6 +5820,21 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 
 {subnav}
 {heading}
+
+<dialog id="bk-external-change-dialog" class="bk-dialog">
+  <div class="bk-dialog-body" style="max-width:720px">
+    <div class="bk-dialog-head">
+      <div>
+        <h2 id="bk-external-change-title">Dateibestand</h2>
+        <div id="bk-external-change-lead" style="color:var(--bk-muted);margin-top:5px;line-height:1.45"></div>
+      </div>
+      <button type="button" id="bk-external-rename-close" hidden aria-label="Close notice"
+        title="Close notice" style="align-self:flex-start;min-width:30px;min-height:30px">×</button>
+    </div>
+    <div id="bk-external-change-list" style="margin-top:12px;max-height:min(52vh,520px);overflow:auto"></div>
+    <div id="bk-external-change-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px"></div>
+  </div>
+</dialog>
 
 <dialog id="bk-settings-dialog" class="bk-dialog">
   <div class="bk-dialog-body">
@@ -4605,10 +5865,16 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <section class="bk-settings-group">
         <strong>Sprache</strong>
         <div class="bk-choice-row">
-          <button type="button" class="active">Deutsch</button>
-          <button type="button" disabled title="Die vollständige englische Oberfläche folgt in einem eigenen Lokalisierungsschritt.">English</button>
+          <button type="button" data-bk-language-choice="de" aria-pressed="false">Deutsch</button>
+          <button type="button" class="active" data-bk-language-choice="en" aria-pressed="true">English</button>
         </div>
-        <div class="bk-language-note">Die Oberfläche ist vollständig deutsch. Englisch bleibt vorbereitet und wird erst aktiviert, wenn alle dynamischen Texte mitübersetzt sind.</div>
+        <div class="bk-language-note">Die Sprache betrifft die Oberfläche. Vorhandene Ordnernamen, Benutzereingaben und Dateipfade bleiben unverändert.</div>
+      </section>
+      <section class="bk-settings-group">
+        <strong>Sitzung</strong>
+        <div class="bk-library-actions" style="margin-top:12px">
+          <button id="bk-sign-out" type="button">Abmelden</button>
+        </div>
       </section>
     </div>
 
@@ -4647,6 +5913,22 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         </details>
 
         <details class="bk-settings-card">
+          <summary><span>Unterereignisse</span><span style="color:var(--bk-muted);font-weight:600">Standardbenennung</span></summary>
+          <div class="bk-settings-card-body">
+            <div style="display:flex;gap:14px;flex-wrap:wrap">
+              <label class="bk-compact-toggle"><input id="bk-subevent-include-year" type="checkbox"> <span>Jahr einbeziehen</span></label>
+              <label class="bk-compact-toggle"><input id="bk-subevent-include-time" type="checkbox"> <span>Uhrzeit einbeziehen</span></label>
+              <label class="bk-compact-toggle"><input id="bk-subevent-date-range" type="checkbox"> <span>Von–bis im Namen</span></label>
+            </div>
+            <label class="bk-compact-toggle" style="margin-top:10px">
+              <input id="bk-subevent-prefix-enabled" type="checkbox">
+              <span>Standardmäßig verwenden</span>
+            </label>
+            <div class="bk-language-note">Der eingegebene Unterereignisname bleibt immer erhalten. Jahr, Uhrzeit und Von–bis lassen sich frei kombinieren. Im Ereignisfenster kann der Standard pro Ereignis mit „Präfix: an/aus“ überschrieben werden.</div>
+          </div>
+        </details>
+
+        <details class="bk-settings-card">
           <summary><span>Sammelordner</span><span style="color:var(--bk-muted);font-weight:600">bisher „Ohne Ereignis“</span></summary>
           <div class="bk-settings-card-body">
             <label style="display:grid;gap:6px"><span>Bezeichnung für Sammelordner</span><input id="bk-no-event-label" value="Ohne Ereignis"></label>
@@ -4667,23 +5949,19 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 
     <div class="bk-settings-panel" data-bk-settings-panel="paths" hidden>
       <section class="bk-settings-group" id="bk-storage-path-settings">
-        <div><strong>Verwaltete Pfade</strong><div style="color:var(--bk-muted);margin-top:4px">Ordner innerhalb des gemeinsamen Kamera-Arbeitsbereichs</div></div>
+        <div><strong>Verwaltete Pfade · nur zur Information</strong><div style="color:var(--bk-muted);margin-top:4px">Ordner innerhalb des gemeinsamen Kamera-Arbeitsbereichs</div></div>
         <div class="bk-library-meta" style="margin-top:10px">
           <span>Workspace-Mount: <code id="bk-storage-workspace-root">/workspace</code></span>
           <span>TrueNAS stellt nur diesen RW-Stamm bereit. Bibliothekar verwaltet die folgenden Unterordner.</span>
-        </div>
-        <div class="bk-library-form" style="margin-top:12px">
-          <label><span>SD-Kartensicherungen</span><input id="bk-storage-backup-name" value="SD-Kartensicherungen"></label>
-          <label><span>Bibliotheks-Arbeitsbereiche</span><input id="bk-storage-workspaces-name" value="Arbeitsbereiche"></label>
-          <label><span>Metadatenkorrektur</span><input id="bk-storage-metadata-name" value="Metadatenkorrektur"></label>
         </div>
         <div class="bk-library-meta" style="margin-top:10px">
           <span id="bk-storage-backup-preview"></span>
           <span id="bk-storage-workspaces-preview"></span>
           <span id="bk-storage-metadata-preview"></span>
+          <span id="bk-storage-trash-preview"></span>
         </div>
-        <p style="color:var(--bk-muted);font-size:.86rem;line-height:1.45;margin-top:10px">Diese Namen betreffen ausschließlich von Bibliothekar verwaltete Ordner innerhalb des Workspace-Mounts. Metadatenkorrektur → Allgemein liegt automatisch im Unterordner <code>Allgemein</code>; dafür ist kein zusätzlicher TrueNAS-Host-Path nötig.</p>
-        <div class="bk-library-actions"><button id="bk-storage-save" type="button" class="bk-positive-action">Pfade speichern</button></div>
+        <p style="margin-top:24px">Verwaltungsordnernamen sind fest vorgegeben. Neue Installationen verwenden englische Namen. Bestehende Ordner und gespeicherte Pfade bleiben unverändert.</p>
+        <p><code>SD Card Backups</code> · <code>Library Workspaces</code> · <code>Metadata Correction</code> · <code>Trash</code></p>
         <div id="bk-storage-status" class="bk-library-status"></div>
       </section>
     </div>
@@ -4695,7 +5973,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
         <details class="bk-library-add-card">
           <summary>Bibliothek hinzufügen</summary>
           <div class="bk-library-form">
-            <div style="color:var(--bk-muted);font-size:.88rem;line-height:1.45">Standardmäßig legt Bibliothekar den Arbeitsbereich automatisch unter <code>/workspace/Arbeitsbereiche/&lt;Bibliotheks-ID&gt;</code> an. Nur für einen externen Arbeitsbereich ist ein zusätzlicher RW-Host-Path in TrueNAS nötig. Das Archiv wird aus Sicherheitsgründen pro Bibliothek separat als Read Only Host Path eingebunden.</div>
+            <div style="color:var(--bk-muted);font-size:.88rem;line-height:1.45">Standardmäßig legt Bibliothekar den Arbeitsbereich unter dem konfigurierten Stamm „Bibliotheks-Arbeitsbereiche“ an. Nur für einen externen Arbeitsbereich ist ein zusätzlicher RW-Host-Path in TrueNAS nötig. Das Archiv wird aus Sicherheitsgründen pro Bibliothek separat als Read Only Host Path eingebunden.</div>
             <label><span>Anzeigename</span><input id="bk-new-library-name" placeholder="z. B. Business"></label>
             <label><span>Arbeitsbereich · optional</span><input id="bk-new-library-work" placeholder="Leer = automatisch im gemeinsamen Workspace"></label>
             <label><span>Archiv · eigener RO-Mount</span><input id="bk-new-library-archive" placeholder="/libraries/business/archive"></label>
@@ -4726,11 +6004,14 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 <dialog id="bk-about-dialog" class="bk-dialog">
   <div class="bk-dialog-body">
     <div class="bk-dialog-head">
-      <div><h2>Bibliothekar</h2><div style="color:var(--bk-muted);margin-top:5px">Sichern · Ordnen · Bewahren</div></div>
+      <div class="bk-about-title">
+        <h2 class="bk-about-logo-heading"><img src="/assets/bibliothekar-logo-v3.svg?v=0.56.2" alt="Bibliothekar" width="190" height="52" decoding="async"></h2>
+        <div class="bk-about-tagline">Sichern · Ordnen · Bewahren</div>
+      </div>
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>0.40.3 · Kamerakern 0.32.11</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>1.0.0</span></p>
   </div>
 </dialog>
 
@@ -4738,11 +6019,1869 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 """
 
 
+BIBLIOTHEKAR_0441_CSS = r"""
+/* 0.44.4: neutraler Papierkorb ohne Eingriff in den eingefrorenen App-Stil. */
+body[data-bk-area="trash"] {
+  --bk-area-accent: #7c8790;
+  --bk-page-bg: #f1f2ef;
+}
+html[data-bk-theme="dark"] body[data-bk-area="trash"] {
+  --bk-page-bg: #0f1418;
+}
+.bk-tabs-active-trash .bk-tab[data-area="workspace"],
+.bk-tabs-active-trash .bk-tab[data-area="archive"] {
+  --bk-tab-edge-gradient:
+    linear-gradient(
+      to right,
+      var(--bk-stack-blend) 0,
+      transparent calc(var(--bk-tab-overlap) + var(--bk-edge-gradient-width)),
+      transparent 100%
+    );
+}
+body[data-bk-area="trash"] main {
+  min-height: 0 !important;
+}
+"""
+
+
+BIBLIOTHEKAR_0443_CSS = r"""
+/* Bibliotheksübergreifend sichtbarer Status persistenter Verwerfaufträge. */
+#bk-background-cancel-notice {
+  position:fixed;right:18px;top:74px;z-index:1250;
+  box-sizing:border-box;max-width:min(440px,calc(100vw - 32px));
+  border:1px solid var(--bk-line);border-radius:12px;
+  background:var(--bk-surface);color:var(--bk-ink);
+  box-shadow:0 7px 24px rgba(0,0,0,.17);
+  padding:12px 15px;display:flex;gap:11px;align-items:center;
+  font-size:.89rem;line-height:1.4;
+}
+#bk-background-cancel-notice[hidden]{display:none!important}
+#bk-background-cancel-notice[data-status="failed"]{border-color:var(--bk-danger)}
+#bk-background-cancel-notice .bk-cancel-retry{margin-left:auto;padding:6px 10px;font-size:.8rem;white-space:nowrap}
+#bk-background-cancel-notice .bk-cancel-spinner{
+  width:17px;height:17px;flex:0 0 17px;
+  border:2px solid var(--bk-blue);border-right-color:transparent;
+  border-radius:50%;animation:bk-cancel-spin .75s linear infinite;
+}
+@keyframes bk-cancel-spin{to{transform:rotate(360deg)}}
+@media(max-width:700px){
+  #bk-background-cancel-notice{top:75px;left:12px;right:12px;max-width:none}
+}
+"""
+
+BIBLIOTHEKAR_0443_JS = r"""
+(function(){
+  const box=document.createElement("div");
+  box.id="bk-background-cancel-notice";
+  box.hidden=true;
+  box.setAttribute("role","status");
+  box.setAttribute("aria-live","polite");
+  box.innerHTML='<span class="bk-cancel-spinner" aria-hidden="true"></span><span class="bk-cancel-message"></span><button class="bk-cancel-retry" type="button" hidden>Erneut versuchen</button>';
+  document.body.appendChild(box);
+  const message=box.querySelector(".bk-cancel-message");
+  const retry=box.querySelector(".bk-cancel-retry");
+  let inFlight=false;
+  let lastOperation="";
+  async function refresh(){
+    if(inFlight || document.hidden) return;
+    inFlight=true;
+    try{
+      const library=encodeURIComponent(window.__bkLibraryId || "main");
+      const response=await fetch("/api/background-cancellations?library="+library,{cache:"no-store"});
+      if(!response.ok) return;
+      const data=await response.json();
+      const jobs=Array.isArray(data.operations)?data.operations:[];
+      const active=jobs.find(x=>x.status==="running"||x.status==="queued");
+      const item=active||jobs[0];
+      if(!item){box.hidden=true;return;}
+      box.hidden=false;
+      box.dataset.status=item.status;
+      const spinner=box.querySelector(".bk-cancel-spinner");
+      spinner.hidden=!(item.status==="running"||item.status==="queued");
+      if(item.status==="queued") message.textContent="Änderung zum Verwerfen vorgemerkt. Du kannst in andere Bereiche wechseln.";
+      else if(item.status==="running") message.textContent="Änderung wird im Hintergrund verworfen. Bitte betroffene Dateien noch nicht bearbeiten.";
+      else if(item.status==="completed") message.textContent="Änderung erfolgreich verworfen. Der ursprüngliche Zustand ist wiederhergestellt.";
+      else message.textContent="Verwerfen fehlgeschlagen: "+String(item.error_message||"Unbekannter Fehler")+". Du kannst die Änderung erneut verwerfen.";
+      retry.hidden=item.status!=="failed";
+      retry.onclick=async()=>{
+        retry.disabled=true;
+        try{
+          const lib=encodeURIComponent(window.__bkLibraryId || "main");
+          const url="/api/jobs/"+encodeURIComponent(item.job_id)+"/event-mutations/"+encodeURIComponent(item.mutation_id)+"/cancel?library="+lib;
+          const response=await fetch(url,{method:"POST"});
+          if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"Auftrag konnte nicht erneut vorgemerkt werden.");}
+          await refresh();
+        }catch(error){message.textContent=String(error.message||error);}
+        finally{retry.disabled=false;}
+      };
+      if(lastOperation!==item.id) lastOperation=item.id;
+    }catch(_){}
+    finally{inFlight=false;}
+  }
+  window.addEventListener("bk-cancellation-queued",refresh);
+  window.addEventListener("pageshow",refresh);
+  document.addEventListener("visibilitychange",()=>{if(!document.hidden)refresh()});
+  refresh();
+  window.setInterval(refresh,1500);
+})();
+"""
+
+
+BIBLIOTHEKAR_0444_CSS = r"""
+/* 0.44.4: bewusst kompakter Desktop-Dock, außerhalb des Headers. */
+#bk-background-cancel-notice {
+  position:fixed;
+  top:auto;
+  left:auto;
+  right:22px;
+  bottom:22px;
+  z-index:900;
+  display:block;
+  width:290px;
+  max-width:calc(100vw - 44px);
+  padding:0;
+  border:0;
+  border-radius:13px;
+  background:transparent;
+  box-shadow:none;
+  color:var(--bk-ink);
+  font-size:.83rem;
+  line-height:1.4;
+}
+#bk-background-cancel-notice[hidden],
+#bk-background-cancel-notice [hidden] {display:none!important}
+#bk-background-cancel-notice[data-collapsed="true"] {width:48px;}
+#bk-background-cancel-notice .bk-activity-card {
+  border:1px solid var(--bk-line);
+  border-radius:13px;
+  background:var(--bk-surface);
+  box-shadow:0 6px 22px rgba(0,0,0,.13);
+  overflow:hidden;
+}
+#bk-background-cancel-notice .bk-activity-header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:9px 11px 7px 13px;
+  border-bottom:1px solid var(--bk-line);
+}
+#bk-background-cancel-notice .bk-activity-actions {
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:6px;
+  flex:0 0 auto;
+}
+#bk-background-cancel-notice .bk-activity-clear {
+  border:1px solid var(--bk-line);
+  border-radius:8px;
+  padding:5px 8px;
+  min-height:30px;
+  background:var(--bk-surface-2);
+  color:var(--bk-ink);
+  cursor:pointer;
+  font-size:.75rem;
+}
+#bk-background-cancel-notice .bk-activity-header strong {
+  font-size:.83rem;
+}
+#bk-background-cancel-notice .bk-activity-collapse {
+  flex:0 0 30px;
+  width:30px;
+  height:30px;
+  min-width:30px;
+  min-height:30px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border:1px solid var(--bk-line);
+  border-radius:9px;
+  padding:0;
+  background:var(--bk-surface-2);
+  color:var(--bk-ink);
+  cursor:pointer;
+}
+#bk-background-cancel-notice .bk-activity-collapse svg {
+  width:16px;
+  height:16px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:2.5;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+#bk-background-cancel-notice .bk-activity-list {
+  padding:6px 9px 9px;
+  display:grid;
+  gap:4px;
+}
+#bk-background-cancel-notice .bk-activity-item {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:0;
+  padding:7px 5px;
+  border-radius:8px;
+}
+#bk-background-cancel-notice .bk-activity-item + .bk-activity-item {
+  border-top:1px solid var(--bk-line);
+  border-radius:0;
+}
+#bk-background-cancel-notice .bk-activity-link {
+  flex:1 1 auto;
+  min-width:0;
+  color:var(--bk-ink);
+  text-decoration:none;
+  overflow-wrap:anywhere;
+}
+#bk-background-cancel-notice .bk-activity-link:hover {text-decoration:underline}
+#bk-background-cancel-notice .bk-activity-link strong {display:block;font-size:.83rem}
+#bk-background-cancel-notice .bk-activity-link small {display:block;color:var(--bk-muted);font-size:.76rem}
+#bk-background-cancel-notice .bk-activity-progress {flex:0 0 auto;font-size:.78rem;font-weight:700;font-variant-numeric:tabular-nums;color:var(--bk-blue)}
+#bk-background-cancel-notice .bk-activity-retry {
+  font-size:.73rem;
+  padding:4px 7px;
+  border:1px solid var(--bk-line);
+  border-radius:7px;
+  background:var(--bk-surface-2);
+  color:var(--bk-ink);
+  cursor:pointer;
+}
+#bk-background-cancel-notice .bk-activity-icon {
+  width:17px;
+  flex:0 0 17px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:700;
+}
+#bk-background-cancel-notice .bk-activity-icon[data-busy="true"] {
+  height:17px;
+  border:2px solid var(--bk-blue);
+  border-right-color:transparent;
+  border-radius:50%;
+  animation:bk-cancel-spin .75s linear infinite;
+}
+#bk-background-cancel-notice .bk-activity-mini {
+  background:var(--bk-surface)!important;
+  background-image:none!important;
+  margin-left:auto;
+  box-sizing:border-box !important;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  flex:0 0 48px;
+  width:48px;
+  min-width:48px;
+  max-width:48px;
+  height:48px;
+  min-height:48px;
+  padding:0;
+  border:1px solid var(--bk-line);
+  border-radius:14px;
+  background:var(--bk-surface);
+  color:var(--bk-ink);
+  box-shadow:0 5px 18px rgba(0,0,0,.13);
+  cursor:pointer;
+}
+/* Zentrum ist fuer !, Haken, Spinner und 100%-Anzeige identisch. */
+#bk-background-cancel-notice .bk-activity-mini {
+  display:grid;
+  place-items:center;
+}
+#bk-background-cancel-notice .bk-activity-center {
+  position:relative;
+  display:grid;
+  place-items:center;
+  width:36px;
+  height:36px;
+  min-width:0;
+  flex:none;
+}
+#bk-background-cancel-notice .bk-activity-mini .bk-activity-icon {
+  width:27px;
+  height:27px;
+  flex:0 0 27px;
+  margin:0;
+  display:grid;
+  place-items:center;
+  box-sizing:border-box;
+  font-size:1.05rem;
+  line-height:1;
+}
+#bk-background-cancel-notice .bk-activity-mini .bk-activity-icon[data-busy="true"] {
+  width:27px;
+  height:27px;
+}
+#bk-background-cancel-notice .bk-activity-mini-count {
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  padding:1px 3px;
+  border-radius:4px;
+  background:var(--bk-surface);
+  color:var(--bk-ink);
+  white-space:nowrap;
+  font-size:.63rem;
+  line-height:1.2;
+  font-weight:750;
+  font-variant-numeric:tabular-nums;
+}
+#bk-background-cancel-notice .bk-activity-mini[data-status="failed"] .bk-activity-icon {color:var(--bk-danger)}
+#bk-background-cancel-notice [data-status="failed"] .bk-activity-icon {color:var(--bk-danger)}
+#bk-background-cancel-notice [data-status="completed"] .bk-activity-icon {color:var(--bk-green)}
+#bk-background-cancel-notice button:focus-visible,
+#bk-background-cancel-notice a:focus-visible {
+  outline:2px solid var(--bk-blue);
+  outline-offset:2px;
+}
+.bk-page-activity{border:1px solid var(--bk-line,#ccd2d8);border-radius:12px;padding:10px;margin-bottom:14px}
+.bk-page-activity[hidden]{display:none}
+@media(min-width:901px){.bk-page-activity{display:none}}
+.bk-page-activity-dismiss{float:right;min-width:36px;min-height:36px;border:0;background:transparent;color:inherit;font-size:1.3rem;cursor:pointer}
+.bk-page-activity .bk-activity-item{display:flex;gap:10px;align-items:center;padding:6px 0}
+.bk-page-activity .bk-activity-link{display:grid;gap:4px;min-width:0;overflow-wrap:anywhere;color:inherit;text-decoration:none}
+.bk-page-activity [data-status="failed"]{color:var(--bk-danger,#c33)}
+/* Background operations must remain discoverable on desktop, mobile web and PWA. */
+@media (max-width:900px), (max-height:520px), (hover:none), (pointer:coarse) {
+  #bk-background-cancel-notice {
+    width:min(390px,calc(100vw - 24px));right:12px;left:auto;
+    bottom:calc(12px + env(safe-area-inset-bottom,0px));
+    max-height:min(60dvh,440px);
+  }
+  #bk-background-cancel-notice .bk-activity-card {max-height:min(60dvh,440px);overflow:auto}
+}
+"""
+
+BIBLIOTHEKAR_0444_JS = r"""
+(function() {
+  const desktop = window.matchMedia("(min-width: 0px)");
+  document.body.insertAdjacentHTML("beforeend",
+    '<aside id="bk-background-cancel-notice" aria-label="Hintergrundvorgänge" hidden></aside>');
+  const box = document.getElementById("bk-background-cancel-notice");
+
+  const mini = document.createElement("button");
+  mini.type = "button";
+  mini.className = "bk-activity-mini";
+  mini.setAttribute("aria-label", "Hintergrundvorgänge anzeigen");
+  mini.setAttribute("title", "Hintergrundvorgänge anzeigen");
+  mini.innerHTML = '<span class="bk-activity-center"><span class="bk-activity-icon" aria-hidden="true"></span><span class="bk-activity-mini-count" aria-hidden="true"></span></span>';
+  mini.hidden = true;
+
+  const card = document.createElement("section");
+  card.className = "bk-activity-card";
+  card.innerHTML = '<div class="bk-activity-header"><strong>Hintergrundvorgänge</strong><div class="bk-activity-actions"><button class="bk-activity-clear" type="button" title="Beendete Meldungen ausblenden">Leeren</button><button class="bk-activity-collapse" type="button" aria-label="Hintergrundvorgänge verkleinern" title="Hintergrundvorgänge verkleinern"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 9 7 7 7-7"/></svg></button></div></div><div class="bk-activity-list"></div>';
+  const collapse = card.querySelector(".bk-activity-collapse");
+  const clear = card.querySelector(".bk-activity-clear");
+  const list = card.querySelector(".bk-activity-list");
+  // Reuse the same persisted activity feed on the operation's page. A queued
+  // entry stays queued; only a terminal server state receives a success icon.
+  const pageActivity = document.createElement("section");
+  pageActivity.className = "bk-page-activity";
+  pageActivity.setAttribute("aria-label", "Auftragsstatus auf dieser Seite");
+  pageActivity.setAttribute("aria-live", "polite");
+  pageActivity.hidden = true;
+  document.querySelector("main")?.prepend(pageActivity);
+
+  const dismissedPageActivities=new Set();
+  try {for(const id of JSON.parse(sessionStorage.getItem("bk-dismissed-page-activities")||"[]"))dismissedPageActivities.add(id)}catch(_){}
+  function renderPageActivity(operations) {
+    const route = location.pathname;
+    const relevant = operations.filter(item => {
+      // SD progress/results already live in the task dock and near the button.
+      if ((route === "/" && item.kind === "sd_check")
+          || (route === "/trash" && item.kind === "trash_restore")) return false;
+      if(dismissedPageActivities.has(String(item.id)))return false;
+      const target = destination(item).split("?")[0];
+      return target === route || (route === "/workspace" && target === "/events");
+    });
+    pageActivity.hidden = relevant.length === 0;
+    if(!relevant.length){pageActivity.replaceChildren();return;}
+    const dismiss=document.createElement("button");dismiss.type="button";dismiss.className="bk-page-activity-dismiss";
+    dismiss.textContent="×";dismiss.setAttribute("aria-label",window.BibliothekarI18n?.t?.("Statusanzeige ausblenden")||"Statusanzeige ausblenden");
+    dismiss.addEventListener("click",()=>{
+      for(const item of relevant)dismissedPageActivities.add(String(item.id));
+      try{sessionStorage.setItem("bk-dismissed-page-activities",JSON.stringify([...dismissedPageActivities]))}catch(_){}
+      pageActivity.hidden=true;
+    });
+    pageActivity.replaceChildren(dismiss,...relevant.map(makeItem));
+  }
+  box.append(card, mini);
+  document.body.appendChild(box);
+
+  const library = () => encodeURIComponent(window.__bkLibraryId || "main");
+  let collapsed = window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
+  try { const saved = sessionStorage.getItem("bk-activity-collapsed"); if (saved !== null) collapsed = saved === "1"; } catch (_) {}
+  let waiting = false;
+  let lastSeen = [];
+  function viewState() {
+    box.dataset.collapsed = String(collapsed);
+    card.hidden = collapsed;
+    mini.hidden = !collapsed;
+    mini.setAttribute("aria-expanded", String(!collapsed));
+    clear.hidden = !lastSeen.some(item => !item.active);
+    if (collapsed) {
+      const active = lastSeen.filter(item => item.active);
+      const icon = mini.querySelector(".bk-activity-icon");
+      const busy = active.length > 0;
+      icon.dataset.busy = String(busy);
+      const hasFailure = lastSeen.some(item => ["failed", "interrupted"].includes(item.status));
+      mini.dataset.status = busy ? "running" : hasFailure ? "failed" : "completed";
+      icon.textContent = busy ? "" : hasFailure ? "!" : "✓";
+      const single = active.length === 1 ? active[0] : null;
+      const hasPercent = !!(single && single.progress_percent !== null
+        && single.progress_percent !== undefined
+        && Number.isFinite(Number(single.progress_percent)));
+      const count = mini.querySelector(".bk-activity-mini-count");
+      count.hidden = !hasPercent && !(busy && active.length > 1);
+      count.textContent = hasPercent ? Math.round(Number(single.progress_percent)) + "%"
+        : busy && active.length > 1 ? String(active.length) : "";
+      mini.setAttribute("aria-label", hasPercent
+        ? "Hintergrundvorgänge: " + Math.round(Number(single.progress_percent)) + " %"
+        : "Hintergrundvorgänge anzeigen");
+    }
+  }
+  function setCollapsed(value) {
+    collapsed = value;
+    try { sessionStorage.setItem("bk-activity-collapsed", value ? "1" : "0"); } catch (_) {}
+    viewState();
+  }
+  collapse.addEventListener("click", () => setCollapsed(true));
+  mini.addEventListener("click", () => setCollapsed(false));
+  clear.addEventListener("click", async () => {
+    clear.disabled = true;
+    try {
+      const response = await fetch("/api/background-activity/clear?library=" + library(),
+        {method:"POST"});
+      if (!response.ok) throw new Error("Meldungen konnten nicht entfernt werden.");
+      await refresh();
+    } catch (error) {
+      clear.title = String(error.message || error);
+    } finally {
+      clear.disabled = false;
+    }
+  });
+
+  function destination(item) {
+    const lib = library();
+    if (item.kind === "import") return "/?library=" + lib;
+    if (item.kind === "sd_check") return "/?library=" + lib;
+    if (item.kind === "trash_restore") return "/trash?library=" + lib;
+    if (item.kind === "release") return "/archive?library=" + lib;
+    const job = item.job_id ? "&job=" + encodeURIComponent(item.job_id) : "";
+    return "/events?library=" + lib + job;
+  }
+  function makeItem(item) {
+    const row = document.createElement("div");
+    row.className = "bk-activity-item";
+    row.dataset.status = item.status;
+    const icon = document.createElement("span");
+    icon.className = "bk-activity-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.dataset.busy = String(!!item.active);
+    icon.textContent = item.active ? "" : ["completed", "applied"].includes(item.status) ? "✓" : "!";
+    const link = document.createElement("a");
+    link.className = "bk-activity-link";
+    link.href = destination(item);
+    link.title = "Zum Vorgang wechseln";
+    const name = document.createElement("strong");
+    const label = String(item.label || "Hintergrundvorgang");
+    const t = value => window.BibliothekarI18n?.t?.(value) || value;
+    name.setAttribute("data-bk-preserve-language", "");
+    if (item.kind === "import" || item.kind === "sd_check") name.textContent = label;
+    else if (item.kind === "apply" && item.job_id && label.endsWith(" anwenden")) {
+      // The event name is user data, even if it equals a dictionary key.
+      name.textContent = t("Anwenden") + ": " + label.slice(0, -9);
+    } else name.textContent = t(label);
+    const detail = document.createElement("small");
+    detail.textContent = item.detail || "";
+    link.append(name, detail);
+    row.append(icon, link);
+    if ((item.kind === "apply" || item.kind === "release" || item.kind === "trash_restore") && item.progress_percent !== null
+        && item.progress_percent !== undefined
+        && Number.isFinite(Number(item.progress_percent))) {
+      const progress = document.createElement("span");
+      progress.className = "bk-activity-progress";
+      progress.textContent = Math.round(Number(item.progress_percent)) + " %";
+      progress.setAttribute("aria-label", "Fortschritt " + progress.textContent);
+      row.appendChild(progress);
+    }
+    if (item.kind === "sd_check" && item.active) {
+      const cancel=document.createElement("button");
+      cancel.type="button";cancel.className="bk-activity-retry";cancel.textContent=t("Prüfung abbrechen");
+      cancel.addEventListener("click",async()=>{
+        cancel.disabled=true;
+        try{
+          const response=await fetch("/api/jobs/"+encodeURIComponent(item.id)+"/cancel",{method:"POST"});
+          if(!response.ok){const data=await response.json();throw new Error(data.detail);}
+          await refresh();
+        }catch(error){detail.textContent=String(error.message||error);cancel.disabled=false;}
+      });
+      row.appendChild(cancel);
+    }
+    if (item.kind === "cancel" && item.can_retry) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "bk-activity-retry";
+      retry.textContent = "Wiederholen";
+      retry.addEventListener("click", async () => {
+        retry.disabled = true;
+        try {
+          const url = "/api/jobs/" + encodeURIComponent(item.job_id) +
+            "/event-mutations/" + encodeURIComponent(item.mutation_id) +
+            "/cancel?library=" + library();
+          const response = await fetch(url, {method:"POST"});
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.detail || "Auftrag konnte nicht erneut vorgemerkt werden.");
+          }
+          await refresh();
+        } catch (error) {
+          detail.textContent = String(error.message || error);
+        } finally {
+          retry.disabled = false;
+        }
+      });
+      row.appendChild(retry);
+    }
+    return row;
+  }
+  async function refresh() {
+    if (waiting || document.hidden || !desktop.matches) return;
+    waiting = true;
+    try {
+      const res = await fetch("/api/background-activity?library=" + library(), {cache:"no-store"});
+      if (!res.ok) return;
+      const data = await res.json();
+      const ops = Array.isArray(data.operations) ? data.operations : [];
+      renderPageActivity(ops);
+      window.dispatchEvent(new CustomEvent("bk-activity-updated", {detail: ops}));
+      const active = ops.filter(item => item.active);
+      const finished = ops.filter(item => !item.active);
+      lastSeen = active.concat(finished).slice(0,5);
+      box.hidden = lastSeen.length === 0;
+      if (!box.hidden) {
+        list.replaceChildren(...lastSeen.map(makeItem));
+        viewState();
+      }
+    } catch (_) {
+      // Kurzzeitige Netzfehler verändern die serverseitigen Aufträge nicht.
+    } finally {
+      waiting = false;
+    }
+  }
+  const mediaChange = () => { box.hidden = !desktop.matches || !lastSeen.length; if (desktop.matches) refresh(); };
+  desktop.addEventListener?.("change", mediaChange);
+  window.addEventListener("bk-cancellation-queued", refresh);
+  window.addEventListener("bk-activity-refresh", refresh);
+  window.addEventListener("pageshow", refresh);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+  refresh();
+  window.setInterval(refresh, 2500);
+})();
+"""
+
+
+BIBLIOTHEKAR_0450_CSS = r"""
+/* 0.45.0: typografischer App-Standard ohne eingebundene Fontdateien.
+ * Der Browser benutzt die erste lokal verfügbare Schrift. */
+body.bibliothekar-redesign,
+body.bibliothekar-redesign button,
+body.bibliothekar-redesign input,
+body.bibliothekar-redesign select,
+body.bibliothekar-redesign textarea,
+body.bibliothekar-redesign code,
+body.bibliothekar-redesign pre,
+body.bibliothekar-redesign kbd,
+body.bibliothekar-redesign samp {
+  font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+#bk-settings-dialog .bk-settings-preview-case pre {
+  font-family: Futura, "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+/* Fixed-width glyphs are required for the unicode connector lines. */
+body.bibliothekar-redesign :is(
+  .plan-tree, .inspect-structure, .change-target-tree,
+  .structure-lines, .tree:not(.rich-preview), .bk-settings-preview-case pre
+) {
+  font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
+  letter-spacing:0;
+}
+/* Keine zusätzlichen Umbrüche durch abweichende Glyphenbreiten in der Navigation. */
+.bk-brand-copy,
+.bk-brand-title,
+.bk-brand-library,
+.bk-tab-label,
+.bk-tab-mobile-label {
+  min-width: 0;
+}
+.bk-brand-title {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bk-tab-label,
+.bk-tab-mobile-label,
+.bk-pwa-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bk-shell-actions { flex-shrink: 0; }
+@media (max-width: 820px) {
+  .bk-shell { grid-template-columns: minmax(0, 1fr) auto; }
+  .bk-brand { min-width: 0; }
+  .bk-brand-copy { min-width: 0; overflow: hidden; }
+  .bk-shell-actions { min-width: 0; }
+}
+@media (max-width: 400px) {
+  .bk-shell { gap: 6px; }
+  .bk-brand { gap: 7px; }
+  .bk-tab { padding-inline: 10px; }
+}
+"""
+
+
+BIBLIOTHEKAR_0451_HEAD_JS = r"""
+/* Vor den Styles und dem ersten Paint: iOS Safari darf kein helles Default-Theme zeichnen. */
+(() => {
+  const root = document.documentElement;
+  let choice = "light";
+  try { choice = localStorage.getItem("bibliothekar-theme") || "light"; } catch (_) {}
+  let systemDark = false;
+  try { systemDark = Boolean(window.matchMedia("(prefers-color-scheme: dark)").matches); } catch (_) {}
+  root.dataset.bkTheme = choice === "dark" || (choice === "system" && systemDark) ? "dark" : "light";
+  root.dataset.bkThemeChoice = choice;
+  root.dataset.bkDisplayMode = (
+    window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true
+  ) ? "standalone" : "browser";
+  // Sessionzustand gilt nur für den exakt angesteuerten neuen Bereich.
+  try {
+    const key = "bk-tab-navigation-0451";
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return;
+    sessionStorage.removeItem(key);
+    const saved = JSON.parse(raw);
+    const next = new URL(saved.href, location.href);
+    const expected = {"/": "import", "/workspace": "workspace", "/transfer": "archive"}[location.pathname];
+    if (expected && saved.area === expected && next.pathname === location.pathname
+        && Date.now() - Number(saved.at) < 30000 && Date.now() >= Number(saved.at)) {
+      root.dataset.bkNavArriving = saved.area;
+    }
+  } catch (_) {}
+})();
+"""
+
+BIBLIOTHEKAR_0470_HEAD_JS = r"""
+/* Statusleiste in der installierten Handy-PWA passend zum Seitenhintergrund,
+   damit Uhrzeit und Systemicons auch ohne dunklen Markenheader lesbar sind. */
+(() => {
+  const root=document.documentElement;
+  if(root.dataset.bkDisplayMode!=="standalone"
+      || !window.matchMedia?.("(max-width: 820px)")?.matches) return;
+  const pathname=location.pathname;
+  const area=pathname==="/" ? "import"
+    : (pathname==="/workspace" || pathname==="/events") ? "workspace"
+    : pathname==="/transfer" ? "archive"
+    : (pathname==="/metadata-correction" || pathname.startsWith("/metadata-correction/")) ? "metadata"
+    : "neutral";
+  const palettes={
+    import:["#f8efec","#120f11"],
+    workspace:["#eef4f8","#0c1217"],
+    archive:["#f8f4e8","#14120c"],
+    metadata:["#f1f2ef","#0f1418"],
+    neutral:["#f1f2ef","#0f1418"]
+  };
+  const apply=()=>{
+    const dark=root.dataset.bkTheme==="dark";
+    const color=palettes[area][dark?1:0];
+    root.style.backgroundColor=color;
+    let theme=document.querySelector('meta[name="theme-color"]');
+    if(!theme){
+      theme=document.createElement("meta");
+      theme.setAttribute("name","theme-color");
+      document.head.appendChild(theme);
+    }
+    theme.setAttribute("content",color);
+    let bar=document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+    if(!bar){
+      bar=document.createElement("meta");
+      bar.setAttribute("name","apple-mobile-web-app-status-bar-style");
+      document.head.appendChild(bar);
+    }
+    bar.setAttribute("content",dark?"black-translucent":"default");
+  };
+  if(document.readyState==="loading"){
+    document.addEventListener("DOMContentLoaded",apply,{once:true});
+  }else{ apply(); }
+  if(typeof MutationObserver==="function"){
+    new MutationObserver(apply).observe(root,{
+      attributes:true,attributeFilter:["data-bk-theme"]
+    });
+  }
+})();
+"""
+
+BIBLIOTHEKAR_0451_CSS = r"""
+/* 0.45.1: Theme und Standalone-Modus werden vor dem ersten CSS-Paint initialisiert. */
+html[data-bk-theme="dark"] { background-color: #0c1115; color-scheme: dark; }
+html[data-bk-theme="light"] { background-color: #f4f1e8; color-scheme: light; }
+
+/* Hover bleibt ein reiner Desktopzustand; ein Fingertipp erzeugt genau einen Hub. */
+.bk-tab.active { animation: none; }
+.bk-tab.bk-tab-pressing:not(.active),
+.bk-tab.is-navigating:not(.active) {
+  transform: translateY(-8px) !important;
+}
+@media (hover: none), (pointer: coarse) {
+  .bk-tab:hover:not(.active):not(.bk-tab-pressing):not(.is-navigating) {
+    transform: translateY(0);
+  }
+}
+
+/* Auf der Folgeseite startet der aktive Reiter in der angehobenen Lage.
+   Erst nach zwei Animation-Frames wird dieser Zustand freigegeben. */
+html[data-bk-nav-arriving="import"] .bk-tab.active[data-area="import"],
+html[data-bk-nav-arriving="workspace"] .bk-tab.active[data-area="workspace"],
+html[data-bk-nav-arriving="archive"] .bk-tab.active[data-area="archive"] {
+  transform: translateY(-8px);
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bk-tab.bk-tab-pressing:not(.active),
+  .bk-tab.is-navigating:not(.active) { transform: none !important; }
+  html[data-bk-nav-arriving] .bk-tab.active { transform: none !important; }
+}
+"""
+
+
+
+BIBLIOTHEKAR_0452_CSS = r"""
+/* 0.45.2: Im Hellmodus bleiben Prüffälle deutlich von gewöhnlichen Tagen unterscheidbar. */
+html[data-bk-theme="light"] body.bibliothekar-redesign .day-card.without-date.review-card {
+  background: #f3e3cf !important;
+  border-color: #b56d22 !important;
+  color: #382a1e !important;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign .day-card.without-date.review-card:hover {
+  background: #efd7b9 !important;
+  border-color: #985819 !important;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign .day-card.without-date.review-card .badge.warning {
+  color: #89500f !important;
+  border-color: #b56d22 !important;
+}
+"""
+
+
+
+BIBLIOTHEKAR_0453_CSS = r"""
+/* 0.45.3: Importverlauf strukturell getrennt, nur eine Überschrift, Theme-Variablen im Hellmodus. */
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-row {
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) auto;
+  align-items:center;
+  min-width:0;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-strip {
+  grid-column:1;
+  grid-row:1;
+  min-width:0;
+  padding:8px 10px;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions {
+  grid-column:2;
+  grid-row:1;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  flex-direction:row;
+  justify-content:flex-end;
+  gap:8px;
+  padding:8px 10px 8px 0;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions .bk-job-actions {
+  margin:0;
+  display:flex;
+  align-items:center;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details {
+  grid-column:1 / -1;
+  grid-row:2;
+  min-width:0;
+  padding:0 12px 12px;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .bk-history-expanded {
+  margin:0 !important;
+  padding:12px 0 0 !important;
+  border:0 !important;
+  border-radius:0 !important;
+  background:transparent !important;
+  box-shadow:none !important;
+  width:100%;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-detail-date {
+  font-size:.83rem;
+  color:var(--muted);
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .progress-stack.completed-only {
+  display:none !important;
+}
+/* Dezent: die Schublade für ausgeblendete Einträge ist kein eigener Akzentbereich. */
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-hidden-section {
+  border-top:1px solid var(--border);
+  margin-top:18px;
+  padding-top:10px;
+}
+body.bibliothekar-redesign[data-bk-area="import"] #hidden-history-toggle {
+  display:block;
+  width:100%;
+  min-height:38px;
+  padding:8px 14px !important;
+  line-height:1.35;
+  border:1px solid var(--border);
+  border-radius:9px;
+  text-align:center !important;
+  font-weight:500;
+  background:transparent !important;
+  color:var(--muted) !important;
+}
+body.bibliothekar-redesign[data-bk-area="import"] #hidden-history-toggle:hover {
+  border-color:var(--muted);
+}
+/* Ursprünglich dunkel kodierte Importkarten bekommen ein sauberes Hellmodus-Theme. */
+html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="import"] .bk-history-row {
+  --surface:#faf8f2;
+  --surface-soft:#f1ede5;
+  --border:#d9d0c2;
+  --text:#162536;
+  --muted:#66717e;
+  color:var(--text) !important;
+  background:var(--surface-soft) !important;
+  border-color:var(--border) !important;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details {
+  color:var(--text) !important;
+  background:var(--surface) !important;
+  border-color:var(--border) !important;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="import"] .bk-history-open {
+  color:var(--text) !important;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="import"] .bk-history-hidden-section {
+  --border:#d9d0c2;
+  --muted:#67727e;
+}
+html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="import"] #hidden-history-toggle {
+  color:#66717e !important;
+}
+/* Auf allen mobilen Ansichten bleiben Sicherung löschen/Ausblenden nebeneinander unten. */
+@media(max-width:700px){
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-row {
+    grid-template-columns:minmax(0,1fr);
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-strip {
+    grid-column:1;grid-row:1;
+    padding:9px 10px;
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-strip .bk-history-open {
+    min-width:0;
+    width:100%;
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details {
+    grid-column:1;grid-row:2;
+    padding:0 10px 10px;
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions {
+    grid-column:1;grid-row:3;
+    display:flex !important;
+    flex-direction:row !important;
+    align-items:center;
+    justify-content:stretch;
+    gap:8px;
+    padding:8px 10px 10px;
+    border-top:1px solid var(--border);
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions > button,
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions .bk-job-actions {
+    flex:1 1 0;
+    min-width:0;
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions .bk-job-actions > button {
+    width:100%;
+  }
+  body.bibliothekar-redesign[data-bk-area="import"] .bk-history-actions button {
+    width:100%;
+    min-height:36px;
+    padding:7px 8px !important;
+    font-size:.8rem;
+    white-space:normal;
+  }
+}
+/* Zusätzliche Leerfläche unter dem letzten Tagesordner (Desktop). */
+@media(min-width:821px){
+  body.bibliothekar-redesign[data-bk-area="workspace"] main {
+    padding-bottom:max(180px, 23vh) !important;
+  }
+}
+/* Kleine, konsistente Hoververfärbung: keine optische Größenänderung. */
+@media(hover:hover) and (pointer:fine){
+  html[data-bk-theme="dark"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover {
+    background:#202a33 !important;
+    border-color:#53626f !important;
+  }
+  html[data-bk-theme="light"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover {
+    background:#e9e3d9 !important;
+    border-color:#c4b8a8 !important;
+  }
+  html[data-bk-theme="dark"] body.bibliothekar-redesign .event-card:not(.is-open):hover {
+    background:#222e38 !important;
+    border-color:#536675 !important;
+  }
+  html[data-bk-theme="light"] body.bibliothekar-redesign .event-card:not(.is-open):hover {
+    background:#ebe6de !important;
+    border-color:#c7b8a9 !important;
+  }
+}
+body.bibliothekar-redesign .day-card:not(.review-card),
+body.bibliothekar-redesign .event-card {
+  transition:background-color .17s ease, border-color .17s ease;
+}
+@media(prefers-reduced-motion:reduce){
+  body.bibliothekar-redesign .day-card,
+  body.bibliothekar-redesign .event-card {transition:none !important;}
+}
+"""
+
+
+
+BIBLIOTHEKAR_0454_CSS = r"""
+/* 0.45.4: Detailraster, kleine Hover-Reaktionen und ausschließlich anklickbare Hilfen. */
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .bk-history-expanded {
+  display:block !important;
+  grid-template-columns:none !important;
+  column-gap:0 !important;
+}
+body.bibliothekar-redesign[data-bk-area="workspace"] main > #status:empty {
+  display:none !important;
+}
+body.bibliothekar-redesign[data-bk-area="workspace"] main > #summary {
+  margin-top:0;
+}
+/* Der Hinweis schwebt über den Inhalten und verändert nie die Titelhöhe. */
+.bk-title-help {
+  position:relative;
+  cursor:help;
+}
+.bk-title-help::after {
+  position:absolute;
+  z-index:5200;
+  top:calc(100% + 8px);
+  left:0;
+  width:max-content;
+  max-width:min(580px, calc(100vw - 36px));
+  white-space:normal;
+  pointer-events:none;
+}
+.bk-title-help.is-open::after {
+  display:block;
+}
+@media(max-width:700px) {
+  .bk-title-help {cursor:help;}
+  .bk-title-help.is-open::after {
+    margin-top:0;
+    flex-basis:auto;
+    max-width:calc(100vw - 36px);
+  }
+}
+body.bibliothekar-redesign .day-card,
+body.bibliothekar-redesign .timeline-event-card,
+body.bibliothekar-redesign .event-card {
+  transition:background-color .24s ease-in-out, border-color .24s ease-in-out;
+}
+@media (hover:hover) and (pointer:fine) {
+  html[data-bk-theme="dark"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover,
+  html[data-bk-theme="light"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover {
+    background:color-mix(in srgb, var(--surface) 96%, var(--bk-ink) 4%) !important;
+    border-color:color-mix(in srgb, var(--border) 85%, var(--bk-ink) 15%) !important;
+  }
+  html[data-bk-theme="dark"] body.bibliothekar-redesign[data-bk-area="workspace"] .day-card.review-card:hover {
+    background:color-mix(in srgb, var(--warning) 14%, var(--surface)) !important;
+    border-color:var(--warning) !important;
+  }
+  html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="workspace"] .day-card.without-date.review-card:hover {
+    background:#f1dfc8 !important;
+    border-color:#b56d22 !important;
+  }
+  body.bibliothekar-redesign[data-bk-area="workspace"] .timeline-event-card:not(.selected-preview):hover,
+  body.bibliothekar-redesign[data-bk-area="workspace"] .event-card:not(.selected-preview):not(.is-open):hover {
+    background:color-mix(in srgb, var(--surface-2) 96%, var(--bk-ink) 4%) !important;
+    border-color:color-mix(in srgb, var(--border) 85%, var(--bk-ink) 15%) !important;
+  }
+}
+@media (prefers-reduced-motion:reduce) {
+  body.bibliothekar-redesign .day-card,
+  body.bibliothekar-redesign .timeline-event-card,
+  body.bibliothekar-redesign .event-card {transition:none !important;}
+}
+"""
+
+
+BIBLIOTHEKAR_0455_CSS = r"""
+/* 0.45.5: Die Stufenanzeige besitzt einen echten Füllstand aus dem Importverlauf. */
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .progress-row {
+  min-width:0;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .progress-caption {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  gap:5px 10px;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-stage-badge {
+  display:inline-block;
+  margin-inline-start:8px;
+  padding:2px 8px;
+  border-radius:999px;
+  background:color-mix(in srgb,var(--bk-blue) 11%,var(--surface));
+  border:1px solid color-mix(in srgb,var(--bk-blue) 28%,var(--border));
+  color:var(--bk-ink);
+  font-size:.79rem;
+  font-weight:600;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-stage-value {
+  font-size:.79rem;
+  color:var(--muted);
+}
+/* Maximal zwei Prozent optische Veränderung statt einer auffälligen
+   Hintergrundumschaltung. Auch der Rahmen bleibt sehr zurückhaltend. */
+@media(hover:hover) and (pointer:fine){
+  html[data-bk-theme="dark"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover,
+  html[data-bk-theme="light"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover {
+    background:color-mix(in srgb,var(--surface) 98%,var(--bk-ink) 2%) !important;
+    border-color:color-mix(in srgb,var(--border) 94%,var(--bk-ink) 6%) !important;
+  }
+  html[data-bk-theme="dark"] body.bibliothekar-redesign[data-bk-area="workspace"] .day-card.review-card:hover {
+    background:color-mix(in srgb,var(--warning) 13%,var(--surface)) !important;
+    border-color:var(--warning) !important;
+  }
+  html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="workspace"] .day-card.without-date.review-card:hover {
+    background:#f2e1cc !important;
+    border-color:#b56d22 !important;
+  }
+  body.bibliothekar-redesign[data-bk-area="workspace"] .timeline-event-card:not(.selected-preview):hover,
+  body.bibliothekar-redesign[data-bk-area="workspace"] .event-card:not(.selected-preview):not(.is-open):hover {
+    background:color-mix(in srgb,var(--surface-2) 98%,var(--bk-ink) 2%) !important;
+    border-color:color-mix(in srgb,var(--border) 94%,var(--bk-ink) 6%) !important;
+  }
+}
+"""
+
+
+BIBLIOTHEKAR_0456_CSS = r"""
+/* 0.45.6: Phasen-Badge nur im ausgeklappten Import, oben rechts.
+   Kein absolut positionierter Text: die Zeile bleibt auch mobil kollisionsfrei. */
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .bk-history-detail-date {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:space-between;
+  column-gap:12px;
+  row-gap:5px;
+  min-width:0;
+}
+body.bibliothekar-redesign[data-bk-area="import"] .bk-history-details .bk-stage-badge-header {
+  margin-inline-start:auto;
+  flex:0 0 auto;
+  white-space:nowrap;
+}
+
+/* Ausschließlich Hellmodus: Zwischenwert aus 0.45.4 und 0.45.5.
+   Die vorhandenen Dark-Mode-Regeln und 240-ms-Übergänge bleiben unverändert. */
+@media (hover:hover) and (pointer:fine) {
+  html[data-bk-theme="light"] body.bibliothekar-redesign .day-card:not(.review-card):not(.selected):hover {
+    background:color-mix(in srgb,var(--surface) 97%,var(--bk-ink) 3%) !important;
+    border-color:color-mix(in srgb,var(--border) 91%,var(--bk-ink) 9%) !important;
+  }
+  html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="workspace"] .day-card.without-date.review-card:hover {
+    background:#f1dfc9 !important;
+    border-color:#b56d22 !important;
+  }
+  html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="workspace"] .timeline-event-card:not(.selected-preview):hover,
+  html[data-bk-theme="light"] body.bibliothekar-redesign[data-bk-area="workspace"] .event-card:not(.selected-preview):not(.is-open):hover {
+    background:color-mix(in srgb,var(--surface-2) 97%,var(--bk-ink) 3%) !important;
+    border-color:color-mix(in srgb,var(--border) 91%,var(--bk-ink) 9%) !important;
+  }
+}
+
+/* 0.48.0: 0.45.6 inner translations removed. They moved the
+   bordered “Metadaten eindeutig” badge and could clip its outline. */
+"""
+
+
+BIBLIOTHEKAR_0460_CSS = r"""
+/* 0.47.0: Ein einziges vektorbasiertes Markenlogo in allen Bereichen.
+   Die Bibliotheksbezeichnung bleibt ein unabhängiges dynamisches Feld.
+   Sie sitzt bewusst im Freiraum unter dem Pfad-Schriftzug – nicht
+   unter dem nach unten reichenden Symbol links. */
+body.bibliothekar-redesign .bk-brand-new {
+  display:flex;
+  align-items:center;
+  gap:0;
+  min-width:0;
+}
+body.bibliothekar-redesign .bk-brand-new .bk-brand-art {
+  display:block;
+  flex:0 0 auto;
+  position:relative;
+  width:165px;
+  height:45px;
+  max-width:100%;
+  line-height:normal;
+}
+body.bibliothekar-redesign .bk-brand-new .bk-brand-image {
+  display:block;
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  pointer-events:none;
+  user-select:none;
+  -webkit-user-drag:none;
+}
+body.bibliothekar-redesign .bk-brand-new .bk-brand-art #bk-current-library-name {
+  display:block !important;
+  position:absolute;
+  top:71%;
+  left:21.5%;
+  right:1%;
+  max-width:none;
+  min-width:0;
+  margin:0;
+  padding:0;
+  overflow:hidden;
+  color:rgba(255,255,255,.80);
+  font-family:Futura,"Helvetica Neue",Helvetica,Arial,sans-serif;
+  font-size:10px !important;
+  font-weight:600;
+  letter-spacing:.015em;
+  line-height:1.1;
+  text-align:left;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+  pointer-events:none;
+}
+@media (min-width:821px) and (max-width:1120px) {
+  body.bibliothekar-redesign .bk-brand-new .bk-brand-art {
+    width:150px;
+    height:41px;
+  }
+  body.bibliothekar-redesign .bk-brand-new .bk-brand-art #bk-current-library-name {
+    font-size:9.5px !important;
+  }
+}
+@media (max-width:820px) {
+  body.bibliothekar-redesign .bk-brand-new {
+    padding-bottom:0;
+  }
+  body.bibliothekar-redesign .bk-brand-new .bk-brand-art {
+    width:147px;
+    height:40px;
+  }
+  body.bibliothekar-redesign .bk-brand-new .bk-brand-art #bk-current-library-name {
+    font-size:9px !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign .bk-brand-new .bk-brand-art {
+    width:169px;
+    height:46px;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign .bk-brand-new .bk-brand-art #bk-current-library-name {
+    font-size:10.5px !important;
+  }
+}
+@media (max-width:360px) {
+  html[data-bk-display-mode="browser"] body.bibliothekar-redesign .bk-brand-new .bk-brand-art {
+    width:132px;
+    height:36px;
+  }
+  html[data-bk-display-mode="browser"] body.bibliothekar-redesign .bk-brand-new .bk-brand-art #bk-current-library-name {
+    font-size:8.5px !important;
+  }
+}
+"""
+
+
+BIBLIOTHEKAR_0470_CSS = r"""
+/* 0.47.0 – Nur installierte Smartphone-Web-App. Mobile Browserseite und
+ * Desktop-Shell behalten unverändert den Markenkopf von 0.47.0. */
+.bk-about-logo-heading {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin:0;
+  padding:10px 12px;
+  border-radius:12px;
+  background:#15222c;
+  line-height:0;
+}
+.bk-about-logo-heading img {
+  display:block;
+  width:min(190px,55vw);
+  height:auto;
+  aspect-ratio:489.84 / 133.36;
+  object-fit:contain;
+}
+.bk-about-tagline {
+  color:var(--bk-muted);
+  margin-top:6px;
+  line-height:1.3;
+}
+@media (max-width:820px) {
+  /* PWA-Farbfläche füllt auch den iOS-Statusleisten-Hintergrund.
+     Keine dunkelblaue Blindfläche oberhalb des Seiteninhalts. */
+  html[data-bk-display-mode="standalone"]:has(body[data-bk-area="import"]) {
+    background:#f8efec;
+  }
+  html[data-bk-display-mode="standalone"]:has(body[data-bk-area="workspace"]) {
+    background:#eef4f8;
+  }
+  html[data-bk-display-mode="standalone"]:has(body[data-bk-area="archive"]) {
+    background:#f8f4e8;
+  }
+  html[data-bk-display-mode="standalone"]:has(body[data-bk-area="metadata"]),
+  html[data-bk-display-mode="standalone"]:has(body[data-bk-area="assistant"]),
+  html[data-bk-display-mode="standalone"]:has(body[data-bk-area="trash"]) {
+    background:#f1f2ef;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-theme="dark"]:has(body[data-bk-area="import"]) {
+    background:#120f11;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-theme="dark"]:has(body[data-bk-area="workspace"]) {
+    background:#0c1217;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-theme="dark"]:has(body[data-bk-area="archive"]) {
+    background:#14120c;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-theme="dark"]:has(body[data-bk-area="metadata"]),
+  html[data-bk-display-mode="standalone"][data-bk-theme="dark"]:has(body[data-bk-area="assistant"]),
+  html[data-bk-display-mode="standalone"][data-bk-theme="dark"]:has(body[data-bk-area="trash"]) {
+    background:#0f1418;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign {
+    padding-top:0 !important;
+    padding-bottom:calc(132px + env(safe-area-inset-bottom)) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign > .bk-shell {
+    display:none !important;
+  }
+  /* Bei Seiten ohne obere Unternavigation folgt die Überschrift direkt
+     auf die Safe-Area; keine Kopfhöhe als Leerraum reservieren. */
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign:not([data-bk-area="workspace"]):not([data-bk-area="metadata"]) > .bk-page-heading {
+    margin-top:0 !important;
+    padding-top:calc(max(44px, env(safe-area-inset-top)) + 12px) !important;
+  }
+  /* Aufnahmen/Ereignisse bzw. Bibliothek/Allgemein/Mehrfachkorrektur:
+     die obere Tab-Leiste ist der Kopf – inklusive sicherer Statusleistenhöhe.
+     Auch beim Sticky-Scrollen bleibt sie unter den System-Icons lesbar. */
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] > .bk-workspace-subnav,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"] > .bk-metadata-subnav {
+    position:sticky !important;
+    top:0 !important;
+    margin-top:0 !important;
+    padding-top:calc(max(44px, env(safe-area-inset-top)) + 6px) !important;
+    background:var(--bk-page-bg) !important;
+    z-index:4700;
+    box-sizing:border-box;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] > .bk-page-heading,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"] > .bk-page-heading {
+    margin-top:12px !important;
+  }
+  /* Die größere Navigation darf den letzten Eintrag oder die nichtmodalen
+     Metadaten-Auswahlflächen nicht verdecken. */
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign main {
+    padding-bottom:calc(154px + env(safe-area-inset-bottom)) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"].bk-meta-selection-sheet-open main {
+    padding-bottom:calc(154px + env(safe-area-inset-bottom) + var(--bk-meta-selection-sheet-height,44dvh) + 18px) !important;
+  }
+  /* Einheitlicher, großer PWA-Dock auf sämtlichen Unterseiten:
+     flächenfüllende Touch-Ziele, flexible Spalten, ungekürzte Texte. */
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock {
+    box-sizing:border-box;
+    width:100%;
+    min-height:calc(112px + env(safe-area-inset-bottom)) !important;
+    grid-template-columns:minmax(0,.8fr) minmax(0,1.32fr) minmax(0,.74fr) minmax(0,1.14fr) minmax(40px,.55fr) !important;
+    gap:3px !important;
+    align-items:stretch !important;
+    padding:9px 9px calc(10px + env(safe-area-inset-bottom)) !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item {
+    box-sizing:border-box;
+    width:100%;
+    min-width:0 !important;
+    height:auto !important;
+    min-height:87px !important;
+    grid-template-rows:39px 18px !important;
+    align-content:center !important;
+    gap:5px !important;
+    padding:7px 1px !important;
+    overflow:visible !important;
+    font-size:clamp(.55rem,2.65vw,.68rem) !important;
+    line-height:1.1 !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item .bk-pwa-label {
+    display:block;
+    min-width:0;
+    max-width:100%;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    white-space:nowrap !important;
+    font-size:inherit !important;
+    line-height:1.15 !important;
+    letter-spacing:-.025em;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item svg {
+    width:32px !important;
+    height:32px !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle {
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-template-rows:20px 30px !important;
+    place-items:center !important;
+    align-content:center !important;
+    gap:5px !important;
+    min-height:87px !important;
+    padding:8px 2px !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle .bk-pwa-label {
+    display:block !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-count {
+    width:auto;
+    min-width:28px !important;
+    height:28px !important;
+    padding-inline:5px;
+    flex:0 0 auto;
+    font-size:.73rem !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle {
+    width:100% !important;
+    min-width:0 !important;
+    max-width:none !important;
+    min-height:87px !important;
+    height:auto !important;
+    padding:0 !important;
+    justify-self:stretch;
+    display:grid !important;
+    grid-template-rows:1fr !important;
+    align-content:center !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle .bk-pwa-label {
+    display:none !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-menu-portaled,
+  html[data-bk-display-mode="standalone"] .bk-task-panel-portaled {
+    bottom:calc(120px + env(safe-area-inset-bottom)) !important;
+    max-height:calc(100dvh - max(44px, env(safe-area-inset-top)) - 155px - env(safe-area-inset-bottom)) !important;
+  }
+}
+@media (max-width:360px) {
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item {
+    font-size:.53rem !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock {
+    padding-inline:6px !important;
+    gap:1px !important;
+  }
+}
+"""
+
+
+BIBLIOTHEKAR_0472_CSS = r"""
+/* 0.47.2: Alle Regeln ausschließlich für die installierte Smartphone-PWA.
+   Frühere kompakte und große Dockvorgaben werden hier zentral überstimmt. */
+@media (max-width:820px) {
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign {
+    padding-top:0 !important;
+    margin-top:0 !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign > .bk-shell {
+    display:none !important;
+  }
+  /* Die alte Kopfhöhe war bereits entfernt. In 0.47.0 verblieb eine
+     zweite Safe-Area-Reserve an Titel bzw. Bereichsreitern.
+     Hier rückt das ganze Layout im normalen Dokumentfluss nach oben,
+     nicht per transform, sodass es keine leere Lücke hinterlässt. */
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign:not([data-bk-area="workspace"]):not([data-bk-area="metadata"]) > .bk-page-heading {
+    margin-top:-26px !important;
+    padding-top:max(38px, calc(env(safe-area-inset-top) - 6px)) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] > .bk-workspace-subnav,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"] > .bk-metadata-subnav {
+    margin-top:-26px !important;
+    padding-top:max(38px, calc(env(safe-area-inset-top) - 6px)) !important;
+    top:0 !important;
+    position:sticky !important;
+    background:var(--bk-page-bg) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] > .bk-page-heading,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"] > .bk-page-heading {
+    margin-top:8px !important;
+  }
+
+  /* Identischer Dock in Import, Aufnahmen, Archiv und auf Unterseiten,
+     unabhängig vom Dokument-Scroll und früheren page-spezifischen Padding. */
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock {
+    position:fixed !important;
+    bottom:0 !important;
+    top:auto !important;
+    left:0 !important;
+    right:0 !important;
+    width:100% !important;
+    height:calc(112px + env(safe-area-inset-bottom)) !important;
+    min-height:0 !important;
+    max-height:calc(112px + env(safe-area-inset-bottom)) !important;
+    box-sizing:border-box !important;
+    grid-template-columns:minmax(0,.84fr) minmax(0,1.34fr) minmax(0,.80fr) minmax(0,.92fr) minmax(0,.70fr) !important;
+    align-items:stretch !important;
+    gap:2px !important;
+    padding:8px 7px calc(10px + env(safe-area-inset-bottom)) !important;
+    border-top:1px solid var(--bk-line);
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item {
+    width:100% !important;
+    min-width:0 !important;
+    height:100% !important;
+    min-height:0 !important;
+    max-height:none !important;
+    display:grid !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-template-rows:47px 22px !important;
+    align-content:center !important;
+    align-items:center !important;
+    justify-items:center !important;
+    gap:3px !important;
+    padding:3px 0 !important;
+    border:0 !important;
+    border-radius:10px !important;
+    box-shadow:none !important;
+    background:transparent !important;
+    font-size:clamp(.54rem,2.55vw,.68rem) !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item .bk-pwa-icon {
+    display:grid;
+    grid-row:1;
+    place-items:center;
+    align-self:center;
+    width:100%;
+    min-height:47px;
+    line-height:1;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item .bk-pwa-label {
+    display:block !important;
+    grid-row:2;
+    min-width:0 !important;
+    max-width:100% !important;
+    overflow:visible !important;
+    white-space:nowrap !important;
+    text-overflow:clip !important;
+    text-align:center !important;
+    font-size:inherit !important;
+    line-height:1.1 !important;
+    letter-spacing:-.025em;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item svg {
+    width:36px !important;
+    height:36px !important;
+    transition:transform 180ms ease, width 180ms ease, height 180ms ease;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item.active .bk-pwa-icon svg {
+    width:42px !important;
+    height:42px !important;
+    transform:scale(1.04);
+  }
+
+  /* Aufgaben ist ein regulärer Reiter: runde gelbe Zahl als Icon,
+     der Schriftzug liegt exakt in der Textzeile der Hauptbereiche. */
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle {
+    border:0 !important;
+    background:transparent !important;
+    box-shadow:none !important;
+    grid-template-areas:"icon" "label" !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-template-rows:47px 22px !important;
+    min-height:0 !important;
+    height:100% !important;
+    padding:3px 0 !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle .bk-pwa-task-count {
+    grid-area:icon;
+    grid-row:1;
+    align-self:center;
+    justify-self:center;
+    display:grid;
+    place-items:center;
+    box-sizing:border-box;
+    width:39px !important;
+    height:39px !important;
+    min-width:39px !important;
+    border-radius:50% !important;
+    padding:0 !important;
+    font-size:.85rem !important;
+    font-weight:850;
+    background:var(--bk-yellow);
+    color:#202020;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle .bk-pwa-label {
+    grid-area:label;
+    grid-row:2;
+    display:block !important;
+  }
+
+  /* Gleich hohe, rahmenlose Hamburger-Fläche; nur das Symbol in Reihe 1. */
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle {
+    border:0 !important;
+    background:transparent !important;
+    box-shadow:none !important;
+    width:100% !important;
+    min-width:0 !important;
+    max-width:none !important;
+    min-height:0 !important;
+    height:100% !important;
+    justify-self:stretch !important;
+    grid-template-columns:minmax(0,1fr) !important;
+    grid-template-rows:47px 22px !important;
+    padding:3px 0 !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle .bk-pwa-label {
+    display:none !important;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-menu-toggle .bk-pwa-icon {
+    grid-row:1;
+  }
+
+  /* Dialoge schweben oberhalb des exakt festgelegten Docks. */
+  html[data-bk-display-mode="standalone"] .bk-menu-portaled,
+  html[data-bk-display-mode="standalone"] .bk-task-panel-portaled {
+    bottom:calc(112px + env(safe-area-inset-bottom)) !important;
+    max-height:calc(100dvh - max(44px, env(safe-area-inset-top)) - 137px - env(safe-area-inset-bottom)) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign main {
+    padding-bottom:calc(134px + env(safe-area-inset-bottom)) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"].bk-meta-selection-sheet-open main {
+    padding-bottom:calc(134px + env(safe-area-inset-bottom) + var(--bk-meta-selection-sheet-height,44dvh) + 18px) !important;
+  }
+}
+@media (max-width:360px) {
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item {
+    font-size:.50rem !important;
+  }
+}
+@media (prefers-reduced-motion:reduce) {
+  html[data-bk-display-mode="standalone"] .bk-pwa-nav-item svg {
+    transition:none !important;
+  }
+}
+"""
+
+
+BIBLIOTHEKAR_0473_VIEWPORT_JS = r"""
+/* Nur iOS-/Smartphone-PWA: gleiche Viewport-Geometrie wie Import & Prüfung.
+   Workspace und Archiv enthielten viewport-fit=cover, die übrigen Bereiche
+   nicht. Daher waren dort Dock-Icons unterschiedlich hoch über der Kante.
+   Die mobile Website behält ihren ursprünglichen Viewport. */
+(() => {
+  const root = document.documentElement;
+  if (root.dataset.bkDisplayMode !== "standalone" ||
+      !window.matchMedia?.("(max-width: 820px)")?.matches) return;
+  const viewport = document.querySelector('meta[name="viewport"]');
+  if (!viewport) return;
+  const original = viewport.getAttribute("content") || "";
+  if (!/(?:^|,)\s*viewport-fit\s*=\s*cover\b/i.test(original)) return;
+  const normalized = original.replace(/,\s*viewport-fit\s*=\s*cover\b/i, "")
+    .replace(/viewport-fit\s*=\s*cover\s*,\s*/i, "");
+  viewport.setAttribute("content", normalized);
+  root.dataset.bkViewportNormalized = "true";
+})();
+"""
+
+
+BIBLIOTHEKAR_0473_CSS = r"""
+/* 0.47.3: Standalone-Smartphone-PWA: keine überlappenden Reiter und Titel.
+   Die Korrektur gehört ans obere Navigations-Element, nicht an die
+   Überschrift. 0.47.2 verschob nur die Reiter per negativen Margin,
+   dadurch überlagerten sie bei Sticky die nachfolgenden Überschriften. */
+@media (max-width:820px) {
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] > .bk-workspace-subnav,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"] > .bk-metadata-subnav {
+    position:sticky !important;
+    top:0 !important;
+    margin-top:0 !important;
+    margin-bottom:0 !important;
+    padding-top:8px !important;
+    z-index:4700;
+    background:var(--bk-page-bg) !important;
+  }
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="workspace"] > .bk-page-heading,
+  html[data-bk-display-mode="standalone"] body.bibliothekar-redesign[data-bk-area="metadata"] > .bk-page-heading {
+    position:relative;
+    z-index:1;
+    margin-top:12px !important;
+    padding-top:0 !important;
+  }
+
+  /* Die Zahl bleibt gleich groß, nur ihre Hintergrundscheibe wird kleiner
+     als die ungewählten Bereichs-Icons (36px) und deutlich kleiner als
+     das aktive Icon (42px). */
+  html[data-bk-display-mode="standalone"] .bk-pwa-task-toggle .bk-pwa-task-count {
+    width:33px !important;
+    min-width:33px !important;
+    height:33px !important;
+    font-size:.85rem !important;
+  }
+}
+"""
+
+BIBLIOTHEKAR_0505_LANGUAGE_HEAD_JS = r"""
+/* Resolve the user's application-wide language before Safari's first paint. */
+(() => {
+  const root = document.documentElement;
+  let language = "en";
+  try { language = localStorage.getItem("bibliothekar-language") === "de" ? "de" : "en"; }
+  catch (_) {}
+  root.lang = language;
+  root.dataset.bkLocale = language;
+  if (language === "en") root.dataset.bkI18nPending = "true";
+  // If another unrelated script fails, never strand the user on a hidden page.
+  window.addEventListener("load", () => {
+    if (root.dataset.bkI18nPending === "true") {
+      window.setTimeout(() => { delete root.dataset.bkI18nPending; }, 1800);
+    }
+  }, {once: true});
+})();
+"""
+
+BIBLIOTHEKAR_0505_LANGUAGE_CSS = r"""
+/* English content stays concealed only until the initial synchronous translation.
+   This avoids presenting German content even for one frame on iPhone PWA reloads. */
+/* Full-page masking is exclusively for the installed PWA. Desktop can paint
+   its header, tabs and heading as soon as HTML begins arriving. */
+html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"] body > main,
+html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"] body > dialog {
+  visibility: hidden !important;
+}
+/* The common header, section tabs, page title and bottom dock are translated
+   immediately before <main> is parsed; they never wait for API responses. */
+/* A visible loading indicator exists even before the destination body is parsed.
+   The same indicator responds at once to a navigation tap on the outgoing page. */
+html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::before,
+html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::before {
+  content: "Loading…";
+  display:flex; align-items:center; justify-content:center;
+  position:fixed; inset:0; z-index:2147483645;
+  font: 700 1rem Futura,"Helvetica Neue",Arial,sans-serif;
+  color:var(--bk-ink,#192637); background:var(--bk-page-bg,var(--bk-paper,#f5f1e9));
+}
+html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::after,
+html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::after {
+  content:""; position:fixed; z-index:2147483646;
+  top:calc(50% - 52px); left:calc(50% - 17px);
+  width:34px; height:34px; box-sizing:border-box;
+  border:4px solid color-mix(in srgb,var(--bk-blue,#1974c6) 22%,transparent);
+  border-top-color:var(--bk-blue,#1974c6); border-radius:50%;
+  animation:bk0506spin .75s linear infinite; pointer-events:none;
+}
+html[data-bk-display-mode="standalone"][data-bk-locale="de"][data-bk-nav-loading="true"]::before,
+html[data-bk-display-mode="standalone"][data-bk-locale="de"][data-bk-i18n-pending="true"]::before {content:"Wird geladen …";}
+@keyframes bk0506spin {to {transform:rotate(360deg);}}
+@media(prefers-reduced-motion: reduce) {
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::after,
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::after {animation-duration:2.4s;}
+}
+.bk-i18n-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  box-sizing: border-box;
+  border: 1px solid var(--bk-line);
+  border-radius: 18px;
+  padding: 23px;
+  color: var(--bk-ink);
+  background: var(--bk-surface);
+  box-shadow: 0 14px 44px rgba(0,0,0,.25);
+}
+.bk-i18n-dialog::backdrop { background: rgba(0,0,0,.62); }
+.bk-i18n-dialog-message { white-space: pre-wrap; line-height: 1.55; margin: 0 0 22px; overflow-wrap: anywhere; }
+.bk-i18n-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; }
+.bk-i18n-prompt-input { box-sizing:border-box; display:block; width:100%; min-width:0; padding:12px; margin:0 0 18px; border:1px solid var(--bk-line); border-radius:9px; color:var(--bk-ink); background:var(--bk-surface-2); }
+.bk-i18n-dialog-actions button { padding: 10px 19px; min-height: 44px; border-radius: 10px; border: 1px solid var(--bk-line); }
+.bk-i18n-dialog-actions .bk-i18n-confirm { background: var(--bk-blue); color: #fff; border-color: var(--bk-blue); }
+"""
+
+
+BIBLIOTHEKAR_0551_DOCK_CSS = r"""
+@media (max-width:820px) {
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock a.bk-pwa-nav-item {
+    touch-action:manipulation;
+    -webkit-tap-highlight-color:transparent;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock a.bk-pwa-nav-item.is-navigating {
+    transition:none!important;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::before {
+    inset:0 0 calc(112px + env(safe-area-inset-bottom)) 0!important;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"] .bk-pwa-dock {
+    z-index:2147483647!important;
+  }
+}
+"""
+
+
+
+BIBLIOTHEKAR_0552_EARLY_LINKS_JS = r"""
+/* Make visible shell links library-safe before the page-specific JS is parsed.
+   Existing late href normalization remains idempotent. */
+(() => {
+  const library = window.__bkLibraryId || new URL(location.href).searchParams.get("library") || "main";
+  document.querySelectorAll(".bk-pwa-dock a[href^='/'], .bk-workspace-subnav a[href^='/']").forEach(link => {
+    const href = link.getAttribute("href");
+    if (!href) return;
+    const url = new URL(href, location.href);
+    if (url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
+    url.searchParams.set("library", library);
+    link.setAttribute("href", url.pathname + url.search + url.hash);
+  });
+})();
+"""
+
+BIBLIOTHEKAR_0552_PROGRESSIVE_CSS = r"""
+/* 0.55.2: no full-screen blocker on an outgoing or incoming PWA document.
+   The shared shell is translated early, and the ordinary page components
+   retain their own inline loading/status placeholders while data fetches run. */
+@media (max-width:820px) {
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::before,
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::after,
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::before,
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::after {
+    content:none!important;
+    display:none!important;
+  }
+  /* Never let the previous page's accent leak into the newly selected dock. */
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock .bk-pwa-nav-item[data-area="import"] {
+    --bk-area-accent:var(--bk-red);
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock .bk-pwa-nav-item[data-area="workspace"] {
+    --bk-area-accent:var(--bk-blue);
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock .bk-pwa-nav-item[data-area="archive"] {
+    --bk-area-accent:var(--bk-yellow);
+  }
+  /* On the outgoing document, don't allow stale content interactions while
+     navigation is pending; the shell and all its links remain touchable. */
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"] body > main {
+    opacity:.45;
+    pointer-events:none;
+  }
+  /* A local loading marker is separate from the title/subnavigation; it only
+     appears while the new document is being requested. */
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"] body > .bk-page-heading::after {
+    content:"";
+    display:inline-block;
+    vertical-align:middle;
+    width:14px;
+    height:14px;
+    margin-top:9px;
+    border:2px solid color-mix(in srgb,var(--bk-area-accent) 25%,transparent);
+    border-top-color:var(--bk-area-accent);
+    border-radius:50%;
+    animation:bk0506spin .75s linear infinite;
+  }
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"] body > .bk-page-heading,
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"] body > .bk-workspace-subnav,
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"] body > .bk-pwa-dock {
+    visibility:visible!important;
+  }
+}
+@media (prefers-reduced-motion:reduce) {
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"] body > .bk-page-heading::after {
+    animation:none;
+  }
+}
+"""
+
+
+BIBLIOTHEKAR_0553_POLISH_CSS = r"""
+/* Desktop standalone is not the iPhone PWA. Don't show the legacy screen
+   blocker when navigating the installed Mac app. The iPhone rules remain. */
+@media (min-width:821px) {
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::before,
+  html[data-bk-display-mode="standalone"][data-bk-nav-loading="true"]::after,
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::before,
+  html[data-bk-display-mode="standalone"][data-bk-i18n-pending="true"]::after {
+    content:none!important;
+    display:none!important;
+  }
+}
+/* Explicit pointer cursor, including nested icon and text targets. Limit
+   this to fine-pointer devices; keep disabled and busy cursor semantics. */
+@media (hover:hover) and (pointer:fine) {
+  body.bibliothekar-redesign a[href]:not([aria-disabled="true"]),
+  body.bibliothekar-redesign button:not(:disabled):not(.bk-busy),
+  body.bibliothekar-redesign summary,
+  body.bibliothekar-redesign select:not(:disabled),
+  body.bibliothekar-redesign label[for],
+  body.bibliothekar-redesign [role="button"]:not([aria-disabled="true"]) {
+    cursor:pointer!important;
+  }
+  body.bibliothekar-redesign button:disabled {
+    cursor:not-allowed!important;
+  }
+  body.bibliothekar-redesign button.bk-busy {
+    cursor:progress!important;
+  }
+}
+/* Safari's grey/black transient press tile is not a focus indicator.
+   Do not suppress focus-visible outlines for keyboard accessibility. */
+@media (max-width:820px) {
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock
+  :is(.bk-pwa-task-toggle,.bk-pwa-menu-toggle) {
+    -webkit-tap-highlight-color:transparent!important;
+    -webkit-touch-callout:none;
+    touch-action:manipulation;
+    -webkit-appearance:none;
+    appearance:none;
+  }
+  html[data-bk-display-mode="standalone"] .bk-pwa-dock
+  :is(.bk-pwa-task-toggle,.bk-pwa-menu-toggle):focus:not(:focus-visible) {
+    outline:none!important;
+  }
+}
+"""
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
-    result = html
+    result = re.sub(
+        r"(<head(?:\s[^>]*)?>)",
+        lambda match: match.group(0) + f'\n<script src="/auth/client.js"></script>\n<script>{BIBLIOTHEKAR_0505_LANGUAGE_HEAD_JS}</script>\n<style>{BIBLIOTHEKAR_0505_LANGUAGE_CSS}</style>\n<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n<script>{BIBLIOTHEKAR_0470_HEAD_JS}</script>\n',
+        html,
+        count=1,
+        flags=re.IGNORECASE,
+    )
     result = result.replace(
         "</head>",
         '<link rel="manifest" href="/manifest.webmanifest">\n'
+        '<link rel="icon" type="image/svg+xml" href="/assets/bibliothekar-logo-symbol-background.svg?v=0.56.2">\n'
+        '<link rel="apple-touch-icon" sizes="192x192" href="/assets/bibliothekar-icon-192.png?v=0.56.2">\n'
         '<meta name="apple-mobile-web-app-capable" content="yes">\n'
         f"<style>{BIBLIOTHEKAR_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0310_CSS}</style>\n"
@@ -4753,10 +7892,31 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         f"<style>{BIBLIOTHEKAR_0353_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0354_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0355_CSS}</style>\n"
-        f"<style>{BIBLIOTHEKAR_0356_CSS}</style>\n</head>",
+        f"<style>{BIBLIOTHEKAR_0356_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0423_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0424_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0425_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0441_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0443_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0444_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0450_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0451_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0452_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0453_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0454_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0455_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0456_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0460_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0470_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0472_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0473_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0551_DOCK_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0552_PROGRESSIVE_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_0553_POLISH_CSS}</style>\n"
+        f"<script>{BIBLIOTHEKAR_0473_VIEWPORT_JS}</script>\n</head>",
         1,
     )
-    area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata"} else "import"
+    area = active_area if active_area in {"import", "workspace", "archive", "assistant", "metadata", "trash"} else "import"
 
     body_match = re.search(r"<body(?:\s[^>]*)?>", result, flags=re.IGNORECASE)
     if body_match is None:
@@ -4774,12 +7934,19 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         replacement_body,
         replacement_body + "\n"
         + f"<script>{BIBLIOTHEKAR_BOOTSTRAP_JS}</script>\n"
-        + _shell_markup(area, subarea),
+        + _shell_markup(area, subarea)
+        + f"<script>{BIBLIOTHEKAR_0552_EARLY_LINKS_JS}</script>\n"
+        + f"<script>{I18N_UI_JS}</script>\n",
         1,
     )
     result = result.replace(
         "</body>",
-        f"<script>{BIBLIOTHEKAR_JS}</script>\n</body>",
+        f"<script>{BIBLIOTHEKAR_JS}</script>\n"
+        f"<script>{BIBLIOTHEKAR_0444_JS}</script>\n"
+        '<script>document.getElementById("bk-sign-out")?.addEventListener("click",async()=>{'
+        'try{await fetch("/auth/logout",{method:"POST"});}finally{location.replace("/login");}'
+        '});</script>\n</body>',
         1,
     )
-    return result
+    from app.operation_ui import NOTICE
+    return result.replace('</body>', NOTICE + '</body>')

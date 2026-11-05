@@ -1,11 +1,11 @@
 """Portable Ereignisbeschreibung: ``event.json``.
 
-Jedes Ereignis erhält im gemeinsamen Arbeitsbereich eine portable
-``event.json``. Sie ist die **primäre** Beschreibung des Ereignisses
-(Name, Zeitraum, Struktur, Unterereignis, Dateizuordnung mit Prüfsummen,
-Ordneroptionen). SQLite ist der **sekundäre Index** und wird konsistent
-nachgeführt; bei Abweichung regeneriert die App das Dokument aus dem
-lebhaften SQLite-Zustand.
+Angewendete Ereignisse erhalten im gemeinsamen Arbeitsbereich eine
+portable ``event.json`` (Name, Zeitraum, Struktur, Dateifamilien,
+Prüfsummen und Ordneroptionen). Für den bearbeitbaren App-Zustand ist
+SQLite maßgeblich; Änderungen werden über eine dauerhaft protokollierte
+Aufgabe in die portable Datei nachgeführt. Fremde oder beschädigte
+Ereignisdokumente werden dabei nicht blind überschrieben.
 
 Das Modul ist bewusst ohne Seiteneffekt auf SQLite *schreibend* gehalten:
 Es baut und schreibt Dokumente, lädt sie ein und erkennt Abweichungen.
@@ -17,6 +17,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
+from contextlib import nullcontext
+import sqlite3
 import hashlib
 import json
 import os
@@ -24,8 +26,9 @@ import os
 from app.database import database_connection
 from app.event_access import event_family_rows, event_file_rows, event_source_jobs
 from app.event_layout import ensure_event_layout_snapshot
+from app.event_leaf_layouts import stored_leaf_layouts
 
-from app.workspace_layout import WORK_DIRECTORY_NAME
+from app.workspace_layout import shared_work_root
 
 EVENT_DOCUMENT_VERSION = 3
 EVENT_DOCUMENT_FILENAME = "event.json"
@@ -42,7 +45,7 @@ def event_document_path(
 ) -> Path:
     """Pfad einer event.json aus Jahr + Ereignisordnername."""
 
-    work_root = Path(workspace_root) / WORK_DIRECTORY_NAME
+    work_root = shared_work_root(Path(workspace_root))
     return work_root / str(year)[:4] / str(folder_name) / EVENT_DOCUMENT_FILENAME
 
 
@@ -101,6 +104,7 @@ def build_event_document_from_db(
     event_id: str,
     *,
     include_archived: bool = False,
+    transaction_connection: sqlite3.Connection | None = None,
 ) -> dict[str, Any] | None:
     """Eines Ereignisses aus dem lebhaften SQLite-Zustand bauen.
 
@@ -109,7 +113,11 @@ def build_event_document_from_db(
     (nur dann existiert ein Ereignisordner).
     """
 
-    with database_connection(database_path) as connection:
+    with (
+        database_connection(database_path)
+        if transaction_connection is None
+        else nullcontext(transaction_connection)
+    ) as connection:
         event = connection.execute(
             "SELECT * FROM events WHERE id = ? AND parent_event_id IS NULL",
             (event_id,),
@@ -137,6 +145,7 @@ def build_event_document_from_db(
         layout_state = ensure_event_layout_snapshot(
             connection, event_id, now=datetime.now(timezone.utc).isoformat()
         )
+        leaf_layouts = list(stored_leaf_layouts(connection, event_id).values())
 
         assignment_day_rows = connection.execute(
             """
@@ -247,6 +256,8 @@ def build_event_document_from_db(
         structure_children,
         preserve_day_folders,
         layout_state=layout_state,
+        leaf_layouts=leaf_layouts,
+        parent_event_id=event_id,
     )
     return {
         "document_version": EVENT_DOCUMENT_VERSION,
@@ -286,6 +297,7 @@ def build_event_document_from_db(
             "layout": layout_state["layout"],
             "revision": int(layout_state["revision"]),
         },
+        **({"leaf_folder_layouts": leaf_layouts} if leaf_layouts else {}),
         "child_events": children,
         "no_event_segments": segments,
         "child_event": (
@@ -322,6 +334,7 @@ def write_event_document(
     document: dict[str, Any],
     *,
     app_version: str | None = None,
+    require_existing_directory: bool = False,
 ) -> Path:
     """Ein Ereignisdokument atomar in seinen Ordner schreiben."""
 
@@ -340,14 +353,18 @@ def write_event_document(
         document["generated_at"] = datetime.now(timezone.utc).isoformat()
 
     path = event_document_path(workspace_root, year, folder_name)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if require_existing_directory:
+        if not path.parent.is_dir():
+            raise EventDocumentError("Der vorhandene Ereignisordner fehlt.")
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
 
     payload = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True)
     encoded = payload.encode("utf-8")
     digest_prefix = hashlib.sha256(encoded).hexdigest()[:12]
 
     target = path.resolve(strict=False)
-    work_root = (Path(workspace_root) / WORK_DIRECTORY_NAME).resolve(strict=False)
+    work_root = (shared_work_root(Path(workspace_root))).resolve(strict=False)
     try:
         target.relative_to(work_root)
     except ValueError as error:
@@ -373,7 +390,7 @@ def read_event_document(path: Path) -> dict[str, Any]:
 
 
 def discover_event_documents(workspace_root: Path) -> Iterator[Path]:
-    work_root = Path(workspace_root) / WORK_DIRECTORY_NAME
+    work_root = shared_work_root(Path(workspace_root))
     if not work_root.is_dir():
         return
     yield from sorted(work_root.glob(f"*/*/{EVENT_DOCUMENT_FILENAME}"))
@@ -430,6 +447,12 @@ def event_document_matches_db(
     for key in ("document_version", "source_jobs", "folder_layout", "child_events", "no_event_segments", "structure", "files"):
         if document.get(key) != fresh.get(key):
             drift.append(key)
+    # New events may have independent parent/child/day layout snapshots.
+    # Keep old documents compatible, but do not ignore drift once such a
+    # snapshot exists on either side.
+    if "leaf_folder_layouts" in document or "leaf_folder_layouts" in fresh:
+        if document.get("leaf_folder_layouts") != fresh.get("leaf_folder_layouts"):
+            drift.append("leaf_folder_layouts")
 
     doc_families = {int(f.get("family_id")) for f in document.get("families") or []}
     fresh_families = {int(f["family_id"]) for f in fresh["families"]}

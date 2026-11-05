@@ -1,0 +1,9 @@
+Bibliothekar 0.50.0 – ausschließlich separates Audit-/Testimage veröffentlichen.
+
+Geprüfter Quellstand vor dieser Publishing-Anforderung: ca7032f6360b364111c73353bd3ad0d70d8625e8.
+Branch: patch/0.50.0-audit; PR #19 bleibt Draft, main und stable latest unberührt.
+Vollständige CI: 995/995 Backend-Tests bestanden; isolierter Archiv-Container-Harness samt echter Anmeldung, CSRF, Origin und Logout erfolgreich.
+Synthetische Migrationstests 0.40→0.50 und 0.51→0.52 bestanden.
+Image-Ziel: ghcr.io/heller-adrian/bibliothekar:patch-0.50.0.
+Diese Veröffentlichung ist ausdrücklich KEIN stabiler Release. BA-10-Dynamik, TrueNAS-Upgrade/PWA und Public-History-Review bleiben vor Stable offen.
+Build aus dem Commit, der diese Anforderungsdatei enthält; SOURCE_REVISION als OCI-Label setzen und SHA256-Image-Digest im Action Summary protokollieren.

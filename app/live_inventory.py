@@ -7,6 +7,8 @@ from app.database import database_connection
 from app.event_inventory import EventInventoryError, scan_event_inventory
 from app.sort_plan import _reapply_physical_event_prefix
 from app.workspace_layout import WorkspaceLayoutError, shared_work_root
+from app.root_operations import RootOperationBusy
+from app.trash import reconcile_trash_inventory
 
 
 def refresh_live_event_inventories(
@@ -18,6 +20,8 @@ def refresh_live_event_inventories(
     event_id: str | None = None,
 ) -> dict[str, Any]:
     """Refresh observational IST snapshots for applied/archived parent events."""
+    from app.operation_health import read_only
+    reconcile_trash_inventory(database_path, workspace_path)
     where = [
         "parent_event_id IS NULL",
         "status IN ('applied','archived')",
@@ -69,6 +73,94 @@ def refresh_live_event_inventories(
             )
             refreshed[current_event_id] = dict(inventory.get("summary") or {})
         except (EventInventoryError, WorkspaceLayoutError, OSError) as error:
+            if isinstance(error.__cause__, RootOperationBusy):
+                raise error.__cause__ from None
+            # Ein angewendetes Ereignis kann vom Benutzer bereits vollständig
+            # ins Archiv verschoben worden sein. In diesem Sonderfall wird das
+            # Archiv read-only gescannt, damit reconcile_missing_files den
+            # vorhandenen Mechanismus „Mögliche Archivübernahme erkannt“
+            # tatsächlich aus einem realen Dateisystemzustand ableiten kann.
+            if (
+                str(row["status"]) == "applied"
+                and isinstance(error, EventInventoryError)
+                and "Ereignisordner wurde nicht gefunden" in str(error)
+            ):
+                try:
+                    archive_inventory = scan_event_inventory(
+                        database_path,
+                        archive_root,
+                        current_job_id,
+                        current_event_id,
+                        root_kind="camera_archive",
+                        persist=True,
+                        update_known_file_locations=False,
+                        fast_refresh=False,
+                    )
+                    archive_known = {
+                        int(item["known_file_id"])
+                        for item in archive_inventory.get("files") or []
+                        if item.get("known_file_id") is not None
+                    }
+                    if archive_known:
+                        from app.event_access import event_file_rows
+                        from app.physical_state import reconcile_missing_files
+                        with database_connection(database_path) as connection:
+                            event = connection.execute(
+                                "SELECT * FROM events WHERE id=?",
+                                (current_event_id,),
+                            ).fetchone()
+                            expected_ids = [
+                                int(item["file_id"])
+                                for item in event_file_rows(
+                                    connection,
+                                    current_event_id,
+                                )
+                            ]
+                            if event is not None and expected_ids and not read_only():
+                                reconcile_missing_files(
+                                    connection,
+                                    dict(event),
+                                    "shared_workspace",
+                                    expected_ids,
+                                )
+                        refreshed[current_event_id] = {
+                            **dict(archive_inventory.get("summary") or {}),
+                            "archive_transfer_candidate": True,
+                        }
+                        continue
+                except (EventInventoryError, OSError):
+                    pass
+
+            # A removed event root is a valid physical IST state, not a
+            # permanent scanner failure. Keep the archive-transfer check
+            # above first: files moved to the archive must not be recorded
+            # as deletions. The strict scanner remains the default for
+            # archive verification, editing and all other callers.
+            if (
+                isinstance(error, EventInventoryError)
+                and "Ereignisordner wurde nicht gefunden" in str(error)
+            ):
+                try:
+                    missing_inventory = scan_event_inventory(
+                        database_path,
+                        root,
+                        current_job_id,
+                        current_event_id,
+                        root_kind=root_kind,
+                        persist=True,
+                        update_known_file_locations=False,
+                        event_prefix_override=prefix,
+                        fast_refresh=False,
+                        allow_missing_root=True,
+                    )
+                    if missing_inventory.get("event_root_missing"):
+                        refreshed[current_event_id] = {
+                            **dict(missing_inventory.get("summary") or {}),
+                            "event_root_missing": True,
+                        }
+                        continue
+                except (EventInventoryError, WorkspaceLayoutError, OSError):
+                    pass
             errors.append({
                 "event_id": current_event_id,
                 "job_id": current_job_id,

@@ -142,6 +142,17 @@ def test_0322_worker_claims_global_import_before_library_registry_queue(
 
     monkeypatch.setattr(main, "DATABASE_FILE", database)
     monkeypatch.setattr(main, "MAIN_LIBRARY_CONTEXT", context)
+    from app.library_registry import initialize_library_registry
+    registry=tmp_path/'registry.sqlite3';initialize_library_registry(registry)
+    monkeypatch.setattr(main,'REGISTRY_DATABASE_FILE',registry)
+    monkeypatch.setattr(main,'WORKSPACE_PATH',workspace)
+    monkeypatch.setattr(main,'build_main_library_context',lambda:context)
+    # A rejected admission must terminate this test instead of hiding its cause.
+    retries=[]
+    def bounded_wait(seconds):
+        retries.append(seconds);main.WORKER_STOP.set();return True
+    monkeypatch.setattr(main.WORKER_STOP,'wait',bounded_wait)
+
 
     def registry_must_not_be_needed(_registry):
         raise AssertionError("Globaler Folder-Import darf nicht von Registry-Queues abhängen.")
@@ -159,6 +170,7 @@ def test_0322_worker_claims_global_import_before_library_registry_queue(
     finally:
         main.WORKER_STOP.clear()
 
+    assert not retries, "Worker admission unexpectedly rejected the bounded fixture"
     assert processed == [("GLOBAL_FOLDER_IMPORT", MAIN_LIBRARY_ID)]
     assert get_job(database, "GLOBAL_FOLDER_IMPORT")["state"] == "copying"
 
