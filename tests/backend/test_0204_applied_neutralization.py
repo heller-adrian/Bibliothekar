@@ -164,6 +164,49 @@ def test_0260_applied_no_event_shrink_reconciles_removed_family_to_free_stock(tm
         assert tuple(marker) == ('2026-09-08T00:00:00', '2026-09-08T23:59:59')
     assert not any(task['kind'] in {'reassignment','resort'} for task in list_global_tasks(db))
     assert any(task['kind']=='unassigned_families' for task in list_global_tasks(db))
+
+def test_no_event_pending_reconcile_uses_old_physical_but_new_target_occupancy(tmp_path):
+    """Saved applied edits must not move files before confirmed reconciliation.
+
+    The physical source stays occupied until a verified move, but the canonical
+    target for a released family uses the new saved No Event time segments.
+    """
+    import pytest
+    from app.free_stock_layout import (
+        FreeStockLayoutError,
+        canonical_free_directory,
+        occupied_ranges_for_day,
+    )
+
+    db, workspace, ids, folder = _seed(tmp_path, no_event=True)
+    unchanged = _current_paths(db, ids[1])
+    _edit(db, workspace, ids, folder, no_event=True)
+
+    with database_connection(db) as connection:
+        physically_occupied = occupied_ranges_for_day(
+            connection, "2026-09-08", physical=True
+        )
+        assert physically_occupied == [
+            ("2026-09-08T00:00:00", "2026-09-08T23:59:59")
+        ]
+        with pytest.raises(FreeStockLayoutError):
+            canonical_free_directory(
+                connection, "2026-09-08T11:00:00", physical=True
+            )
+
+        target_occupancy = occupied_ranges_for_day(
+            connection, "2026-09-08", physical=True,
+            include_event_ids=("src",),
+        )
+        assert target_occupancy == []
+        assert str(canonical_free_directory(
+            connection, "2026-09-08T11:00:00",
+            physical=True, include_event_ids=("src",),
+        )) == "2026/2026-09-08"
+
+    _assert_removed_family_stays_in_place(db, workspace, ids[1], unchanged)
+
+
 def test_cancel_applied_edit_restores_db_without_moving_files(tmp_path):
     db,workspace,ids,folder=_seed(tmp_path,no_event=False)
     before=_current_paths(db,ids[1])
