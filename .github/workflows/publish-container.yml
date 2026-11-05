@@ -8,12 +8,13 @@ on:
   workflow_call:
 
 permissions:
+  actions: read
   contents: write
   packages: write
 
 concurrency:
   group: publish-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -21,7 +22,8 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
 
     steps:
       - name: Checkout repository
@@ -53,6 +55,62 @@ jobs:
             *) echo "Unauthorized release ref: $GITHUB_REF" >&2; exit 1 ;;
           esac
 
+      - name: Verify exact approved complete 1.0.0 qualification (without re-running pytest)
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUALIFIED_RUN: '42002573062'
+          QUALIFIED_SHA: 'd2a0a13e2a392b841acac83762c07939ce87242e'
+          QUALIFIED_TREE: 'dda96c909c561e2702b2c28225a57d5045d3601e'
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse "${QUALIFIED_SHA}^{tree}")" = "$QUALIFIED_TREE"
+          # Entire approved source tree is identical except this publisher workflow.
+          # In particular the Dockerfile, every application file and both
+          # dependency lock/constraint inputs are byte-identical.
+          changed="$(git diff --name-only "$QUALIFIED_SHA" "$GITHUB_SHA")"
+          if [[ "$changed" != '.github/workflows/publish-container.yml' ]]; then
+            printf 'Rejected unqualified repository changes:\n%s\n' "$changed" >&2
+            exit 1
+          fi
+          test "$(git rev-parse "${QUALIFIED_SHA}:app")" = "$(git rev-parse "${GITHUB_SHA}:app")"
+          mkdir -p "$RUNNER_TEMP/qualified-coverage"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${QUALIFIED_RUN}" > "$RUNNER_TEMP/qualified-run.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${QUALIFIED_RUN}/jobs?per_page=100" > "$RUNNER_TEMP/qualified-jobs.json"
+          gh run download "$QUALIFIED_RUN" --repo "$GITHUB_REPOSITORY" --name 100-backend-coverage-1 --dir "$RUNNER_TEMP/qualified-coverage"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])
+          run=json.loads((root/'qualified-run.json').read_text())
+          jobs=json.loads((root/'qualified-jobs.json').read_text())['jobs']
+          report=json.loads((root/'qualified-coverage'/'coverage-summary.json').read_text())
+          sha=os.environ['QUALIFIED_SHA']
+          assert run['id']==int(os.environ['QUALIFIED_RUN'])
+          assert run['status']=='completed' and run['conclusion']=='success'
+          assert run['head_sha']==sha
+          assert run['head_branch']=='ci/1.0.0-release-full-20261105'
+          assert run['path']=='.github/workflows/qa-100-stabilization.yml'
+          required={'preflight','frontend','container','backend-coverage'} | {f'backend ({i})' for i in range(8)}
+          assert len(jobs)==len(required) and {j['name'] for j in jobs}==required
+          assert all(j['status']=='completed' and j['conclusion']=='success' for j in jobs)
+          assert report['source']==sha and report['status']=='PASS'
+          assert report['collected']==2634 and report['tested_once']==2634
+          parts=report['parts']
+          assert len(parts)==8 and {p['partition'] for p in parts}==set(range(8))
+          assert sum(p['selected'] for p in parts)==2634
+          assert all(p['source']==sha and p['status']=='PASS' and p['exit']==0
+                     and p['collected']==2634 and p['coverage_ok'] is True
+                     and p['junit']['tests']==p['selected']
+                     and all(p['junit'][field]==0 for field in ('failures','errors','skipped'))
+                     for p in parts)
+          print('APPROVED: 2634/2634 exact-case backend QA, container, frontend, preflight and coverage.')
+          PY
+          echo 'Verified source identity and successful GitHub qualification #42002573062.' >> "$GITHUB_STEP_SUMMARY"
       - name: Validate TrueNAS Custom App compose
         env:
           BIBLIOTHEKAR_APPDATA_DIR: /tmp/bibliothekar/appdata
@@ -62,9 +120,11 @@ jobs:
         run: docker compose -f compose.example.yaml config -q
 
       - name: Install metadata regression dependency
+        if: github.ref != 'refs/heads/main'
         run: sudo apt-get update -qq && sudo apt-get install -y libimage-exiftool-perl
 
       - name: Complete QA before publishing
+        if: github.ref != 'refs/heads/main'
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
@@ -74,7 +134,7 @@ jobs:
           pytest -q -o addopts='' --junitxml=/tmp/bibliothekar-qa.xml tests/backend
 
       - name: Retain QA evidence
-        if: always()
+        if: always() && github.ref != 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: backend-qa
