@@ -46,8 +46,8 @@ def test_ui1_structure_off_canonicalises_input_to_event_root():
 def test_ui1_manual_change_ui_is_compact_and_durable():
     source = Path("app/events_ui.py").read_text(encoding="utf-8")
 
-    assert "Ordneränderungen · ${folderChangeCount}" in source
-    assert "Dateiänderungen · ${moves.length}" in source
+    assert "bk0511EventLabel(\"Ordneränderungen\",\"Folder changes\")} · ${folderChangeCount}" in source
+    assert "bk0511EventLabel(\"Dateiänderungen\",\"File changes\")} · ${moves.length}" in source
     assert "Bereits in der vorbereiteten event.json gespeichert." in source
     assert "clearStructureTaskFromUrl(changeId)" in source
     assert 'if(change.status==="completed")' in source
