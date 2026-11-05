@@ -198,10 +198,20 @@ def test_recovery_waits_for_live_deletion(tmp_path, monkeypatch):
         except BaseException as e: errors.append(e)
         finally: recovered.set()
     a = threading.Thread(target=deleting); a.start()
-    assert entered.wait(5)
+    # Reaching the journalled purge may take longer than five seconds on the
+    # virtual CI disk. Observe the actual threads instead of calling that a
+    # product failure before the injected pause has even been reached.
+    if not entered.wait(30):
+        from tests.backend.thread_evidence import snapshot
+        snapshot("recovery-before-purge", [a], errors=[str(e) for e in errors])
+        release.set();a.join(15)
+        pytest.fail("Deletion did not reach the injected purge within 30 seconds")
     b = threading.Thread(target=recovery); b.start()
-    try: assert not recovered.wait(.1)
-    finally: release.set(); a.join(5); b.join(5)
+    try: assert not recovered.wait(.1), "Recovery must wait for live deletion"
+    finally: release.set(); a.join(30); b.join(30)
+    if a.is_alive() or b.is_alive() or errors:
+        from tests.backend.thread_evidence import snapshot
+        snapshot("recovery-after-release", [a,b], errors=[str(e) for e in errors])
     assert not a.is_alive() and not b.is_alive() and not errors
     assert not (Path(paths['trash_root'])/'A.JPG').exists()
 
