@@ -6,7 +6,7 @@ Es gibt genau zwei getrennte Containerkanäle. **Das Stable-Image `latest` darf 
 
 - Entwicklung auf einem `patch/*`-Branch; der Branch allein ist **keine** stabile Freigabe.
 - Die Backend-QA läuft für Pull Requests oder über `workflow_dispatch`. Ein beliebiger Quell-Push auf `patch/*` veröffentlicht **kein** Image.
-- Ein Patch-Image wird nur nach einer ausdrücklich eingecheckten Datei unter `.github/release-requests/` über `.github/workflows/publish-patch-request.yml` gebaut.
+- Ein Patch-Image wird nur nach einer **neu angelegten oder ausdrücklich aktualisierten** Datei unter `.github/release-requests/` über `.github/workflows/publish-patch-request.yml` gebaut. Historische Anträge liegen ausschließlich unter [docs/history/release-requests](history/release-requests/) und lösen keine Builds aus.
 - Das Image wird dann ausschließlich mit `patch-<version>` versehen; es überschreibt niemals `latest`.
 - Für den Archiv-E2E muss das Testimage aus **genau demselben Commit** gebaut und anhand des OCI-Labels `org.opencontainers.image.revision` kontrolliert werden.
 
