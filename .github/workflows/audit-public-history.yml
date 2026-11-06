@@ -1,14 +1,12 @@
 name: Public visibility history inventory (no secret values in logs)
 on:
-  push:
-    branches: [release/1.0.0-public-preparation]
-    paths: [.github/workflows/audit-public-history.yml]
+  # Run explicitly on the default branch; do not re-activate old release branches.
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   scan:
-    runs-on: [self-hosted, Linux, X64, bibliothekar-safe]
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +27,7 @@ jobs:
           print('Review of GitHub logs/assets/comments still required:',not x['other_public_surfaces_reviewed'])
           PY
       - name: Private scan report, paths only
+        if: github.event.repository.private == true
         uses: actions/upload-artifact@v4
         with:
           name: public-history-finding-paths
