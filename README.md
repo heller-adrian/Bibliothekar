@@ -138,6 +138,7 @@ The **1.0.0 milestone** focuses on the stable camera-file workflow. Bibliothekar
 [Source code](app/) · [Automated tests](tests/) · [QA](qa/) · [Technical documentation](docs/) · [Changelog](CHANGELOG.md) · [Security policy](.github/SECURITY.md) · [Releases](https://github.com/heller-adrian/Bibliothekar/releases)
 
 Development combines backend regression tests, integration tests and hands-on UI and TrueNAS checks. A green workflow alone is not a promise that every possible storage configuration is supported.
+in Cooperation with GPT-6.1 Sol
 
 ### Reporting problems
 
