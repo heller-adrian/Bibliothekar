@@ -9,84 +9,148 @@
 
 # Bibliothekar
 
-**Bibliothekar** is a self-hosted web application for moving photographs from camera cards and other folders into a structured, long-term camera library. It emphasizes traceable file operations, preserving original media, keeping associated files together, and leaving decisions about the final archive to the user.
+### From camera card to camera archive. Carefully.
 
-**Stable version:** 1.0.0 · **Image:** ghcr.io/heller-adrian/bibliothekar:1.0.0 · **License:** [AGPL-3.0](LICENSE)
+**Self-hosted photo ingestion, event organization and verified archiving for TrueNAS.**
 
-Bibliothekar can run as a **TrueNAS Custom App** with Docker Compose. It has **not yet been accepted into the official TrueNAS Apps Catalog**; catalog submission and review are separate.
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-3b657f)](LICENSE)
+[![Container: GHCR](https://img.shields.io/badge/Container-GHCR-15222c)](https://github.com/heller-adrian/Bibliothekar/pkgs/container/bibliothekar)
+[![Platform: TrueNAS](https://img.shields.io/badge/Platform-TrueNAS-3b657f)](https://www.truenas.com/)
 
-## Features
+[Overview](#overview) · [Workflow](#how-it-works) · [Features](#what-bibliothekar-does) · [Installation](#install-on-truenas) · [Safety](#data-safety) · [Deutsch](#kurz-auf-deutsch)
 
-- **Import & Review:** inspect metadata and capture dates from SD-card backups, mounted removable devices or explicitly configured NAS folders.
-- **Safe sourcing:** when the optional device helper is enabled, mount SD cards and USB media **read-only**; back up data before further organization.
-- **File families:** keep related RAW, JPEG and sidecar files together.
-- **Workspace:** assign media to dated events or a configurable **No Event** collection and preview file/folder operations before applying changes.
-- **Metadata correction:** review and correct capture timestamps on verified working copies, including applying a consistent offset to groups.
-- **Controlled archiving:** prepare a camera archive update and verify the actual file structure and event.json. Archive storage normally remains **read-only** to Bibliothekar.
-- **Manual-change review:** detect external filename and event folder changes and handle them explicitly, including Accept/Undo for archived events.
-- **Multiple libraries:** separate library databases and archive roots, with managed shared workspace inventories.
+</div>
 
-The UI supports English and German. Bibliothekar is a **file and event management application**, not a photo gallery or an AI sorter.
+---
 
-## A typical workflow
+## Overview
 
-1. Attach an SD card or choose a saved backup/NAS source.
-2. Create or review a verified backup; inspect media families and capture dates.
-3. Assign files to events or leave them in **No Event**.
-4. Review the planned folder structure and confirm the workspace operation.
-5. Prepare a long-term archive change and manually perform the explicitly listed archive operations.
-6. Return to Bibliothekar for verification, including the event.json. Unfinished actions remain visible under **Tasks**.
+**Bibliothekar** is a self-hosted web application for photographers who want to manage camera files deliberately, rather than hand their original photo archive to an opaque automation.
 
-## Installation on TrueNAS
+It bridges the gap between an SD card and a durable, organized camera library. You can import and check media, group related files, organize images into events, work with your own folder structure and verify the final archive. The archive remains under **your control**.
 
-The [Compose example](compose.example.yaml) is a starting point for a TrueNAS **Custom App**. By default, it runs without Docker privileged mode and uses already available storage paths. The optional SD/USB device helper is disabled in the base profile.
+Bibliothekar runs locally as a container. It is designed primarily for **TrueNAS SCALE** and can be installed as a **Custom App**. It is **not yet an officially listed TrueNAS Apps Catalog / Discover app**.
 
-Before installing:
+> **The central idea:** Backup and working files may be managed by the application. Changes to the long-term camera archive are explicit, reviewable and verified — not silent background reorganizations.
 
-1. Create dedicated datasets/directories for **app data**, **workspace** and **camera archive**, and ensure the correct filesystem/ACL permissions.
-2. Set BIBLIOTHEKAR_APPDATA_DIR, BIBLIOTHEKAR_WORKSPACE_DIR and BIBLIOTHEKAR_MAIN_LIBRARY_DIR to their existing host paths.
-3. Configure a strong BIBLIOTHEKAR_ADMIN_PASSWORD (at least 16 characters). Limit public access to the web UI.
-4. Keep the archive mapping **read-only**, the workspace and app data **read/write**. Avoid mounting unrelated NAS datasets.
-5. Deploy the Compose configuration and open the web UI on the selected port (default 30044).
-6. Back up app data and the database before updates. Do **not** run two instances against the same SQLite database.
+## How it works
 
-For reproducible installs use **ghcr.io/heller-adrian/bibliothekar:1.0.0**. The **ghcr.io/heller-adrian/bibliothekar:latest** tag follows the latest approved stable release. Pin a numbered tag or digest if rollback reproducibility matters.
+```text
+Camera / SD card / existing folders
+                │
+                ▼
+       Back up and inspect
+       Metadata · duplicates · file families
+                │
+                ▼
+          Shared photo stock
+       Dates · unassigned captures
+                │
+                ▼
+           Plan events
+       Named events or "No Event"
+                │
+                ▼
+          Working library
+       Custom folders · manual selection
+                │
+                ▼
+          Prepare archive
+       Compare source and destination
+                │
+                ▼
+         Verify and finish
+       Read-only archive · open tasks
+```
 
-### Container paths
+Bibliothekar **does not decide which photographs are good**. You remain free to select, edit, export and rearrange your photos using your preferred tools.
 
-| Container path | Purpose | Access |
+## What Bibliothekar does
+
+| Area | Capabilities |
+| --- | --- |
+| **Import** | Read camera backups and configured folder/NAS sources; optional read-only removable-media support |
+| **Media integrity** | Inspect capture metadata and duplicates; keep RAW/JPEG pairs and related sidecars associated |
+| **Events** | Organize captures into dated events, subevents and configurable *No Event* collections |
+| **Workspaces** | Plan and preview folder operations; use configurable, event-specific directory layouts |
+| **Metadata** | Correct capture dates safely, including batch correction using a reference photograph and a constant time offset |
+| **Multiple libraries** | Keep independent library databases, working areas and archive destinations while coordinating shared incoming media |
+| **Archive** | Check files and structures, prepare explicit archive actions and verify the result; track remaining tasks |
+| **Change handling** | Detect external file/folder changes and support controlled editing, rollback and recovery workflows |
+| **Everyday use** | Browser interface and installable web app (PWA), with English and German UI |
+
+### One file, one history
+
+A RAW file and its matching JPEG should not lose their relationship just because they are moved into an event. A photograph should not silently be assigned twice. A failed or interrupted operation should not be mistaken for a successful one. Bibliothekar is built around **file identity, visible states, verification and recoverable operations**.
+
+### Your archive stays yours
+
+An event can change long after its photographs have been archived. Bibliothekar can prepare the necessary changes and verify their result, but its recommended archive mount is **read-only**. The actual archive file operations remain deliberate administrator actions.
+
+## Install on TrueNAS
+
+The repository provides a [Compose example](compose.example.yaml) for a TrueNAS **Custom App**. This is not the same as an official one-click Catalog/Discover installation.
+
+**Before you start:** Create and configure separate persistent storage locations for application data, the shared workspace and the primary camera archive. Set appropriate TrueNAS ACLs and permissions. Never point a test instance at an existing production database or workspace.
+
+1. Open [`compose.example.yaml`](compose.example.yaml) and configure the required host paths `BIBLIOTHEKAR_APPDATA_DIR`, `BIBLIOTHEKAR_WORKSPACE_DIR` and `BIBLIOTHEKAR_MAIN_LIBRARY_DIR`.
+2. Set `BIBLIOTHEKAR_ADMIN_PASSWORD` to a strong password (**at least 16 characters**). The example uses port `30044`.
+3. Mount **app data** and **workspace** read/write; mount the **archive read-only**. Verify the paths and filesystem permissions before starting.
+4. Deploy the Custom App and finish the web-based setup. Back up app data and your database before upgrading.
+
+```text
+Image: ghcr.io/heller-adrian/bibliothekar:1.0.0
+Web UI: http://<your-truenas-host>:30044
+```
+
+**Release note:** The `1.0.0` image is the intended stable release tag. Verify that the [GitHub Release](https://github.com/heller-adrian/Bibliothekar/releases) and the corresponding GHCR image have actually been published before installing it. For reproducible deployments, pin a numbered image tag or digest rather than relying on `latest`.
+
+| Container path | Use | Mount |
 | --- | --- | --- |
-| /appdata | Settings, library databases, application state and recovery journals | Read/write; persistent |
-| /workspace | SD backups, free media, event workspaces, metadata working copies and trash | Read/write; persistent |
-| /main-library | Primary camera archive (other libraries have separate configured archive roots) | **Read-only** |
-| /sources/nas | Optional NAS folder import source | Read-only |
-| /tmp | Temporary runtime files | Disposable tmpfs |
+| `/appdata` | Configuration, SQLite databases and recovery state | Persistent RW |
+| `/workspace` | Shared incoming stock and working data | Persistent RW |
+| `/main-library` | Primary camera archive | **RO** |
+| `/tmp` | Temporary runtime files | tmpfs |
 
-Use the actual [Compose example](compose.example.yaml) for the authoritative environment variable names and host mappings. Internal paths below /appdata do not require separate host datasets.
+The [Compose example](compose.example.yaml) is authoritative for the actual container configuration. Optional NAS sources and additional library roots require explicit configuration.
 
-### Optional automatic SD-card/USB mounting
+### SD cards and USB drives
 
-Direct discovery, read-only mount and safe unmount of attached devices use a dedicated **source-helper process**. The optional [removable-device Compose overlay](compose.removable.yaml) currently enables Docker **privileged mode for the container**. The web process itself drops to UID/GID 568, but the container receives expanded device and mount permissions.
+The default deployment uses folder-based sources **without privileged container mode**. Direct detection and mounting of physical SD/USB devices is a separate optional capability and requires additional host/device permissions. Do **not** enable elevated privileges just for convenience; consult the deployment/security documentation and assess the impact on your TrueNAS host. Automatic removable-device operation is not yet qualified for an official TrueNAS catalog listing.
 
-Enable this profile only as an informed administrator on a trusted host. Do not expose the source-helper service on a public port. The standard folder-based import profile does **not** require privileged mode. Fully automatic hardware hotplug under restricted device permissions is not yet qualified for the TrueNAS Apps Catalog.
+## Data safety
 
-## Data safety and operational notes
+- **Read-only archive boundary:** The recommended container setup cannot write directly into the camera archive.
+- **Explicit operations:** Preview and confirm significant changes; review open tasks before declaring the workflow complete.
+- **Verification:** File sizes, hashes and live file inventories are used where appropriate to detect incomplete or inconsistent states.
+- **Recovery state:** SQLite databases and persistent operation journals must be retained and backed up. Do not delete journals or reservations to bypass a blocked operation.
+- **Least privilege:** Mount only the directories the application actually needs. Do not expose the web UI directly to the public internet; use appropriate access controls and HTTPS for remote use.
+- **One active writer:** Never run multiple instances against the same application database/workspace.
 
-- Mount original camera media **read-only** wherever supported; keep camera archive mounts read-only in the recommended deployment.
-- Bibliothekar uses SQLite, persistent operation journals and verification checks. **Never delete a recovery reservation merely to bypass a blocked action.**
-- Changes involving the long-term camera archive deliberately require operator verification; the app does not silently modify that read-only mount.
-- TrueNAS permissions, ACLs and selected host paths must be configured by the operator. Bibliothekar does not provision arbitrary host datasets.
-- Device support depends on host Linux, filesystem, device exposure and permissions; unsupported or unverifiable devices are rejected.
-- Use an HTTPS reverse proxy and appropriate network controls before making the web UI available remotely.
+Like any file-management software, Bibliothekar is **not a replacement for an independent backup** of your original photos and application state.
 
-## Source, issues and license
+## Scope
 
-Application code: [app](app/) · Tests: [tests](tests/) · Qualification: [qa](qa/) · [Documentation guide](docs/README.md) · Downloads: [Releases](https://github.com/heller-adrian/Bibliothekar/releases).
+The **1.0.0 milestone** focuses on the stable camera-file workflow. Bibliothekar is **not** a photo gallery, an Immich replacement or an AI-based photo selector. Possible future integrations (including Immich and optional AI-assisted preselection) are separate work, not promised features of 1.0.0.
 
-[Contributing](CONTRIBUTING.md) · [Security policy](.github/SECURITY.md)
+## Project and development
 
-For a public bug report, include the version, environment and reproduction steps, with **redacted** error messages. Do not upload private photos, databases, credentials or device IDs.
+[Source code](app/) · [Automated tests](tests/) · [QA](qa/) · [Technical documentation](docs/) · [Changelog](CHANGELOG.md) · [Security policy](.github/SECURITY.md) · [Releases](https://github.com/heller-adrian/Bibliothekar/releases)
 
-Bibliothekar has been developed with extensive AI-assisted programming. Changes are tracked in Git, and automated checks and manual acceptance evidence can be reviewed in the repository. AI involvement should not be mistaken for independent certification or a guarantee of data safety.
+Development combines backend regression tests, integration tests and hands-on UI and TrueNAS checks. A green workflow alone is not a promise that every possible storage configuration is supported.
 
-Bibliothekar is free software under the **GNU Affero General Public License version 3**. See [LICENSE](LICENSE).
+### Reporting problems
+
+For suspected vulnerabilities, follow our [private disclosure policy](.github/SECURITY.md), not a public issue. For ordinary bugs, please include the exact version or container digest, relevant TrueNAS information, expected versus actual behavior and reproducible steps. **Remove personal photographs, database contents, passwords, tokens, device identifiers and internal network details** before posting logs or screenshots.
+
+## Kurz auf Deutsch
+
+**Bibliothekar** ist eine selbst gehostete Web-App zur sicheren Organisation von Kameraaufnahmen auf TrueNAS. Sie begleitet den Weg von der SD-Karte über Sicherung, Metadatenprüfung, Ereigniszuordnung und Arbeitsbereich bis zur langfristigen Kamerabibliothek.
+
+Im Mittelpunkt stehen **nachvollziehbare Dateioperationen, zusammengehörige RAW-/JPEG-Dateien, kontrollierte Änderungen und eine möglichst schreibgeschützte Archivbibliothek**. Du behältst die Entscheidung darüber, wie deine Fotos sortiert und archiviert werden. Die Oberfläche ist auf Deutsch und Englisch verfügbar.
+
+Die Installation erfolgt zunächst als **TrueNAS Custom App**. Eine Aufnahme in den offiziellen TrueNAS-Katalog ist angestrebt, aber noch nicht erfolgt.
+
+## License
+
+Bibliothekar is free and open-source software licensed under the **GNU Affero General Public License v3.0**. See [LICENSE](LICENSE).
