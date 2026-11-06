@@ -19,6 +19,7 @@ Some historic qualification tools **still import or inspect these files by their
 
 - [Original version-bound CI definitions at the immutable v1.0.0 tag](https://github.com/heller-adrian/Bibliothekar/tree/v1.0.0/.github/workflows)
 - [Post-1.0 workflow inventory](history/ci-workflows.md)
+- [Branch inventory and public-readiness review (2026-11-06)](history/PUBLICATION-AUDIT-2026-11-06.md)
 - [Historical patch-release requests](history/release-requests/)
 - [Pre-release notes](pre/) and [Pre.5 release evidence](pre5/)
 - [RC14 release candidate reports](rc14/)
