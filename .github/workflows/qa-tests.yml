@@ -9,6 +9,7 @@ on:
       - 'requirements*.txt'
       - 'Dockerfile'
       - 'compose*.yaml'
+      - '!qa/README.md'
   push:
     branches: [main]
     paths:
@@ -18,6 +19,7 @@ on:
       - 'requirements*.txt'
       - 'Dockerfile'
       - 'compose*.yaml'
+      - '!qa/README.md'
   workflow_dispatch:
 permissions:
   contents: read
