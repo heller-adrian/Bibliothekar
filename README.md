@@ -83,6 +83,8 @@ Enable this profile only as an informed administrator on a trusted host. Do not 
 
 Application code: [app](app/) · Tests: [tests](tests/) · Qualification: [qa](qa/) · [Documentation guide](docs/README.md) · Downloads: [Releases](https://github.com/heller-adrian/Bibliothekar/releases).
 
+[Contributing](CONTRIBUTING.md) · [Security policy](.github/SECURITY.md)
+
 For a public bug report, include the version, environment and reproduction steps, with **redacted** error messages. Do not upload private photos, databases, credentials or device IDs.
 
 Bibliothekar has been developed with extensive AI-assisted programming. Changes are tracked in Git, and automated checks and manual acceptance evidence can be reviewed in the repository. AI involvement should not be mistaken for independent certification or a guarantee of data safety.
