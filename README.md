@@ -81,8 +81,10 @@ Enable this profile only as an informed administrator on a trusted host. Do not 
 
 ## Source, issues and license
 
-Application code: [app](app/) · Tests: [tests](tests/) · Qualification: [qa](qa/) · Technical notes: [docs](docs/) · Downloads: [Releases](https://github.com/heller-adrian/Bibliothekar/releases).
+Application code: [app](app/) · Tests: [tests](tests/) · Qualification: [qa](qa/) · [Documentation guide](docs/README.md) · Downloads: [Releases](https://github.com/heller-adrian/Bibliothekar/releases).
 
 For a public bug report, include the version, environment and reproduction steps, with **redacted** error messages. Do not upload private photos, databases, credentials or device IDs.
+
+Bibliothekar has been developed with extensive AI-assisted programming. Changes are tracked in Git, and automated checks and manual acceptance evidence can be reviewed in the repository. AI involvement should not be mistaken for independent certification or a guarantee of data safety.
 
 Bibliothekar is free software under the **GNU Affero General Public License version 3**. See [LICENSE](LICENSE).

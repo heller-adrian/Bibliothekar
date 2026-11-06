@@ -1,38 +1,32 @@
-# Veröffentlichung und öffentliche Quellcodefreigabe – Checkliste
+# Public source release checklist
 
-Diese Checkliste ist für die öffentliche Freigabe des Projekts bestimmt. Sie enthält **keine** privaten Infrastrukturinformationen.
+**Status: preparation in progress – not a public-release approval.**
+Stable **v1.0.0** was published on 2026-11-05. This checklist concerns **making the GitHub source repository public**, not rebuilding or retesting that already published version.
 
-## Vor Änderung der Repository-Sichtbarkeit
+## Before making the repository public
 
-- [ ] Quellbaum auf eingecheckte Zugangsdaten, Token, Zertifikate, private Schlüssel, interne IP-Adressen und installationsspezifische Pfade prüfen.
-- [ ] **Die gesamte erreichbare Git-Historie**, alle Tags, Branches, Releases, Action-Artefakte und hochgeladenen Dateien mitprüfen. Ein neuer Commit entfernt ältere Angaben **nicht** aus der Historie.
-- [ ] Versehentlich enthaltene Geheimnisse unabhängig von späteren Lösch-Commits sperren bzw. austauschen.
-- [ ] Öffentliche Dokumentation auf Funktionen, Systemanforderungen, Einrichtung, Grenzen und Support konzentrieren. Entwicklungsspezifische QA-Unterlagen ohne privaten Infrastrukturbezug bereitstellen.
-- [ ] Lizenz, Drittanbieter-Lizenzen, Sicherheitskontakt und Release-Hinweise überprüfen.
-- [ ] Test- und Image-Publishing für öffentliches Repository kontrollieren; GHCR-Sichtbarkeit und Rechte separat prüfen.
-- [ ] Bestehende Pull Requests und Commit-/Issue-Kommentare ebenfalls auf private Angaben prüfen.
+- [ ] Review all files in the current default branch for access tokens, passwords, private keys, credentials, internal IP addresses, home directories and private NAS paths.
+- [ ] Scan **all reachable Git history** across every retained branch and tag. Removing files in a new commit does not remove old reachable versions.
+- [ ] Review old release assets, GitHub Actions logs, uploaded artifacts, issue and pull-request descriptions/comments, and any other attachments. The source-history scanner does not cover every GitHub surface.
+- [ ] Rotate or revoke any credentials found, even if they appear only in an old commit.
+- [ ] Review old branch and open pull-request retention. Only remove a branch after checking its contribution, current activity, open PRs and release/tag references.
+- [ ] Check GitHub Actions workflows for fork/pull-request trust boundaries, self-hosted runners, token permissions, secrets and writable publishing paths.
+- [ ] Verify that publication is intentionally gated and that documentation-only changes cannot publish or overwrite an existing stable image.
+- [ ] Review the container package visibility in GHCR separately; public source access does not determine package visibility.
+- [ ] Verify license text, dependencies/third-party licenses, third-party image/icon usage and a security-reporting contact.
+- [ ] Review README and install instructions from a new user's perspective, including restrictions on privileged SD/USB mounting and the distinction between TrueNAS Custom Apps and the official Apps Catalog.
+- [ ] Recheck the remaining repository contents, GitHub settings, and sensitive metadata after cleanup; explicitly approve the final public-visibility change.
 
-## Gate für einen stabilen 0.50.0-Release
+## Current preservation rule
 
-- [x] BA-01: Datenbank- und Ereignisdokumente bei Fehler/Neustart konsistent halten.
-- [x] BA-02: Sichere, wiederanlauffähige Löschtransaktionen.
-- [x] BA-03: Schreibende APIs vor unberechtigtem Zugriff schützen.
-- [x] BA-08: Zielzuordnung und Ursprungs-Warteschlange atomar und idempotent fortschreiben.
-- [x] BA-12: Recovery nach Abbruch während der Metadatenkorrektur.
-- [ ] BA-07/10: vollständige dynamische Fehlerfall- und Neustartabnahme.
-- [ ] Sämtliche Backend-Tests, aktuelle Archiv-E2E, Upgrade- und Mehrbibliothekstests bestanden.
-- [ ] Verifizierten Commit einmalig als stabilen Release markieren; keine Force-Retags.
-- [ ] Versionstag und Build-Digest dokumentieren; erst dann `latest` veröffentlichen.
+The existing `v1.0.0` release tag, published image digest and application code are not part of this housekeeping task. Historic candidate testing is already recorded; it should not be run again simply to reorganize documentation or CI entry points.
 
-**Stand der automatischen Prüfungen:** 995/995 Backend-Tests + isolierter
-Container-Authentisierung/CSRF-HTTP-Test grün. Die oben abgehakten BA-Punkte
-sind auf synthetischer Ebene umgesetzt und geprüft, ersetzen aber nicht
-die noch offenen TrueNAS-/iPhone-/Mehrbibliotheks-Praxistests.
+## Historical qualification documentation
 
-**Freigabeentscheidung:** Vorerst NO-GO für Merge / Stable-`latest`.
-Vollständiger Nachweis und offene Gates:
-[0.50.0 Freigabebericht](0500_RELEASE_GATE_REPORT.md).
+The archived 0.50.0 gate report is [here](0500_RELEASE_GATE_REPORT.md). Its earlier **NO-GO** language and test counts concern *0.50.0*, not the published 1.0.0 release, and should not be read as a current release verdict.
 
-## Separates Discover-Gate
+The final 1.0.0 qualification is represented by its recorded release QA run and immutable `v1.0.0` source tag. The one-off full-qualification workflow is not yet a reusable future-version release gate. See [Releasing](RELEASING.md) and the [CI inventory](history/ci-workflows.md).
 
-Der direkte SD-Kartenimport bleibt eine Produkteigenschaft. Die für eine TrueNAS-Community-Katalog-App zulässigen Geräteberechtigungen werden gesondert abgestimmt und getestet. Die Discover-Entscheidung blockiert nicht die Entwicklung der selbst gehosteten Custom-App; sie rechtfertigt aber auch keine Umgehung der Sicherheitsprüfung.
+## Separate TrueNAS Catalog submission
+
+Public repository visibility does **not** imply approval by the TrueNAS Apps Catalog. Device access, privileged helper operation, filesystem mounts and security review must be handled under a separate catalog-submission assessment.
