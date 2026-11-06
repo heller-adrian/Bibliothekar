@@ -1,8 +1,23 @@
 name: Backend QA
 on:
+  # Documentation and housekeeping commits do not need the long regression suite.
   pull_request:
+    paths:
+      - 'app/**'
+      - 'tests/**'
+      - 'qa/**'
+      - 'requirements*.txt'
+      - 'Dockerfile'
+      - 'compose*.yaml'
   push:
     branches: [main]
+    paths:
+      - 'app/**'
+      - 'tests/**'
+      - 'qa/**'
+      - 'requirements*.txt'
+      - 'Dockerfile'
+      - 'compose*.yaml'
   workflow_dispatch:
 permissions:
   contents: read
