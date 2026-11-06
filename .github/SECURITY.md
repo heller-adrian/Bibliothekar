@@ -12,7 +12,7 @@ The supported stable series is **1.0.x**, starting with the published release `v
 
 **Please do not report security vulnerabilities in public GitHub issues, discussions or pull requests.**
 
-When **GitHub Private Vulnerability Reporting** is enabled, use **Report a vulnerability** on the repository's [Security page](https://github.com/heller-adrian/Bibliothekar/security) to report privately. **This feature must be explicitly verified and enabled before opening the repository to the public.**
+When **GitHub Private Vulnerability Reporting** is enabled, use **Report a vulnerability** on the repository's [Security page](https://github.com/heller-adrian/Bibliothekar/security) to report privately. **GitHub enables this feature for public repositories.** It must therefore be activated and verified immediately **after** making the repository public and **before** announcing the public launch. Until a working private reporting channel is available, publication should not be actively promoted.
 
 If private reporting is unavailable, do not include security details in a public issue, discussion or pull request. Ask the maintainers to make a private channel available without revealing the vulnerability in public. Ordinary issues are for non-security bugs only.
 

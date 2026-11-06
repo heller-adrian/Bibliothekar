@@ -14,7 +14,7 @@ Stable **v1.0.0** was published on 2026-11-05. This checklist concerns **making 
 - [ ] Verify that publication is intentionally gated and that documentation-only changes cannot publish or overwrite an existing stable image.
 - [ ] Review the container package visibility in GHCR separately; public source access does not determine package visibility.
 - [ ] Verify license text, dependencies/third-party licenses, third-party image/icon usage and a security-reporting contact.
-- [ ] Enable **GitHub Private Vulnerability Reporting** and verify that the Security page offers a working private reporting route; publication must not precede this check.
+- [ ] Before visibility change, prepare a confidential security-contact fallback. **Immediately after** the repository becomes public, enable GitHub Private Vulnerability Reporting (available for public repositories) and verify that **Report a vulnerability** works; only then announce public availability.
 - [ ] Review README and install instructions from a new user's perspective, including restrictions on privileged SD/USB mounting and the distinction between TrueNAS Custom Apps and the official Apps Catalog.
 - [ ] Recheck the remaining repository contents, GitHub settings, and sensitive metadata after cleanup; explicitly approve the final public-visibility change.
 
