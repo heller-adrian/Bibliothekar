@@ -143,14 +143,6 @@ Development combines backend regression tests, integration tests and hands-on UI
 
 For suspected vulnerabilities, follow our [private disclosure policy](.github/SECURITY.md), not a public issue. For ordinary bugs, please include the exact version or container digest, relevant TrueNAS information, expected versus actual behavior and reproducible steps. **Remove personal photographs, database contents, passwords, tokens, device identifiers and internal network details** before posting logs or screenshots.
 
-## Kurz auf Deutsch
-
-**Bibliothekar** ist eine selbst gehostete Web-App zur sicheren Organisation von Kameraaufnahmen auf TrueNAS. Sie begleitet den Weg von der SD-Karte über Sicherung, Metadatenprüfung, Ereigniszuordnung und Arbeitsbereich bis zur langfristigen Kamerabibliothek.
-
-Im Mittelpunkt stehen **nachvollziehbare Dateioperationen, zusammengehörige RAW-/JPEG-Dateien, kontrollierte Änderungen und eine möglichst schreibgeschützte Archivbibliothek**. Du behältst die Entscheidung darüber, wie deine Fotos sortiert und archiviert werden. Die Oberfläche ist auf Deutsch und Englisch verfügbar.
-
-Die Installation erfolgt zunächst als **TrueNAS Custom App**. Eine Aufnahme in den offiziellen TrueNAS-Katalog ist angestrebt, aber noch nicht erfolgt.
-
 ## License
 
 Bibliothekar is free and open-source software licensed under the **GNU Affero General Public License v3.0**. See [LICENSE](LICENSE).
