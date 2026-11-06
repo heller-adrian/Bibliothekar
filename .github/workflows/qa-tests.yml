@@ -16,9 +16,9 @@ jobs:
     env:
       PYTHONPATH: ${{ github.workspace }}
       PYTEST_ADDOPTS: ''
-      BIBLIOTHEKAR_APPDATA_DIR: ${{ runner.temp }}/bibliothekar-qa/appdata
-      BIBLIOTHEKAR_WORKSPACE_DIR: ${{ runner.temp }}/bibliothekar-qa/workspace
-      BIBLIOTHEKAR_MAIN_LIBRARY_DIR: ${{ runner.temp }}/bibliothekar-qa/main-library
+      BIBLIOTHEKAR_APPDATA_DIR: /tmp/bibliothekar-qa/appdata
+      BIBLIOTHEKAR_WORKSPACE_DIR: /tmp/bibliothekar-qa/workspace
+      BIBLIOTHEKAR_MAIN_LIBRARY_DIR: /tmp/bibliothekar-qa/main-library
       BIBLIOTHEKAR_ADMIN_PASSWORD: ci-synthetic-never-use-this-password
     steps:
       - uses: actions/checkout@v4
