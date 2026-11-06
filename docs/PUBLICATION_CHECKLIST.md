@@ -1,6 +1,8 @@
 # Public source release checklist
 
 **Status: preparation in progress – not a public-release approval.**
+
+An initial historic branch and privacy review is recorded in [the 2026-11-06 audit](history/PUBLICATION-AUDIT-2026-11-06.md). Its path findings remain unresolved; do not change repository visibility based on that preliminary report.
 Stable **v1.0.0** was published on 2026-11-05. This checklist concerns **making the GitHub source repository public**, not rebuilding or retesting that already published version.
 
 ## Before making the repository public
