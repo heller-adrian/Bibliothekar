@@ -50,10 +50,10 @@ Achtung: Das Publizieren des Images und das Anlegen des Git-Tags sind technisch 
 
 `app/__init__.py`, die `RELEASE_VERSION`- und `DEPLOYMENT_VERSION`-Konstanten in `app/main.py`, die sichtbare Versionsanzeige und das Compose-Beispiel müssen denselben Entwicklungsstand ausweisen.
 
-Beispiel:
+Beispiel für das unveränderte Stable-Release 1.0.0:
 
 ```python
-__version__ = "0.50.0"
+__version__ = "1.0.0"
 ```
 
 Ein Entwicklungsbranch mit dieser Nummer ist **nicht** automatisch ein Release. Die Version gilt erst nach dem erfolgreichen Merge in `main` und dem eindeutigen Veröffentlichungslauf als stabil.
@@ -62,6 +62,8 @@ Ein Entwicklungsbranch mit dieser Nummer ist **nicht** automatisch ein Release. 
 
 Für installierte stable Custom Apps ist `ghcr.io/heller-adrian/bibliothekar:latest` vorgesehen. Für reproduzierbare Updates/Rollbacks möglichst einen geprüften Image-Digest bzw. festen Versionstag benutzen.
 
-Bei einem App-/Discover-Migrationslauf die vorhandenen Host-Path-Datasets und dieselben Containerpfade für `/config`, `/database`, `/workspace`, `/logs`, `/main-library` und `/sources/nas` beibehalten. Alte und neue Instanzen dürfen nicht parallel auf die SQLite-Datenbanken zugreifen.
+**Neuinstallation 1.0.0:** Maßgeblich ist die aktuelle [Compose-Vorlage](../compose.example.yaml). Sie bindet den persistenten Appzustand nach `/appdata`, den Arbeitsbereich nach `/workspace` und das Kameraarchiv **read-only** nach `/main-library` ein. Optional kann ein NAS-Quellverzeichnis nur lesend unter `/sources/nas` eingebunden werden. Die Host-Path-Variablen heißen `BIBLIOTHEKAR_APPDATA_DIR`, `BIBLIOTHEKAR_WORKSPACE_DIR` und `BIBLIOTHEKAR_MAIN_LIBRARY_DIR`.
+
+**Bestehende ältere Installation:** Historische Konfigurationen können zusätzliche Pfade wie `/config`, `/database` oder `/logs` verwenden. Solche Installationen nicht blind auf die neue Compose-Vorlage umstellen oder gespeicherte Daten verschieben; zuerst tatsächliche Mounts, Datenbankpfade und Migrationsverfahren prüfen und sichern. Alte und neue Instanzen dürfen nicht gleichzeitig dieselbe SQLite-Datenbank öffnen.
 
 **Der SD-Karten-Import direkt über TrueNAS muss funktionsfähig bleiben.** Katalog-Kompatibilität darf nicht durch die stille Entfernung der Geräteerkennung erreicht werden. Der notwendige Gerätezugriff und das privilegierte Helper-Sicherheitsmodell bedürfen einer gesonderten Sicherheits- und TrueNAS-Freigabe.
