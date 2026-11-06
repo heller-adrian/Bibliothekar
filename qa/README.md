@@ -8,7 +8,7 @@ The application, test implementations and historical qualification artifacts are
 - `../tests/fixtures/` contains test fixtures.
 - `.github/workflows/qa-tests.yml` runs the ordinary backend regression on source changes and supports manual dispatch. Documentation-only housekeeping is excluded from automatic source-test triggers.
 - `qa/rc13/regression.py` is still used to partition the exact-source **1.0.0** full qualification. Its older name does **not** mean that the script can be deleted or renamed without updating its consumers.
-- `.github/workflows/qa-100-stabilization.yml` is an archived-version-specific qualification entry point retained temporarily for reference, **not** a reusable future-release gate.
+- The version-specific 1.0.0 qualification workflow is preserved at `v1.0.0:.github/workflows/qa-100-stabilization.yml` (not active on `main`), **not** a reusable future-release gate.
 
 ## Safety rules
 
