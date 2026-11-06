@@ -1,137 +1,23 @@
-# QA
+# Bibliothekar QA and tests
 
-Dieser Bereich dient automatisierten Integrations- und Regressionstests.
+The application, test implementations and historical qualification artifacts are intentionally separate. This directory contains regression tools and synthetic-data integration tests; it is **not** part of the installed image by default.
 
-## Grundregel
+## Current orientation
 
-QA darf Fehler finden und dokumentieren, aber keinen Produktivcode selbständig reparieren.
+- `../tests/backend/` contains the main automated backend regression suite.
+- `../tests/fixtures/` contains test fixtures.
+- `.github/workflows/qa-tests.yml` runs the ordinary backend regression on source changes and supports manual dispatch. Documentation-only housekeeping is excluded from automatic source-test triggers.
+- `qa/rc13/regression.py` is still used to partition the exact-source **1.0.0** full qualification. Its older name does **not** mean that the script can be deleted or renamed without updating its consumers.
+- `.github/workflows/qa-100-stabilization.yml` is an archived-version-specific qualification entry point retained temporarily for reference, **not** a reusable future-release gate.
 
-Der QA-Agent:
+## Safety rules
 
-1. liest Testmatrix und aktuellen Versionsstand
-2. führt Tests einzeln nach Test-ID aus
-3. dokumentiert Soll und Ist
-4. setzt jeden Test auf PASS, FAIL, BLOCKED oder SKIPPED
-5. führt unabhängige Tests nach einem Fehler weiter
-6. beendet einen Testpfad nur, wenn Folgeprüfungen durch den Fehler fachlich unbrauchbar wären
-7. verändert keine realen Kameraarchive oder Sicherungsbestände
-8. schreibt am Ende einen vollständigen Bericht
+Run tests against isolated synthetic media, disposable databases and temporary workspace/archive roots only. Do not run archive mutation or cleanup tests against the actual TrueNAS production application, photo archive or a live library database. Do not copy private photos or credentials into public CI artifacts.
 
-## Vollständiger 0.21.2-Testumfang
+Keep source/commit identity, environment information, test manifests and immutable evidence together. Never report a full pass if any required partition, restart, container, frontend or filesystem verification did not complete.
 
-Die jeweils aktuelle `TEST_MATRIX.md` ist die verbindliche Umfangsliste für den Hermes-QA-Lauf. Es dürfen nicht nur exemplarische oder zuletzt geänderte Fälle ausgewählt werden.
+## Historical test plans
 
-Am Ende muss für jede Test-ID aus der Matrix genau ein Ergebnis `PASS`, `FAIL`, `BLOCKED` oder `SKIPPED` vorliegen. Fehlende IDs sind ein unvollständiger QA-Lauf und werden von `qa/validate_results.py` abgelehnt.
+The original `TEST_MATRIX.md`, `CLEAN_SLATE.md`, `archive_e2e/`, `pre*/`, `rc*/`, `f*/` and other older phases preserve substantial regression coverage. They also contain version-bound assumptions, earlier path conventions and historical test procedures. Their descriptions and test IDs should **not** be mistaken for a current operator runbook. In particular, old references to named NAS datasets or dedicated QA machines are examples of past test conditions, not supported default installation paths.
 
-Automatisierte Backend-QA läuft immer gegen das vollständige Verzeichnis `tests/backend`. Der GitHub-Workflow sammelt die komplette Suite vorab und führt sie ohne Fail-fast-Option aus. Ein FAIL darf fachlich unabhängige Tests nicht verhindern.
-
-## Testlauf
-
-Jeder Lauf erhält einen eigenen Ordner:
-
-`/mnt/storage/ki-workspace/hermes/bibliothekar-qa/runs/YYYY-MM-DD_VERSION_RUN/`
-
-Mindestens:
-
-- `report.md`
-- `results.json`
-- `commands.log`
-- `app.log`
-- `environment.txt`
-- bei T080–T088 zusätzlich `filesystem/` mit IST→SOLL-Plänen, erwarteten Manifesten und realen Evidence-Dateien
-
-## Realdateien
-
-Für realistische E2E-Tests darf `nas-agent` geeignete Kamera-Dateien aus vorhandenen Sicherungsbeständen ausschließlich lesend entnehmen und in seinen QA-Bereich kopieren. Originale bleiben unverändert.
-
-Bevorzugte Quellen sind:
-
-- `/mnt/storage/backup/kamera-sd-karten/DEEPTEST_SD_02`
-- andere ausdrücklich freigegebene SD-Kartensicherungen unter `/mnt/storage/backup/kamera-sd-karten`
-
-Testkopien liegen ausschließlich unter `/mnt/storage/ki-workspace/hermes/bibliothekar-qa/` oder in einem ausdrücklich freigegebenen Testbereich des Kamera-Arbeitsbereichs.
-
-## Beschreibbare Test-Kamerabibliothek
-
-Archivtests T080–T088 verwenden niemals die reale Kamerabibliothek `/mnt/storage/fotos/Kamerabibliothek`.
-
-Für diese Tests existiert eine eigene beschreibbare Test-Kamerabibliothek:
-
-`/mnt/storage/ki-workspace/hermes/bibliothekar-qa/archive-test-library`
-
-Sie wird von QA als vollständiger Ersatz für `KAMERA_ARCHIVE_ROOT` behandelt. Innerhalb eines Archiv-E2E-Laufs darf `nas-agent` dort Ereignisse archivieren, Dateien verschieben, IST→SOLL-Pläne prüfen und den Bestand anschließend wieder entfernen.
-
-Die reale Kamerabibliothek bleibt für Hermes read-only und darf weder als Testziel noch als temporärer Schreibbereich verwendet werden.
-
-### Verbindliches Isolations-Gate vor T080–T088
-
-Die Existenz oder Beschreibbarkeit von `archive-test-library` allein reicht **nicht** aus. T080–T088 dürfen nicht gegen die normale TrueNAS-App ausgeführt werden, weil deren `/camera-library:ro` weiterhin die reale Kamerabibliothek repräsentiert.
-
-Vor T080–T088 muss `nas-agent` die isolierte QA-Instanz gemäß `qa/archive_e2e/README.md` starten. Der Harness erzwingt:
-
-- eine eigene laufbezogene SQLite-DB unter dem Hermes-QA-Bereich
-- `KAMERA_ARCHIVE_ROOT=/mnt/storage/ki-workspace/hermes/bibliothekar-qa/archive-test-library`
-- Testkopien aus einer freigegebenen SD-Sicherung; die Originalquelle wird nicht in den Container gemountet
-- keinerlei Mount der Produktiv-DB oder realen Kamerabibliothek
-- das unveränderliche Produktimage von Commit `627c5515e533e167e45354ccaa71f988f104ae08`
-- einen lokalen, nichtproduktiven QA-Prozess statt einer neuen produktiven TrueNAS-App
-
-Nur ein `PASS` des Isolations-Harness erlaubt den Start von T080–T088. Bei `BLOCKED` oder `FAIL` werden diese Tests nicht improvisiert gegen Produktionspfade ausgeführt; unabhängige Tests laufen weiter.
-
-### Verbindliche reale Dateisystemprüfung
-
-Für T080–T088 reichen API/UI/SQLite-Nachweise nicht aus. Nach jedem relevanten Archiv-, Reassignment- oder manuellen IST→SOLL-Schritt wird der **tatsächliche** Inhalt von `archive-test-library` gegen ein explizites SOLL-Manifest geprüft.
-
-`qa/archive_e2e/verify_filesystem_state.py` prüft dabei mindestens:
-
-- exakte Pfade und Ordnerstruktur
-- Datei- und Ordneranzahl
-- Größe und SHA-256 der Testkopien
-- vollständigen Zusammenhalt jeder Dateifamilie
-- korrekte Unterereignisordner
-- fehlende und verbliebene Dateien/Ordner
-- ungewollte Inhaltsduplikate
-- Symlinks
-
-Jeder relevante Vergleich wird als `filesystem_checks` in `results.json` dokumentiert. `qa/validate_results.py` akzeptiert für T080–T088 kein `PASS`, wenn diese Nachweise fehlen oder ein Dateisystemvergleich nicht PASS ist. Für T082–T087 muss zusätzlich der konkrete IST→SOLL-Plan als Datei im Laufordner referenziert sein.
-
-Vor jedem Archiv-Testlauf muss der Agent dokumentieren:
-
-- verwendeter QA-Archivpfad
-- verwendete Test-DB
-- Quellbestand der Testkopien
-- SHA-256 bzw. Dateigröße der verwendeten Testdateien
-- dass kein Schreibzugriff auf `/mnt/storage/fotos/Kamerabibliothek` stattgefunden hat
-
-Nach dem Lauf muss er den Zustand der QA-Testbibliothek und der Test-DB dokumentieren. Aufräumen ist nur innerhalb des QA-Bereichs erlaubt.
-
-## Fehlerbericht
-
-Jeder Fehler enthält:
-
-- Test-ID
-- Version / Commit
-- Ausgangszustand
-- ausgeführte Schritte
-- erwartetes Ergebnis
-- tatsächliches Ergebnis
-- relevante API-Antworten
-- DB-Zustand
-- Dateisystemzustand einschließlich konkretem SOLL-Manifest und Evidence-Datei, sofern ein Archivschritt erreicht wurde
-- Logs
-- Reproduzierbarkeit
-- dadurch blockierte Tests
-
-## Rollen
-
-Hermes / nas-agent:
-führt technische Tests durch.
-
-Workspacecontroller:
-plant Reihenfolge, bewertet Abhängigkeiten, lässt unabhängige Tests weiterlaufen und erstellt den Gesamtbericht.
-
-Nutzer:
-nimmt UI, Bedienbarkeit und reale End-to-End-Abläufe manuell ab.
-
-ChatGPT:
-entwickelt Patches auf Basis des QA-Berichts und der manuellen Abnahme.
+Preserve these materials and their referenced paths until a separate dependency-aware refactor is reviewed. Refer to the [documentation index](../docs/README.md) and [release instructions](../docs/RELEASING.md) for current orientation.

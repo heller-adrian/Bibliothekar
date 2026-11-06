@@ -10,13 +10,34 @@ Es gibt genau zwei getrennte Containerkanäle. **Das Stable-Image `latest` darf 
 - Das Image wird dann ausschließlich mit `patch-<version>` versehen; es überschreibt niemals `latest`.
 - Für den Archiv-E2E muss das Testimage aus **genau demselben Commit** gebaut und anhand des OCI-Labels `org.opencontainers.image.revision` kontrolliert werden.
 
+## Stand nach Release 1.0.0 (05.11.2026)
+
+Das erste stabile Release `v1.0.0` ist veröffentlicht und bleibt unverändert.
+**Ein Commit auf `main` startet nicht mehr automatisch die Image-Veröffentlichung.**
+Der vorhandene Stable-Publisher lässt sich ausschließlich durch einen expliziten
+`workflow_dispatch` auf `main` starten. Patch-Images verwenden weiterhin die
+separate, explizite Release-Request-Datei.
+
+**Wichtige Übergangsgrenze:** Die Stable-Freigabeprüfung in
+`.github/workflows/publish-container.yml` ist gegenwärtig noch fest auf den
+vollständigen Abnahmelauf für **1.0.0** einschließlich Commit, Baum und Run-ID
+gebunden. Sie ist noch kein allgemeines Verfahren für **1.0.1 oder höher**.
+Vor dem nächsten stabilen Release müssen die Freigabeprüfung und der
+wiederverwendbare vollständige QA-Workflow geprüft, angepasst und erfolgreich
+gegen den dann tatsächlich auszuliefernden Commit ausgeführt werden.
+Bis dahin darf niemand die bisherige 1.0.0-Qualifikation für einen anderen
+Quellstand als ausreichend behandeln.
+
+Alte versionsgebundene Actions-Dateien sind anhand des unveränderten Tags
+`v1.0.0` weiter erreichbar; siehe [historische Workflows](history/ci-workflows.md).
+
 ## Stable-Freigabe
 
 Vor dem Merge nach `main` **müssen** alle P0-Datenintegritäts-, Sicherheits- und Wiederanlauf-Gates einschließlich SD-Karten-Import erfüllt sein. Grün gemeldete gewöhnliche Backend-Tests ersetzen keine Crash-/Recovery-Abnahme.
 
 Ein genehmigter Stable-Publish:
 
-1. prüft Compose und führt alle Backend-Tests aus;
+1. verlangt eine vollständige, quellstandsgenaue Freigabe einschließlich Compose- und Backend-/Recovery-Abnahme; der Publisher verifiziert diese Nachweise, statt bei jedem Stable-Publish selbst alle Tests erneut auszuführen;
 2. liest die neue SemVer aus `app/__init__.py`;
 3. bricht **vor dem Docker-Build** ab, wenn `v<version>` schon existiert;
 4. baut das Image aus dem freigegebenen Git-Commit;

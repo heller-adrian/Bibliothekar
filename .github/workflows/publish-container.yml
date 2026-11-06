@@ -1,9 +1,8 @@
 name: Publish container image
 
 on:
-  push:
-    branches:
-      - main
+  # Stable releases require an explicit, authorized manual start.
+  # Documentation-only pushes to main must never trigger publication.
   workflow_dispatch:
   workflow_call:
 
@@ -40,7 +39,12 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
-            refs/heads/main) ;;
+            refs/heads/main)
+              if [[ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]]; then
+                echo 'Stable publishing requires explicit workflow dispatch from main.' >&2
+                exit 1
+              fi
+              ;;
             refs/heads/patch/*)
               if [[ "$GITHUB_EVENT_NAME" != "push" ]]; then
                 echo 'Patch builds require explicit release-request push.' >&2
