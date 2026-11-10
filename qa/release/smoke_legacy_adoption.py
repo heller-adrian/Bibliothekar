@@ -43,8 +43,11 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path) -> None:
                     raise
                 time.sleep(1)
 
+    def login():
+        api("/auth/login", method="POST", payload={"password": os.environ["ADOPTION_SMOKE_PASSWORD"]})
+
     wait_ready()
-    api("/auth/login", method="POST", payload={"password": os.environ["ADOPTION_SMOKE_PASSWORD"]})
+    login()
     assert api("/api/settings/storage-health")["ready"]
     checked = api("/api/libraries/check", method="POST", payload={
         "work_root": "", "archive_root": "/main-library", "default_library_id": "smoke",
@@ -89,6 +92,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path) -> None:
             subprocess.run(["docker", "restart", container], check=True)
             base = address()
             wait_ready()
+            login()
             resumed = api(job)
             assert resumed["draft_revision"] == draft["revision"] and resumed["draft"]["events"][0]["name"] == name
             assert b'id="safety"' in request("/")
