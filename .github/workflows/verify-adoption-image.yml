@@ -1,0 +1,126 @@
+name: Verify and release qualified adoption image
+
+on:
+  workflow_call:
+
+permissions:
+  actions: read
+  contents: write
+  packages: read
+
+concurrency:
+  group: bibliothekar-adoption-image-release
+  cancel-in-progress: false
+
+env:
+  QA_SOURCE: 6c4403b68430d59870357f27104869ed4761ca69
+  QA_RUN: '42912304726'
+  IMAGE_SOURCE: 165da30f8350c07319ccce6d5bef22670e5d1030
+  IMAGE_DIGEST: sha256:4c32cba0e89a53a958dd5388c7fcab41db85da485a68a3d58ed5eb491315dfcf
+  IMAGE: ghcr.io/heller-adrian/bibliothekar
+
+jobs:
+  verify-and-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require exact qualified product and full QA evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
+          test "$GITHUB_REF" = 'refs/heads/patch/1.0.1-legacy-adoption'
+          test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
+          request=.github/release-requests/v1.0.1-rc.1.txt
+          test "$(git rev-parse "$IMAGE_SOURCE^")" = "$QA_SOURCE"
+          test "$(git diff --name-only "$QA_SOURCE" "$IMAGE_SOURCE")" = "$request"
+          test -z "$(git diff --name-only "$IMAGE_SOURCE" HEAD -- app Dockerfile requirements.txt requirements-rc.constraints.txt)"
+          test -z "$(git diff --name-only "$QA_SOURCE" HEAD -- qa/release/verify_backend_coverage.py)"
+          evidence="$RUNNER_TEMP/image-qualification"
+          mkdir "$evidence"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN" > "$evidence/run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN/jobs?per_page=100" > "$evidence/jobs.json"
+          gh run download "$QA_RUN" --repo "$GITHUB_REPOSITORY" --pattern 'backend-qa-part-*' --dir "$evidence"
+          gh run download "$QA_RUN" --repo "$GITHUB_REPOSITORY" --name backend-coverage-1 --dir "$evidence/published"
+          gh run download "$QA_RUN" --repo "$GITHUB_REPOSITORY" --name adoption-preflight --dir "$evidence/preflight"
+          python qa/release/verify_backend_coverage.py "$evidence" "$evidence/verified.json"
+          python - "$evidence" <<'PY'
+          import json, os, subprocess, sys
+          from pathlib import Path
+          from xml.etree import ElementTree
+          root = Path(sys.argv[1])
+          run = json.loads((root / "run.json").read_text())
+          assert run["id"] == int(os.environ["QA_RUN"])
+          assert run["head_sha"] == os.environ["QA_SOURCE"] and run["run_attempt"] == 1
+          assert run["status"] == "completed" and run["conclusion"] == "success"
+          assert run["event"] == "workflow_dispatch" and run["path"] == ".github/workflows/qa-tests.yml"
+          assert run["head_branch"] == "patch/1.0.1-legacy-adoption"
+          assert run["head_repository"]["full_name"] == os.environ["GITHUB_REPOSITORY"]
+          jobs = json.loads((root / "jobs.json").read_text())["jobs"]
+          required = {"adoption-preflight", "backend-coverage"} | {f"backend-regression ({i})" for i in range(8)}
+          assert len(jobs) == len(required) and {job["name"] for job in jobs} == required
+          assert all(job["status"] == "completed" and job["conclusion"] == "success" for job in jobs)
+          assert json.loads((root / "verified.json").read_text()) == json.loads(
+              (root / "published/coverage-summary.json").read_text()
+          )
+          cases = list(ElementTree.parse(root / "preflight/result.xml").iter("testcase"))
+          assert len(cases) == 42
+          assert all(not any(child.tag in {"failure", "error", "skipped"} for child in case) for case in cases)
+          request = subprocess.check_output([
+              "git", "show", os.environ["IMAGE_SOURCE"] + ":.github/release-requests/v1.0.1-rc.1.txt"
+          ], text=True).splitlines()
+          assert request == ["v1.0.1-rc.1", os.environ["QA_SOURCE"], os.environ["QA_RUN"]]
+          PY
+          if git ls-remote --exit-code --tags origin refs/tags/v1.0.1-rc.1 >/dev/null; then
+            echo 'Release candidate tag already exists.' >&2
+            exit 1
+          else
+            test "$?" = 2
+          fi
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Verify both methods at the existing immutable digest
+        run: |
+          set -euo pipefail
+          bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh             "$IMAGE@$IMAGE_DIGEST" "$IMAGE_SOURCE"
+          printf '%s\n' "$IMAGE_SOURCE" "$IMAGE_DIGEST" > "$RUNNER_TEMP/image-qualification/image-pass.txt"
+      - name: Publish the verified release candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/adoption-release.md" <<EOF2
+          Bibliothekar 1.0.1 release candidate for manual or scripted adoption within one ZFS dataset.
+
+          Source commit · `$IMAGE_SOURCE`
+          Qualified product commit · `$QA_SOURCE`
+          Test image · `$IMAGE:patch-1.0.1-$IMAGE_SOURCE`
+          Verified image digest · `$IMAGE@$IMAGE_DIGEST`
+          Container test harness commit · `$GITHUB_SHA`
+
+          [Adoption guide](https://github.com/$GITHUB_REPOSITORY/blob/$IMAGE_SOURCE/docs/legacy-adoption.md)
+          [Full backend QA](https://github.com/$GITHUB_REPOSITORY/actions/runs/$QA_RUN)
+          [Container and ZFS qualification](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)
+          EOF2
+          gh release create v1.0.1-rc.1 --repo "$GITHUB_REPOSITORY" --prerelease --latest=false             --target "$IMAGE_SOURCE" --title 'Bibliothekar v1.0.1-rc.1'             --notes-file "$RUNNER_TEMP/adoption-release.md"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: adoption-image-evidence
+          path: |
+            ${{ runner.temp }}/image-qualification/verified.json
+            ${{ runner.temp }}/image-qualification/run.json
+            ${{ runner.temp }}/image-qualification/jobs.json
+            ${{ runner.temp }}/image-qualification/image-pass.txt
+          retention-days: 30

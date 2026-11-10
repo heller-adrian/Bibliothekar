@@ -8,8 +8,33 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from zipfile import ZipFile
+
+
+def open_request(client, request, *, expected, retry_busy=False):
+    attempts = 21 if retry_busy else 1
+    for attempt in range(attempts):
+        try:
+            with client.open(request, timeout=45) as response:
+                assert response.status == expected, (request.full_url, response.status)
+                return response.read()
+        except urllib.error.HTTPError as error:
+            with error:
+                content = error.read().decode("utf-8", errors="replace")
+            try:
+                detail = json.loads(content)
+            except ValueError:
+                detail = {}
+            transient = (error.code == 409 and isinstance(detail, dict)
+                         and detail.get("code") == "legacy_adoption_busy")
+            if not retry_busy or not transient or attempt == attempts - 1:
+                raise AssertionError(
+                    f"{request.method} {request.full_url}: HTTP {error.code}: {content}"
+                ) from error
+            print("Adoption start is waiting for the current operation to release its lock.", flush=True)
+            time.sleep(0.25)
 
 
 def smoke(container: str, source: Path, archive: Path, appdata: Path) -> None:
@@ -26,9 +51,10 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path) -> None:
             csrf = next((cookie.value for cookie in cookies if cookie.name == "bibliothekar_csrf"), "")
             headers.update({"Content-Type": "application/json", "X-Bibliothekar-CSRF": csrf})
         body = json.dumps(payload).encode() if payload is not None else None
-        with client.open(urllib.request.Request(base + path, body, headers, method=method), timeout=45) as response:
-            assert response.status == expected, (path, response.status)
-            return response.read()
+        return open_request(
+            client, urllib.request.Request(base + path, body, headers, method=method),
+            expected=expected, retry_busy=method == "POST" and path == "/api/legacy-adoption/jobs",
+        )
 
     def api(path, **kwargs):
         return json.loads(request(path, **kwargs))

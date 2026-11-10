@@ -4,6 +4,12 @@ on:
   # Stable releases require an explicit, authorized manual start.
   # Documentation-only pushes to main must never trigger publication.
   workflow_dispatch:
+    inputs:
+      verify_existing_adoption_image:
+        description: Verify and release the already built qualified 1.0.1 image
+        type: boolean
+        default: false
+        required: true
   workflow_call:
 
 permissions:
@@ -20,7 +26,16 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/bibliothekar
 
 jobs:
+  verify-existing-adoption-image:
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_existing_adoption_image
+    uses: ./.github/workflows/verify-adoption-image.yml
+    permissions:
+      actions: read
+      contents: write
+      packages: read
+
   build-and-push:
+    if: github.event_name != 'workflow_dispatch' || !inputs.verify_existing_adoption_image
     runs-on: ubuntu-24.04
     timeout-minutes: 75
 

@@ -498,3 +498,39 @@ def test_adoption_reads_actual_read_only_archive(inventory, monkeypatch):
     finally:
         for view in reversed(mounted):
             subprocess.run(["sudo", "-n", "umount", str(view)], check=True)
+
+
+
+@pytest.mark.parametrize("code,retries", [("legacy_adoption_busy", 1), ("legacy_adoption_active", 0)])
+def test_container_probe_retries_only_the_explicit_temporary_lock(monkeypatch, code, retries):
+    from io import BytesIO
+    import json
+    import urllib.error
+    import urllib.request
+    from qa.release import smoke_legacy_adoption as probe
+
+    calls = []
+    waits = []
+
+    class Response(BytesIO):
+        status = 201
+
+    class Client:
+        def open(self, request, timeout):
+            calls.append(request)
+            if len(calls) == 1:
+                raise urllib.error.HTTPError(
+                    request.full_url, 409, "Conflict", {},
+                    BytesIO(json.dumps({"code": code}).encode()),
+                )
+            return Response(b'{"id":"one-job"}')
+
+    monkeypatch.setattr(probe.time, "sleep", waits.append)
+    request = urllib.request.Request("http://127.0.0.1/api/legacy-adoption/jobs", data=b"{}", method="POST")
+    if retries:
+        assert json.loads(probe.open_request(Client(), request, expected=201, retry_busy=True))["id"] == "one-job"
+        assert len(calls) == 2 and waits == [0.25]
+    else:
+        with pytest.raises(AssertionError, match="legacy_adoption_active"):
+            probe.open_request(Client(), request, expected=201, retry_busy=True)
+        assert len(calls) == 1 and waits == []
