@@ -9,22 +9,23 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 from app.database import database_connection
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps
 from app.legacy_adoption_catalogue import prepare_documents
 from app.legacy_adoption_dataset import DatasetError
+from app.legacy_adoption_execution import change_phase, complete_rollback, confirm_plan, verify_execution
 from app.legacy_adoption_export import directory_scaffold, event_documents, manifest_file
 from app.legacy_adoption_inventory import (
     _job, create_job, discard_job, inventory_chronology, inventory_errors, inventory_families,
     inventory_status, scan_inventory,
 )
 from app.legacy_adoption_paths import AdoptionError, bound_directory
-from app.legacy_adoption_mode import reserve_adoption
+from app.legacy_adoption_mode import adoption_execution_access, reserve_adoption
 from app.legacy_adoption_plan import create_plan, plan_moves, plan_status
 from app.legacy_adoption_registration import finalize_adoption
-from app.legacy_adoption_verify import plan_issues, reopen_plan, verify_media
+from app.legacy_adoption_verify import plan_issues, reopen_plan
 from app.library_registry import LibraryRegistryError, list_libraries
 from app.root_operations import RootOperationError, admission
 
@@ -53,8 +54,21 @@ class Draft(BaseModel):
     target_stems: dict[str, str] = Field(default_factory=dict, max_length=10000)
 
 
-class Finalize(BaseModel):
+class SaveDraft(Draft):
+    revision: int = Field(ge=0)
+
+
+class Freeze(BaseModel):
+    revision: int = Field(ge=0)
+
+
+class PlanCommand(BaseModel):
     plan_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+class Confirm(PlanCommand):
+    method: Literal["manual"]
+    acknowledged: StrictBool
 
 
 @contextmanager
@@ -172,7 +186,9 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         with _errors():
             result = inventory_status(library, job_id)
             with database_connection(library.database_path) as connection:
-                result["draft"] = json.loads(_job(connection, library.library_id, job_id)["draft_json"])
+                item = _job(connection, library.library_id, job_id)
+                result["draft"] = json.loads(item["draft_json"])
+                result["draft_revision"] = item["draft_revision"]
             with running_lock:
                 result["scan_running"] = key(library, job_id) in running
             result["plan"] = plan_status(library, job_id)
@@ -234,7 +250,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             ) if row["id"] in matches]
 
     @router.put("/jobs/{job_id}/draft")
-    def save_draft(job_id: str, draft: Draft):
+    def save_draft(job_id: str, draft: SaveDraft):
         library = context()
         with _errors(), admission(library), database_connection(library.database_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -243,17 +259,20 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 "SELECT 1 FROM legacy_adoption_plans WHERE job_id = ?", (job_id,),
             ).fetchone():
                 raise AdoptionError("Der Entwurf ist in diesem Zustand nicht bearbeitbar.")
+            if item["draft_revision"] != draft.revision:
+                raise AdoptionError("Der Entwurf wurde in einer anderen Sitzung geändert. Lade ihn erneut.")
+            revision = draft.revision + 1
             connection.execute(
-                "UPDATE legacy_adoption_jobs SET draft_json = ? WHERE id = ?",
-                (draft.model_dump_json(exclude_none=True), job_id),
+                "UPDATE legacy_adoption_jobs SET draft_json = ?, draft_revision = ? WHERE id = ?",
+                (draft.model_dump_json(exclude_none=True, exclude={"revision"}), revision, job_id),
             )
-        return {"saved": True}
+        return {"saved": True, "revision": revision}
 
     @router.post("/jobs/{job_id}/plan")
-    def freeze(job_id: str, draft: Draft):
+    def freeze(job_id: str, draft: Freeze):
         library = context()
         with _errors(), admission(library):
-            return create_plan(library, registry_path(), job_id, draft.model_dump(exclude_none=True))
+            return create_plan(library, registry_path(), job_id, draft_revision=draft.revision)
 
     @router.get("/jobs/{job_id}/moves")
     def moves(job_id: str, after: str = ""):
@@ -277,25 +296,65 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         if artifact == "manifest":
             return _download(lambda: manifest_file(library, job_id), "bestandsuebernahme.jsonl",
                              media_type="application/x-ndjson")
+        with _errors():
+            execution = plan_status(library, job_id).get("execution")
+            allowed = {"manual"} if artifact != "original-documents" else {"manual", "repair", "rolling_back"}
+            if not execution or execution["method"] != "manual" or execution["phase"] not in allowed:
+                raise AdoptionError("Diese Unterlagen sind für den aktuellen Ausführungsschritt gesperrt.")
         if artifact == "folders":
             return _download(lambda: directory_scaffold(library, job_id), "archiv-ordnergeruest.zip")
         return _download(lambda: event_documents(library, job_id, originals=artifact == "original-documents"),
                          "urspruengliche-ereignisdokumente.zip" if artifact == "original-documents"
                          else "ereignisdokumente.zip")
 
-    @router.post("/jobs/{job_id}/verify")
-    def verify(job_id: str):
+    @router.post("/jobs/{job_id}/confirm")
+    def confirm(job_id: str, command: Confirm):
         library = context()
-        with _errors(), admission(library):
-            return verify_media(library, job_id)
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
+            return confirm_plan(library, job_id, command.plan_id, command.method,
+                                acknowledged=command.acknowledged)
+
+    @router.post("/jobs/{job_id}/verify")
+    def verify(job_id: str, command: PlanCommand):
+        library = context()
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
+            return verify_execution(library, job_id, command.plan_id)
+
+    @router.post("/jobs/{job_id}/resume")
+    def resume(job_id: str, command: PlanCommand):
+        library = context()
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
+            change_phase(library, job_id, command.plan_id, "manual", from_phases={"repair"})
+            return plan_status(library, job_id)
+
+    @router.post("/jobs/{job_id}/rollback/start")
+    def rollback_start(job_id: str, command: PlanCommand):
+        library = context()
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
+            change_phase(library, job_id, command.plan_id, "rolling_back", from_phases={
+                "manual", "verifying", "repair", "registration_pending", "rolling_back",
+            })
+            return plan_status(library, job_id)
+
+    @router.post("/jobs/{job_id}/rollback/check")
+    def rollback_check(job_id: str, command: PlanCommand):
+        library = context()
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
+            return complete_rollback(library, job_id, command.plan_id)
 
     @router.post("/jobs/{job_id}/finalize")
-    def finalize(job_id: str, command: Finalize):
+    def finalize(job_id: str, command: PlanCommand):
         library = context()
-        with _errors():
+        with _errors(), adoption_execution_access(registry_path()):
             planned = plan_status(library, job_id)
             if planned.get("id") != command.plan_id:
                 raise AdoptionError("Der angezeigte Verschiebeplan ist veraltet.")
+            if planned["state"] != "completed" and (
+                planned["execution"] is None or planned["execution"]["phase"] != "registering"
+            ):
+                with admission(library):
+                    change_phase(library, job_id, command.plan_id, "registering",
+                                 from_phases={"registration_pending"})
             return finalize_adoption(library, registry_path(), job_id, command.plan_id)
 
     @router.post("/jobs/{job_id}/reopen")

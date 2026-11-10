@@ -217,40 +217,53 @@ def assert_verification_stamps(connection, library, job, plan):
                 raise AdoptionError("Quelldatei ist seit der Prüfung wieder vorhanden: " + path)
 
 
+def assert_original_layout(connection, library, job, plan):
+    """Independently verify the complete original layout before release or rollback."""
+    plan_id = plan["id"]
+    with ExitStack() as stack:
+        source, archive = _roots(stack, library, job)
+        lookup = _archive_probe(archive)
+        for row in connection.execute(
+            """SELECT move.*, inventory.size_bytes FROM legacy_adoption_moves move
+                 JOIN legacy_adoption_inventory inventory ON inventory.job_id = ?
+                  AND inventory.relative_path = move.relative_path
+                WHERE move.plan_id = ?""",
+            (job["id"], plan_id),
+        ):
+            if row["target_path"] and lookup(row["target_path"]) is not None:
+                raise AdoptionError("Das Verschiebeziel ist noch belegt: " + row["target_path"])
+            if not _matches(source, row["relative_path"], row["size_bytes"], row["sha256"]):
+                raise AdoptionError("Die Quelldatei fehlt oder stimmt nicht mit dem Plan überein: " +
+                                    row["relative_path"])
+
+        baseline = {
+            row["relative_path"]: (row["size_bytes"], row["sha256"]) for row in connection.execute(
+                "SELECT relative_path, size_bytes, sha256 FROM legacy_adoption_baseline WHERE plan_id = ?",
+                (plan_id,),
+            )
+        }
+        for path, proof in baseline.items():
+            if not _matches(archive, path, *proof):
+                raise AdoptionError("Vorhandene Archivdatei fehlt oder wurde verändert: " + path)
+        for event in json.loads(plan["events_json"]):
+            prefix = event_root_relative(event)
+            if lookup(str(prefix)) is None:
+                continue
+            for path, _, _, _ in walk_bound_files(archive, prefix):
+                if path not in baseline:
+                    raise AdoptionError("Zusätzliche Datei im betroffenen Ereignisordner: " + path)
+
+
 def reopen_plan(library, job_id: str) -> None:
-    """Forget a plan after independently confirming the original file layout."""
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         job = _job(connection, library.library_id, job_id)
         plan = _plan(connection, job_id)
-        if plan["state"] not in {"prepared", "media_verified", "verified"}:
-            raise AdoptionError("Der Verschiebeplan kann in diesem Zustand nicht zurückgenommen werden.")
-        with ExitStack() as stack:
-            source, archive = _roots(stack, library, job)
-            for row in connection.execute(
-                """SELECT * FROM legacy_adoption_moves WHERE plan_id = ? AND target_path IS NOT NULL""",
-                (plan["id"],),
-            ):
-                if _entry(archive, row["target_path"]) is not None:
-                    raise AdoptionError("Vor der Rücknahme die Datei manuell zurückbringen: " + row["target_path"])
-                try:
-                    with relative_parent(source, row["relative_path"]) as (directory, name):
-                        with bound_file(directory, name) as (descriptor, _):
-                            if bound_sha256(descriptor) != row["sha256"]:
-                                raise AdoptionError("Die Datei an der Quelle stimmt nicht mit dem Plan überein.")
-                except FileNotFoundError as error:
-                    raise AdoptionError("Quelldatei fehlt: " + row["relative_path"]) from error
-            for row in connection.execute(
-                """SELECT doc.relative_path, base.size_bytes, base.sha256 FROM legacy_adoption_documents doc
-                     LEFT JOIN legacy_adoption_baseline base USING (plan_id, relative_path)
-                    WHERE doc.plan_id = ?""", (plan["id"],),
-            ):
-                path = row["relative_path"]
-                if row["sha256"] is not None:
-                    if not _matches(archive, path, row["size_bytes"], row["sha256"]):
-                        raise AdoptionError("Vor der Rücknahme das frühere Ereignisdokument wiederherstellen: " + path)
-                elif _entry(archive, path) is not None:
-                    raise AdoptionError("Vor der Rücknahme das neue Ereignisdokument manuell entfernen: " + path)
+        if plan["state"] not in {"prepared", "media_verified", "verified"} or connection.execute(
+            "SELECT 1 FROM legacy_adoption_execution WHERE plan_id = ?", (plan["id"],),
+        ).fetchone():
+            raise AdoptionError("Der bestätigte Verschiebeplan ist eingefroren.")
+        assert_original_layout(connection, library, job, plan)
         connection.execute("DELETE FROM legacy_adoption_plans WHERE id = ?", (plan["id"],))
 
 

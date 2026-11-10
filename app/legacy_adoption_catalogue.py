@@ -291,7 +291,9 @@ def prepare_documents(library, job_id: str) -> list[dict]:
         connection.execute("BEGIN IMMEDIATE")
         job = _job(connection, library.library_id, job_id)
         plan = _plan(connection, job_id)
-        if plan["state"] not in {"prepared", "media_verified", "verified"}:
+        if plan["state"] not in {"prepared", "media_verified", "verified"} or connection.execute(
+            "SELECT 1 FROM legacy_adoption_execution WHERE plan_id = ?", (plan["id"],),
+        ).fetchone():
             raise AdoptionError("Die Ereignisdokumente können in diesem Zustand nicht vorbereitet werden.")
         events = json.loads(plan["events_json"])
         _catalogue_unchanged(connection, job_id, events)

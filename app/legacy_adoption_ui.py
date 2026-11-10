@@ -1,4 +1,4 @@
-"""Browser wizard for planning and checking a manual legacy adoption."""
+"""Browser wizard for planning and checking a legacy adoption."""
 from html import escape
 
 from app.security import _client_code
@@ -31,6 +31,9 @@ a{color:LinkText}label{display:flex;flex-direction:column;gap:.25rem;min-width:0
 code,.paths{overflow-wrap:anywhere}
 small,.subtle{opacity:.78}
 #message:not(:empty){border-left:.25rem solid #c27b24;padding:.5rem .75rem;white-space:pre-wrap}
+#safety{position:sticky;top:0;z-index:1;border-left:.25rem solid #c27b24;padding:.55rem .75rem;background:Canvas}
+#dirty:not(:empty){color:#a45616;font-weight:600}
+[hidden]{display:none!important}
 summary{cursor:pointer}textarea{min-height:4rem;width:min(100%,35rem);box-sizing:border-box}
 </style>
 </head>
@@ -38,9 +41,15 @@ summary{cursor:pointer}textarea{min-height:4rem;width:min(100%,35rem);box-sizing
 <main>
 <nav class="inline"><a id="back" href="/">Bibliothekar</a><a id="new-library" href="/?settings=libraries">Bibliothek einrichten</a></nav>
 <h1>Bestehende Fotosammlung übernehmen</h1>
-<p>Bibliothekar liest die Quelle und prüft das Archiv. Verschiebe die Originale und übertrage Ereignisdokumente anschließend selbst, etwa über SMB.</p>
+<section id="introduction">
+  <p>Die Übernahme einer bestehenden Fotosammlung ist ein umfangreicher Vorgang und kann längere Zeit dauern. Abhängig von der Anzahl und Größe der Dateien können Inventur, Planung und Sicherheitsprüfung mehrere Stunden benötigen. Bitte plane ausreichend Zeit ein und führe die Übernahme möglichst ohne Zeitdruck durch.</p>
+  <p>Die alte Fotosammlung und das neue Zielarchiv müssen sich auf demselben ZFS-Dataset befinden. Unterschiedliche Ordner innerhalb desselben Datasets sind zulässig. Unterschiedliche Datasets werden nicht unterstützt, auch wenn sie auf demselben ZFS-Pool liegen.</p>
+  <p>Liegt deine Fotosammlung auf einem anderen Dataset, kopiere sie vor der Bestandsübernahme eigenständig auf das Dataset des Zielarchivs.</p>
+</section>
+<p id="safety" role="status">Bitte keine manuellen Änderungen an der alten Fotosammlung oder am Zielarchiv vornehmen. Andernfalls kann der gespeicherte Übernahmeplan ungültig werden.</p>
 <div id="message" role="status" aria-live="polite"></div>
-<section>
+<div id="dirty" role="status" aria-live="polite"></div>
+<section id="setup">
   <h2>1. Zielbibliothek und Quelle</h2>
   <div class="inline">
     <label>Zielbibliothek <select id="library"></select></label>
@@ -59,11 +68,37 @@ const $ = id => document.getElementById(id);
 const library = document.body.dataset.library;
 const currentUrl = new URL(location.href);
 let jobId = currentUrl.searchParams.get("job") || "";
-let job = null, draft = {}, year = "", day = null;
+let job = null, draft = {}, draftRevision = 0, year = "", day = null;
 let familyCursor = "", moveCursor = "", sourceRelative = "", timer = 0;
 const base = "/api/legacy-adoption";
+const dirty = new Set();
+function watchDraft(editor) {
+  editor.addEventListener("input", () => markDirty(editor));
+}
+function markDirty(editor) {
+  dirty.add(editor);
+  $("dirty").textContent = "Du hast ungespeicherte Eingaben.";
+}
+function savedEditor(editor) {
+  dirty.delete(editor);
+  if (!dirty.size) $("dirty").textContent = "";
+}
+function requireSaved(scope, except) {
+  if ([...dirty].some(editor => editor !== except && (!scope || scope.contains(editor)))) {
+    throw new Error("Speichere deine Eingaben zuerst.");
+  }
+}
+window.addEventListener("beforeunload", event => {
+  if (dirty.size) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
 const labels = {
- ready:"Bereit", scanning:"Inventur", inventoried:"Inventur abgeschlossen", prepared:"Manuelle Schritte offen",
+ ready:"Bereit", scanning:"Inventur", inventoried:"Inventur abgeschlossen", prepared:"Plan vorbereitet",
+ manual:"Manuelle Verschiebung", verifying:"Archivprüfung läuft", repair:"Fehlerbehebung erforderlich",
+ registration_pending:"Registrierung ausstehend", registering:"Registrierung läuft",
+ rolling_back:"Wiederherstellung läuft", rolled_back:"Wiederherstellung geprüft",
  media_verified:"Medien geprüft", verified:"Medien und Ereignisdokumente geprüft", completed:"Registriert",
  pending:"Ausstehend", duplicate:"Bereits registriert", missing:"Zieldatei fehlt", unsafe:"Unsicherer Pfad",
  size_mismatch:"Dateigröße weicht ab", sha256_mismatch:"Prüfsumme weicht ab", source_present:"Datei auch an der Quelle"
@@ -155,6 +190,7 @@ async function browse(relative) {
   host.replaceChildren(bar,children);
 }
 async function openJob(id) {
+  requireSaved();
   jobId=id;
   year="";day=null;familyCursor="";moveCursor="";
   const url=new URL(location.href);url.searchParams.set("job",id);
@@ -167,7 +203,9 @@ async function refresh() {
   const requested=jobId;
   const state=await api(jobPath());
   if (requested!==jobId) return;
+  requireSaved();
   job=state;
+  draftRevision=state.draft_revision;
   draft={events:[],capture_overrides:{},exclude_families:[],target_stems:{},...state.draft};
   render();
   if (job.scan_running) {
@@ -179,6 +217,7 @@ async function refresh() {
   }
 }
 async function mutate(path, method="POST", body) {
+  requireSaved();
   report("Bibliothekar verarbeitet den Auftrag …");
   const result=await api(jobPath(path),method,body);
   await refresh();
@@ -186,6 +225,22 @@ async function mutate(path, method="POST", body) {
   return result;
 }
 function render() {
+  const phase=job.plan.execution?.phase;
+  const terminal=job.state==="discarded" || job.plan.state==="completed";
+  $("setup").hidden=!terminal;
+  $("back").hidden=!terminal;
+  $("new-library").hidden=!terminal;
+  $("safety").hidden=terminal;
+  const warnings={
+    manual:"Jetzt sind ausschließlich die im freigegebenen Plan beschriebenen manuellen Verschiebungen erlaubt.",
+    rolling_back:"Führe nur die im Wiederherstellungsplan beschriebenen Rückschritte aus.",
+    repair:"Bitte keine Dateien verändern. Prüfe die Abweichungen und wähle einen Weg zur Fortsetzung.",
+    checking:"Bitte keine Dateien mehr verändern. Bibliothekar prüft und registriert gerade den übernommenen Archivbestand."
+  };
+  $("safety").textContent=warnings[phase] || (
+    ["verifying","registration_pending","registering"].includes(phase) ? warnings.checking :
+    "Bitte keine manuellen Änderungen an der alten Fotosammlung oder am Zielarchiv vornehmen. Andernfalls kann der gespeicherte Übernahmeplan ungültig werden."
+  );
   const host=$("work");
   const status=section("2. Lesende Inventur");
   status.append(line(job.source_root),
@@ -194,11 +249,11 @@ function render() {
   const buttons=node("div",undefined,"inline");
   if (job.scan_running) buttons.append(action("Inventur pausieren",()=>mutate("/pause")));
   else if (!job.plan.id) buttons.append(action(job.state==="ready"?"Inventur starten":"Inventur erneut starten",()=>mutate("/scan")));
-  if (!job.plan.id && !job.scan_running) buttons.append(action("Auftrag verwerfen",async()=>{
+  if (!job.plan.execution && !job.scan_running) buttons.append(action("Änderungen verwerfen",async()=>{
     if (!confirm("Auftrag und Entwurf verwerfen? Originaldateien bleiben erhalten.")) return;
     await api(jobPath(),"DELETE");
-    jobId="";const url=new URL(location.href);url.searchParams.delete("job");history.replaceState(null,"",url);
-    host.replaceChildren();await lists();
+    dirty.clear();
+    location.href=$("back").href;
   }));
   if (job.errors) buttons.append(action("Pfadfehler anzeigen", async()=>{
     const rows=await api(jobPath("/errors"));
@@ -217,12 +272,13 @@ function renderDraft(host) {
   chronologyPane.append(slot("periods"),slot("days"),slot("matches"),slot("families"));
   const formPane=node("div");
   formPane.append(node("h3","Entwurf"),slot("draft-events"),slot("event-editor"));
-  formPane.append(action("Verschiebeplan erstellen",()=>mutate("/plan","POST",draft),true));
+  formPane.append(action("Verschiebeplan erstellen",()=>mutate("/plan","POST",{revision:draftRevision}),true));
   grid.append(chronologyPane,formPane);
   panel.append(grid);host.append(panel);
   showDraftEvents();eventEditor();
 }
 async function chronology() {
+  requireSaved($("families"));
   const periods=await api(jobPath("/chronology"));
   const buttons=node("div",undefined,"inline");
   for (const period of periods) {
@@ -246,6 +302,7 @@ async function chronology() {
   if (day!==null) await showDay();
 }
 async function showDay() {
+  requireSaved($("families"));
   $("matches").replaceChildren();
   $("families").replaceChildren();
   familyCursor="";
@@ -271,6 +328,7 @@ async function showFamilies() {
   const rows=await api(jobPath("/families?"+new URLSearchParams({day,after:familyCursor})));
   for (const family of rows) {
     const row=node("details",undefined,"row");
+    watchDraft(row);
     const capture=draft.capture_overrides[family.family_key] || family.selected_capture_time || "Aufnahmezeit offen";
     const excluded=draft.exclude_families.includes(family.family_key);
     const summary=node("summary",family.family_key+" · "+capture+(excluded?" · Ausgeschlossen":family.status==="review_required"?" · Prüfen":""));
@@ -297,8 +355,8 @@ async function showFamilies() {
       if (stem.value.trim()) target_stems[family.family_key]=stem.value.trim();
       else delete target_stems[family.family_key];
       if (exclude.checked) exclude_families.push(family.family_key);
-      await setDraft({...draft,capture_overrides,target_stems,exclude_families});
-      await showDay();
+      await setDraft({...draft,capture_overrides,target_stems,exclude_families},row);
+      if (![...dirty].some(editor=>$("families").contains(editor))) await showDay();
       report("Familie im Entwurf gespeichert.");
     }));
     target.append(row);
@@ -309,9 +367,11 @@ async function showFamilies() {
     target.append(more);
   }
 }
-async function setDraft(value) {
-  await api(jobPath("/draft"),"PUT",value);
+async function setDraft(value, editor) {
+  const result=await api(jobPath("/draft"),"PUT",{...value,revision:draftRevision});
   draft=value;
+  draftRevision=result.revision;
+  savedEditor(editor);
   showDraftEvents();
 }
 function showDraftEvents() {
@@ -329,8 +389,10 @@ function showDraftEvents() {
   });
 }
 function eventEditor(index, selectedDay="") {
+  requireSaved($("event-editor"));
   const item=draft.events[index] || {};
   const form=node("fieldset");
+  watchDraft(form);
   form.append(node("legend",index===undefined?"Neues Ereignis oder Sammelordner":"Entwurf bearbeiten"));
   const type=node("select");
   for (const [value,title] of [["event","Normales Ereignis"],["no_event","Sammelordner ohne Ereignis"]]) {
@@ -354,11 +416,11 @@ function eventEditor(index, selectedDay="") {
     const [bWrap,b]=field("Ende","datetime-local",child.end_datetime?.slice(0,16));
     row.childValues=()=>({name:n.value,start_datetime:a.value,end_datetime:b.value});
     const pair=node("div",undefined,"inline");pair.append(aWrap,bWrap);
-    row.append(nWrap,pair,action("Unterereignis entfernen",()=>row.remove()));
+    row.append(nWrap,pair,action("Unterereignis entfernen",()=>{row.remove();markDirty(form);}));
     children.append(row);
   }
   for (const child of item.children || []) addChild(child);
-  continuous.append(nameWrap,dates,children,action("Unterereignis hinzufügen",()=>addChild()));
+  continuous.append(nameWrap,dates,children,action("Unterereignis hinzufügen",()=>{addChild();markDirty(form);}));
   const segments=node("label","Ein Zeitabschnitt pro Zeile, zum Beispiel 2026-07-21 12:00 17:30. Für einen ganzen Tag reicht das Datum.");
   const text=node("textarea");
   text.value=(item.segments || []).map(segment=>[segment.day_key,segment.start_time,segment.end_time].filter(Boolean).join(" ")).join("\n");
@@ -383,29 +445,37 @@ function eventEditor(index, selectedDay="") {
       }
       const events=[...draft.events];
       if (index===undefined) events.push(value);else events[index]=value;
-      await setDraft({...draft,events});
+      await setDraft({...draft,events},form);
       eventEditor();
     }));
   $("event-editor").replaceChildren(form);
 }
 function renderPlan(host) {
   const plan=job.plan;
-  const panel=section("3. Manuelle Verschiebung und Prüfung");
+  const panel=section("4. Durchführung und Prüfung");
+  const phase=plan.execution?.phase;
+  const command={plan_id:plan.id};
+  const run=path=>mutate(path,"POST",command);
   const completed=plan.state==="completed";
-  panel.append(line(label(plan.state)));
+  panel.append(line(label(phase || plan.state)));
+  panel.append(line([plan.dataset?.dataset, plan.move_files+" Dateien", plan.move_bytes+" Bytes"].filter(Boolean).join(" · ")));
+  panel.append(node("code",plan.source_root+" → "+plan.archive_root));
   for (const [state,count] of Object.entries(plan.counts)) panel.append(node("span",label(state)+": "+count+"  "));
-  if (!completed) {
-    if (plan.filesystem_warning) panel.append(line(plan.filesystem_warning));
-    panel.append(line(plan.snapshot_hint),
-      line("Lade zuerst das leere Ordnergerüst und den Plan. Stelle die Ordner im Archiv bereit und verschiebe nur die aufgeführten Dateien. Sichere frühere Ereignisdokumente vor dem Ersetzen."));
-  }
+  if (!completed && phase!=="rolled_back") panel.append(line(
+    "Vor größeren Dateiänderungen empfehlen wir, einen ZFS-Snapshot oder eine andere geeignete Sicherung anzulegen. Diese zusätzliche Sicherheitsmaßnahme ist freiwillig."
+  ));
   const files=node("div",undefined,"inline");
-  files.append(link("Leeres Ordnergerüst",jobPath("/download/folders")),
-    link("Verschiebeplan mit Rückwegen",jobPath("/download/manifest")));
-  if (plan.documents_at) files.append(link("Ereignisdokumente",jobPath("/download/documents")),
-    link("Frühere Ereignisdokumente",jobPath("/download/original-documents")));
+  files.append(link("Verschiebeplan mit Rückwegen",jobPath("/download/manifest")));
+  if (phase==="manual") {
+    panel.append(line("Stelle die Ordner im Archiv über SMB bereit und verschiebe nur die aufgeführten Dateien. Sichere frühere Ereignisdokumente vor dem Ersetzen."));
+    files.append(link("Leeres Ordnergerüst",jobPath("/download/folders")),
+      link("Ereignisdokumente",jobPath("/download/documents")));
+  }
+  if (["manual","rolling_back","repair"].includes(phase)) {
+    files.append(link("Frühere Ereignisdokumente",jobPath("/download/original-documents")));
+  }
   panel.append(files);
-  if (plan.folder_moves.length && !completed) {
+  if (plan.folder_moves.length && phase==="manual") {
     const groups=node("details");
     groups.append(node("summary","Tagesordner im Ganzen verschieben"));
     groups.append(line("Diese Vorschläge sind Alternativen zu den Einzeloperationen. Lasse den jeweiligen Zielordner beim Bereitstellen des Gerüsts frei. Nutze die Sammelanweisung nur, wenn sich der Quellordner seit der Inventur nicht verändert hat."));
@@ -415,22 +485,44 @@ function renderPlan(host) {
     panel.append(groups);
   }
   const controls=node("div",undefined,"inline");
-  if (!completed) {
+  if (!phase && !completed) {
     controls.append(
       action(plan.documents_at?"Ereignisdokumente neu vorbereiten":"Ereignisdokumente vorbereiten",()=>mutate("/documents")),
-      action("Archiv prüfen",()=>mutate("/verify"),true),
-      action("Übernahme registrieren",async()=>{
-        if (plan.state!=="verified") throw new Error("Medien und Ereignisdokumente müssen vollständig geprüft sein.");
-        if (confirm("Geprüfte Aufnahmen und Ereignisse in dieser Bibliothek registrieren?")) {
-          await mutate("/finalize","POST",{plan_id:plan.id});
-        }
-      }),
-      action("Plan zur Bearbeitung öffnen",async()=>{
-        if (confirm("Falls bereits Dateien verschoben wurden, bringe sie zuerst manuell an ihren Ausgangsort zurück. Plan jetzt prüfen und öffnen?")) {
-          await mutate("/reopen");
-        }
-      }));
+      action("Plan zur Bearbeitung öffnen",()=>mutate("/reopen")));
+    if (plan.documents_at) {
+      const confirmation=node("fieldset");
+      confirmation.append(node("legend","Manuelle Durchführung über SMB"),
+        line("Du bist dabei, die geplante Bestandsübernahme verbindlich zu starten."),
+        line("Nach dieser Bestätigung kann der Übernahmeauftrag nicht mehr einfach verworfen werden. Die vorgesehenen Verschiebungen müssen abgeschlossen, überprüft oder gegebenenfalls über den vorgesehenen Wiederherstellungsweg rückgängig gemacht werden."),
+        line("Bitte vergewissere dich, dass Quelle und Ziel auf demselben ZFS-Dataset liegen und während der Durchführung keine weiteren Änderungen am Archiv vorgenommen werden."),
+        line("Möchtest du fortfahren?"));
+      const [wrap,ack]=field("Ich bestätige die Sicherheitsbedingungen und den angezeigten Plan.","checkbox");
+      confirmation.append(wrap,action("Manuelle Durchführung verbindlich starten",()=>{
+        if (!ack.checked) throw new Error("Bitte bestätige zuerst die Sicherheitsbedingungen.");
+        return mutate("/confirm","POST",{...command,method:"manual",acknowledged:true});
+      },true));
+      panel.append(confirmation);
+    }
   }
+  if (["manual","verifying","repair"].includes(phase)) {
+    controls.append(action("Archiv prüfen",()=>run("/verify"),true));
+  }
+  if (phase==="repair") controls.append(action("Manuelle Schritte fortsetzen",()=>run("/resume")));
+  if (["registration_pending","registering"].includes(phase)) {
+    controls.append(action("Übernahme registrieren",()=>run("/finalize"),true));
+  }
+  if (["manual","verifying","repair","registration_pending"].includes(phase)) {
+    controls.append(action("Kontrollierte Wiederherstellung starten",async()=>{
+      if (confirm("Möchtest du die Übernahme anhand des gespeicherten Plans rückgängig machen?")) {
+        await run("/rollback/start");
+      }
+    }));
+  }
+  if (phase==="rolling_back") {
+    panel.append(line("Bringe verschobene Dateien über SMB an ihre ursprünglichen Pfade zurück. Stelle frühere Ereignisdokumente wieder her und entferne ausschließlich die für diesen Auftrag neu bereitgestellten Ereignisdokumente."));
+    controls.append(action("Wiederherstellung prüfen und Auftrag beenden",()=>run("/rollback/check"),true));
+  }
+  if (phase==="rolled_back" || completed) controls.append(link("Zur Bibliothek", $("back").href));
   if (plan.issues) controls.append(action("Prüfprobleme anzeigen",async()=>{
     const issues=await api(jobPath("/issues"));
     $("issues").replaceChildren(...issues.map(item=>line([item.relative_path,item.issue].filter(Boolean).join(" · "))));

@@ -143,7 +143,7 @@ def test_verification_survives_partial_moves_and_detects_unexpected_files(invent
 
     Path(first["source"]).rename(first_target)
     assert verify_media(context, job)["counts"] == {"missing": 1, "verified": 1}
-    with pytest.raises(AdoptionError, match="manuell zurückbringen"):
+    with pytest.raises(AdoptionError, match="Verschiebeziel ist noch belegt"):
         reopen_plan(context, job)
 
     second_target.write_bytes(b"wrong")
@@ -239,10 +239,50 @@ def test_projects_canonical_event_documents_without_registering(inventory):
         assert connection.execute("SELECT count(*) FROM event_archive_verifications").fetchone()[0] == 0
 
 
+def test_confirmed_rollback_keeps_plan_and_requires_restored_bytes(inventory):
+    from app.legacy_adoption_catalogue import prepare_documents
+    from app.legacy_adoption_execution import change_phase, complete_rollback, confirm_plan, verify_execution
+    from app.legacy_adoption_inventory import discard_job, inventory_status
+
+    context, source, registry = inventory
+    original = source / "original.jpg"
+    original.write_bytes(b"original photo")
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft())
+    prepare_documents(context, job)
+    plan_id = plan["id"]
+    original.write_bytes(b"modified")
+    with pytest.raises(AdoptionError, match="Quelldatei fehlt oder stimmt nicht"):
+        confirm_plan(context, job, plan_id, "manual", acknowledged=True)
+    original.write_bytes(b"original photo")
+    assert confirm_plan(context, job, plan_id, "manual", acknowledged=True)["execution"]["phase"] == "manual"
+    [move] = plan_moves(context, job)
+    target = Path(move["target"])
+    target.parent.mkdir(parents=True)
+    original.rename(target)
+    assert verify_execution(context, job, plan_id)["execution"]["phase"] == "repair"
+    with pytest.raises(AdoptionError, match="kontrolliert zurückgenommen"):
+        discard_job(context, job)
+    change_phase(context, job, plan_id, "rolling_back", from_phases={"repair"})
+    with pytest.raises(AdoptionError, match="Verschiebeziel ist noch belegt"):
+        complete_rollback(context, job, plan_id)
+    target.rename(original)
+    original.write_bytes(b"modified")
+    with pytest.raises(AdoptionError, match="Quelldatei fehlt oder stimmt nicht"):
+        complete_rollback(context, job, plan_id)
+    original.write_bytes(b"original photo")
+    restored = complete_rollback(context, job, plan_id)
+    assert restored["id"] == plan_id
+    assert restored["execution"]["phase"] == "rolled_back"
+    assert inventory_status(context, job)["state"] == "discarded"
+    assert original.read_bytes() == b"original photo"
+
+
 def _ready_for_registration(inventory, draft):
     from zipfile import ZipFile
 
     from app.legacy_adoption_catalogue import prepare_documents
+    from app.legacy_adoption_execution import change_phase, confirm_plan, verify_execution
     from app.legacy_adoption_export import directory_scaffold, event_documents
     from app.library_registry import register_library
 
@@ -257,12 +297,15 @@ def _ready_for_registration(inventory, draft):
     job = _scan(context, source)
     plan = create_plan(context, registry, job, draft)
     prepare_documents(context, job)
+    confirm_plan(context, job, plan["id"], "manual", acknowledged=True)
     with directory_scaffold(context, job) as handle, ZipFile(handle) as scaffold:
         scaffold.extractall(context.archive_root)
     for move in plan_moves(context, job):
         Path(move["source"]).rename(move["target"])
     with event_documents(context, job) as handle, ZipFile(handle) as documents:
         documents.extractall(context.archive_root)
+    assert verify_execution(context, job, plan["id"])["execution"]["phase"] == "registration_pending"
+    change_phase(context, job, plan["id"], "registering", from_phases={"registration_pending"})
     return job, plan
 
 

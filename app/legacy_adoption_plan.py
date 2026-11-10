@@ -384,10 +384,7 @@ def _roots(stack, library, job):
     return source, archive
 
 
-def create_plan(library, registry_path: Path, job_id: str, draft: dict) -> dict:
-    definitions = draft.get("events")
-    if not isinstance(definitions, list) or not 1 <= len(definitions) <= 200:
-        raise AdoptionError("Wähle mindestens ein Ereignis und höchstens 200 Ereignisse.")
+def create_plan(library, registry_path: Path, job_id: str, draft=None, *, draft_revision=None) -> dict:
     plan_id = uuid4().hex
     with database_connection(library.database_path) as connection, closing(sqlite3.connect(
         registry_path.absolute().as_uri() + "?mode=ro", uri=True,
@@ -395,6 +392,13 @@ def create_plan(library, registry_path: Path, job_id: str, draft: dict) -> dict:
         connection.execute("BEGIN IMMEDIATE")
         registry.execute("BEGIN")
         job = _job(connection, library.library_id, job_id)
+        if draft_revision is not None:
+            if job["draft_revision"] != draft_revision:
+                raise AdoptionError("Der Entwurf wurde in einer anderen Sitzung geändert. Lade ihn erneut.")
+            draft = json.loads(job["draft_json"])
+        definitions = (draft or {}).get("events")
+        if not isinstance(definitions, list) or not 1 <= len(definitions) <= 200:
+            raise AdoptionError("Wähle mindestens ein Ereignis und höchstens 200 Ereignisse.")
         if job["state"] != "inventoried":
             raise AdoptionError("Die Inventur muss zuerst abgeschlossen werden.")
         if connection.execute("SELECT 1 FROM legacy_adoption_plans WHERE job_id = ?", (job_id,)).fetchone():
@@ -428,8 +432,21 @@ def plan_status(library, job_id: str) -> dict:
             "SELECT status, count(*) AS count FROM legacy_adoption_moves WHERE plan_id = ? GROUP BY status",
             (plan["id"],),
         )}
+        execution = connection.execute(
+            "SELECT method, phase, confirmed_at, updated_at FROM legacy_adoption_execution WHERE plan_id = ?",
+            (plan["id"],),
+        ).fetchone()
+        volume = connection.execute(
+            """SELECT count(*), coalesce(sum(inventory.size_bytes), 0)
+                 FROM legacy_adoption_moves AS move JOIN legacy_adoption_inventory AS inventory
+                   ON inventory.job_id = ? AND inventory.relative_path = move.relative_path
+                WHERE move.plan_id = ? AND move.target_path IS NOT NULL""",
+            (job_id, plan["id"]),
+        ).fetchone()
         return {
             "id": plan["id"], "state": plan["state"], "counts": counts,
+            "execution": dict(execution) if execution else None,
+            "move_files": volume[0], "move_bytes": volume[1],
             "documents_at": plan["documents_at"],
             "folder_moves": [dict(row) for row in connection.execute(
                 """SELECT source_path, target_path, file_count FROM legacy_adoption_folder_moves

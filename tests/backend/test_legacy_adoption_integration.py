@@ -73,11 +73,23 @@ def test_wizard_and_f14_recovery_in_secondary_library(ready, tmp_path, monkeypat
     assert other.get("/healthz").status_code == 200
     draft = {"events": [{"name":"Synthetisch", "start_date":"2026-07-21", "end_date":"2026-07-21",
                          "preserve_day_folders":True}]}
-    _json(client, "PUT", job + "/draft", json=draft)
+    revision = _json(client, "PUT", job + "/draft", json={**draft, "revision": 0})["revision"]
+    assert revision == 1
     assert _json(client, "GET", job)["draft"]["events"][0]["name"] == "Synthetisch"
-    plan = _json(client, "POST", job + "/plan", json=draft)
+    _json(other, "PUT", job + "/draft", json={**draft, "revision": 0}, status=409)
+    _json(other, "POST", job + "/plan", json={"revision": 0}, status=409)
+    plan = _json(client, "POST", job + "/plan", json={"revision": revision})
     assert plan["folder_moves"][0]["source_path"] == "2026/07/2026-07-21"
     _json(client, "POST", job + "/documents")
+    command = {"plan_id": plan["id"]}
+    confirm = {**command, "method": "manual", "acknowledged": True}
+    _json(client, "POST", job + "/verify", json=command, status=409)
+    _json(client, "GET", job + "/download/folders", status=409)
+    _json(client, "POST", job + "/confirm", json={**confirm, "acknowledged": False}, status=409)
+    assert _json(client, "POST", job + "/confirm", json=confirm)["execution"]["phase"] == "manual"
+    _json(other, "POST", job + "/reopen", status=409)
+    _json(other, "POST", job + "/documents", status=409)
+    _json(other, "DELETE", job, status=409)
     for item in ("folders", "documents"):
         response = client.get(job + "/download/" + item, headers={"X-Bibliothekar-Library":"second"})
         assert response.status_code == 200, response.text
@@ -85,7 +97,9 @@ def test_wizard_and_f14_recovery_in_secondary_library(ready, tmp_path, monkeypat
             archive.extractall(library.archive_root)
     move = _json(client, "GET", job + "/moves")[0]
     media.rename(move["target"])
-    assert _json(client, "POST", job + "/verify")["state"] == "verified"
+    checked = _json(client, "POST", job + "/verify", json=command)
+    assert checked["state"] == "verified"
+    assert checked["execution"]["phase"] == "registration_pending"
 
     original = registration.source_registry_transaction
     @contextmanager
@@ -263,15 +277,17 @@ def test_adoption_reads_actual_read_only_archive(inventory):
         from app.legacy_adoption_catalogue import prepare_documents
         from app.legacy_adoption_export import directory_scaffold, event_documents
         from app.legacy_adoption_plan import plan_moves
-        from app.legacy_adoption_verify import verify_media
+        from app.legacy_adoption_execution import change_phase, confirm_plan, verify_execution
 
         prepare_documents(library, job)
+        confirm_plan(library, job, plan["id"], "manual", acknowledged=True)
         for factory in (directory_scaffold, event_documents):
             with factory(library, job) as handle, ZipFile(handle) as files:
                 files.extractall(physical)
         for move in plan_moves(library, job):
             Path(move["source"]).rename(writable_target(move["target"]))
-        assert verify_media(library, job)["state"] == "verified"
+        assert verify_execution(library, job, plan["id"])["state"] == "verified"
+        change_phase(library, job, plan["id"], "registering", from_phases={"registration_pending"})
         from app.legacy_adoption_registration import finalize_adoption
         assert finalize_adoption.__wrapped__(library, registry, job, plan["id"])["state"] == "completed"
         assert os.statvfs(mount).f_flag & os.ST_RDONLY

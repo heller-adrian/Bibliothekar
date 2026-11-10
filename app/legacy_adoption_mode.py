@@ -67,3 +67,8 @@ def reserve_adoption(registry_path, library_id, job_id):
                ON CONFLICT(singleton) DO UPDATE SET library_id = excluded.library_id, job_id = excluded.job_id""",
             (library_id, job_id),
         )
+
+
+def adoption_execution_access(registry_path):
+    path = Path(registry_path)
+    return _lock(path.with_name(path.name + ".adoption-execution.lock"), exclusive=True)

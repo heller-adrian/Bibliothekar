@@ -10,6 +10,7 @@ from app.global_library_inventory import backup_key, family_content_fingerprint,
 from app.legacy_adoption_catalogue import (
     _inventory_rows, adoption_source_signature, catalogue_documents, catalogue_job_id, write_catalogue,
 )
+from app.legacy_adoption_execution import execution_row, set_phase
 from app.legacy_adoption_inventory import _job
 from app.legacy_adoption_paths import AdoptionError
 from app.legacy_adoption_plan import plan_status
@@ -121,7 +122,7 @@ def _assert_document_projection(connection, library, plan, events):
     )}
     if expected != actual:
         raise _RegistrationConflict("Der Bibliotheksindex hat sich geändert. "
-                                    "Erzeuge die Ereignisdokumente erneut und stelle sie manuell bereit.")
+                                    "Prüfe die Änderungen und nutze gegebenenfalls den vorgesehenen Wiederherstellungsweg.")
 
 
 @protect(kind="archive", error_type=AdoptionError)
@@ -148,10 +149,14 @@ def finalize_adoption(library_context, registry_path, job_id, operation_id):
             if receipt is None:
                 raise AdoptionError("Die globale Abschlussquittung fehlt.")
         else:
+            execution = execution_row(connection, plan["id"])
+            if execution is None or execution["phase"] != "registering":
+                raise AdoptionError("Der bestätigte Auftrag ist noch nicht zur Registrierung bereit.")
             state = verify_locked(connection, library, job, plan, keep_stamps=True)
             if state != "verified":
                 if receipt is not None:
                     raise AdoptionError("Archivnachweis seit Beginn der Registrierung verändert.")
+                set_phase(connection, plan["id"], "repair")
             else:
                 _complete_verified(connection, registry_path, library, job, plan, fingerprint, receipt)
         validate_active_roots()
@@ -184,10 +189,12 @@ def _complete_verified(connection, registry_path, library, job, plan, fingerprin
         connection.execute(
             "UPDATE legacy_adoption_plans SET state = 'completed' WHERE id = ?", (plan["id"],),
         )
+        set_phase(connection, plan["id"], "completed")
     except _RegistrationConflict as error:
         if receipt is not None:
             raise
         connection.execute("ROLLBACK TO adopt_catalogue")
+        set_phase(connection, plan["id"], "repair")
         connection.execute("UPDATE legacy_adoption_plans SET state = 'prepared' WHERE id = ?", (plan["id"],))
         connection.execute(
             "INSERT OR IGNORE INTO legacy_adoption_issues VALUES (?, '', ?)", (plan["id"], str(error)),

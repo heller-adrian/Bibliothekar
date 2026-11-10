@@ -167,8 +167,14 @@ def discard_job(library: LibraryContext, job_id: str) -> None:
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         job = _job(connection, library.library_id, job_id)
-        if connection.execute("SELECT 1 FROM legacy_adoption_plans WHERE job_id = ?", (job_id,)).fetchone():
-            raise AdoptionError("Der Auftrag kann in diesem Zustand nicht verworfen werden.")
+        if connection.execute(
+            """SELECT 1 FROM legacy_adoption_plans AS plan
+                 LEFT JOIN legacy_adoption_execution AS execution ON execution.plan_id = plan.id
+                WHERE plan.job_id = ? AND (execution.plan_id IS NOT NULL OR plan.state != 'prepared')""",
+            (job_id,),
+        ).fetchone():
+            raise AdoptionError("Der bestätigte Auftrag kann nur kontrolliert zurückgenommen werden.")
+        connection.execute("DELETE FROM legacy_adoption_plans WHERE job_id = ?", (job_id,))
         connection.execute("DELETE FROM legacy_adoption_families WHERE job_id = ?", (job_id,))
         connection.execute("DELETE FROM legacy_adoption_inventory WHERE job_id = ?", (job_id,))
         connection.execute(

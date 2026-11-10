@@ -68,11 +68,14 @@ def smoke(base: str, source: Path, archive: Path) -> None:
     for relative, digest in originals.items():
         assert hashlib.sha256((source / relative).read_bytes()).hexdigest() == digest
     assert not list(archive.iterdir())
-    plan = api(job + "/plan", method="POST", payload={"events": [{
+    draft = api(job + "/draft", method="PUT", payload={"revision": 0, "events": [{
         "name": "Smoke", "start_date": "2026-07-21", "end_date": "2026-07-21",
         "preserve_day_folders": True,
     }]})
+    plan = api(job + "/plan", method="POST", payload={"revision": draft["revision"]})
     api(job + "/documents", method="POST")
+    command = {"plan_id": plan["id"]}
+    api(job + "/confirm", method="POST", payload={**command, "method": "manual", "acknowledged": True})
     for name in ("folders", "documents"):
         with ZipFile(BytesIO(request(job + "/download/" + name))) as package:
             package.extractall(archive)
@@ -81,7 +84,7 @@ def smoke(base: str, source: Path, archive: Path) -> None:
         target = archive / Path(move["target"]).relative_to("/main-library")
         original.rename(target)
         assert hashlib.sha256(target.read_bytes()).hexdigest() == move["sha256"]
-    assert api(job + "/verify", method="POST")["state"] == "verified"
+    assert api(job + "/verify", method="POST", payload=command)["state"] == "verified"
     for _ in range(2):
         assert api(job + "/finalize", method="POST", payload={"plan_id": plan["id"]})["state"] == "completed"
     print("Legacy adoption container smoke passed with source and archive mounted read-only.")

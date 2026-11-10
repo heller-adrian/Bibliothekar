@@ -76,6 +76,8 @@ def bound_file(parent, name, expected=None):
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode):
             raise AdoptionError("Der Pfad bezeichnet keine reguläre Datei.")
+        if sys.platform == "linux" and mount_id(parent) != mount_id(descriptor):
+            raise AdoptionError("Eine Datei führt über eine Mountgrenze.")
         identity = file_identity(info)
         if expected is not None and identity != expected:
             raise AdoptionError("Die Datei wurde während der Prüfung ausgetauscht.")
