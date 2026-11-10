@@ -161,3 +161,26 @@ def test_conflicting_capture_times_remain_unconfirmed(library, monkeypatch):
     [family] = inventory_families(context, job, day="")
     assert family["selected_capture_time"] is None
     assert family["status"] == "review_required"
+
+
+def test_upgrades_1_0_0_catalogue_and_registry_without_touching_existing_rows(tmp_path, monkeypatch):
+    from app import database, library_registry
+
+    db, registry = tmp_path / "library.db", tmp_path / "registry.db"
+    migrations = database.available_migrations()
+    registry_migrations = library_registry.REGISTRY_MIGRATIONS
+    with monkeypatch.context() as version_1_0_0:
+        version_1_0_0.setattr(database, "available_migrations", lambda: [item for item in migrations if item[0] <= 55])
+        version_1_0_0.setattr(library_registry, "REGISTRY_MIGRATIONS",
+                             {version: sql for version, sql in registry_migrations.items() if version <= 3})
+        version_1_0_0.setattr(library_registry, "REGISTRY_SCHEMA_VERSION", 3)
+        initialize_database(db)
+        ensure_library_identity(db, "historic")
+        library_registry.initialize_library_registry(registry)
+        library_registry.register_source_backup(
+            registry, backup_id="historic", source_kind="import", source_identity="old", backup_path="/synthetic",
+        )
+    assert initialize_database(db)["newly_applied_versions"] == [56, 57, 58, 59]
+    assert library_registry.initialize_library_registry(registry)["newly_applied_versions"] == [4, 5]
+    assert library_registry.read_library_identity(db) == "historic"
+    assert library_registry.get_source_backup(registry, "historic")["source_identity"] == "old"

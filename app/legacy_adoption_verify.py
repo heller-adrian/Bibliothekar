@@ -5,6 +5,7 @@ import os
 import stat
 
 from app.database import database_connection
+from app.event_document import EVENT_DOCUMENT_FILENAME
 from app.event_inventory import event_root_relative
 from app.legacy_adoption_inventory import _job
 from app.legacy_adoption_paths import AdoptionError, bound_file, bound_sha256, file_identity, relative_parent, target_key, walk_bound_files
@@ -95,6 +96,11 @@ def verify_locked(connection, library, job, plan, *, keep_stamps=False):
         connection.execute(
             "INSERT OR IGNORE INTO legacy_adoption_issues VALUES (?, ?, ?)", (plan_id, path, message),
         )
+
+    if plan["documents_at"] is not None and set(documents) != {
+        str(event_root_relative(event) / EVENT_DOCUMENT_FILENAME) for event in events
+    }:
+        issue("", "Die vorbereiteten Ereignisdokumente sind unvollständig.")
 
     try:
         _catalogue_unchanged(connection, job_id, events)

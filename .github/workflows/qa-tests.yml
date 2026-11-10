@@ -75,10 +75,12 @@ jobs:
           node --check /tmp/bibliothekar-events.js
       # Public pull requests must never execute their code on a self-hosted runner.
       - name: Full backend regression tests (synthetic fixtures only)
-        run: pytest -q -o addopts='' --junitxml=/tmp/bibliothekar-main-qa.xml tests/backend
+        run: python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" backend
       - name: Save test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backend-qa
-          path: /tmp/bibliothekar-main-qa.xml
+          path: |
+            ${{ runner.temp }}/f14-qa/backend/results/result.xml
+            ${{ runner.temp }}/f14-qa/backend/results/exit.json

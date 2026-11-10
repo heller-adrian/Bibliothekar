@@ -103,7 +103,7 @@ Image: ghcr.io/heller-adrian/bibliothekar:1.0.0
 Web UI: http://<your-truenas-host>:30044
 ```
 
-**Release note:** The `1.0.0` image is the intended stable release tag. Verify that the [GitHub Release](https://github.com/heller-adrian/Bibliothekar/releases) and the corresponding GHCR image have actually been published before installing it. For reproducible deployments, pin a numbered image tag or digest rather than relying on `latest`.
+**Stable version:** 1.0.0. Verify that the [GitHub Release](https://github.com/heller-adrian/Bibliothekar/releases) and the corresponding GHCR image have actually been published before installing it. For reproducible deployments, pin a numbered image tag or digest. The floating image tag is `ghcr.io/heller-adrian/bibliothekar:latest`.
 
 | Container path | Use | Mount |
 | --- | --- | --- |
@@ -131,7 +131,7 @@ Like any file-management software, Bibliothekar is **not a replacement for an in
 
 ## Scope
 
-The 1.0.1 release candidate adds manual adoption of existing photo collections. See the [adoption guide](docs/legacy-adoption.md) for setup, a first transfer and recovery.
+**Release candidate version:** 1.0.1. This release candidate adds manual adoption of existing photo collections. See the [adoption guide](docs/legacy-adoption.md) for setup, a first transfer and recovery.
 
 The **1.0.0 milestone** focuses on the stable camera-file workflow. Bibliothekar is **not** a photo gallery, an Immich replacement or an AI-based photo selector. Possible future integrations (including Immich and optional AI-assisted preselection) are separate work, not promised features of 1.0.0.
 

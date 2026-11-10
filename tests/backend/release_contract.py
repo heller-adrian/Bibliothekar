@@ -8,3 +8,7 @@ METADATA = next(
     if (path := RELEASE_ROOT / name).is_file()
 )
 EXPECTED_RELEASE_VERSION = json.loads(METADATA.read_text())["version"]
+STABLE_METADATA = RELEASE_ROOT / "stable-1.0.0.json"
+EXPECTED_STABLE_VERSION = (
+    json.loads(STABLE_METADATA.read_text())["version"] if STABLE_METADATA.is_file() else EXPECTED_RELEASE_VERSION
+)
