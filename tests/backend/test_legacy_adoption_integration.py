@@ -534,3 +534,58 @@ def test_container_probe_retries_only_the_explicit_temporary_lock(monkeypatch, c
         with pytest.raises(AssertionError, match="legacy_adoption_active"):
             probe.open_request(Client(), request, expected=201, retry_busy=True)
         assert len(calls) == 1 and waits == []
+
+
+@pytest.mark.parametrize("failure", [None, "startup_error", "storage", "orphan", "domain", "unknown", "timeout"])
+def test_container_repeat_finalize_preserves_recovery_fences(monkeypatch, failure):
+    from io import BytesIO
+    import json
+    import urllib.error
+    import urllib.request
+    from qa.release import smoke_legacy_adoption as probe
+
+    recovery = {"phase": "recovery_in_progress", "scope": "workspace"}
+    status = {"ready": True, "startup_error": None, "operation_health": {
+        "writes_allowed": False, "issues": [recovery], "reservations": [],
+    }}
+    if failure == "startup_error":
+        status["startup_error"] = "Technical startup failed"
+    elif failure == "storage":
+        status["ready"] = False
+    elif failure == "orphan":
+        status["operation_health"]["reservations"] = [{"live": False}]
+    elif failure == "domain":
+        status["operation_health"]["issues"].append({"phase": "startup-recovery", "scope": "workspace"})
+    calls, waits, diagnostics = [], [], []
+
+    class Response(BytesIO):
+        status = 200
+
+    class Client:
+        def open(self, request, timeout):
+            calls.append(request)
+            if len(calls) == 1 or failure == "timeout":
+                detail = "other_conflict" if failure == "unknown" else (
+                    "operation_recovery_required: workspace writes paused; storage may remain READY; " + str(recovery)
+                )
+                raise urllib.error.HTTPError(request.full_url, 409, "Conflict", {},
+                                             BytesIO(json.dumps({"detail": detail}).encode()))
+            return Response(b'{"state":"completed"}')
+
+    def inspect():
+        diagnostics.append(status)
+        return status
+
+    monkeypatch.setattr(probe.time, "sleep", waits.append)
+    request = urllib.request.Request("http://127.0.0.1/api/legacy-adoption/jobs/one/finalize",
+                                     data=b"{}", method="POST")
+    if failure is None:
+        assert json.loads(probe.open_request(Client(), request, expected=200,
+                                             recovery_status=inspect))["state"] == "completed"
+        assert len(calls) == 2 and len(diagnostics) == 1 and waits == [0.25]
+    else:
+        with pytest.raises(AssertionError):
+            probe.open_request(Client(), request, expected=200, recovery_status=inspect)
+        assert len(calls) == (121 if failure == "timeout" else 1)
+        assert waits == ([0.25] * 120 if failure == "timeout" else [])
+        assert len(diagnostics) == (120 if failure == "timeout" else int(failure != "unknown"))

@@ -13,8 +13,8 @@ import urllib.request
 from zipfile import ZipFile
 
 
-def open_request(client, request, *, expected, retry_busy=False):
-    attempts = 21 if retry_busy else 1
+def open_request(client, request, *, expected, retry_busy=False, recovery_status=None):
+    attempts = 121 if recovery_status else (21 if retry_busy else 1)
     for attempt in range(attempts):
         try:
             with client.open(request, timeout=45) as response:
@@ -29,11 +29,26 @@ def open_request(client, request, *, expected, retry_busy=False):
                 detail = {}
             transient = (error.code == 409 and isinstance(detail, dict)
                          and detail.get("code") == "legacy_adoption_busy")
-            if not retry_busy or not transient or attempt == attempts - 1:
+            recovery = (error.code == 409 and isinstance(detail, dict)
+                        and isinstance(detail.get("detail"), str)
+                        and detail["detail"].startswith("operation_recovery_required:")
+                        and "'phase': 'recovery_in_progress', 'scope': 'workspace'" in detail["detail"])
+            if not ((retry_busy and transient) or (recovery_status and recovery)) or attempt == attempts - 1:
                 raise AssertionError(
                     f"{request.method} {request.full_url}: HTTP {error.code}: {content}"
                 ) from error
-            print("Adoption start is waiting for the current operation to release its lock.", flush=True)
+            if recovery_status and recovery:
+                status = recovery_status()
+                health = status["operation_health"]
+                issues = health["issues"]
+                assert (status["ready"] is True and not status.get("startup_error")
+                        and all(issue.get("phase") == "recovery_in_progress"
+                                and issue.get("scope") == "workspace" for issue in issues)
+                        and all(record.get("live") is True for record in health["reservations"])
+                        and (health["writes_allowed"] is True or issues)), status
+                print("Repeated finalization is waiting for startup write admission.", flush=True)
+            else:
+                print("Adoption start is waiting for the current operation to release its lock.", flush=True)
             time.sleep(0.25)
 
 
@@ -45,7 +60,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path) -> None:
     cookies = http.cookiejar.CookieJar()
     client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
 
-    def request(path, *, method="GET", payload=None, expected=200):
+    def request(path, *, method="GET", payload=None, expected=200, repeat_finalize=False):
         headers = {"Origin": base}
         if method != "GET":
             csrf = next((cookie.value for cookie in cookies if cookie.name == "bibliothekar_csrf"), "")
@@ -54,6 +69,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path) -> None:
         return open_request(
             client, urllib.request.Request(base + path, body, headers, method=method),
             expected=expected, retry_busy=method == "POST" and path == "/api/legacy-adoption/jobs",
+            recovery_status=(lambda: api("/api/settings/storage-health")) if repeat_finalize else None,
         )
 
     def api(path, **kwargs):
@@ -152,8 +168,9 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path) -> None:
             target = archive / Path(move["target"]).relative_to("/main-library")
             assert hashlib.sha256(target.read_bytes()).hexdigest() == move["sha256"]
         assert api(job + "/verify", method="POST", payload=command)["state"] == "verified"
-        for _ in range(2):
-            assert api(job + "/finalize", method="POST", payload=command)["state"] == "completed"
+        assert api(job + "/finalize", method="POST", payload=command)["state"] == "completed"
+        assert api(job + "/finalize", method="POST", payload=command,
+                   repeat_finalize=True)["state"] == "completed"
     print("Manual and scripted adoption passed with native ZFS and separate read-only container mounts.")
 
 

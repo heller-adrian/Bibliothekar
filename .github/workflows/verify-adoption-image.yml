@@ -103,11 +103,11 @@ jobs:
           cat > "$RUNNER_TEMP/adoption-release.md" <<EOF2
           Bibliothekar 1.0.1 release candidate for manual or scripted adoption within one ZFS dataset.
 
-          Source commit · `$IMAGE_SOURCE`
-          Qualified product commit · `$QA_SOURCE`
-          Test image · `$IMAGE:patch-1.0.1-$IMAGE_SOURCE`
-          Verified image digest · `$IMAGE@$IMAGE_DIGEST`
-          Container test harness commit · `$GITHUB_SHA`
+          Source commit · \`$IMAGE_SOURCE\`
+          Qualified product commit · \`$QA_SOURCE\`
+          Test image · \`$IMAGE:patch-1.0.1-$IMAGE_SOURCE\`
+          Verified image digest · \`$IMAGE@$IMAGE_DIGEST\`
+          Container test harness commit · \`$GITHUB_SHA\`
 
           [Adoption guide](https://github.com/$GITHUB_REPOSITORY/blob/$IMAGE_SOURCE/docs/legacy-adoption.md)
           [Full backend QA](https://github.com/$GITHUB_REPOSITORY/actions/runs/$QA_RUN)
