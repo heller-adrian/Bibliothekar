@@ -55,8 +55,22 @@ def test_wizard_and_f14_recovery_in_secondary_library(ready, tmp_path, monkeypat
     job = api + "/jobs/" + job_id
     _json(client, "POST", job + "/scan", status=202)
     assert _json(client, "GET", job)["state"] == "inventoried"
-    assert _json(client, "GET", api + "/jobs", library="main") == []
-    assert _json(client, "GET", job, library="main", status=409)["detail"]
+    assert [item["id"] for item in _json(client, "GET", api + "/jobs", library="main")] == [job_id]
+    assert _json(client, "GET", job, library="main")["id"] == job_id
+    assert _json(client, "GET", api + "/jobs/other", status=409)["code"] == "legacy_adoption_active"
+    assert _json(client, "POST", api + "/jobs", library="main", status=409, json={"root": "nas"})[
+        "code"
+    ] == "legacy_adoption_active"
+    other = TestClient(main.app, follow_redirects=False)
+    for old_url in ("/", "/workspace?library=main", "/legacy-adoption?library=main"):
+        redirect = other.get(old_url)
+        assert redirect.status_code == 303
+        assert redirect.headers["location"] == f"/legacy-adoption?library=second&job={job_id}"
+    wizard = other.get(redirect.headers["location"], headers={"X-Bibliothekar-Library": "main"})
+    assert wizard.status_code == 200 and 'data-library="second"' in wizard.text
+    assert _json(other, "GET", "/api/jobs", status=409)["code"] == "legacy_adoption_active"
+    assert _json(other, "POST", "/api/jobs", status=409)["code"] == "legacy_adoption_active"
+    assert other.get("/healthz").status_code == 200
     draft = {"events": [{"name":"Synthetisch", "start_date":"2026-07-21", "end_date":"2026-07-21",
                          "preserve_day_folders":True}]}
     _json(client, "PUT", job + "/draft", json=draft)
@@ -94,6 +108,7 @@ def test_wizard_and_f14_recovery_in_secondary_library(ready, tmp_path, monkeypat
     assert domain_recovery.replay(workspace, registry, database=databases[0])
     assert operation_health.inspect(workspace)["writes_allowed"]
     assert _json(client, "GET", job)["plan"]["state"] == "completed"
+    assert _json(client, "GET", "/api/jobs", library="main")["count"] == 0
     assert _json(client, "POST", job + "/finalize", json={"plan_id": plan["id"]})["state"] == "completed"
 
     inventory = scan_event_inventory(
@@ -165,6 +180,43 @@ def test_wizard_and_f14_recovery_in_secondary_library(ready, tmp_path, monkeypat
         assert connection.execute("SELECT 1 FROM events WHERE id = ?", (event_id,)).fetchone() is None
         assert connection.execute("SELECT current_root_kind FROM files WHERE id = ?",
                                   (media_row["id"],)).fetchone()[0] == "shared_workspace"
+
+
+def test_exclusive_mode_waits_for_ordinary_work_and_discard_restores_access(
+    ready, tmp_path, monkeypatch, synthetic_dataset,
+):
+    from app.legacy_adoption_mode import active_adoption, adoption_access
+
+    _, _, registry, _, _ = ready
+    source = tmp_path.resolve() / "legacy-source"
+    source.mkdir()
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+    monkeypatch.setattr(main, "DATABASE_INITIALIZATION_ERROR", None)
+    client = TestClient(main.app, follow_redirects=False)
+    jobs = "/api/legacy-adoption/jobs"
+    with adoption_access(registry):
+        result = _json(client, "POST", jobs, status=409, json={"root": "nas"})
+        assert result["code"] == "legacy_adoption_busy"
+    assert active_adoption(registry) is None
+
+    job_id = _json(client, "POST", jobs, status=201, json={"root": "nas"})["id"]
+    assert active_adoption(registry) == {"job_id": job_id, "library_id": "second"}
+
+    calls = []
+    stop = main.WORKER_STOP
+    monkeypatch.setattr(stop, "wait", lambda seconds: stop.set())
+    monkeypatch.setattr(main, "_claim_runtime_job", calls.append)
+    main.worker_loop()
+    assert calls == []
+    _json(client, "DELETE", jobs + "/" + job_id)
+    assert active_adoption(registry) is None
+    assert _json(client, "GET", "/api/jobs", library="main")["count"] == 0
+    stop.clear()
+    main.worker_loop()
+    assert calls == [None]
+    next_id = _json(client, "POST", jobs, status=201, json={"root": "nas"})["id"]
+    assert next_id != job_id
+    assert active_adoption(registry)["job_id"] == next_id
 
 
 @pytest.mark.skipif(

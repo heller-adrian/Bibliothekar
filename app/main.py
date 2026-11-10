@@ -16,9 +16,11 @@ import urllib.request
 import uuid
 import time
 import tempfile
+from functools import wraps
 
 from PIL import Image, ImageOps
 
+from fastapi.concurrency import contextmanager_in_threadpool
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from app import __version__
@@ -34,7 +36,8 @@ from app.trash import (
 )
 from app.ui_shell import apply_shell
 from app import view_cache
-from app.root_operations import RootOperationError, protect, reserve, mutate, assert_workspace_startable, _identity, generation, admission
+from app.legacy_adoption_mode import adoption_access
+from app.root_operations import RootOperationBusy, RootOperationError, protect, reserve, mutate, assert_workspace_startable, _identity, generation, admission
 from app import background_mutation_cancel as cancel_queue
 from app.background_activity import current_activity, clear_finished_activity
 from app import ssd_release_background as release_queue
@@ -778,6 +781,9 @@ def _default_requested_library_id() -> str:
 
 
 def _requested_library_id(request: Request) -> str:
+    adoption = getattr(request.state, "legacy_adoption", None)
+    if adoption is not None:
+        return adoption["library_id"]
     fallback = _default_requested_library_id()
     return str(
         request.headers.get("X-Bibliothekar-Library")
@@ -2358,8 +2364,12 @@ def _release_for_context(context) -> bool:
 def release_worker_loop() -> None:
     while not RELEASE_WORKER_STOP.is_set():
         try:
-            while not RELEASE_WORKER_STOP.is_set() and process_background_release():
-                pass
+            while not RELEASE_WORKER_STOP.is_set():
+                with adoption_access(REGISTRY_DATABASE_FILE) as active:
+                    if active or not process_background_release():
+                        break
+        except RootOperationBusy:
+            pass
         except Exception as error:
             print("SSD-Freigabeworker fehlgeschlagen:", error, flush=True)
         RELEASE_WORKER_WAKE.wait(3.0)
@@ -2383,8 +2393,12 @@ def cancel_worker_loop() -> None:
     """Unabhängiger, ereignisgesteuerter Worker; keine Leerlauf-DB-Abfragen."""
     while not CANCEL_WORKER_STOP.is_set():
         try:
-            while not CANCEL_WORKER_STOP.is_set() and process_background_mutation_cancel():
-                pass
+            while not CANCEL_WORKER_STOP.is_set():
+                with adoption_access(REGISTRY_DATABASE_FILE) as active:
+                    if active or not process_background_mutation_cancel():
+                        break
+        except RootOperationBusy:
+            pass
         except Exception as error:
             print("Hintergrund-Verwerfworker:", error, flush=True)
         CANCEL_WORKER_WAKE.wait(5.0)
@@ -2404,47 +2418,48 @@ def start_cancel_worker() -> None:
     CANCEL_WORKER_WAKE.set()
 
 
+def _claim_runtime_job(last_library_id):
+    # Kamera-/Ordnerimporte sind seit 0.31.1 globaler Bestand und
+    # liegen ausschließlich in der Main-Datenbank. Sie werden deshalb
+    # direkt aus dieser Queue übernommen und nicht über die
+    # Bibliotheks-Registry wiederentdeckt. Ein fehlerhafter oder
+    # vorübergehend unvollständiger Sekundärkontext kann den globalen
+    # Import damit nicht mehr dauerhaft auf "queued" halten.
+    from app.library_context import _context_from_row
+    row = get_library(REGISTRY_DATABASE_FILE,MAIN_LIBRARY_ID,active_only=False)
+    import_context = _context_from_row(row) if row else build_main_library_context()
+    with admission(import_context):
+        global_import = None
+        for operation in ['sd_recheck','folder_import','metadata_multiple_import','metadata_general_import','trash_import']:
+            global_import = claim_next_job(DATABASE_FILE,operation=operation)
+            if global_import is not None:break
+    if global_import is not None:
+        claimed = (import_context, global_import)
+    else:
+        contexts = ordered_worker_contexts(
+            list_active_library_contexts(
+                REGISTRY_DATABASE_FILE
+            ),
+            last_library_id,
+        )
+        claimed = claim_next_library_job(contexts)
+
+    return claimed
+
+
 def worker_loop() -> None:
     last_library_id: str | None = None
-
     while not WORKER_STOP.is_set():
         try:
-            # Kamera-/Ordnerimporte sind seit 0.31.1 globaler Bestand und
-            # liegen ausschließlich in der Main-Datenbank. Sie werden deshalb
-            # direkt aus dieser Queue übernommen und nicht über die
-            # Bibliotheks-Registry wiederentdeckt. Ein fehlerhafter oder
-            # vorübergehend unvollständiger Sekundärkontext kann den globalen
-            # Import damit nicht mehr dauerhaft auf "queued" halten.
-            from app.library_context import _context_from_row
-            row = get_library(REGISTRY_DATABASE_FILE,MAIN_LIBRARY_ID,active_only=False)
-            import_context = _context_from_row(row) if row else build_main_library_context()
-            with admission(import_context):
-                global_import = None
-                for operation in ['sd_recheck','folder_import','metadata_multiple_import','metadata_general_import','trash_import']:
-                    global_import = claim_next_job(DATABASE_FILE,operation=operation)
-                    if global_import is not None:break
-            if global_import is not None:
-                claimed = (import_context, global_import)
-            else:
-                contexts = ordered_worker_contexts(
-                    list_active_library_contexts(
-                        REGISTRY_DATABASE_FILE
-                    ),
-                    last_library_id,
-                )
-                claimed = claim_next_library_job(contexts)
-
-            if claimed is None:
-                WORKER_STOP.wait(1.0)
-                continue
-
-            context, job = claimed
-            process_claimed_job(
-                job,
-                library_context=context,
-            )
-            last_library_id = context.library_id
-
+            with adoption_access(REGISTRY_DATABASE_FILE) as active:
+                claimed = None if active else _claim_runtime_job(last_library_id)
+                if claimed is not None:
+                    context, job = claimed
+                    process_claimed_job(job, library_context=context)
+                    last_library_id = context.library_id
+                    continue
+        except RootOperationBusy:
+            pass
         except Exception as error:
             print(
                 "Fehler im bibliotheksbewussten Hintergrund-Worker:",
@@ -2452,6 +2467,24 @@ def worker_loop() -> None:
                 flush=True,
             )
             WORKER_STOP.wait(2.0)
+            continue
+        WORKER_STOP.wait(1.0)
+
+
+def _after_adoption(fn):
+    """Defer an already queued thread until normal work can resume."""
+    @wraps(fn)
+    def run(*args, **kwargs):
+        while not WORKER_STOP.is_set():
+            try:
+                with adoption_access(REGISTRY_DATABASE_FILE) as active:
+                    if not active:
+                        return fn(*args, **kwargs)
+            except RootOperationBusy:
+                pass
+            WORKER_STOP.wait(1.0)
+
+    return run
 
 
 def _startup_step(name, function, *args, **kwargs):
@@ -8521,6 +8554,7 @@ def api_delete_event(
     }
 
 
+@_after_adoption
 def _apply_batch_thread_target(
     batch_id: str,
     library_context: LibraryContext,
@@ -8550,6 +8584,7 @@ def _apply_batch_thread_target(
 
 
 @protect(kind='sort', context_provider=lambda a: a['library_context'])
+@_after_adoption
 def _sort_run_thread_target(
     run_id: str,
     library_context: LibraryContext,
@@ -8579,6 +8614,7 @@ def _sort_run_thread_target(
         )
 
 
+@_after_adoption
 def _reconcile_run_thread_target(
     run_id: str,
     library_context: LibraryContext,
@@ -14257,6 +14293,63 @@ def api_archive_change(cr_id: str) -> JSONResponse:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.middleware("http")
+async def adoption_access_middleware(request: Request, call_next):
+    import sqlite3
+    from urllib.parse import urlencode
+    from starlette.responses import RedirectResponse
+    from app.legacy_adoption_paths import AdoptionError
+
+    path = request.url.path
+    read = request.method in {"GET", "HEAD", "OPTIONS"}
+    if read and (path.startswith("/assets/") or path in {
+        "/healthz", "/api/health", "/manifest.webmanifest", "/favicon.ico",
+        "/apple-touch-icon.png", "/api/settings/storage-health",
+        "/api/settings/recovery-diagnostics",
+    }):
+        return await call_next(request)
+    start = path == "/api/legacy-adoption/jobs" and request.method == "POST"
+    guard = adoption_access(REGISTRY_DATABASE_FILE, exclusive=start)
+    try:
+        async with contextmanager_in_threadpool(guard) as active:
+            request.state.legacy_adoption = active
+            if active:
+                wizard = "/legacy-adoption?" + urlencode({"library": active["library_id"], "job": active["job_id"]})
+                if path == "/legacy-adoption" and read:
+                    if (request.query_params.get("job"), request.query_params.get("library")) != (
+                        active["job_id"], active["library_id"],
+                    ):
+                        return RedirectResponse(wizard, status_code=303)
+                elif path == "/api/libraries" and read:
+                    pass
+                elif not path.startswith("/api/legacy-adoption/") or start:
+                    if read and not path.startswith("/api/"):
+                        return RedirectResponse(wizard, status_code=303)
+                    return JSONResponse(status_code=409, content={
+                        "detail": "Eine Bestandsübernahme ist aktiv.", "code": "legacy_adoption_active",
+                        "wizard": wizard,
+                    })
+                elif path.startswith("/api/legacy-adoption/jobs/") and (
+                    path.split("/", 5)[4] != active["job_id"]
+                ):
+                    return JSONResponse(status_code=409, content={
+                        "detail": "Ein anderer Übernahmeauftrag ist aktiv.", "code": "legacy_adoption_active",
+                        "wizard": wizard,
+                    })
+            elif not read and path.startswith("/api/legacy-adoption/jobs/") and not path.endswith("/finalize"):
+                return JSONResponse(status_code=409, content={
+                    "detail": "Es ist kein Übernahmeauftrag aktiv.", "code": "legacy_adoption_inactive",
+                })
+            return await call_next(request)
+    except RootOperationBusy:
+        return JSONResponse(status_code=409, content={
+            "detail": "Ein anderer Vorgang läuft noch. Bitte versuche es erneut.",
+            "code": "legacy_adoption_busy",
+        })
+    except (AdoptionError, RootOperationError, OSError, sqlite3.DatabaseError) as error:
+        return JSONResponse(status_code=409, content={"detail": str(error)})
 
 
 # BA-03: The last registered HTTP middleware executes first. In particular,

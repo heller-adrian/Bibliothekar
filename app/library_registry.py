@@ -11,7 +11,7 @@ import os
 import sqlite3
 
 
-REGISTRY_SCHEMA_VERSION = 5
+REGISTRY_SCHEMA_VERSION = 6
 MAIN_LIBRARY_ID = "main"
 
 
@@ -185,6 +185,13 @@ REGISTRY_MIGRATIONS: dict[int, str] = {
             catalogue_job_id TEXT NOT NULL,
             plan_fingerprint TEXT NOT NULL,
             registered_at TEXT NOT NULL
+        );
+    """,
+    6: """
+        CREATE TABLE legacy_adoption_active (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            library_id TEXT NOT NULL REFERENCES libraries(library_id),
+            job_id TEXT NOT NULL
         );
     """,
 }

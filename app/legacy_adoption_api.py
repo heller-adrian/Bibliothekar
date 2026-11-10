@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import Event, Lock
 from typing import Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -21,6 +21,7 @@ from app.legacy_adoption_inventory import (
     inventory_status, scan_inventory,
 )
 from app.legacy_adoption_paths import AdoptionError, bound_directory
+from app.legacy_adoption_mode import reserve_adoption
 from app.legacy_adoption_plan import create_plan, plan_moves, plan_status
 from app.legacy_adoption_registration import finalize_adoption
 from app.legacy_adoption_verify import plan_issues, reopen_plan, verify_media
@@ -139,15 +140,18 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 "folders": folders}
 
     @router.get("/jobs")
-    def jobs():
+    def jobs(request: Request):
         library = context()
+        active = getattr(request.state, "legacy_adoption", None)
+        job_id = active["job_id"] if active else None
         with database_connection(library.database_path) as connection:
             return [dict(row) for row in connection.execute(
                 """SELECT job.id, job.state, job.source_root, job.created_at,
                           plan.state AS plan_state
                      FROM legacy_adoption_jobs job LEFT JOIN legacy_adoption_plans plan ON plan.job_id = job.id
                     WHERE job.library_id = ? AND job.state != 'discarded'
-                    ORDER BY job.created_at DESC, job.id DESC""", (library.library_id,),
+                      AND (job.id = ? OR (? IS NULL AND plan.state = 'completed'))
+                    ORDER BY job.created_at DESC, job.id DESC""", (library.library_id, job_id, job_id),
             )]
 
     @router.post("/jobs", status_code=201)
@@ -159,6 +163,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 for field in ("archive_root", "workspace_root", "work_root", "database_path")
             )
             identifier = create_job(library, source_path(source.root, source.relative), other_managed_roots=roots)
+            reserve_adoption(registry_path(), library.library_id, identifier)
         return {"id": identifier}
 
     @router.get("/jobs/{job_id}")

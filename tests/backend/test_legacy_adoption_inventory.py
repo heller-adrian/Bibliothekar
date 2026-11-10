@@ -194,6 +194,6 @@ def test_upgrades_1_0_0_catalogue_and_registry_without_touching_existing_rows(tm
             registry, backup_id="historic", source_kind="import", source_identity="old", backup_path="/synthetic",
         )
     assert initialize_database(db)["newly_applied_versions"] == [56, 57, 58, 59, 60]
-    assert library_registry.initialize_library_registry(registry)["newly_applied_versions"] == [4, 5]
+    assert library_registry.initialize_library_registry(registry)["newly_applied_versions"] == [4, 5, 6]
     assert library_registry.read_library_identity(db) == "historic"
     assert library_registry.get_source_backup(registry, "historic")["source_identity"] == "old"
