@@ -1,6 +1,6 @@
 name: Backend QA
 on:
-  # Documentation and housekeeping commits do not need the long regression suite.
+  # PRs run the focused adoption gate. Full release qualification is explicit.
   pull_request:
     paths:
       - 'app/**'
@@ -21,13 +21,19 @@ on:
       - 'compose*.yaml'
       - '!qa/README.md'
   workflow_dispatch:
+    inputs:
+      full_backend:
+        description: Run complete eight-part release qualification
+        type: boolean
+        default: false
+        required: true
 permissions:
   contents: read
 env:
   QA_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
 concurrency:
-  group: bibliothekar-main-qa-${{ github.ref }}
-  cancel-in-progress: true
+  group: bibliothekar-qa-${{ github.event_name == 'workflow_dispatch' && inputs.full_backend && 'release' || 'development' }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || !inputs.full_backend }}
 jobs:
   adoption-preflight:
     outputs:
@@ -142,7 +148,7 @@ jobs:
   # Public pull requests must never execute their code on a self-hosted runner.
   backend-regression:
     needs: adoption-preflight
-    if: needs.adoption-preflight.outputs.request-only != 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.full_backend && needs.adoption-preflight.outputs.request-only != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 48
     strategy:
@@ -186,7 +192,7 @@ jobs:
           retention-days: 14
 
   backend-coverage:
-    if: always() && needs.adoption-preflight.result == 'success' && needs.adoption-preflight.outputs.request-only != 'true'
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.full_backend && needs.adoption-preflight.result == 'success' && needs.adoption-preflight.outputs.request-only != 'true'
     needs: [adoption-preflight, backend-regression]
     runs-on: ubuntu-24.04
     timeout-minutes: 5

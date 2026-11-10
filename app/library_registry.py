@@ -346,6 +346,12 @@ def initialize_library_registry(path: Path) -> dict[str, Any]:
                 + ", ".join(str(version) for version in versions)
             )
 
+        # Provision coordination during registry initialization. Requests that
+        # are rejected without mutation must not create a new control file.
+        from app.root_operations import _lock
+        with _lock(Path(path).with_name(Path(path).name + ".adoption.lock")):
+            pass
+
         return {
             "database_path": str(path),
             "schema_versions": versions,

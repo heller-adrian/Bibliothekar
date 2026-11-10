@@ -149,8 +149,18 @@ jobs:
             select(.status == "completed" and .conclusion == "success"
               and .path == ".github/workflows/qa-tests.yml"
               and .head_branch == "patch/1.0.1-legacy-adoption" and .head_sha == $sha
-              and .event == "pull_request" and .head_repository.full_name == "heller-adrian/Bibliothekar")
+              and .event == "workflow_dispatch" and .head_repository.full_name == "heller-adrian/Bibliothekar")
             | .run_attempt' "$evidence/run.json")"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$qa_run/attempts/$attempt/jobs?per_page=100" > "$evidence/jobs.json"
+          python - "$evidence/jobs.json" <<'PY'
+          import json, sys
+          jobs = json.load(open(sys.argv[1]))["jobs"]
+          required = {"adoption-preflight", "backend-coverage"} | {
+              f"backend-regression ({index})" for index in range(8)
+          }
+          assert len(jobs) == len(required) and {job["name"] for job in jobs} == required
+          assert all(job["status"] == "completed" and job["conclusion"] == "success" for job in jobs)
+          PY
           gh run download "$qa_run" --repo "$GITHUB_REPOSITORY" --name "backend-coverage-$attempt" --dir "$evidence"
           jq -e --arg sha "$qa_source" '
             .source == $sha and .status == "PASS" and .partitions == 8
