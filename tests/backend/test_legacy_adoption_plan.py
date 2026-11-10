@@ -201,3 +201,111 @@ def test_manual_manifest_and_empty_scaffold(inventory):
     assert record["undo"] == {"from": record["target"], "to": record["source"]}
     assert record["size_bytes"] == 4
     assert list(context.archive_root.iterdir()) == []
+
+
+def test_projects_canonical_event_documents_without_registering(inventory):
+    import json
+    from zipfile import ZipFile
+
+    from app.legacy_adoption_catalogue import prepare_documents
+    from app.legacy_adoption_export import directory_scaffold, event_documents
+    from app.legacy_adoption_verify import verify_media
+
+    context, source, registry = inventory
+    event_id = _existing(context)
+    (source / "pair.raf").write_bytes(b"raw")
+    (source / "pair.xmp").write_bytes(b"sidecar")
+    job = _scan(context, source)
+    create_plan(context, registry, job, {"events": [{"existing_id": event_id}]})
+    [document] = prepare_documents(context, job)
+    with event_documents(context, job, originals=True) as handle, ZipFile(handle) as originals:
+        assert json.loads(originals.read(document["relative_path"]))["event"]["id"] == event_id
+    with directory_scaffold(context, job) as handle, ZipFile(handle) as scaffold:
+        scaffold.extractall(context.archive_root)
+    for move in plan_moves(context, job):
+        Path(move["source"]).rename(Path(move["target"]))
+    assert verify_media(context, job)["state"] == "prepared"
+    with event_documents(context, job) as handle, ZipFile(handle) as documents:
+        payload = json.loads(documents.read(document["relative_path"]))
+        assert payload["event"]["id"] == event_id
+        assert payload["event"]["status"] == "archived"
+        assert len(payload["files"]) == 2
+        assert len(payload["families"]) == 1
+        documents.extractall(context.archive_root)
+    assert verify_media(context, job)["state"] == "verified"
+    with database_connection(context.database_path) as connection:
+        assert connection.execute("SELECT revision FROM events WHERE id = ?", (event_id,)).fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM files").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM event_archive_verifications").fetchone()[0] == 0
+
+
+def _ready_for_registration(inventory, draft):
+    from zipfile import ZipFile
+
+    from app.legacy_adoption_catalogue import prepare_documents
+    from app.legacy_adoption_export import directory_scaffold, event_documents
+    from app.library_registry import register_library
+
+    context, source, registry = inventory
+    context.work_root.mkdir()
+    register_library.__wrapped__(
+        registry, library_id=context.library_id, display_name=context.display_name,
+        database_path=context.database_path, workspace_root=context.workspace_root,
+        work_root=context.work_root, archive_root=context.archive_root, is_main=False,
+    )
+    (source / "adopted.raf").write_bytes(b"raw file in synthetic archive")
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, draft)
+    prepare_documents(context, job)
+    with directory_scaffold(context, job) as handle, ZipFile(handle) as scaffold:
+        scaffold.extractall(context.archive_root)
+    for move in plan_moves(context, job):
+        Path(move["source"]).rename(move["target"])
+    with event_documents(context, job) as handle, ZipFile(handle) as documents:
+        documents.extractall(context.archive_root)
+    return job, plan
+
+
+def test_registration_replays_after_registry_commit(inventory, monkeypatch):
+    import sqlite3
+
+    from app import legacy_adoption_registration as registration
+    from app.global_library_inventory import backfill_library_inventory
+    from app.event_access import event_file_rows
+
+    context, _, registry = inventory
+    job, plan = _ready_for_registration(inventory, _draft(preserve_day_folders=True))
+    event_id = plan["events"][0]["id"]
+
+    # Model a process dying after the registry's durable commit and before
+    # the catalogue commits. No app rows should have escaped that transaction.
+    original = registration.source_registry_transaction
+    from contextlib import contextmanager
+
+    @contextmanager
+    def interrupt_after_commit(path):
+        with original(path) as connection:
+            yield connection
+        raise InterruptedError("synthetic crash between commits")
+
+    monkeypatch.setattr(registration, "source_registry_transaction", interrupt_after_commit)
+    with pytest.raises(InterruptedError):
+        registration.finalize_adoption.__wrapped__(context, registry, job, plan["id"])
+    with database_connection(context.database_path) as connection:
+        assert event_file_rows(connection, event_id) == []
+    with sqlite3.connect(registry) as connection:
+        assert connection.execute("SELECT count(*) FROM legacy_adoption_receipts").fetchone()[0] == 1
+        assert connection.execute("SELECT count(*) FROM family_claims").fetchone()[0] == 1
+
+    monkeypatch.setattr(registration, "source_registry_transaction", original)
+    assert registration.finalize_adoption.__wrapped__(context, registry, job, plan["id"])["state"] == "completed"
+    assert registration.finalize_adoption.__wrapped__(context, registry, job, plan["id"])["state"] == "completed"
+    with database_connection(context.database_path) as connection:
+        [adopted] = event_file_rows(connection, event_id)
+        assert adopted["current_root_kind"] == "camera_archive"
+        assert adopted["original_relative_path"] == "adopted.raf"
+        assert connection.execute("SELECT status FROM events WHERE id = ?", (event_id,)).fetchone()[0] == "archived"
+        assert connection.execute("SELECT count(*) FROM event_archive_verified_file_locations").fetchone()[0] == 1
+    assert backfill_library_inventory(
+        registry, database_path=context.database_path, library_id=context.library_id, claim_all_owned=False,
+    )["family_count"] == 1

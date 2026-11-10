@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,7 +11,7 @@ import os
 import sqlite3
 
 
-REGISTRY_SCHEMA_VERSION = 4
+REGISTRY_SCHEMA_VERSION = 5
 MAIN_LIBRARY_ID = "main"
 
 
@@ -177,6 +178,15 @@ REGISTRY_MIGRATIONS: dict[int, str] = {
     4: """
         CREATE INDEX idx_source_media_sha ON source_media(sha256);
     """,
+    5: """
+        CREATE TABLE legacy_adoption_receipts (
+            plan_id TEXT PRIMARY KEY,
+            library_id TEXT NOT NULL REFERENCES libraries(library_id),
+            catalogue_job_id TEXT NOT NULL,
+            plan_fingerprint TEXT NOT NULL,
+            registered_at TEXT NOT NULL
+        );
+    """,
 }
 
 
@@ -203,6 +213,30 @@ def _connect(path: Path) -> sqlite3.Connection:
     # Registry transactions share the same workspace write barrier.
     from app.operation_health import guard_registry_connection
     return guard_registry_connection(connection,path)
+
+
+@contextmanager
+def source_registry_transaction(path: Path):
+    """Publish related source inventory and claim writes in one transaction."""
+    with closing(_connect(path)) as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        yield connection
+
+
+@contextmanager
+def _source_registry_write(path: Path, transaction_connection, *, translate_integrity=False):
+    try:
+        if transaction_connection is None:
+            with source_registry_transaction(path) as connection:
+                yield connection
+        else:
+            if not transaction_connection.in_transaction:
+                raise LibraryRegistryError("Die Quelltransaktion ist nicht aktiv.")
+            yield transaction_connection
+    except sqlite3.IntegrityError as error:
+        if translate_integrity:
+            raise LibraryRegistryError(str(error)) from error
+        raise
 
 
 def _ensure_registry_schema_table(connection: sqlite3.Connection) -> None:
@@ -1027,6 +1061,7 @@ def register_source_backup(
     source_identity: str,
     backup_path: str,
     metadata: dict[str, Any] | None = None,
+    _transaction_connection: sqlite3.Connection | None = None,
 ) -> None:
     clean_backup_id = str(backup_id or "").strip()
     clean_kind = str(source_kind or "").strip()
@@ -1043,9 +1078,7 @@ def register_source_backup(
         ensure_ascii=False,
         sort_keys=True,
     )
-    connection = _connect(registry_path)
-    try:
-        connection.execute("BEGIN IMMEDIATE")
+    with _source_registry_write(registry_path, _transaction_connection, translate_integrity=True) as connection:
         existing = connection.execute(
             """
             SELECT source_kind, source_identity, backup_path, metadata_json, created_at
@@ -1189,15 +1222,7 @@ def register_source_backup(
                 now,
             ),
         )
-        connection.commit()
-    except sqlite3.IntegrityError as error:
-        connection.rollback()
-        raise LibraryRegistryError(str(error)) from error
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
+
 
 def _canonical_family_id(content_fingerprint: str) -> str:
     clean = str(content_fingerprint or "").strip()
@@ -1279,6 +1304,7 @@ def register_source_family(
     family_key: str,
     content_fingerprint: str,
     metadata: dict[str, Any] | None = None,
+    _transaction_connection: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     clean_source_key = str(source_family_key or "").strip()
     clean_backup_id = str(backup_id or "").strip()
@@ -1296,9 +1322,7 @@ def register_source_family(
         sort_keys=True,
     )
 
-    connection = _connect(registry_path)
-    try:
-        connection.execute("BEGIN IMMEDIATE")
+    with _source_registry_write(registry_path, _transaction_connection, translate_integrity=True) as connection:
 
         backup = connection.execute(
             "SELECT backup_id FROM source_backups WHERE backup_id = ?",
@@ -1394,19 +1418,9 @@ def register_source_family(
             """,
             (clean_source_key,),
         ).fetchone()
-        connection.commit()
         result = dict(row)
         result["content_fingerprint"] = clean_fingerprint
         return result
-    except sqlite3.IntegrityError as error:
-        connection.rollback()
-        raise LibraryRegistryError(str(error)) from error
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
-
 
 
 def register_source_media(
@@ -1418,6 +1432,7 @@ def register_source_media(
     sha256: str,
     media_type: str | None = None,
     metadata: dict[str, Any] | None = None,
+    _transaction_connection: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     clean_backup = str(backup_id or "").strip()
     clean_relative = str(relative_path or "").strip().replace("\\", "/")
@@ -1430,9 +1445,7 @@ def register_source_media(
         (clean_backup + "\0" + clean_relative).encode("utf-8", "surrogateescape")
     ).hexdigest()
     now = _now()
-    connection = _connect(registry_path)
-    try:
-        connection.execute("BEGIN IMMEDIATE")
+    with _source_registry_write(registry_path, _transaction_connection) as connection:
         backup = connection.execute(
             "SELECT backup_id FROM source_backups WHERE backup_id = ?",
             (clean_backup,),
@@ -1455,7 +1468,6 @@ def register_source_media(
 
         if existing is not None:
             row=connection.execute("SELECT * FROM source_media WHERE media_id=?",(existing["media_id"],)).fetchone()
-            connection.commit()
             return dict(row)
 
         connection.execute(
@@ -1487,13 +1499,7 @@ def register_source_media(
             "SELECT * FROM source_media WHERE backup_id=? AND relative_path=?",
             (clean_backup, clean_relative),
         ).fetchone()
-        connection.commit()
         return dict(row)
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
 
 
 def register_source_family_members(
@@ -1501,15 +1507,14 @@ def register_source_family_members(
     *,
     source_family_key: str,
     media_ids: list[str],
+    _transaction_connection: sqlite3.Connection | None = None,
 ) -> int:
     clean_family = str(source_family_key or "").strip()
     unique_media = [str(value).strip() for value in dict.fromkeys(media_ids) if str(value).strip()]
     if not clean_family:
         raise LibraryRegistryError("Quellfamilien-ID fehlt.")
 
-    connection = _connect(registry_path)
-    try:
-        connection.execute("BEGIN IMMEDIATE")
+    with _source_registry_write(registry_path, _transaction_connection) as connection:
         family = connection.execute(
             "SELECT source_family_key FROM source_families WHERE source_family_key=?",
             (clean_family,),
@@ -1523,7 +1528,6 @@ def register_source_family_members(
         if existing:
             if set(existing) != set(unique_media):
                 raise LibraryRegistryError("source_inventory_conflict: original source family members are immutable: " + clean_family)
-            connection.commit()
             return len(existing)
         now = _now()
         for order, media_id in enumerate(unique_media):
@@ -1544,13 +1548,7 @@ def register_source_family_members(
                 """,
                 (clean_family, media_id, order, now),
             )
-        connection.commit()
         return len(unique_media)
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
 
 
 def list_source_family_members(
@@ -1581,6 +1579,7 @@ def claim_source_family(
     library_id: str,
     event_id: str | None,
     claim_state: str = "reserved",
+    _transaction_connection: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     """Create the single global reservation or ownership claim.
 
@@ -1591,9 +1590,7 @@ def claim_source_family(
         raise LibraryRegistryError("Ungültiger Reservierungszustand.")
 
     now = _now()
-    connection = _connect(registry_path)
-    try:
-        connection.execute("BEGIN IMMEDIATE")
+    with _source_registry_write(registry_path, _transaction_connection) as connection:
         library = connection.execute(
             """
             SELECT library_id
@@ -1692,15 +1689,9 @@ def claim_source_family(
             """,
             (canonical_id, str(library_id)),
         ).fetchone()
-        connection.commit()
         result = dict(row)
         result["source_family_key"] = str(source_family_key)
         return result
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
 
 
 def release_source_family_claim(

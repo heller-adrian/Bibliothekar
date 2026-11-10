@@ -7,6 +7,7 @@ from zipfile import ZipFile
 
 from app.database import database_connection
 from app.legacy_adoption_inventory import _job
+from app.legacy_adoption_paths import AdoptionError
 from app.legacy_adoption_verify import _plan
 
 
@@ -56,3 +57,28 @@ def manual_manifest(library, job_id: str):
                 "action": "move" if target else "skip_duplicate",
                 "undo": {"from": target, "to": source} if target else None,
             }, ensure_ascii=False) + "\n"
+
+
+@contextmanager
+def event_documents(library, job_id: str, *, originals: bool = False):
+    with (
+        SpooledTemporaryFile(max_size=2 * 1024 * 1024) as output,
+        database_connection(library.database_path) as connection,
+    ):
+        connection.execute("BEGIN")
+        _job(connection, library.library_id, job_id)
+        plan = _plan(connection, job_id)
+        if plan["documents_at"] is None:
+            raise AdoptionError("Die Ereignisdokumente müssen zuerst vorbereitet werden.")
+        query = (
+            """SELECT relative_path, document FROM legacy_adoption_baseline
+               WHERE plan_id = ? AND document IS NOT NULL ORDER BY relative_path"""
+            if originals else
+            """SELECT relative_path, content FROM legacy_adoption_documents
+               WHERE plan_id = ? ORDER BY relative_path"""
+        )
+        with ZipFile(output, "w") as archive:
+            for path, content in connection.execute(query, (plan["id"],)):
+                archive.writestr(path, content)
+        output.seek(0)
+        yield output

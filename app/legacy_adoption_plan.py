@@ -161,20 +161,23 @@ def _snapshot_existing_event(connection, plan_id, root_fd, prefix, event_id):
     doc = str(prefix / "event.json")
     found = False
     for path, directory, name, observed in walk_bound_files(root_fd, prefix):
+        document = None
         with bound_file(directory, name, file_identity(observed)) as (descriptor, info):
             digest = bound_sha256(descriptor)
             if path == doc:
                 if info.st_size > 64 * 1024 * 1024:
                     raise AdoptionError("Das bestehende Ereignisdokument überschreitet das Leselimit.")
-                with os.fdopen(os.dup(descriptor), "r", encoding="utf-8") as handle:
+                with os.fdopen(os.dup(descriptor), "rb") as handle:
                     handle.seek(0)
-                    payload = json.load(handle)
+                    document = handle.read()
+                payload = json.loads(document)
                 if not isinstance(payload, dict) or (payload.get("event") or {}).get("id") != event_id:
                     raise AdoptionError("Das vorhandene Ereignisdokument gehört zu einem anderen Ereignis.")
                 found = True
         connection.execute(
-            "INSERT INTO legacy_adoption_baseline VALUES (?, ?, ?, ?)",
-            (plan_id, path, info.st_size, digest),
+            """INSERT INTO legacy_adoption_baseline
+                  (plan_id, relative_path, size_bytes, sha256, document) VALUES (?, ?, ?, ?, ?)""",
+            (plan_id, path, info.st_size, digest, document),
         )
     if not found:
         raise AdoptionError("Das bestehende Ereignisdokument fehlt: " + doc)
@@ -254,6 +257,8 @@ def _plan_moves(connection, registry, job, plan_id, events, overrides, source_fd
         if len(eligible) != 1:
             raise AdoptionError("Die Aufnahmezeit trifft mehrere Ereignisse: " + key)
         event = eligible[0]
+        if key.strip() != key:
+            raise AdoptionError("Der Familienname ist für die globale Registry ungeeignet: " + key)
         assigned, leaf, layout = _target_leaf(event, capture)
         if any(not member["sha256"] for member in family):
             raise AdoptionError("Die Familie konnte nicht vollständig inventarisiert werden: " + key)
@@ -266,6 +271,8 @@ def _plan_moves(connection, registry, job, plan_id, events, overrides, source_fd
 
         for member in family:
             source = member["relative_path"]
+            if source.strip() != source:
+                raise AdoptionError("Der Quellpfad ist für die globale Registry ungeeignet: " + source)
             with relative_parent(source_fd, source) as (directory, name):
                 with bound_file(directory, name, tuple(json.loads(member["identity"]))):
                     pass
