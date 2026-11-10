@@ -56,7 +56,6 @@ jobs:
                 exit 1
               fi
               if [[ "$GITHUB_REF" == 'refs/heads/patch/1.0.1-legacy-adoption' ]]; then
-                test "$(cat .github/release-requests/v1.0.1-rc.1.txt)" = 'v1.0.1-rc.1'
                 git diff-tree --root --no-commit-id --diff-filter=AM --name-only -r "$GITHUB_SHA" |
                   grep -Fxq '.github/release-requests/v1.0.1-rc.1.txt'
                 if git ls-remote --exit-code --tags origin 'refs/tags/v1.0.1-rc.1' >/dev/null; then
@@ -126,6 +125,40 @@ jobs:
           print('APPROVED: 2634/2634 exact-case backend QA, container, frontend, preflight and coverage.')
           PY
           echo 'Verified source identity and successful GitHub qualification #42002573062.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify full backend qualification for the 1.0.1 source
+        if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          request=.github/release-requests/v1.0.1-rc.1.txt
+          mapfile -t qualification < "$request"
+          test "${#qualification[@]}" = 3
+          test "${qualification[0]}" = 'v1.0.1-rc.1'
+          qa_source="${qualification[1]}"
+          qa_run="${qualification[2]}"
+          [[ "$qa_source" =~ ^[a-f0-9]{40}$ && "$qa_run" =~ ^[0-9]+$ ]]
+          test "$(git rev-parse HEAD^)" = "$qa_source"
+          test "$(git diff --name-only "$qa_source" HEAD)" = "$request"
+          test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
+          evidence="$RUNNER_TEMP/adoption-qualification"
+          mkdir "$evidence"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$qa_run" > "$evidence/run.json"
+          attempt="$(jq -er --arg sha "$qa_source" '
+            select(.status == "completed" and .conclusion == "success"
+              and .path == ".github/workflows/qa-tests.yml"
+              and .head_branch == "patch/1.0.1-legacy-adoption" and .head_sha == $sha
+              and .event == "pull_request" and .head_repository.full_name == "heller-adrian/Bibliothekar")
+            | .run_attempt' "$evidence/run.json")"
+          gh run download "$qa_run" --repo "$GITHUB_REPOSITORY" --name "backend-coverage-$attempt" --dir "$evidence"
+          jq -e --arg sha "$qa_source" '
+            .source == $sha and .status == "PASS" and .partitions == 8
+            and .collected > 0 and .collected == .tested_once and .read_only_mount == "PASS"
+          ' "$evidence/coverage-summary.json"
+          echo "ADOPTION_QA_RUN=$qa_run" >> "$GITHUB_ENV"
+          echo "Verified complete backend and read-only mount qualification in run $qa_run." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Validate TrueNAS Custom App compose
         env:
           BIBLIOTHEKAR_APPDATA_DIR: /tmp/bibliothekar/appdata
@@ -135,32 +168,26 @@ jobs:
         run: docker compose -f compose.example.yaml config -q
 
       - name: Install metadata regression dependency
-        if: github.ref != 'refs/heads/main'
+        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/patch/1.0.1-legacy-adoption'
         run: sudo apt-get update -qq && sudo apt-get install -y libimage-exiftool-perl
 
       - name: Complete QA before publishing
-        if: github.ref != 'refs/heads/main'
+        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/patch/1.0.1-legacy-adoption'
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           pip install -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2
           python -m compileall -q app qa
           bash -n qa/archive_e2e/*.sh
-          if [[ "$GITHUB_REF" == 'refs/heads/patch/1.0.1-legacy-adoption' ]]; then
-            python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" backend
-          else
-            pytest -q -o addopts='' --junitxml=/tmp/bibliothekar-qa.xml tests/backend
-          fi
+          pytest -q -o addopts='' --junitxml=/tmp/bibliothekar-qa.xml tests/backend
 
       - name: Retain QA evidence
-        if: always() && github.ref != 'refs/heads/main'
+        if: always() && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/patch/1.0.1-legacy-adoption'
         uses: actions/upload-artifact@v4
         with:
           name: backend-qa
           path: |
             /tmp/bibliothekar-qa.xml
-            ${{ runner.temp }}/f14-qa/backend/results/result.xml
-            ${{ runner.temp }}/f14-qa/backend/results/exit.json
             /tmp/pytest-of-*/pytest-*/0562-evidence
 
       - name: Read application version
@@ -255,7 +282,8 @@ jobs:
           Verified image digest: \`$image@$IMAGE_DIGEST\`
 
           [Adoption guide](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/legacy-adoption.md)
-          [Backend QA, read-only bind mount and container smoke](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)
+          [Backend QA and read-only bind mount](https://github.com/$GITHUB_REPOSITORY/actions/runs/$ADOPTION_QA_RUN)
+          [Container smoke](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)
           EOF
           gh release create "$tag" --prerelease --latest=false --target "$GITHUB_SHA" \
             --title "Bibliothekar $tag" --notes-file "$RUNNER_TEMP/legacy-release-body.md"
