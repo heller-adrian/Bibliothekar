@@ -3,6 +3,9 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 import stat
+import sys
+
+from app.legacy_adoption_dataset import mount_id
 
 from app.pipeline import sha256_stream
 
@@ -56,6 +59,8 @@ def bound_child_directory(parent, name, expected):
     try:
         if directory_identity(os.fstat(descriptor)) != expected:
             raise AdoptionError("Ein Unterordner wurde während der Prüfung ausgetauscht.")
+        if sys.platform == "linux" and mount_id(parent) != mount_id(descriptor):
+            raise AdoptionError("Ein Unterordner führt über eine Mountgrenze.")
         yield descriptor
         named = os.stat(name, dir_fd=parent, follow_symlinks=False)
         if directory_identity(named) != expected:

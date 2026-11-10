@@ -215,7 +215,8 @@ def test_scoped_startup_reports_connected_database_and_releases_only_admitted_wo
     assert domain==[] and workers==[{'recover_domain':False}]
     assert main.DATABASE_INITIALIZATION_ERROR is None
     assert main.DATABASE_INITIALIZATION['connected'] and main.DATABASE_INITIALIZATION['consistent']
-    assert main.DATABASE_INITIALIZATION['applied_versions']==list(range(1,56))
+    from app.database import available_migrations
+    assert main.DATABASE_INITIALIZATION['applied_versions']==[version for version, _ in available_migrations()]
     assert operations.inspect(ws)['workspace_writes_allowed']
     assert before=={p:p.read_bytes() for p in records}
 

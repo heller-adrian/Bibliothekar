@@ -144,7 +144,7 @@ def test_0530_second_move_failure_reverts_first(tmp_path, monkeypatch):
 def test_0530_ui_and_endpoint_contract():
     from app import main
     from app.trash_ui import TRASH_HTML
-    routes = {route.path for route in main.app.routes}
+    routes = main.app.openapi()["paths"]
     assert "/api/trash/restore" in routes
     assert 'id="trash-restore-button"' in TRASH_HTML
     assert 'id="trash-select-button"' in TRASH_HTML

@@ -7,7 +7,7 @@ from app.legacy_adoption_inventory import create_job, inventory_chronology, scan
 from app.legacy_adoption_paths import AdoptionError
 from app.legacy_adoption_plan import create_plan, plan_moves
 from app.library_registry import initialize_library_registry, register_source_backup, register_source_media
-from tests.backend.test_legacy_adoption_inventory import library
+from tests.backend.test_legacy_adoption_inventory import library, synthetic_dataset
 
 
 @pytest.fixture

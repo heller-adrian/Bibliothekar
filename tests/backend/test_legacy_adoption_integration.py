@@ -16,6 +16,7 @@ from app.library_context import resolve_library_context
 from tests.backend.test_f14_root_operations import fixture
 from tests.backend.test_pre4_operation_separation import ready
 from tests.backend.test_legacy_adoption_plan import inventory, library
+from tests.backend.test_legacy_adoption_inventory import synthetic_dataset
 
 
 def _json(client, method, path, *, library="second", status=200, **kwargs):
@@ -24,7 +25,7 @@ def _json(client, method, path, *, library="second", status=200, **kwargs):
     return response.json()
 
 
-def test_wizard_and_f14_recovery_in_secondary_library(ready, tmp_path, monkeypatch):
+def test_wizard_and_f14_recovery_in_secondary_library(ready, tmp_path, monkeypatch, synthetic_dataset):
     from io import BytesIO
     from app import legacy_adoption_registration as registration
     from app.legacy_adoption_paths import AdoptionError

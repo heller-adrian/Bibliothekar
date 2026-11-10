@@ -15,7 +15,20 @@ from app.library_registry import ensure_library_identity
 
 
 @pytest.fixture
-def library(tmp_path):
+def synthetic_dataset(monkeypatch):
+    from app import legacy_adoption_dataset
+
+    def prove(source, archive, source_fd, archive_fd):
+        left, right = os.fstat(source_fd), os.fstat(archive_fd)
+        assert left.st_dev == right.st_dev
+        return {"dataset": "synthetic/test", "device": str(left.st_dev),
+                "source_directory": str(left.st_ino), "archive_directory": str(right.st_ino)}
+
+    monkeypatch.setattr(legacy_adoption_dataset, "prove", prove)
+
+
+@pytest.fixture
+def library(tmp_path, synthetic_dataset):
     root = tmp_path.resolve()
     for name in ("archive", "workspace", "source"):
         (root / name).mkdir()
@@ -180,7 +193,7 @@ def test_upgrades_1_0_0_catalogue_and_registry_without_touching_existing_rows(tm
         library_registry.register_source_backup(
             registry, backup_id="historic", source_kind="import", source_identity="old", backup_path="/synthetic",
         )
-    assert initialize_database(db)["newly_applied_versions"] == [56, 57, 58, 59]
+    assert initialize_database(db)["newly_applied_versions"] == [56, 57, 58, 59, 60]
     assert library_registry.initialize_library_registry(registry)["newly_applied_versions"] == [4, 5]
     assert library_registry.read_library_identity(db) == "historic"
     assert library_registry.get_source_backup(registry, "historic")["source_identity"] == "old"

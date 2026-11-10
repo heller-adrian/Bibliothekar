@@ -11,6 +11,7 @@ import sqlite3
 import stat
 from uuid import uuid4
 
+from app import legacy_adoption_dataset as dataset
 from app.database import database_connection
 from app.event_inventory import event_root_relative
 from app.event_layout import ensure_event_layout_snapshot, get_global_default, layout_paths, normalize_layout, validate_input_path
@@ -378,6 +379,8 @@ def _roots(stack, library, job):
     archive = stack.enter_context(bound_directory(
         library.archive_root, (job["archive_device"], job["archive_inode"]),
     ))
+    dataset.revalidate(json.loads(job["dataset_json"] or "null"),
+                       job["source_root"], library.archive_root, source, archive)
     return source, archive
 
 
@@ -414,20 +417,6 @@ def create_plan(library, registry_path: Path, job_id: str, draft: dict) -> dict:
     return plan_status(library, job_id)
 
 
-def _filesystem_warning(job):
-    from app.appdata import mount
-
-    try:
-        source = mount(job["source_root"])
-        archive = mount(job["archive_root"])
-        if source is not None and source == archive and job["source_device"] == job["archive_device"]:
-            return ""
-    except (OSError, ValueError):
-        pass
-    return ("Quelle und Ziel liegen möglicherweise auf unterschiedlichen Dateisystemen. "
-            "Das Verschieben kann daher einen umfangreichen Kopiervorgang erfordern.")
-
-
 def plan_status(library, job_id: str) -> dict:
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN")
@@ -450,7 +439,8 @@ def plan_status(library, job_id: str) -> dict:
             "draft": json.loads(plan["draft_json"]), "events": json.loads(plan["events_json"]),
             "issues": connection.execute("SELECT count(*) FROM legacy_adoption_issues WHERE plan_id = ?",
                                          (plan["id"],)).fetchone()[0],
-            "filesystem_warning": _filesystem_warning(job),
+            "dataset": json.loads(job["dataset_json"] or "null"),
+            "dataset_verified_at": job["dataset_verified_at"],
             "snapshot_hint": (
                 "Vor größeren Dateiänderungen wird empfohlen, einen ZFS-Snapshot oder eine andere "
                 "geeignete Sicherung anzulegen. Dies ist eine freiwillige zusätzliche Sicherheitsmaßnahme "

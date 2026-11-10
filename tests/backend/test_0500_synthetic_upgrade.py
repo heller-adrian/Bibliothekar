@@ -43,8 +43,10 @@ def test_0500_upgrade_from_synthetic_040_preserves_job_and_event(tmp_path, monke
     migration = initialize_database(path)
     assert migration["integrity"] == "ok"
     assert migration["foreign_key_errors"] == 0
-    assert migration["newly_applied_versions"] == list(range(41, 56))
-    assert migration["applied_versions"] == list(range(1, 56))
+    expected = [version for version, _ in real_available()]
+    assert expected[:55] == list(range(1, 56))
+    assert migration["newly_applied_versions"] == expected[40:]
+    assert migration["applied_versions"] == expected
     with database_connection(path) as conn:
         event = conn.execute(
             "SELECT name,start_datetime,end_datetime,status "
@@ -79,6 +81,8 @@ def test_0500_upgrade_historical_051_to_052_is_atomic(tmp_path, monkeypatch):
         previous = initialize_database(path)
     assert previous["applied_versions"][-1] == 51
     result = initialize_database(path)
-    assert result["newly_applied_versions"] == [52, 53, 54, 55]
+    expected = [version for version, _ in real_available() if version > 51]
+    assert expected[:4] == [52, 53, 54, 55]
+    assert result["newly_applied_versions"] == expected
     assert "event_document_sync_tasks" in result["tables"]
     assert initialize_database(path)["newly_applied_versions"] == []

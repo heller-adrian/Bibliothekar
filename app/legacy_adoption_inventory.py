@@ -7,6 +7,7 @@ from pathlib import Path
 import stat
 from uuid import uuid4
 
+from app import legacy_adoption_dataset as dataset
 from app.database import database_connection
 from app.legacy_adoption_paths import (
     AdoptionError, absolute_root, bound_child_directory, bound_directory,
@@ -40,18 +41,19 @@ def create_job(
     with bound_directory(source) as source_fd, bound_directory(archive) as archive_fd:
         source_identity = directory_identity(os.fstat(source_fd))
         archive_identity = directory_identity(os.fstat(archive_fd))
-    if source_identity == archive_identity:
-        raise AdoptionError("Bestandsquelle und Archiv bezeichnen denselben Ordner.")
+        if source_identity == archive_identity:
+            raise AdoptionError("Bestandsquelle und Archiv bezeichnen denselben Ordner.")
+        evidence = dataset.prove(source, archive, source_fd, archive_fd)
 
     job_id = uuid4().hex
     with database_connection(library.database_path) as connection:
         connection.execute(
             """INSERT INTO legacy_adoption_jobs (
                    id, library_id, source_root, source_device, source_inode,
-                   archive_root, archive_device, archive_inode, state
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready')""",
+                   archive_root, archive_device, archive_inode, state, dataset_json, dataset_verified_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ready', ?, CURRENT_TIMESTAMP)""",
             (job_id, library.library_id, str(source), *source_identity,
-             str(archive), *archive_identity),
+             str(archive), *archive_identity, json.dumps(evidence)),
         )
     return job_id
 
@@ -80,7 +82,8 @@ def inventory_status(library: LibraryContext, job_id: str) -> dict:
         ).fetchone()
     return {
         "id": job["id"], "state": job["state"], "source_root": job["source_root"],
-        "scan_error": job["scan_error"], **dict(counts),
+        "scan_error": job["scan_error"], "dataset": json.loads(job["dataset_json"] or "null"),
+        "dataset_verified_at": job["dataset_verified_at"], **dict(counts),
     }
 
 
@@ -356,9 +359,12 @@ def scan_inventory(library: LibraryContext, job_id: str, *, cancellation_callbac
     try:
         with (
             bound_directory(source, (job["source_device"], job["source_inode"])) as source_fd,
-            bound_directory(archive, (job["archive_device"], job["archive_inode"])),
+            bound_directory(archive, (job["archive_device"], job["archive_inode"])) as archive_fd,
         ):
+            evidence = json.loads(job["dataset_json"] or "null")
+            dataset.revalidate(evidence, source, archive, source_fd, archive_fd)
             _scan_tree(source_fd, source, consume, cancel)
+            dataset.revalidate(evidence, source, archive, source_fd, archive_fd)
         cancel()
         with database_connection(library.database_path) as connection:
             connection.execute("BEGIN IMMEDIATE")

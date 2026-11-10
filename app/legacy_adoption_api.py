@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from app.database import database_connection
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps
 from app.legacy_adoption_catalogue import prepare_documents
+from app.legacy_adoption_dataset import DatasetError
 from app.legacy_adoption_export import directory_scaffold, event_documents, manifest_file
 from app.legacy_adoption_inventory import (
     _job, create_job, discard_job, inventory_chronology, inventory_errors, inventory_families,
@@ -63,7 +64,7 @@ def _errors():
         raise HTTPException(404, "Der gewählte Pfad ist nicht erreichbar.") from error
     except PermissionError as error:
         raise HTTPException(403, "Für den gewählten Ordner fehlt die Leseberechtigung.") from error
-    except (AdoptionError, LibraryRegistryError, RootOperationError, OSError, ValueError, TypeError) as error:
+    except (AdoptionError, DatasetError, LibraryRegistryError, RootOperationError, OSError, ValueError, TypeError) as error:
         raise HTTPException(409, str(error)) from error
 
 

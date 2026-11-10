@@ -1,5 +1,5 @@
 
-from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION, EXPECTED_STABLE_VERSION
 from tests.backend.legacy_storage_fixture import provision_legacy_storage
 from pathlib import Path
 from types import SimpleNamespace
@@ -89,7 +89,7 @@ def test_0300_library_identity_is_additive_migration_39(tmp_path):
     assert "library_identity" in state["initialized"]["tables"]
 
     registry_status = initialize_library_registry(state["registry_file"])
-    assert registry_status["schema_versions"] == [1, 2, 3]
+    assert registry_status["schema_versions"] == [1, 2, 3, 4, 5]
     assert registry_status["newly_applied_versions"] == []
 
 
@@ -359,7 +359,7 @@ def test_0300_worker_and_ui_are_library_foundation_aware():
     assert '"/api/libraries/current"' in main_source
     assert "deployment_version" in ui_source
     assert f'Version <span data-bk-version>{EXPECTED_RELEASE_VERSION}</span>' in ui_source
-    assert f'ghcr.io/heller-adrian/bibliothekar:{EXPECTED_RELEASE_VERSION}' in compose
+    assert f'ghcr.io/heller-adrian/bibliothekar:{EXPECTED_STABLE_VERSION}' in compose
     assert "KAMERA_APPDATA: /appdata" in compose
     from app import appdata
     assert "bibliothekar-global.sqlite3" in Path(appdata.__file__).read_text()
