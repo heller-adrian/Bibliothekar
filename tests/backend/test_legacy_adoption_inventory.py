@@ -130,3 +130,34 @@ def test_exiftool_reads_xmp_by_bound_descriptor(library):
         digest = connection.execute("SELECT sha256 FROM legacy_adoption_inventory").fetchone()[0]
     assert digest == hashlib.sha256(content).hexdigest()
     assert os.stat(sidecar).st_mtime_ns == before.st_mtime_ns
+
+
+def test_large_inventory_and_compound_xmp_names(library, monkeypatch):
+    context, source = library
+    for index in range(2500):
+        (source / f"{index:05}.raf").write_bytes(str(index).encode())
+    (source / "00001.RAF.xmp").write_bytes(b"sidecar")
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", lambda _files, _cancel: {})
+    job = create_job(context, source)
+    status = scan_inventory(context, job)
+    assert status["files"] == 2501
+    assert status["families"] == 2500
+    assert inventory_families(context, job, after="00000", limit=1)[0]["member_count"] == 2
+
+
+def test_conflicting_capture_times_remain_unconfirmed(library, monkeypatch):
+    context, source = library
+    (source / "mixed.raf").write_bytes(b"raw")
+    (source / "mixed.jpg").write_bytes(b"jpeg")
+    monkeypatch.setattr(
+        "app.legacy_adoption_inventory.read_bound_metadata",
+        lambda descriptors, _cancel: {
+            fd: {"EXIF:ExifIFD:DateTimeOriginal": f"2026:07:{index + 20:02} 10:00:00"}
+            for index, fd in enumerate(descriptors)
+        },
+    )
+    job = create_job(context, source)
+    scan_inventory(context, job)
+    [family] = inventory_families(context, job, day="")
+    assert family["selected_capture_time"] is None
+    assert family["status"] == "review_required"

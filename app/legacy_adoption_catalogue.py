@@ -73,11 +73,12 @@ def _store_event(connection, job_id, event, now):
             """INSERT INTO events (
                    id, job_id, event_level, name, start_datetime, end_datetime, folder_name,
                    status, created_at, updated_at, event_kind, preserve_day_folders,
-                   applied_at, archived_at, time_model_version, folder_naming_json
-               ) VALUES (?, ?, 'parent', ?, ?, ?, ?, 'archived', ?, ?, ?, ?, ?, ?, 2, ?)""",
+                   applied_at, archived_at, timeline_model, time_model_version, folder_naming_json
+               ) VALUES (?, ?, 'parent', ?, ?, ?, ?, 'archived', ?, ?, ?, ?, ?, ?, ?, 2, ?)""",
             (event_id, job_id, event["name"], event["start_datetime"], event["end_datetime"],
              event["folder_name"], now, now, event["event_kind"], int(event["preserve_day_folders"]),
-             now, now, json.dumps(event["naming"])),
+             now, now, "segments" if event["event_kind"] == "no_event" else "continuous",
+             json.dumps(event["naming"])),
         )
         layout = event["folder_layout"]
         connection.execute(

@@ -1,4 +1,5 @@
 """Build and persist manual legacy moves without changing the archive catalogue."""
+from collections import Counter
 from contextlib import closing, ExitStack
 from datetime import date, datetime
 from functools import lru_cache
@@ -223,7 +224,35 @@ def _known_content(connection, registry, plan_id, checksum):
     )
 
 
-def _plan_moves(connection, registry, job, plan_id, events, overrides, source_fd, archive_fd):
+def _suggest_folder_moves(connection, plan_id, source_fd, archive_entry, candidates, target_counts):
+    for source, (target, count) in candidates.items():
+        if not target or target_counts[target] != count or archive_entry(target) is not None:
+            continue
+        try:
+            with relative_parent(source_fd, str(PurePosixPath(source) / ".binding")) as (directory, _):
+                with os.scandir(directory) as entries:
+                    actual = 0
+                    for entry in entries:
+                        relative = str(PurePosixPath(source) / entry.name)
+                        if not entry.is_file(follow_symlinks=False) or connection.execute(
+                            """SELECT 1 FROM legacy_adoption_moves
+                               WHERE plan_id = ? AND relative_path = ? AND target_path = ?""",
+                            (plan_id, relative, str(PurePosixPath(target) / entry.name)),
+                        ).fetchone() is None:
+                            break
+                        actual += 1
+                    else:
+                        if actual == count:
+                            connection.execute(
+                                "INSERT INTO legacy_adoption_folder_moves VALUES (?, ?, ?, ?)",
+                                (plan_id, source, target, count),
+                            )
+        except OSError:
+            # The per-file move plan remains valid even when grouping is unavailable.
+            continue
+
+
+def _plan_moves(connection, registry, job, plan_id, events, draft, source_fd, archive_fd):
     archive_entry = _archive_probe(archive_fd)
     for event in events:
         prefix = event_root_relative(event)
@@ -233,8 +262,13 @@ def _plan_moves(connection, registry, job, plan_id, events, overrides, source_fd
         elif archive_entry(str(prefix)) is not None:
             raise AdoptionError("Der neue Ereignisordner existiert bereits: " + str(prefix))
 
-    seen_overrides = set()
+    overrides = {key: _local_capture(value) for key, value in (draft.get("capture_overrides") or {}).items()}
+    exclusions = set(draft.get("exclude_families") or [])
+    target_stems = draft.get("target_stems") or {}
+    seen_draft_keys = set()
     added = set()
+    candidates = {}
+    target_counts = Counter()
     rows = connection.execute(
         """SELECT inventory.*, families.capture_time, families.review_required
              FROM legacy_adoption_inventory inventory
@@ -244,10 +278,11 @@ def _plan_moves(connection, registry, job, plan_id, events, overrides, source_fd
     )
     for key, group in groupby(rows, key=lambda row: row["family_key"]):
         family = list(group)
+        seen_draft_keys.add(key)
+        if key in exclusions:
+            continue
         capture = overrides.get(key, family[0]["capture_time"])
-        if key in overrides:
-            seen_overrides.add(key)
-        elif family[0]["review_required"]:
+        if key not in overrides and family[0]["review_required"]:
             continue
         if not capture:
             continue
@@ -271,17 +306,31 @@ def _plan_moves(connection, registry, job, plan_id, events, overrides, source_fd
 
         for member in family:
             source = member["relative_path"]
-            if source.strip() != source:
+            if source.strip() != source or "\\" in source:
                 raise AdoptionError("Der Quellpfad ist für die globale Registry ungeeignet: " + source)
             with relative_parent(source_fd, source) as (directory, name):
                 with bound_file(directory, name, tuple(json.loads(member["identity"]))):
                     pass
             target = None
             if not all(duplicate):
-                target = str(leaf / layout["input_path"] / PurePosixPath(source).name)
+                filename = PurePosixPath(source).name
+                if key in target_stems:
+                    stem = target_stems[key]
+                    if "/" in stem:
+                        raise AdoptionError("Der Zielname muss ein einzelner Dateiname ohne Endung sein.")
+                    validate_target(stem)
+                    original_stem = PurePosixPath(key).name
+                    filename = stem + filename[len(original_stem):]
+                target = str(leaf / layout["input_path"] / filename)
                 validate_target(target)
                 if archive_entry(target) is not None:
                     raise AdoptionError("Zieldatei existiert bereits: " + target)
+                source_dir = PurePosixPath(source).parent
+                target_dir = str(PurePosixPath(target).parent)
+                target_counts[target_dir] += 1
+                if source_dir.name == capture[:10]:
+                    previous, count = candidates.get(str(source_dir), (target_dir, 0))
+                    candidates[str(source_dir)] = (target_dir if previous == target_dir else None, count + 1)
                 added.add(event["id"])
             try:
                 connection.execute(
@@ -311,12 +360,13 @@ def _plan_moves(connection, registry, job, plan_id, events, overrides, source_fd
                 connection.execute(
                     "INSERT OR IGNORE INTO legacy_adoption_directories VALUES (?, ?)", (plan_id, value),
                 )
-    if overrides.keys() - seen_overrides:
-        raise AdoptionError("Mindestens eine bestätigte Dateifamilie fehlt in der Inventur.")
+    if (overrides.keys() | exclusions | target_stems.keys()) - seen_draft_keys:
+        raise AdoptionError("Mindestens eine Dateifamilie aus dem Entwurf fehlt in der Inventur.")
     if not added:
         raise AdoptionError("Die Auswahl enthält keine neuen, vollständig datierten Dateifamilien.")
     if any(event["id"] not in added for event in events):
         raise AdoptionError("Mindestens ein gewähltes Ereignis erhält keine neuen Dateifamilien.")
+    _suggest_folder_moves(connection, plan_id, source_fd, archive_entry, candidates, target_counts)
 
 
 def _roots(stack, library, job):
@@ -335,7 +385,6 @@ def create_plan(library, registry_path: Path, job_id: str, draft: dict) -> dict:
     definitions = draft.get("events")
     if not isinstance(definitions, list) or not 1 <= len(definitions) <= 200:
         raise AdoptionError("Wähle mindestens ein Ereignis und höchstens 200 Ereignisse.")
-    overrides = {key: _local_capture(value) for key, value in (draft.get("capture_overrides") or {}).items()}
     plan_id = uuid4().hex
     with database_connection(library.database_path) as connection, closing(sqlite3.connect(
         registry_path.absolute().as_uri() + "?mode=ro", uri=True,
@@ -361,8 +410,22 @@ def create_plan(library, registry_path: Path, job_id: str, draft: dict) -> dict:
         )
         with ExitStack() as stack:
             source, archive = _roots(stack, library, job)
-            _plan_moves(connection, registry, job, plan_id, events, overrides, source, archive)
+            _plan_moves(connection, registry, job, plan_id, events, draft, source, archive)
     return plan_status(library, job_id)
+
+
+def _filesystem_warning(job):
+    from app.appdata import mount
+
+    try:
+        source = mount(job["source_root"])
+        archive = mount(job["archive_root"])
+        if source is not None and source == archive and job["source_device"] == job["archive_device"]:
+            return ""
+    except (OSError, ValueError):
+        pass
+    return ("Quelle und Ziel liegen möglicherweise auf unterschiedlichen Dateisystemen. "
+            "Das Verschieben kann daher einen umfangreichen Kopiervorgang erfordern.")
 
 
 def plan_status(library, job_id: str) -> dict:
@@ -378,14 +441,16 @@ def plan_status(library, job_id: str) -> dict:
         )}
         return {
             "id": plan["id"], "state": plan["state"], "counts": counts,
+            "documents_at": plan["documents_at"],
+            "folder_moves": [dict(row) for row in connection.execute(
+                """SELECT source_path, target_path, file_count FROM legacy_adoption_folder_moves
+                    WHERE plan_id = ? ORDER BY source_path LIMIT 100""", (plan["id"],),
+            )],
             "source_root": job["source_root"], "archive_root": job["archive_root"],
             "draft": json.loads(plan["draft_json"]), "events": json.loads(plan["events_json"]),
             "issues": connection.execute("SELECT count(*) FROM legacy_adoption_issues WHERE plan_id = ?",
                                          (plan["id"],)).fetchone()[0],
-            "filesystem_warning": (
-                "Quelle und Ziel liegen möglicherweise auf unterschiedlichen Dateisystemen. "
-                "Das Verschieben kann daher einen umfangreichen Kopiervorgang erfordern."
-            ),
+            "filesystem_warning": _filesystem_warning(job),
             "snapshot_hint": (
                 "Vor größeren Dateiänderungen wird empfohlen, einen ZFS-Snapshot oder eine andere "
                 "geeignete Sicherung anzulegen. Dies ist eine freiwillige zusätzliche Sicherheitsmaßnahme "

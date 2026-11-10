@@ -8,7 +8,7 @@ from app.database import database_connection
 from app.event_inventory import event_root_relative
 from app.legacy_adoption_inventory import _job
 from app.legacy_adoption_paths import AdoptionError, bound_file, bound_sha256, file_identity, relative_parent, target_key, walk_bound_files
-from app.legacy_adoption_plan import _assert_timeline, _existing_event, _roots, plan_status
+from app.legacy_adoption_plan import _archive_probe, _assert_timeline, _existing_event, _roots, plan_status
 
 
 def _plan(connection, job_id):
@@ -26,7 +26,7 @@ def _entry(root, relative):
         return None
 
 
-def _verify_move(source, archive, row):
+def _verify_move(source, archive, row, stamp):
     try:
         original = _entry(source, row["relative_path"])
         with relative_parent(archive, row["target_path"]) as (directory, name):
@@ -37,7 +37,10 @@ def _verify_move(source, archive, row):
                     return "size_mismatch"
                 if bound_sha256(descriptor) != row["sha256"]:
                     return "sha256_mismatch"
-        return "source_present" if original is not None else "verified"
+        if original is not None:
+            return "source_present"
+        stamp(row["target_path"], file_identity(info))
+        return "verified"
     except FileNotFoundError:
         return "missing"
     except (OSError, AdoptionError):
@@ -62,7 +65,7 @@ def verify_media(library, job_id: str) -> dict:
     return plan_status(library, job_id)
 
 
-def verify_locked(connection, library, job, plan):
+def verify_locked(connection, library, job, plan, *, keep_stamps=False):
     job_id = job["id"]
     events = json.loads(plan["events_json"])
     plan_id = plan["id"]
@@ -73,6 +76,20 @@ def verify_locked(connection, library, job, plan):
         )
     }
     connection.execute("DELETE FROM legacy_adoption_issues WHERE plan_id = ?", (plan_id,))
+
+    if keep_stamps:
+        connection.execute(
+            """CREATE TEMP TABLE adoption_verification_stamps (
+                   relative_path TEXT PRIMARY KEY, stamp TEXT NOT NULL
+               ) WITHOUT ROWID""",
+        )
+
+    def stamp(path, identity):
+        if keep_stamps:
+            connection.execute(
+                "INSERT INTO adoption_verification_stamps VALUES (?, ?)",
+                (path, json.dumps(identity)),
+            )
 
     def issue(path, message):
         connection.execute(
@@ -86,6 +103,7 @@ def verify_locked(connection, library, job, plan):
 
     with ExitStack() as stack:
         source, archive = _roots(stack, library, job)
+        archive_entry = _archive_probe(archive)
         moves = connection.execute(
             """SELECT move.*, inventory.size_bytes FROM legacy_adoption_moves move
                JOIN legacy_adoption_inventory inventory ON inventory.job_id = ? AND
@@ -94,7 +112,11 @@ def verify_locked(connection, library, job, plan):
             (job_id, plan_id),
         )
         for row in moves:
-            status = _verify_move(source, archive, row)
+            try:
+                archive_entry(row["target_path"])
+                status = _verify_move(source, archive, row, stamp)
+            except (OSError, AdoptionError):
+                status = "unsafe"
             connection.execute(
                 "UPDATE legacy_adoption_moves SET status = ? WHERE plan_id = ? AND relative_path = ?",
                 (status, plan_id, row["relative_path"]),
@@ -114,7 +136,7 @@ def verify_locked(connection, library, job, plan):
         for event in events:
             prefix = event_root_relative(event)
             try:
-                for path, _, _, _ in walk_bound_files(archive, prefix):
+                for path, _, _, _ in walk_bound_files(archive, prefix, stamp):
                     expected = connection.execute(
                         """SELECT 1 FROM legacy_adoption_baseline WHERE plan_id = ? AND relative_path = ?
                            UNION ALL
@@ -138,11 +160,13 @@ def verify_locked(connection, library, job, plan):
                     with bound_file(directory, name) as (descriptor, info):
                         if info.st_size != row["size_bytes"] or bound_sha256(descriptor) != row["sha256"]:
                             issue(path, "Bereits vorhandene Archivdatei wurde verändert.")
+                        else:
+                            stamp(path, file_identity(info))
             except (OSError, AdoptionError) as error:
                 issue(path, str(error))
 
         for path, proof in documents.items():
-            if not _matches(archive, path, *proof):
+            if not _matches(archive, path, *proof, stamp=stamp):
                 issue(path, "Das vorbereitete Ereignisdokument fehlt oder stimmt nicht überein.")
 
     pending = connection.execute(
@@ -156,14 +180,35 @@ def verify_locked(connection, library, job, plan):
     return state
 
 
-def _matches(root, path, size, checksum):
+def _matches(root, path, size, checksum, *, stamp=None):
     try:
         with relative_parent(root, path) as (directory, name):
             with bound_file(directory, name) as (descriptor, info):
-                return (info.st_dev == os.fstat(root).st_dev and info.st_size == size
-                        and bound_sha256(descriptor) == checksum)
+                matched = (info.st_dev == os.fstat(root).st_dev and info.st_size == size
+                           and bound_sha256(descriptor) == checksum)
+        if matched and stamp is not None:
+            stamp(path, file_identity(info))
+        return matched
     except (OSError, AdoptionError):
         return False
+
+
+def assert_verification_stamps(connection, library, job, plan):
+    """Fence late changes after hashing, before the verified database commits."""
+    with ExitStack() as stack:
+        source, archive = _roots(stack, library, job)
+        for path, encoded in connection.execute(
+            "SELECT relative_path, stamp FROM adoption_verification_stamps ORDER BY relative_path",
+        ):
+            info = _entry(archive, path)
+            if info is None or file_identity(info) != tuple(json.loads(encoded)):
+                raise AdoptionError("Archivpfad seit der Prüfung verändert: " + path)
+        for (path,) in connection.execute(
+            "SELECT relative_path FROM legacy_adoption_moves WHERE plan_id = ? AND target_path IS NOT NULL",
+            (plan["id"],),
+        ):
+            if _entry(source, path) is not None:
+                raise AdoptionError("Quelldatei ist seit der Prüfung wieder vorhanden: " + path)
 
 
 def reopen_plan(library, job_id: str) -> None:

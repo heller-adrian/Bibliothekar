@@ -179,10 +179,17 @@ def _identity_json(info) -> str:
     return json.dumps(file_identity(info), separators=(",", ":"))
 
 
+def _legacy_family_key(source, relative):
+    path = source / relative
+    if path.suffix.lower() == ".xmp" and classify_media(path.with_suffix("")) not in {"other", "xmp"}:
+        path = path.with_suffix("")
+    return family_key(source, path)
+
+
 def _row(relative: Path, source: Path, info=None, *, media=False, error=None):
     return {
         "relative_path": relative.as_posix(),
-        "family_key": family_key(source, source / relative) if media else None,
+        "family_key": _legacy_family_key(source, relative) if media else None,
         "identity": _identity_json(info) if info is not None else None,
         "size_bytes": info.st_size if info is not None else None,
         "sha256": None,
@@ -264,7 +271,9 @@ def _read_batch(directory, source, rows, cached, cancel):
             try:
                 if old is not None and old["identity"] == row["identity"] and old["sha256"]:
                     with bound:
-                        row.update(sha256=old["sha256"], metadata_json=old["metadata_json"])
+                        record = json.loads(old["metadata_json"])
+                        record["family_key"] = row["family_key"]
+                        row.update(sha256=old["sha256"], metadata_json=json.dumps(record, ensure_ascii=False))
                     continue
                 descriptor, _ = files.enter_context(bound)
             except (OSError, AdoptionError) as error:
@@ -281,6 +290,7 @@ def _read_batch(directory, source, rows, cached, cancel):
             except ValueError:
                 record = analyze_file_metadata(source, source / row["relative_path"], row["size_bytes"], {})
                 record["metadata_error"] = "Ungültiger Metadatenwert."
+            record["family_key"] = row["family_key"]
             row["metadata_json"] = json.dumps(record, ensure_ascii=False)
 
 

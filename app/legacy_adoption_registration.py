@@ -13,7 +13,7 @@ from app.legacy_adoption_catalogue import (
 from app.legacy_adoption_inventory import _job
 from app.legacy_adoption_paths import AdoptionError
 from app.legacy_adoption_plan import plan_status
-from app.legacy_adoption_verify import verify_locked
+from app.legacy_adoption_verify import assert_verification_stamps, verify_locked
 from app.library_registry import (
     MAIN_LIBRARY_ID, claim_source_family, register_source_backup, register_source_family,
     register_source_family_members, register_source_media, source_registry_transaction,
@@ -148,7 +148,7 @@ def finalize_adoption(library_context, registry_path, job_id, operation_id):
             if receipt is None:
                 raise AdoptionError("Die globale Abschlussquittung fehlt.")
         else:
-            state = verify_locked(connection, library, job, plan)
+            state = verify_locked(connection, library, job, plan, keep_stamps=True)
             if state != "verified":
                 if receipt is not None:
                     raise AdoptionError("Archivnachweis seit Beginn der Registrierung verändert.")
@@ -173,7 +173,14 @@ def _complete_verified(connection, registry_path, library, job, plan, fingerprin
                 _register_global(connection, registry, registry_path, library, job, plan, fingerprint)
             else:
                 _assert_receipt(current_receipt, library, plan, fingerprint)
+            try:
+                assert_verification_stamps(connection, library, job, plan)
+            except (OSError, AdoptionError) as error:
+                if current_receipt is not None:
+                    raise
+                raise _RegistrationConflict(str(error)) from error
             validate_active_roots()
+        assert_verification_stamps(connection, library, job, plan)
         connection.execute(
             "UPDATE legacy_adoption_plans SET state = 'completed' WHERE id = ?", (plan["id"],),
         )
@@ -181,6 +188,7 @@ def _complete_verified(connection, registry_path, library, job, plan, fingerprin
         if receipt is not None:
             raise
         connection.execute("ROLLBACK TO adopt_catalogue")
+        connection.execute("UPDATE legacy_adoption_plans SET state = 'prepared' WHERE id = ?", (plan["id"],))
         connection.execute(
             "INSERT OR IGNORE INTO legacy_adoption_issues VALUES (?, '', ?)", (plan["id"], str(error)),
         )

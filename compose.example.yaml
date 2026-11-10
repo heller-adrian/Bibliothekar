@@ -1,5 +1,6 @@
 services:
   bibliothekar:
+    # For 1.0.1 testing, set BIBLIOTHEKAR_IMAGE to the verified patch image by digest.
     image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:1.0.0}
     restart: unless-stopped
     user: "0:0"

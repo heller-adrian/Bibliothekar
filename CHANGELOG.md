@@ -1,3 +1,10 @@
+## 1.0.1-rc.1 – Bestandsübernahme
+
+- Bestehende Fotosammlungen in Etappen inventarisieren und auf neue oder vorhandene Archivereignisse verteilen.
+- Leeres Archivgerüst, Verschiebeplan mit Rückwegen und Ereignisdokumente zur manuellen Bereitstellung herunterladen.
+- Zielpfade, Dateigrößen und SHA-256 vor der Registrierung in Bibliothek und Besitzregistry prüfen.
+- [Anleitung für die Bestandsübernahme](docs/legacy-adoption.md)
+
 ## 1.0.0 – Erste stabile Veröffentlichung
 
 - Stabile Version aus dem praktisch abgenommenen Stand `1.0.0-pre.7.2`, ohne neue Foto- oder Archivfunktionen.

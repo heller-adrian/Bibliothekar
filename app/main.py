@@ -14265,3 +14265,11 @@ def api_archive_change(cr_id: str) -> JSONResponse:
 async def owner_authentication_middleware(request: Request, call_next):
     from app.security import protect_request
     return await protect_request(request, call_next)
+
+
+from app.legacy_adoption_api import install_legacy_adoption_routes
+
+install_legacy_adoption_routes(
+    app, context=current_library_context, registry_path=lambda: REGISTRY_DATABASE_FILE,
+    source_root_path=source_root_path,
+)

@@ -4308,6 +4308,14 @@ BIBLIOTHEKAR_JS = r"""
     button.addEventListener("click", () => setSettingsArea(button.dataset.bkSettingsArea));
   });
   setSettingsArea("appearance");
+  document.getElementById("bk-legacy-adoption")?.addEventListener("click", () => {
+    location.href = bkLibraryHref("/legacy-adoption");
+  });
+  if (new URLSearchParams(location.search).get("settings") === "libraries") {
+    setSettingsArea("libraries");
+    openDialog("bk-settings-dialog");
+    bkRefreshLibraryManagement();
+  }
 
   document.querySelector("[data-bk-open-settings]")?.addEventListener("click", () => {
     openDialog("bk-settings-dialog");
@@ -5970,6 +5978,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <section class="bk-settings-group" id="bk-library-settings">
         <div><strong>Bibliotheken</strong><div style="color:var(--bk-muted);margin-top:4px">Anzeigenamen, Arbeitsbereiche und einzeln gemountete Archive verwalten</div></div>
         <div id="bk-library-management-list" class="bk-library-list"></div>
+        <div class="bk-library-actions"><button id="bk-legacy-adoption" type="button">Bestehende Fotosammlung übernehmen</button></div>
         <details class="bk-library-add-card">
           <summary>Bibliothek hinzufügen</summary>
           <div class="bk-library-form">
@@ -6011,7 +6020,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>1.0.0</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>1.0.1</span></p>
   </div>
 </dialog>
 

@@ -127,7 +127,7 @@ def validate_target(relative: str) -> None:
             raise AdoptionError(f"{error} ({relative})") from error
 
 
-def walk_bound_files(root_fd, prefix):
+def walk_bound_files(root_fd, prefix, on_directory=None):
     """Yield each regular file under an event, with its held directory."""
     device = os.fstat(root_fd).st_dev
 
@@ -151,6 +151,8 @@ def walk_bound_files(root_fd, prefix):
                     raise AdoptionError("Unzulässiger Archivpfad: " + str(path))
         if original != file_identity(os.fstat(directory)):
             raise AdoptionError("Archivordner während der Prüfung verändert: " + str(relative))
+        if on_directory is not None:
+            on_directory(str(relative), original)
 
     with relative_parent(root_fd, str(prefix / ".binding")) as (directory, _):
         yield from walk(directory, prefix, 0)
