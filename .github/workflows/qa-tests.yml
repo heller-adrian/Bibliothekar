@@ -51,10 +51,11 @@ jobs:
         id: scope
         env:
           HEAD_BRANCH: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           test "$(git rev-parse HEAD)" = "$QA_SOURCE"
           request=.github/release-requests/v1.0.1-rc.1.txt
-          if [[ "$HEAD_BRANCH" == 'patch/1.0.1-legacy-adoption' ]] &&
+          if [[ "$HEAD_REPOSITORY" == "$GITHUB_REPOSITORY" && "$HEAD_BRANCH" == 'patch/1.0.1-legacy-adoption' ]] &&
              [[ "$(git diff-tree --no-commit-id --name-only -r HEAD)" == "$request" ]] &&
              [[ -f "$request" && "$(sed -n '2p' "$request")" == "$(git rev-parse HEAD^)" ]]; then
             echo 'request-only=true' >> "$GITHUB_OUTPUT"
@@ -100,7 +101,15 @@ jobs:
         if: steps.scope.outputs.request-only != 'true'
         run: |
           test "$(git rev-parse HEAD)" = "$QA_SOURCE"
-          printf '%s\n' '["tests/backend/test_legacy_adoption_inventory.py","tests/backend/test_legacy_adoption_plan.py","tests/backend/test_legacy_adoption_integration.py"]' > "$RUNNER_TEMP/adoption-targets.json"
+          cat > "$RUNNER_TEMP/adoption-targets.json" <<'JSON'
+          [
+            "tests/backend/test_legacy_adoption_inventory.py",
+            "tests/backend/test_legacy_adoption_plan.py",
+            "tests/backend/test_legacy_adoption_integration.py",
+            "tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.hash_chunk]",
+            "tests/backend/test_f12_no_clobber.py::test_real_sigkill_around_atomic_publication_and_three_startups[import.publish_before]"
+          ]
+          JSON
           python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" targets "$RUNNER_TEMP/adoption-targets.json"
           python - <<'PY'
           import os
