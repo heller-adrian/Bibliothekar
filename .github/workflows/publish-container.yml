@@ -273,9 +273,9 @@ jobs:
             test "$?" = 2
           fi
           image="$REGISTRY/$IMAGE_NAME"
-          bash qa/release/smoke_legacy_adoption.sh "$image@$IMAGE_DIGEST" "$GITHUB_SHA"
+          bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh "$image@$IMAGE_DIGEST" "$GITHUB_SHA"
           cat > "$RUNNER_TEMP/legacy-release-body.md" <<EOF
-          Bibliothekar 1.0.1 release candidate for manual adoption of existing photo collections.
+          Bibliothekar 1.0.1 release candidate for manual or scripted adoption within one ZFS dataset.
 
           Source commit: \`$GITHUB_SHA\`
           Test image: \`$image:patch-$VERSION-$GITHUB_SHA\`

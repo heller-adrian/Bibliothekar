@@ -89,14 +89,23 @@ jobs:
           from pathlib import Path
           from app.events_ui import EVENTS_HTML
           from app.ui_shell import BIBLIOTHEKAR_JS
+          from app.legacy_adoption_i18n import PATTERNS
+          from app.legacy_adoption_ui import wizard_html
+          import json
           import re
           scripts=re.findall(r'<script[^>]*>(.*?)</script>',EVENTS_HTML,flags=re.S)
           assert scripts
           Path("/tmp/bibliothekar-events.js").write_text("\n".join(scripts))
           Path("/tmp/bibliothekar-shell.js").write_text(BIBLIOTHEKAR_JS)
+          scripts = re.findall(r"<script>(.*?)</script>", wizard_html("main"), re.S)
+          assert len(scripts) == 3
+          Path("/tmp/bibliothekar-adoption.js").write_text("\n".join(scripts))
+          Path("/tmp/bibliothekar-adoption-patterns.json").write_text(json.dumps(PATTERNS))
           PY
           node --check /tmp/bibliothekar-shell.js
           node --check /tmp/bibliothekar-events.js
+          node --check /tmp/bibliothekar-adoption.js
+          node -e 'for (const [source] of require("/tmp/bibliothekar-adoption-patterns.json")) new RegExp(source, "u")'
       - name: Verify adoption including the kernel read-only bind mount
         if: steps.scope.outputs.request-only != 'true'
         run: |
@@ -104,13 +113,15 @@ jobs:
           cat > "$RUNNER_TEMP/adoption-targets.json" <<'JSON'
           [
             "tests/backend/test_legacy_adoption_inventory.py",
+            "tests/backend/test_legacy_adoption_dataset.py",
+            "tests/backend/test_legacy_adoption_host.py",
             "tests/backend/test_legacy_adoption_plan.py",
             "tests/backend/test_legacy_adoption_integration.py",
             "tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.hash_chunk]",
             "tests/backend/test_f12_no_clobber.py::test_real_sigkill_around_atomic_publication_and_three_startups[import.publish_before]"
           ]
           JSON
-          python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" targets "$RUNNER_TEMP/adoption-targets.json"
+          bash qa/release/with_synthetic_zfs.sh python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" targets "$RUNNER_TEMP/adoption-targets.json"
           python - <<'PY'
           import os
           from pathlib import Path
