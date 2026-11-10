@@ -22,8 +22,8 @@ def set_phase(connection, plan_id, phase):
     )
 
 
-def confirm_plan(library, job_id, plan_id, method, *, acknowledged):
-    if acknowledged is not True or method != "manual":
+def confirm_plan(library, job_id, plan_id, method, *, acknowledged, probe_digest=None):
+    if acknowledged is not True or method not in {"manual", "script"}:
         raise AdoptionError("Bestätige die Sicherheitsbedingungen und wähle eine verfügbare Methode.")
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -37,9 +37,12 @@ def confirm_plan(library, job_id, plan_id, method, *, acknowledged):
             _catalogue_unchanged(connection, job_id, json.loads(plan["events_json"]))
             assert_original_layout(connection, library, job, plan)
             connection.execute(
-                "INSERT INTO legacy_adoption_execution (plan_id, method, phase) VALUES (?, ?, 'manual')",
-                (plan_id, method),
+                "INSERT INTO legacy_adoption_execution (plan_id, method, phase) VALUES (?, ?, ?)",
+                (plan_id, method, "manual" if method == "manual" else "script_prepared"),
             )
+            if method == "script":
+                from app.legacy_adoption_package import prepare_manifest
+                prepare_manifest(connection, library, job, plan, probe_digest)
         elif existing["method"] != method:
             raise AdoptionError("Die bestätigte Methode kann nicht geändert werden.")
     return plan_status(library, job_id)
@@ -74,7 +77,7 @@ def verify_execution(library, job_id, plan_id):
     return plan_status(library, job_id)
 
 
-def complete_rollback(library, job_id, plan_id):
+def complete_rollback(library, job_id, plan_id, *, before_commit=None):
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         job = _job(connection, library.library_id, job_id)
@@ -84,6 +87,8 @@ def complete_rollback(library, job_id, plan_id):
             raise AdoptionError("Starte zuerst den vorgesehenen Wiederherstellungsweg.")
         _catalogue_unchanged(connection, job_id, json.loads(plan["events_json"]))
         assert_original_layout(connection, library, job, plan)
+        if before_commit:
+            before_commit()
         set_phase(connection, plan_id, "rolled_back")
         connection.execute("UPDATE legacy_adoption_jobs SET state = 'discarded' WHERE id = ?", (job_id,))
     return plan_status(library, job_id)

@@ -69,7 +69,7 @@ const library = document.body.dataset.library;
 const currentUrl = new URL(location.href);
 let jobId = currentUrl.searchParams.get("job") || "";
 let job = null, draft = {}, draftRevision = 0, year = "", day = null;
-let familyCursor = "", moveCursor = "", sourceRelative = "", timer = 0;
+let familyCursor = "", moveCursor = "", sourceRelative = "", timer = 0, scriptTimer = 0;
 const base = "/api/legacy-adoption";
 const dirty = new Set();
 function watchDraft(editor) {
@@ -199,6 +199,7 @@ async function openJob(id) {
 }
 async function refresh() {
   clearTimeout(timer);
+  clearTimeout(scriptTimer);
   if (!jobId) return;
   const requested=jobId;
   const state=await api(jobPath());
@@ -214,6 +215,9 @@ async function refresh() {
     await chronology();
   } else if (job.plan.id) {
     await showMoves(true);
+    if (job.plan.execution?.method==="script" && !["completed","rolled_back"].includes(job.plan.execution.phase)) {
+      await pollScript();
+    }
   }
 }
 async function mutate(path, method="POST", body) {
@@ -235,10 +239,13 @@ function render() {
     manual:"Jetzt sind ausschließlich die im freigegebenen Plan beschriebenen manuellen Verschiebungen erlaubt.",
     rolling_back:"Führe nur die im Wiederherstellungsplan beschriebenen Rückschritte aus.",
     repair:"Bitte keine Dateien verändern. Prüfe die Abweichungen und wähle einen Weg zur Fortsetzung.",
+    script:"Bitte keine zusätzlichen manuellen Dateioperationen ausführen. Das Übernahmeskript arbeitet mit dem verbindlich geprüften Plan.",
     checking:"Bitte keine Dateien mehr verändern. Bibliothekar prüft und registriert gerade den übernommenen Archivbestand."
   };
-  $("safety").textContent=warnings[phase] || (
-    ["verifying","registration_pending","registering"].includes(phase) ? warnings.checking :
+  const runningScript=job.plan.execution?.method==="script" &&
+    ["script_prepared","rolling_back","repair"].includes(phase);
+  $("safety").textContent=runningScript ? warnings.script : warnings[phase] || (
+    ["operations_done","verifying","registration_pending","registering"].includes(phase) ? warnings.checking :
     "Bitte keine manuellen Änderungen an der alten Fotosammlung oder am Zielarchiv vornehmen. Andernfalls kann der gespeicherte Übernahmeplan ungültig werden."
   );
   const host=$("work");
@@ -490,28 +497,19 @@ function renderPlan(host) {
       action(plan.documents_at?"Ereignisdokumente neu vorbereiten":"Ereignisdokumente vorbereiten",()=>mutate("/documents")),
       action("Plan zur Bearbeitung öffnen",()=>mutate("/reopen")));
     if (plan.documents_at) {
-      const confirmation=node("fieldset");
-      confirmation.append(node("legend","Manuelle Durchführung über SMB"),
-        line("Du bist dabei, die geplante Bestandsübernahme verbindlich zu starten."),
-        line("Nach dieser Bestätigung kann der Übernahmeauftrag nicht mehr einfach verworfen werden. Die vorgesehenen Verschiebungen müssen abgeschlossen, überprüft oder gegebenenfalls über den vorgesehenen Wiederherstellungsweg rückgängig gemacht werden."),
-        line("Bitte vergewissere dich, dass Quelle und Ziel auf demselben ZFS-Dataset liegen und während der Durchführung keine weiteren Änderungen am Archiv vorgenommen werden."),
-        line("Möchtest du fortfahren?"));
-      const [wrap,ack]=field("Ich bestätige die Sicherheitsbedingungen und den angezeigten Plan.","checkbox");
-      confirmation.append(wrap,action("Manuelle Durchführung verbindlich starten",()=>{
-        if (!ack.checked) throw new Error("Bitte bestätige zuerst die Sicherheitsbedingungen.");
-        return mutate("/confirm","POST",{...command,method:"manual",acknowledged:true});
-      },true));
-      panel.append(confirmation);
+      renderConfirmation(panel,command);
     }
   }
-  if (["manual","verifying","repair"].includes(phase)) {
+  const scripted=plan.execution?.method==="script";
+  if (scripted && !completed && phase!=="rolled_back") panel.append(slot("script-state"));
+  if (!scripted && ["manual","verifying","repair"].includes(phase)) {
     controls.append(action("Archiv prüfen",()=>run("/verify"),true));
   }
-  if (phase==="repair") controls.append(action("Manuelle Schritte fortsetzen",()=>run("/resume")));
+  if (phase==="repair" && !scripted) controls.append(action("Manuelle Schritte fortsetzen",()=>run("/resume")));
   if (["registration_pending","registering"].includes(phase)) {
     controls.append(action("Übernahme registrieren",()=>run("/finalize"),true));
   }
-  if (["manual","verifying","repair","registration_pending"].includes(phase)) {
+  if (["manual","script_prepared","operations_done","verifying","repair","registration_pending"].includes(phase)) {
     controls.append(action("Kontrollierte Wiederherstellung starten",async()=>{
       if (confirm("Möchtest du die Übernahme anhand des gespeicherten Plans rückgängig machen?")) {
         await run("/rollback/start");
@@ -519,7 +517,8 @@ function renderPlan(host) {
     }));
   }
   if (phase==="rolling_back") {
-    panel.append(line("Bringe verschobene Dateien über SMB an ihre ursprünglichen Pfade zurück. Stelle frühere Ereignisdokumente wieder her und entferne ausschließlich die für diesen Auftrag neu bereitgestellten Ereignisdokumente."));
+    if (!scripted) panel.append(line("Bringe verschobene Dateien über SMB an ihre ursprünglichen Pfade zurück. Stelle frühere Ereignisdokumente wieder her und entferne ausschließlich die für diesen Auftrag neu bereitgestellten Ereignisdokumente."));
+    else controls.append(action("Befehl für die Skriptrücknahme bereitstellen",()=>run("/rollback/start")));
     controls.append(action("Wiederherstellung prüfen und Auftrag beenden",()=>run("/rollback/check"),true));
   }
   if (phase==="rolled_back" || completed) controls.append(link("Zur Bibliothek", $("back").href));
@@ -529,6 +528,121 @@ function renderPlan(host) {
   }));
   panel.append(controls,slot("issues"),slot("moves"));
   host.append(panel);
+}
+
+function commandBox(command) {
+  const area=node("textarea");
+  area.readOnly=true;
+  area.value=command;
+  const host=node("div",undefined,"stack");
+  host.append(area,action("Befehl kopieren",async()=>{
+    area.select();
+    if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(command);
+    else document.execCommand("copy");
+  }));
+  return host;
+}
+function renderConfirmation(panel,command) {
+  const confirmation=node("fieldset");
+  const method=node("select");
+  for (const [value,title] of [["manual","Manuelle Durchführung über SMB"],["script","Skriptgestützte Durchführung auf TrueNAS"]]) {
+    const option=node("option",title);
+    option.value=value;
+    method.append(option);
+  }
+  const choice=node("label","Durchführungsmethode");
+  choice.append(method);
+  const scripts=node("div",undefined,"stack");
+  scripts.hidden=true;
+  const [appWrap,appdata]=field("AppData auf dem TrueNAS-Host","text");
+  const [sourceWrap,source]=field("Quellordner auf dem TrueNAS-Host","text");
+  const [archiveWrap,archive]=field("Archivordner auf dem TrueNAS-Host","text");
+  const proofState=node("div");
+  let probe=null;
+  function showProbe(result) {
+    probe=result;
+    proofState.replaceChildren();
+    if (result.command) {
+      appdata.value=result.host.package.split("/").slice(0,-2).join("/");
+      source.value=result.host.source;
+      archive.value=result.host.archive;
+      proofState.append(line(result.verified?"Die Hostpfade sind bestätigt.":
+        "Führe diesen reinen Prüfungsbefehl in der TrueNAS-Shell aus und lies danach den Nachweis ein."),
+        commandBox(result.command));
+    }
+  }
+  async function readProbe() { showProbe(await api(jobPath("/script/probe"))); }
+  for (const input of [appdata,source,archive]) input.addEventListener("input",()=>{
+    probe=null;
+    proofState.replaceChildren();
+  });
+  scripts.append(
+    line("Bibliothekar erstellt ein Python-Skript, das die geplanten Dateiverschiebungen auf deinem TrueNAS-System durchführen kann. Du startest dieses Skript eigenverantwortlich über die TrueNAS-Shell."),
+    line("Du kannst das Skript vor der Ausführung einsehen, seinen Inhalt prüfen und es bei Bedarf mit Sicherheitssoftware untersuchen lassen. Eine automatische Sicherheitsprüfung ersetzt keine Kontrolle der tatsächlich vorgesehenen Dateioperationen."),
+    line("Das Skript darf ausschließlich die zuvor bestätigten Verschiebungen innerhalb desselben ZFS-Datasets durchführen. Vorhandene Dateien dürfen nicht unkontrolliert überschrieben oder gelöscht werden."),
+    link("Python-Skript ansehen",jobPath("/script/source/legacy_adoption_host.py")),
+    link("Code für die Dataset-Prüfung ansehen",jobPath("/script/source/legacy_adoption_dataset.py")),
+    appWrap,sourceWrap,archiveWrap,
+    action("Hostpfadprüfung vorbereiten",async()=>{
+      showProbe(await api(jobPath("/script/probe"),"POST",{
+        ...command,appdata:appdata.value,source:source.value,archive:archive.value
+      }));
+    }),
+    action("Hostnachweis einlesen",readProbe),
+    proofState);
+  method.addEventListener("change",()=>{
+    scripts.hidden=method.value!=="script";
+    ack.checked=false;
+    if (!scripts.hidden && !probe) readProbe().catch(error=>report(error.message));
+  });
+  confirmation.append(node("legend","Verbindliche Sicherheitsbestätigung"),choice,scripts,
+    line("Du bist dabei, die geplante Bestandsübernahme verbindlich zu starten."),
+    line("Nach dieser Bestätigung kann der Übernahmeauftrag nicht mehr einfach verworfen werden. Die vorgesehenen Verschiebungen müssen abgeschlossen, überprüft oder gegebenenfalls über den vorgesehenen Wiederherstellungsweg rückgängig gemacht werden."),
+    line("Bitte vergewissere dich, dass Quelle und Ziel auf demselben ZFS-Dataset liegen und während der Durchführung keine weiteren Änderungen am Archiv vorgenommen werden."),
+    line("Möchtest du fortfahren?"));
+  const [wrap,ack]=field("Ich bestätige die Sicherheitsbedingungen und den angezeigten Plan.","checkbox");
+  confirmation.append(wrap,action("Durchführung verbindlich starten",()=>{
+    if (!ack.checked) throw new Error("Bitte bestätige zuerst die Sicherheitsbedingungen.");
+    if (method.value==="script" && !probe?.verified) throw new Error("Prüfe zuerst die drei tatsächlichen Hostpfade.");
+    return mutate("/confirm","POST",{...command,method:method.value,acknowledged:true,probe_sha256:probe?.sha256});
+  },true));
+  panel.append(confirmation);
+}
+async function pollScript() {
+  const target=$("script-state");
+  const plan=job.plan;
+  if (!target) return;
+  const phase=plan.execution.phase;
+  const run=path=>mutate(path,"POST",{plan_id:plan.id});
+  try {
+    const result=await api(jobPath("/script"));
+    if (target!==$("script-state")) return;
+    const status=result.status;
+    const state=result.running ? "script_running" :
+      status?.state==="running" ? "script_interrupted" :
+      status?.state==="completed" ? "operations_done" : status?.state || phase;
+    const nodes=[line(label(state)+(status?" · "+status.processed+" / "+status.total:""))];
+    if (status?.error) nodes.push(line(status.error));
+    if (result.command && target.dataset.command!==result.command) {
+      target.dataset.command=result.command;
+      target.replaceChildren(commandBox(result.command),slot("script-progress"));
+    } else if (!result.command && target.dataset.command) {
+      delete target.dataset.command;
+      target.replaceChildren();
+    }
+    if (!result.running && ["script_prepared","repair"].includes(phase) && !result.command) {
+      nodes.push(action("Skriptbefehl bereitstellen",()=>run("/script/release"),true));
+    }
+    if (!result.running && status?.state==="completed" && status.mode==="apply" &&
+        ["script_prepared","operations_done","verifying","repair"].includes(phase)) {
+      nodes.push(action("Archiv unabhängig prüfen",()=>run("/verify"),true));
+    }
+    if (!$("script-progress")) target.append(slot("script-progress"));
+    $("script-progress").replaceChildren(...nodes);
+  } catch (error) {
+    report(error.message);
+  }
+  if (target===$("script-state")) scriptTimer=setTimeout(pollScript,3000);
 }
 async function showMoves(reset=false) {
   const target=$("moves");

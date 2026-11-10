@@ -166,6 +166,7 @@ def write_atomic(parent, name, data):
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=parent)
     try:
         with os.fdopen(fd, "wb") as stream:
+            os.fchmod(stream.fileno(), 0o644)  # Package directory remains private; the app can read host-written evidence.
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
@@ -519,6 +520,8 @@ def main(argv=None):
                 raise ExecutionError("The package digest differs from the approved command.")
             binding = json.loads(content)
             if args.mode == "probe":
+                if binding["host"] != {"package": args.package, "source": args.source, "archive": args.archive}:
+                    raise ExecutionError("The host paths differ from the requested probe.")
                 with directory(args.source, binding["source_inode"]) as source, \
                         directory(args.archive, binding["archive_inode"]) as archive:
                     probe_roots(args.source, args.archive, binding, source, archive)

@@ -233,6 +233,88 @@ def test_exclusive_mode_waits_for_ordinary_work_and_discard_restores_access(
     assert active_adoption(registry)["job_id"] == next_id
 
 
+def test_script_host_proof_release_and_independent_archive_verification(
+    ready, tmp_path, monkeypatch, synthetic_dataset,
+):
+    import json
+    import shlex
+    import subprocess
+
+    from app import legacy_adoption_host as host, legacy_adoption_package as package
+    from tests.backend.test_legacy_adoption_host import _macos_rename
+
+    _, _, registry, _, _ = ready
+    root = tmp_path.resolve()
+    source = root / "source with space"
+    appdata = root / "app's data"
+    source.mkdir()
+    appdata.mkdir()
+    original = source / "proof.raf"
+    original.write_bytes(b"synthetic script photo")
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+    monkeypatch.setattr(main, "DATABASE_INITIALIZATION_ERROR", None)
+    monkeypatch.setattr(package, "appdata_root", lambda: appdata)
+    monkeypatch.setattr(host, "revalidate", lambda *args: None)
+    monkeypatch.setattr(
+        "app.legacy_adoption_inventory.read_bound_metadata",
+        lambda descriptors, _cancel: {
+            fd: {"EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00"} for fd in descriptors
+        },
+    )
+    if sys.platform == "darwin":
+        monkeypatch.setattr(host, "mount_id", lambda _fd: 1)
+        monkeypatch.setattr(host, "rename_noreplace", _macos_rename)
+    client = TestClient(main.app)
+    api = "/api/legacy-adoption"
+    job_id = _json(client, "POST", api + "/jobs", status=201, json={"root": "nas"})["id"]
+    job = api + "/jobs/" + job_id
+    _json(client, "POST", job + "/scan", status=202)
+    saved = _json(client, "PUT", job + "/draft", json={"revision": 0, "events": [{
+        "name": "Skript", "start_date": "2026-07-21", "end_date": "2026-07-21",
+    }]})
+    plan = _json(client, "POST", job + "/plan", json={"revision": saved["revision"]})
+    _json(client, "POST", job + "/documents")
+    command = {"plan_id": plan["id"]}
+    library = resolve_library_context(registry, "second")
+    probe = _json(client, "POST", job + "/script/probe", json={
+        **command, "appdata": str(appdata), "source": str(source), "archive": str(library.archive_root),
+    })
+    confirm = {**command, "method": "script", "acknowledged": True, "probe_sha256": probe["sha256"]}
+    _json(client, "POST", job + "/confirm", json=confirm, status=409)
+
+    def external(shell_command):
+        subprocess.run(["/bin/sh", "-n", "-c", shell_command], check=True)
+        args = shlex.split(shell_command)
+        assert args[:2] == ["cd", probe["host"]["package"]]
+        start = args.index("./legacy_adoption_host.py")
+        return host.main(args[start + 1:])
+
+    assert external(probe["command"]) == 0
+    assert _json(client, "GET", job + "/script/probe")["verified"]
+    assert _json(client, "POST", job + "/confirm", json=confirm)["execution"]["phase"] == "script_prepared"
+    assert not _json(client, "GET", job + "/script").get("command")
+    assert _json(client, "GET", job + "/download/documents", status=409)["detail"]
+    apply = _json(client, "POST", job + "/script/release", json=command)["command"]
+    _json(client, "POST", job + "/verify", json=command, status=409)
+    # A reported completion is insufficient while the planned files are still at the source.
+    package_root = Path(probe["host"]["package"])
+    binding = json.loads((package_root / "permission.json").read_text())["manifest"]
+    (package_root / "status.json").write_bytes(host.json_bytes({
+        "manifest": binding, "mode": "apply", "state": "completed",
+    }))
+    assert _json(client, "POST", job + "/verify", json=command)["execution"]["phase"] == "repair"
+    assert external(apply) == 1
+    assert _json(client, "POST", job + "/script/release", json=command)["command"] == apply
+    assert external(apply) == 0
+    assert not original.exists()
+    assert _json(client, "GET", job + "/script")["status"]["state"] == "completed"
+    assert _json(client, "POST", job + "/verify", json=command)["execution"]["phase"] == "registration_pending"
+    assert external(apply) == 1
+    assert _json(client, "POST", job + "/finalize", json=command)["execution"]["phase"] == "completed"
+    [move] = _json(client, "GET", job + "/moves")
+    assert Path(move["target"]).read_bytes() == b"synthetic script photo"
+
+
 @pytest.mark.skipif(
     sys.platform != "linux" or os.environ.get("GITHUB_ACTIONS") != "true",
     reason="Der echte Read-only-Bind-Mount läuft auf dem isolierten Linux-Runner.",

@@ -8,7 +8,7 @@ from threading import Event, Lock
 from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, StrictBool
 
 from app.database import database_connection
@@ -17,9 +17,13 @@ from app.legacy_adoption_catalogue import prepare_documents
 from app.legacy_adoption_dataset import DatasetError
 from app.legacy_adoption_execution import change_phase, complete_rollback, confirm_plan, verify_execution
 from app.legacy_adoption_export import directory_scaffold, event_documents, manifest_file
+from app.legacy_adoption_host import ExecutionError
 from app.legacy_adoption_inventory import (
     _job, create_job, discard_job, inventory_chronology, inventory_errors, inventory_families,
     inventory_status, scan_inventory,
+)
+from app.legacy_adoption_package import (
+    inspect_runner, locked_script, permit, prepare_probe, probe_details, script_details, script_status,
 )
 from app.legacy_adoption_paths import AdoptionError, bound_directory
 from app.legacy_adoption_mode import adoption_execution_access, reserve_adoption
@@ -67,8 +71,15 @@ class PlanCommand(BaseModel):
 
 
 class Confirm(PlanCommand):
-    method: Literal["manual"]
+    method: Literal["manual", "script"]
     acknowledged: StrictBool
+    probe_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
+class ScriptHost(PlanCommand):
+    appdata: str = Field(max_length=4096)
+    source: str = Field(max_length=4096)
+    archive: str = Field(max_length=4096)
 
 
 @contextmanager
@@ -79,7 +90,8 @@ def _errors():
         raise HTTPException(404, "Der gewählte Pfad ist nicht erreichbar.") from error
     except PermissionError as error:
         raise HTTPException(403, "Für den gewählten Ordner fehlt die Leseberechtigung.") from error
-    except (AdoptionError, DatasetError, LibraryRegistryError, RootOperationError, OSError, ValueError, TypeError) as error:
+    except (AdoptionError, DatasetError, ExecutionError, LibraryRegistryError,
+            RootOperationError, OSError, ValueError, TypeError) as error:
         raise HTTPException(409, str(error)) from error
 
 
@@ -307,23 +319,76 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                          "urspruengliche-ereignisdokumente.zip" if artifact == "original-documents"
                          else "ereignisdokumente.zip")
 
+    @router.get("/jobs/{job_id}/script/source/{name}", response_class=PlainTextResponse)
+    def script_source(job_id: str, name: str):
+        with _errors():
+            inventory_status(context(), job_id)
+            return PlainTextResponse(inspect_runner(name), headers={"Cache-Control": "no-store"})
+
+    @router.get("/jobs/{job_id}/script/probe")
+    def get_probe(job_id: str):
+        library = context()
+        with _errors():
+            plan = plan_status(library, job_id)
+            return probe_details(library, job_id, plan["id"]) if plan and not plan["execution"] else {}
+
+    @router.post("/jobs/{job_id}/script/probe")
+    def script_probe(job_id: str, command: ScriptHost):
+        library = context()
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
+            return prepare_probe(library, job_id, command.plan_id, command.appdata, command.source, command.archive)
+
+    @router.get("/jobs/{job_id}/script")
+    def script(job_id: str):
+        library = context()
+        with _errors():
+            plan = plan_status(library, job_id)
+            if not plan.get("execution") or plan["execution"]["method"] != "script":
+                raise AdoptionError("Für diesen Auftrag ist kein Skript freigegeben.")
+            return script_details(library, job_id, plan["id"])
+
+    @router.post("/jobs/{job_id}/script/release")
+    def script_release(job_id: str, command: PlanCommand):
+        library = context()
+        with _errors(), adoption_execution_access(registry_path()), admission(library),                 locked_script(library, job_id, command.plan_id) as (descriptor, script):
+            if script["phase"] not in {"script_prepared", "repair"}:
+                raise AdoptionError("Die Skriptausführung ist in dieser Phase gesperrt.")
+            change_phase(library, job_id, command.plan_id, "script_prepared",
+                         from_phases={"script_prepared", "repair"})
+            return {"command": permit(descriptor, script, "apply")}
+
     @router.post("/jobs/{job_id}/confirm")
     def confirm(job_id: str, command: Confirm):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
             return confirm_plan(library, job_id, command.plan_id, command.method,
-                                acknowledged=command.acknowledged)
+                                acknowledged=command.acknowledged, probe_digest=command.probe_sha256)
 
     @router.post("/jobs/{job_id}/verify")
     def verify(job_id: str, command: PlanCommand):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
+            planned = plan_status(library, job_id)
+            execution = planned.get("execution")
+            if execution and execution["method"] == "script":
+                with locked_script(library, job_id, command.plan_id) as (descriptor, script):
+                    status = script_status(descriptor, script)
+                    if not status or (status["state"], status["mode"]) != ("completed", "apply"):
+                        raise AdoptionError("Das externe Skript hat die Ausführung noch nicht abgeschlossen.")
+                    permit(descriptor, script, None)
+                    change_phase(library, job_id, command.plan_id, "operations_done", from_phases={
+                        "script_prepared", "operations_done", "verifying", "repair", "registration_pending",
+                    })
+                    return verify_execution(library, job_id, command.plan_id)
             return verify_execution(library, job_id, command.plan_id)
 
     @router.post("/jobs/{job_id}/resume")
     def resume(job_id: str, command: PlanCommand):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
+            execution = plan_status(library, job_id).get("execution")
+            if not execution or execution["method"] != "manual":
+                raise AdoptionError("Die bestätigte Methode kann nicht geändert werden.")
             change_phase(library, job_id, command.plan_id, "manual", from_phases={"repair"})
             return plan_status(library, job_id)
 
@@ -331,15 +396,32 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def rollback_start(job_id: str, command: PlanCommand):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
-            change_phase(library, job_id, command.plan_id, "rolling_back", from_phases={
-                "manual", "verifying", "repair", "registration_pending", "rolling_back",
-            })
+            phases = {"manual", "verifying", "repair", "registration_pending", "rolling_back"}
+            execution = plan_status(library, job_id).get("execution")
+            if execution and execution["method"] == "script":
+                phases.update(("script_prepared", "operations_done"))
+                with locked_script(library, job_id, command.plan_id) as (descriptor, script):
+                    if script["phase"] not in phases:
+                        raise AdoptionError("Eine Skriptrücknahme ist in dieser Phase gesperrt.")
+                    permit(descriptor, script, None)
+                    change_phase(library, job_id, command.plan_id, "rolling_back", from_phases=phases)
+                    permit(descriptor, script, "rollback")
+            else:
+                change_phase(library, job_id, command.plan_id, "rolling_back", from_phases=phases)
             return plan_status(library, job_id)
 
     @router.post("/jobs/{job_id}/rollback/check")
     def rollback_check(job_id: str, command: PlanCommand):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
+            execution = plan_status(library, job_id).get("execution")
+            if execution and execution["method"] == "script":
+                with locked_script(library, job_id, command.plan_id) as (descriptor, script):
+                    if script["phase"] != "rolling_back":
+                        raise AdoptionError("Starte zuerst den vorgesehenen Wiederherstellungsweg.")
+                    return complete_rollback(
+                        library, job_id, command.plan_id, before_commit=lambda: permit(descriptor, script, None),
+                    )
             return complete_rollback(library, job_id, command.plan_id)
 
     @router.post("/jobs/{job_id}/finalize")
