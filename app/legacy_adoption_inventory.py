@@ -299,6 +299,10 @@ def _read_batch(directory, source, rows, cached, cancel):
             except ValueError:
                 record = analyze_file_metadata(source, source / row["relative_path"], row["size_bytes"], {})
                 record["metadata_error"] = "Ungültiger Metadatenwert."
+            reported_error = metadata.get(descriptor, {}).get("ExifTool:Error")
+            if reported_error:
+                record["metadata_error"] = str(reported_error)
+                record["review_required"] = True
             record["family_key"] = row["family_key"]
             row["metadata_json"] = json.dumps(record, ensure_ascii=False)
 

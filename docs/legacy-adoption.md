@@ -1,24 +1,39 @@
-# Erste Bestandsübernahme mit Bibliothekar 1.0.1
+# Bestandsübernahme mit Bibliothekar 1.0.1
 
-Teste die Vorabversion mit einer getrennten Installation und einer kleinen synthetischen Sammlung. Verwende für `BIBLIOTHEKAR_IMAGE` den Digest des geprüften Patch-Images aus dem GitHub-Pre-Release. Die Vorabversion migriert die Bibliotheksdatenbanken und die globale Besitzregistry. Bewahre für einen Versionswechsel zurück die Datenbanken aus 1.0.0 separat auf.
+Für den ersten Durchlauf eignen sich eine getrennte Installation und eine kleine synthetische Sammlung. Verwende den Image-Digest aus der GitHub-Vorabveröffentlichung. Bewahre für einen Wechsel zurück zu 1.0.0 den damaligen Stand der Bibliotheksdatenbanken und der globalen Registry separat auf.
 
-## Quelle und Bibliothek auswählen
+## Einrichten und inventarisieren
 
-1. Binde die Sammlung lesend unter `/sources/nas` ein. Für Compose steht [compose.nas-source.yaml](../compose.nas-source.yaml) mit `BIBLIOTHEKAR_NAS_SOURCE_DIR` zur Verfügung. Das Zielarchiv bleibt in Bibliothekar schreibgeschützt. Du benötigst für die manuellen Schritte einen eigenen Schreibzugang, etwa über SMB.
-2. Öffne **Einstellungen → Bibliotheken → Bestehende Fotosammlung übernehmen**. Wähle die Zielbibliothek oder richte sie über **Bibliothek einrichten** ein. Wähle dann den Quellordner.
-3. Starte die Inventur. Sie erfasst Originalpfade, Metadaten und SHA-256. Beim Pausieren oder Neustart bleiben bereits untersuchte Dateien gespeichert. Eine erneute Inventur liest unveränderte Dateien aus diesem Zwischenstand.
+1. Lege die Sammlung und das Zielarchiv in getrennte Ordner **desselben ZFS-Datasets**. Zwei Datasets im selben Pool reichen nicht. Liegt die Sammlung anderswo, kopiere sie selbst vor Beginn auf das Dataset des Zielarchivs.
+2. Binde die Sammlung unter `/sources/nas` und das Archiv schreibgeschützt in den Container ein. Für die Quelle kannst du [compose.nas-source.yaml](../compose.nas-source.yaml) und `BIBLIOTHEKAR_NAS_SOURCE_DIR` verwenden. Für den Skriptweg braucht Bibliothekar zusätzlich dauerhaft eingebundenes AppData.
+3. Öffne **Einstellungen → Bibliotheken → Bestehende Fotosammlung übernehmen**. Wähle zuerst den Quellordner und dann eine vorhandene oder neue Zielbibliothek. Bibliothekar prüft die tatsächlichen Einbindungen. Weitere Mounts innerhalb der gewählten Ordner blockieren den Start.
+4. Starte die Inventur. Bei großen Sammlungen können das Lesen, die Planung und die Prüfung mehrere Stunden dauern. Du kannst die Inventur pausieren. Bereits gelesene Dateien, Entwürfe und der aktive Auftrag bleiben nach einem Neustart verfügbar.
 
-## Ereignisse planen
+Lasse Quelle und Archiv während der Planung unverändert. Der aktive Auftrag öffnet sich auch bei direktem Aufruf einer anderen Bibliothekar-Seite. Solange du die Durchführung noch nicht bestätigt hast, kannst du **Änderungen verwerfen** wählen.
 
-4. Wähle ein Jahr und einen Tag. Öffne Familien mit **Prüfen** und bestätige die Aufnahmezeit anhand der angezeigten Metadaten oder deiner eigenen Aufzeichnungen. Ein RAW ohne JPEG ist eine reguläre Familie.
-5. Wähle ein vorgeschlagenes Archivereignis, um es zu ergänzen, oder lege ein Ereignis mit Zeitraum und optionalen Unterereignissen an. Sammelordner bündeln freie Zeitabschnitte innerhalb eines Monats. Tagesordner und die in der Bibliothek konfigurierte Ordnerstruktur lassen sich für neue Ereignisse verwenden.
-6. Speichere den Entwurf und erstelle den Verschiebeplan. Für eine Teilübernahme beschränke den Entwurf auf die gewünschten Zeiträume. Exakte bereits registrierte Dateien erscheinen als Duplikate. Wenn nur ein Teil einer Familie doppelt ist, meldet die Planung den Konflikt zur Prüfung. Bei Zielkollisionen kannst du im Entwurf einen neuen Zielnamen für die ganze Familie festlegen oder die Familie auslassen.
+## Ereignisse und Prüffälle planen
 
-## Dateien manuell verschieben und prüfen
+- Wähle ein Jahr und einen Tag. Du kannst vorhandene Archivereignisse ergänzen oder Ereignisse, Unterereignisse und Sammelordner planen. Vorhandene Archivereignisse behalten ihre Struktur. Für jedes neue Ereignis, Unterereignis und jeden Sammelordner kannst du Standardordner, eigene Ordner oder eine flache Ablage wählen.
+- Öffne die Prüffallliste, um widersprüchliche oder fehlende Aufnahmezeiten und betroffene Familien zu sehen. Ungeklärte Familien bleiben ausgenommen. Mit **Zur Metadatenkorrektur kopieren** kannst du eine vollständige Familie nach General kopieren. Dafür benötigt der Workspace zusätzlichen Speicherplatz. Die Originale bleiben an der Quelle. Die geprüften Arbeitskopien bleiben auch beim Verwerfen des Auftrags erhalten und stehen später für die normale Metadatenkorrektur bereit.
+- Speichere den Entwurf und erstelle den Verschiebeplan. Die Vorschau zeigt Zielordner, Dateien, Datenmenge und das nachgewiesene Dataset. Bereits registrierte vollständige Familien werden als Duplikate ausgewiesen. Bei Zielkonflikten kannst du im Entwurf einen anderen Namen für die gesamte Familie wählen oder die Familie auslassen.
+- Bereite die Ereignisdokumente vor. Wähle die Durchführungsmethode und bestätige den aktuellen Plan ausdrücklich. Danach bleibt der Plan eingefroren. Vor der Ausführung empfiehlt sich ein ZFS-Snapshot oder eine andere geeignete Sicherung. Sie ist freiwillig.
 
-7. Lade das leere ZIP-Ordnergerüst und den JSONL-Verschiebeplan herunter. In der ersten Zeile stehen die eingebundenen Wurzeln. Jede Datei erhält den Quellpfad, das Ziel, die Prüfsumme und den Rückweg. Übersetze bei SMB die angezeigten Containerpfade in deine Freigabepfade. Nutze Sammelanweisungen nur für unveränderte Tagesordner und lass deren jeweilige Zielordner im Gerüst frei.
-8. Vor größeren Dateiänderungen wird ein ZFS-Snapshot oder eine andere Sicherung empfohlen. Diese zusätzliche Sicherung ist freiwillig. Bei unklaren Dateisystemgrenzen kann das manuelle Verschieben eine vollständige Kopie über SMB auslösen.
-9. Bereite die Ereignisdokumente vor. Lade die früheren Dokumente zur Rücknahme separat herunter. Stelle die neuen `event.json` aus dem ZIP manuell unter den angegebenen Archivpfaden bereit. Verschiebe die geplanten Dateien ohne Überschreiben. Prüfe nach jedem Teil, wenn du die Arbeit unterbrechen möchtest.
-10. Wähle **Archiv prüfen** und korrigiere gemeldete Abweichungen. Sobald Medien und Ereignisdokumente geprüft sind, wähle **Übernahme registrieren**. Bibliothekar prüft dabei die Archivdateien erneut und nimmt sie als normale archivierte Dateien auf.
+## Manuell über SMB durchführen
 
-Bei einer Unterbrechung öffnest du den gespeicherten Auftrag erneut. Für eine Rücknahme vor der Registrierung bringst du die Dateien anhand der Rückwege manuell an die Quelle und stellst die vorherigen Ereignisdokumente wieder her. Entferne neue Ereignisdokumente und leere Ordner nur dann, wenn sie zu diesem Auftrag gehören. Öffne anschließend den Plan wieder zur Bearbeitung. Nach der Registrierung gelten die regulären Funktionen für Archivänderungen.
+1. Lade das Ordnergerüst, den Verschiebeplan und die Ereignisdokumente herunter. Die Pfade in der Vorschau sind Containerpfade. Ordne sie deinen SMB-Pfaden zu. Verwende eine Freigabe und ein Werkzeug, das ein echtes Umbenennen innerhalb desselben Dateisystems ausführt. Kopieren mit anschließendem Löschen verändert die Dateiidentität und besteht die Prüfung nicht.
+2. Stelle die vorgesehenen Ordner bereit und verschiebe ausschließlich die freigegebenen Dateien. Sammelanweisungen ersetzen die jeweiligen Einzelschritte. Lasse dabei den vorgesehenen Zielordner frei und prüfe vorab, dass sich der ganze Quellordner seit der Inventur nicht verändert hat.
+3. Sichere frühere Ereignisdokumente und lege die vorbereiteten `event.json` an den vorgesehenen Archivpfaden ab. Wähle **Archiv prüfen**, wenn die freigegebenen Schritte erledigt sind.
+
+## Skript in der TrueNAS-Shell ausführen
+
+1. Gib die tatsächlichen absoluten TrueNAS-Pfade für AppData, Quelle und Zielarchiv an. Verwende für Quelle und Archiv die nativen Pfade innerhalb desselben ZFS-Mounts. Containerpfade wie `/appdata` und `/main-library` sind in der TrueNAS-Shell nur gültig, wenn sie tatsächlich dieselben Verzeichnisse bezeichnen.
+2. Kopiere den Prüfungsbefehl in die TrueNAS-Shell und lies anschließend den Hostnachweis im Assistenten ein. Diese Prüfung verschiebt keine Medien. Du kannst beide Python-Dateien im Assistenten einsehen.
+3. Bestätige den Plan. Wähle **Skriptbefehl bereitstellen** und starte den angezeigten Befehl selbst in der TrueNAS-Shell. Verwende ein Konto mit Zugriff auf das private AppData-Paket und den für die geplanten Umbenennungen nötigen Rechten. Das Skript prüft die Zuordnung erneut, überschreibt keine Zieldateien und protokolliert seine Schritte.
+4. Der Browser kann während der Ausführung geschlossen bleiben. Bei einer Unterbrechung prüfe den Status im Assistenten. Der freigegebene Befehl kann die noch offenen Schritte anhand des Journals fortsetzen. Lasse währenddessen manuelle Dateioperationen aus.
+5. Sobald das Skript fertig ist, wähle **Archiv unabhängig prüfen**. Der Skriptstatus allein reicht für die Registrierung nicht aus.
+
+## Abschließen oder kontrolliert zurücknehmen
+
+Wähle nach erfolgreicher Archivprüfung **Übernahme registrieren**. Bibliothekar prüft Zielpfade, ursprüngliche Dateiidentitäten, SHA-256, den vorhandenen Archivbestand und die Ereignisdokumente erneut. Danach gelten die normalen Funktionen für Archivänderungen.
+
+Vor der Registrierung kannst du **Kontrollierte Wiederherstellung starten**. Im manuellen Modus bringst du die Dateien anhand des Rückwegs an ihre ursprünglichen Pfade und stellst frühere Ereignisdokumente wieder her. Entferne nur Ereignisdokumente, die dieser Auftrag neu bereitgestellt hat. Im Skriptmodus startet der angezeigte Rücknahmebefehl die protokollierte Umkehrung. Der Assistent beendet den Auftrag erst, wenn er die ursprüngliche Anordnung und die Dateiintegrität unabhängig nachgewiesen hat. Bewahre das AppData-Paket und sein Journal für die Wiederaufnahme auf. Wenn Pfade, Rechte oder das Paket selbst verändert wurden, stelle die nachgewiesenen Einbindungen und den ursprünglichen Paketstand wieder her, bevor du die Rücknahme fortsetzt.

@@ -11,6 +11,7 @@ from app.database import database_connection
 from app.event_access import event_file_rows, register_source_jobs
 from app.event_document import EVENT_DOCUMENT_FILENAME, build_event_document_from_db
 from app.event_inventory import IGNORED_EVENT_FILES, event_root_relative
+from app.event_leaf_layouts import save_leaf_layouts
 from app.event_timeline import replace_event_segments
 from app.legacy_adoption_inventory import _job
 from app.legacy_adoption_paths import AdoptionError
@@ -101,6 +102,7 @@ def _store_event(connection, job_id, event, now):
                   child["end_datetime"], child["folder_name"], now, now,
                   int(event["preserve_day_folders"]), now, now) for child in event["children"]),
             )
+        save_leaf_layouts(connection, event_id, list(event["leaf_layouts"].values()), now=now)
         if event["segments"]:
             replace_event_segments(connection, event_id=event_id, job_id=job_id, segments=event["segments"], now=now)
     register_source_jobs(connection, event_id, [job_id], created_at=now)

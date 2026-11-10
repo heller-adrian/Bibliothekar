@@ -40,6 +40,8 @@ def _verify_move(source, archive, row, stamp):
                     return "sha256_mismatch"
         if original is not None:
             return "source_present"
+        if file_identity(info)[:2] != tuple(json.loads(row["identity"])[:2]):
+            return "identity_mismatch"
         stamp(row["target_path"], file_identity(info))
         return "verified"
     except FileNotFoundError:
@@ -111,7 +113,7 @@ def verify_locked(connection, library, job, plan, *, keep_stamps=False):
         source, archive = _roots(stack, library, job)
         archive_entry = _archive_probe(archive)
         moves = connection.execute(
-            """SELECT move.*, inventory.size_bytes FROM legacy_adoption_moves move
+            """SELECT move.*, inventory.size_bytes, inventory.identity FROM legacy_adoption_moves move
                JOIN legacy_adoption_inventory inventory ON inventory.job_id = ? AND
                     inventory.relative_path = move.relative_path
                WHERE move.plan_id = ? AND target_path IS NOT NULL ORDER BY move.relative_path""",
@@ -186,11 +188,12 @@ def verify_locked(connection, library, job, plan, *, keep_stamps=False):
     return state
 
 
-def _matches(root, path, size, checksum, *, stamp=None):
+def _matches(root, path, size, checksum, *, stamp=None, expected_inode=None):
     try:
         with relative_parent(root, path) as (directory, name):
             with bound_file(directory, name) as (descriptor, info):
                 matched = (info.st_dev == os.fstat(root).st_dev and info.st_size == size
+                           and (expected_inode is None or file_identity(info)[:2] == expected_inode)
                            and bound_sha256(descriptor) == checksum)
         if matched and stamp is not None:
             stamp(path, file_identity(info))
@@ -224,7 +227,7 @@ def assert_original_layout(connection, library, job, plan):
         source, archive = _roots(stack, library, job)
         lookup = _archive_probe(archive)
         for row in connection.execute(
-            """SELECT move.*, inventory.size_bytes FROM legacy_adoption_moves move
+            """SELECT move.*, inventory.size_bytes, inventory.identity FROM legacy_adoption_moves move
                  JOIN legacy_adoption_inventory inventory ON inventory.job_id = ?
                   AND inventory.relative_path = move.relative_path
                 WHERE move.plan_id = ?""",
@@ -232,7 +235,8 @@ def assert_original_layout(connection, library, job, plan):
         ):
             if row["target_path"] and lookup(row["target_path"]) is not None:
                 raise AdoptionError("Das Verschiebeziel ist noch belegt: " + row["target_path"])
-            if not _matches(source, row["relative_path"], row["size_bytes"], row["sha256"]):
+            if not _matches(source, row["relative_path"], row["size_bytes"], row["sha256"],
+                            expected_inode=tuple(json.loads(row["identity"])[:2])):
                 raise AdoptionError("Die Quelldatei fehlt oder stimmt nicht mit dem Plan überein: " +
                                     row["relative_path"])
 

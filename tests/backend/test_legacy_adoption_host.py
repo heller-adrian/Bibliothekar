@@ -4,6 +4,7 @@ import errno
 import hashlib
 import json
 import os
+import signal
 import sys
 
 import pytest
@@ -112,6 +113,53 @@ def test_resume_after_rename_and_keep_original_event_document(package, monkeypat
     assert (source / "photo.raf.xmp").read_bytes() == b"sidecar"
     assert not list((archive / "event/all").iterdir())
     assert json.loads((private / "status.json").read_bytes())["state"] == "rolled_back"
+
+
+@pytest.mark.parametrize("point", ["before", "after"])
+def test_real_sigkill_during_media_move_resumes_from_journal(package, point):
+    _, source, archive, _, _ = package
+    rename = host.rename_noreplace
+    _permit(package, "apply")
+
+    def kill_at_rename(src, src_name, dst, dst_name):
+        if src_name != "photo.raf":
+            return rename(src, src_name, dst, dst_name)
+        if point == "after":
+            rename(src, src_name, dst, dst_name)
+        os.kill(os.getpid(), signal.SIGKILL)
+
+    child = os.fork()
+    if child == 0:
+        host.rename_noreplace = kill_at_rename
+        os._exit(host.main(_command(package, "apply")))
+    _, status = os.waitpid(child, 0)
+    assert os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGKILL
+    assert (source / "photo.raf").exists() == (point == "before")
+    assert host.main(_command(package, "apply")) == 0
+    assert (archive / "event/all/photo.raf").read_bytes() == b"raw"
+    assert not (source / "photo.raf").exists()
+
+
+def test_script_rechecks_dataset_permissions_and_source_identity(package, monkeypatch):
+    private, source, archive, _, _ = package
+    _permit(package, "apply")
+
+    def wrong_dataset(*_args):
+        raise host.DatasetError("synthetic host dataset changed")
+
+    with monkeypatch.context() as rejected:
+        rejected.setattr(host, "revalidate", wrong_dataset)
+        assert host.main(_command(package, "apply")) == 1
+        assert not (archive / "event/all").exists()
+    with monkeypatch.context() as denied:
+        denied.setattr(host.os, "access", lambda *args, **kwargs: False)
+        assert host.main(_command(package, "apply")) == 1
+        assert not (archive / "event/all").exists()
+    (source / "photo.raf").write_bytes(b"changed")
+    assert host.main(_command(package, "apply")) == 1
+    assert (source / "photo.raf").read_bytes() == b"changed"
+    assert not (archive / "event/all/photo.raf").exists()
+    assert json.loads((private / "status.json").read_bytes())["state"] == "attention_required"
 
 
 def test_conflicting_file_and_cross_mount_error_do_not_replace_or_copy(package, monkeypatch):

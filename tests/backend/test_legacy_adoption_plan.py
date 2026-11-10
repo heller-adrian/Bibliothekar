@@ -150,7 +150,11 @@ def test_verification_survives_partial_moves_and_detects_unexpected_files(invent
     assert verify_media(context, job)["counts"] == {"sha256_mismatch": 1, "verified": 1}
     second_target.write_bytes(b"other")
     assert verify_media(context, job)["counts"] == {"source_present": 1, "verified": 1}
-    Path(second["source"]).unlink()
+    original_second = Path(second["source"])
+    original_second.rename(original_second.with_name("original-b.jpg"))
+    assert verify_media(context, job)["counts"] == {"identity_mismatch": 1, "verified": 1}
+    second_target.unlink()
+    original_second.with_name("original-b.jpg").rename(second_target)
     extra = first_target.with_name("unexpected.jpg")
     extra.write_bytes(b"unexpected")
     assert verify_media(context, job)["state"] == "prepared"
@@ -307,6 +311,52 @@ def _ready_for_registration(inventory, draft):
     assert verify_execution(context, job, plan["id"])["execution"]["phase"] == "registration_pending"
     change_phase(context, job, plan["id"], "registering", from_phases={"registration_pending"})
     return job, plan
+
+
+def test_individual_parent_subevent_and_collection_layouts_survive_registration(inventory):
+    import json
+    from app.event_leaf_layouts import stored_leaf_layouts
+    from app.legacy_adoption_registration import finalize_adoption
+
+    context, source, registry = inventory
+    (source / "parent.jpg").write_bytes(b"parent capture")
+    (source / "collection.jpg").write_bytes(b"unassigned collection capture")
+    nested = {
+        "structure_enabled": True, "input_path": "My files/Originals",
+        "layout": {"version": 2, "nodes": [{
+            "id": "custom-root", "name": "My files", "children": [
+                {"id": "custom-originals", "name": "Originals"},
+                {"id": "custom-exports", "name": "Prints", "role": "export"},
+            ],
+        }]},
+    }
+    draft = {"capture_overrides": {
+        "parent": "2026-07-21T08:00:00", "collection": "2026-07-25T10:00:00",
+    }, "events": [
+        {"name": "Summer", "start_date": "2026-07-20", "end_date": "2026-07-24",
+         "preserve_day_folders": True, "folder_layout": {"structure_enabled": False, "input_path": "Alle"},
+         "children": [{"name": "Afternoon", "start_datetime": "2026-07-21T11:30",
+                       "end_datetime": "2026-07-21T15:00", "folder_layout": nested}]},
+        {"event_kind": "no_event", "segments": [{"day_key": "2026-07-25"}],
+         "folder_layout": {"mode": "default"}},
+    ]}
+    job, plan = _ready_for_registration(inventory, draft)
+    summer, collection = plan["events"]
+    [child] = summer["children"]
+    paths = {move["relative_path"]: Path(move["target"]) for move in plan_moves(context, job)}
+    assert paths["parent.jpg"].parent.name == "2026-07-21"
+    assert paths["adopted.raf"].parent.parts[-3:] == ("2026-07-21", "My files", "Originals")
+    assert paths["collection.jpg"].parent.name == "Alle"
+    assert paths["adopted.raf"].parent.with_name("Prints").is_dir()
+    assert finalize_adoption.__wrapped__(context, registry, job, plan["id"])["state"] == "completed"
+    with database_connection(context.database_path) as connection:
+        leaves = stored_leaf_layouts(connection, summer["id"])
+        assert leaves[child["id"] + "@2026-07-21"]["input_path"] == "My files/Originals"
+        assert not leaves[summer["id"] + "@2026-07-21"]["structure_enabled"]
+        assert stored_leaf_layouts(connection, collection["id"])[collection["id"]]["input_path"] == "Alle"
+    document = next(context.archive_root.rglob(summer["folder_name"] + "/event.json"))
+    assert any(item["input_path"] == "My files/Originals"
+               for item in json.loads(document.read_bytes())["leaf_folder_layouts"])
 
 
 def test_registration_replays_after_registry_commit(inventory, monkeypatch):

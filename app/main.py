@@ -36,7 +36,7 @@ from app.trash import (
 )
 from app.ui_shell import apply_shell
 from app import view_cache
-from app.legacy_adoption_mode import adoption_access
+from app.legacy_adoption_mode import active_adoption, adoption_access
 from app.root_operations import RootOperationBusy, RootOperationError, protect, reserve, mutate, assert_workspace_startable, _identity, generation, admission
 from app import background_mutation_cancel as cancel_queue
 from app.background_activity import current_activity, clear_finished_activity
@@ -798,6 +798,7 @@ CANCEL_WORKER_STOP = Event()
 CANCEL_WORKER_WAKE = Event()
 CANCEL_WORKER_THREAD: Thread | None = None
 WORKER_THREAD: Thread | None = None
+ADOPTION_STARTUP_THREAD: Thread | None = None
 IMPORT_CANCEL_LOCK = Lock()
 IMPORT_CANCEL_REQUESTS: set[str] = set()
 
@@ -2573,6 +2574,9 @@ def _coordinate_startup(fn):
                     complete(WORKSPACE_PATH, startup_reservation)
             from app.appdata import finish as finish_appdata
             finish_appdata(WORKSPACE_PATH)
+            if active_adoption(REGISTRY_DATABASE_FILE):
+                _defer_startup_for_adoption(coordinated)
+                return
             # Domain recovery never owns the already completed technical lease.
             result=fn()
             from app.import_recovery import finish_published_envelopes
@@ -2623,6 +2627,17 @@ def _coordinate_startup(fn):
                     _STORAGE_STARTUP_PAUSED=False
                     _start_runtime_workers(recover_domain=False)
     return coordinated
+
+
+def _defer_startup_for_adoption(startup):
+    global ADOPTION_STARTUP_THREAD
+    if ADOPTION_STARTUP_THREAD is not None and ADOPTION_STARTUP_THREAD.is_alive():
+        return
+    WORKER_STOP.clear()
+    ADOPTION_STARTUP_THREAD = Thread(
+        target=_after_adoption(startup), name="bibliothekar-adoption-startup", daemon=True,
+    )
+    ADOPTION_STARTUP_THREAD.start()
 
 
 def _quiesce_runtime_for_recovery():
@@ -3107,6 +3122,8 @@ def shutdown_worker() -> None:
     CANCEL_WORKER_WAKE.set()
     RELEASE_WORKER_STOP.set()
     RELEASE_WORKER_WAKE.set()
+    if ADOPTION_STARTUP_THREAD is not None and ADOPTION_STARTUP_THREAD.is_alive():
+        ADOPTION_STARTUP_THREAD.join(timeout=5)
     if RELEASE_WORKER_THREAD is not None and RELEASE_WORKER_THREAD.is_alive():
         RELEASE_WORKER_THREAD.join(timeout=5)
     if CANCEL_WORKER_THREAD is not None and CANCEL_WORKER_THREAD.is_alive():

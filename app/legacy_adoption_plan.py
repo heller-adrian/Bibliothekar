@@ -52,9 +52,15 @@ def _range(start, end):
     return (start + "T00:00:00", end + "T23:59:59")
 
 
-def _layout(definition, defaults):
-    values = definition.get("folder_layout", defaults)
+def _layout(definition, defaults, inherited=None):
+    values = definition.get("folder_layout")
+    if values is None:
+        return inherited or defaults
+    if values.get("mode") == "default":
+        return defaults
     layout = normalize_layout(values.get("layout") or defaults["layout"])
+    for path in layout_paths(layout):
+        validate_target(path)
     enabled = bool(values.get("structure_enabled", defaults["structure_enabled"]))
     return {"structure_enabled": enabled, "layout": layout,
             "input_path": validate_input_path(layout, values.get("input_path", defaults["input_path"]),
@@ -97,6 +103,7 @@ def _draft_event(connection, definition, naming, defaults):
     if definition.get("existing_id"):
         return _existing_event(connection, definition["existing_id"])
     kind = definition.get("event_kind", "event")
+    parent_layout = _layout(definition, defaults)
     if kind == "event":
         start, end = _range(definition.get("start_date"), definition.get("end_date"))
         segments = []
@@ -106,9 +113,21 @@ def _draft_event(connection, definition, naming, defaults):
             event_name=name, start_date=start[:10], end_date=end[:10],
             start_time=None, end_time=None, uses_time_range=False, naming=naming,
         )
-        children = [{**child, "id": _event_id()} for child in normalize_subevents(
-            definition.get("children"), start, end, naming=naming,
-        )]
+        definitions = definition.get("children") or []
+        normalized = normalize_subevents(
+            [{**item, "id": str(index)} for index, item in enumerate(definitions)], start, end, naming=naming,
+        )
+        children = [
+            {**child, "id": _event_id(),
+             "folder_layout": _layout(definitions[int(child["id"])], defaults, inherited=parent_layout)}
+            for child in normalized
+        ]
+        child_names = {target_key(child["folder_name"]) for child in children}
+        if len(child_names) != len(children):
+            raise AdoptionError("Mehrere Unterereignisse beanspruchen denselben Zielordner.")
+        if parent_layout["structure_enabled"] and not definition.get("preserve_day_folders"):
+            if child_names.intersection(target_key(node["name"]) for node in parent_layout["layout"]["nodes"]):
+                raise AdoptionError("Unterereignis und Ordnerstruktur beanspruchen denselben Zielordner.")
     elif kind == "no_event":
         segments = normalize_no_event_segments(definition.get("segments"))
         if len({segment["day_key"][:7] for segment in segments}) != 1 or definition.get("children"):
@@ -125,7 +144,7 @@ def _draft_event(connection, definition, naming, defaults):
         "event_kind": kind, "start_datetime": start, "end_datetime": end, "ranges": ranges,
         "children": children, "segments": segments,
         "preserve_day_folders": bool(definition.get("preserve_day_folders")),
-        "folder_layout": _layout(definition, defaults), "leaf_layouts": {}, "naming": naming,
+        "folder_layout": parent_layout, "leaf_layouts": {}, "naming": naming,
     }
 
 
@@ -147,16 +166,57 @@ def _assert_timeline(connection, job_id, events):
 
 def _target_leaf(event, capture):
     prefix = event_root_relative(event)
-    capture_second = capture[:19]
-    assigned = assignment_target(event["id"], event["children"], capture_second)
-    if assigned != event["id"]:
-        child = next(child for child in event["children"] if child["id"] == assigned)
+    assigned = assignment_target(event["id"], event["children"], capture[:19])
+    child = next((item for item in event["children"] if item["id"] == assigned), None)
+    if child is not None:
         prefix /= child["folder_name"]
-    leaf_id = assigned
+    leaf_key = assigned
     if event["preserve_day_folders"]:
         prefix /= capture[:10]
-        leaf_id += "@" + capture[:10]
-    return assigned, prefix, event["leaf_layouts"].get(leaf_id, event["folder_layout"])
+        leaf_key += "@" + capture[:10]
+    layouts = event["leaf_layouts"]
+    layout = layouts.get(leaf_key) or layouts.get(assigned) or (
+        child.get("folder_layout") if child is not None else None
+    ) or event["folder_layout"]
+    return assigned, prefix, leaf_key, layout
+
+
+def _plan_directories(connection, plan_id, leaf, layout, archive_entry):
+    directories = [leaf]
+    if layout["structure_enabled"]:
+        directories.extend(leaf / part for part in layout_paths(layout["layout"]))
+    for directory in directories:
+        for parent in (directory, *directory.parents):
+            if not parent.parts:
+                continue
+            value = str(parent)
+            validate_target(value)
+            info = archive_entry(value)
+            if info is not None and not stat.S_ISDIR(info.st_mode):
+                raise AdoptionError("Ein benötigter Ordnerpfad ist belegt: " + value)
+            connection.execute(
+                "INSERT OR IGNORE INTO legacy_adoption_directories VALUES (?, ?)", (plan_id, value),
+            )
+
+
+def _store_leaf(event, key, path, layout):
+    relative = path.relative_to(event_root_relative(event))
+    event["leaf_layouts"][key] = {
+        **layout, "leaf_key": key, "leaf_prefix": relative.as_posix() if relative.parts else "",
+    }
+
+
+def _check_planned_collisions(connection, plan_id):
+    paths = {}
+    for (path,) in connection.execute(
+        """SELECT relative_path FROM legacy_adoption_directories WHERE plan_id = ?
+           UNION ALL SELECT target_path FROM legacy_adoption_moves WHERE plan_id = ? AND target_path IS NOT NULL""",
+        (plan_id, plan_id),
+    ):
+        key = target_key(path)
+        if key in paths:
+            raise AdoptionError("Mehrere geplante Pfade kollidieren: " + paths[key] + " / " + path)
+        paths[key] = path
 
 
 def _snapshot_existing_event(connection, plan_id, root_fd, prefix, event_id):
@@ -270,17 +330,19 @@ def _plan_moves(connection, registry, job, plan_id, events, draft, source_fd, ar
     added = set()
     candidates = {}
     target_counts = Counter()
+    planned_directories = set()
     rows = connection.execute(
-        """SELECT inventory.*, families.capture_time, families.review_required
+        """SELECT inventory.*, families.capture_time, families.review_required, copy.state AS review_copy
              FROM legacy_adoption_inventory inventory
              JOIN legacy_adoption_families families USING (job_id, family_key)
+             LEFT JOIN legacy_adoption_review_copies copy USING (job_id, family_key)
             WHERE inventory.job_id = ? ORDER BY family_key, relative_path""",
         (job["id"],),
     )
     for key, group in groupby(rows, key=lambda row: row["family_key"]):
         family = list(group)
         seen_draft_keys.add(key)
-        if key in exclusions:
+        if key in exclusions or family[0]["review_copy"]:
             continue
         capture = overrides.get(key, family[0]["capture_time"])
         if key not in overrides and family[0]["review_required"]:
@@ -295,7 +357,7 @@ def _plan_moves(connection, registry, job, plan_id, events, draft, source_fd, ar
         event = eligible[0]
         if key.strip() != key:
             raise AdoptionError("Der Familienname ist für die globale Registry ungeeignet: " + key)
-        assigned, leaf, layout = _target_leaf(event, capture)
+        assigned, leaf, leaf_key, layout = _target_leaf(event, capture)
         if any(not member["sha256"] for member in family):
             raise AdoptionError("Die Familie konnte nicht vollständig inventarisiert werden: " + key)
 
@@ -322,7 +384,8 @@ def _plan_moves(connection, registry, job, plan_id, events, draft, source_fd, ar
                     validate_target(stem)
                     original_stem = PurePosixPath(key).name
                     filename = stem + filename[len(original_stem):]
-                target = str(leaf / layout["input_path"] / filename)
+                input_path = layout["input_path"] if layout["structure_enabled"] else ""
+                target = str(leaf / input_path / filename)
                 validate_target(target)
                 if archive_entry(target) is not None:
                     raise AdoptionError("Zieldatei existiert bereits: " + target)
@@ -346,21 +409,21 @@ def _plan_moves(connection, registry, job, plan_id, events, draft, source_fd, ar
                 raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + str(target)) from error
         if all(duplicate):
             continue
-        directories = [leaf]
-        if layout["structure_enabled"]:
-            directories.extend(leaf / part for part in layout_paths(layout["layout"]))
-        for directory in directories:
-            for parent in (directory, *directory.parents):
-                if not parent.parts:
-                    continue
-                value = str(parent)
-                validate_target(value)
-                info = archive_entry(value)
-                if info is not None and not stat.S_ISDIR(info.st_mode):
-                    raise AdoptionError("Ein benötigter Ordnerpfad ist belegt: " + value)
-                connection.execute(
-                    "INSERT OR IGNORE INTO legacy_adoption_directories VALUES (?, ?)", (plan_id, value),
-                )
+        if (event["id"], leaf_key) not in planned_directories:
+            if not event["existing"]:
+                _store_leaf(event, leaf_key, leaf, layout)
+            _plan_directories(connection, plan_id, leaf, layout, archive_entry)
+            planned_directories.add((event["id"], leaf_key))
+    for event in events:
+        if event["existing"]:
+            continue
+        planned_leaves = {key.split("@", 1)[0] for key in event["leaf_layouts"]}
+        for child in event["children"]:
+            if child["id"] not in planned_leaves:
+                path = event_root_relative(event) / child["folder_name"]
+                _store_leaf(event, child["id"], path, child["folder_layout"])
+                _plan_directories(connection, plan_id, path, child["folder_layout"], archive_entry)
+    _check_planned_collisions(connection, plan_id)
     if (overrides.keys() | exclusions | target_stems.keys()) - seen_draft_keys:
         raise AdoptionError("Mindestens eine Dateifamilie aus dem Entwurf fehlt in der Inventur.")
     if not added:
@@ -418,6 +481,7 @@ def create_plan(library, registry_path: Path, job_id: str, draft=None, *, draft_
         with ExitStack() as stack:
             source, archive = _roots(stack, library, job)
             _plan_moves(connection, registry, job, plan_id, events, draft, source, archive)
+        connection.execute("UPDATE legacy_adoption_plans SET events_json = ? WHERE id = ?", (json.dumps(events), plan_id))
     return plan_status(library, job_id)
 
 
@@ -464,6 +528,17 @@ def plan_status(library, job_id: str) -> dict:
                 "und keine Voraussetzung für die Übernahme."
             ),
         }
+
+
+def plan_directories(library, job_id, *, after=""):
+    with database_connection(library.database_path) as connection:
+        _job(connection, library.library_id, job_id)
+        return [row[0] for row in connection.execute(
+            """SELECT directory.relative_path FROM legacy_adoption_directories directory
+                 JOIN legacy_adoption_plans plan ON plan.id = directory.plan_id
+                WHERE plan.job_id = ? AND directory.relative_path > ?
+                ORDER BY directory.relative_path LIMIT 100""", (job_id, after),
+        )]
 
 
 def plan_moves(library, job_id: str, *, after: str = "", limit: int = 100):

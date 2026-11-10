@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, StrictBool
 
 from app.database import database_connection
+from app.event_layout import get_global_default
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps
 from app.legacy_adoption_catalogue import prepare_documents
 from app.legacy_adoption_dataset import DatasetError
@@ -27,8 +28,9 @@ from app.legacy_adoption_package import (
 )
 from app.legacy_adoption_paths import AdoptionError, bound_directory
 from app.legacy_adoption_mode import adoption_execution_access, reserve_adoption
-from app.legacy_adoption_plan import create_plan, plan_moves, plan_status
+from app.legacy_adoption_plan import create_plan, plan_directories, plan_moves, plan_status
 from app.legacy_adoption_registration import finalize_adoption
+from app.legacy_adoption_review import copy_review, review_cases, review_count
 from app.legacy_adoption_verify import plan_issues, reopen_plan
 from app.library_registry import LibraryRegistryError, list_libraries
 from app.root_operations import RootOperationError, admission
@@ -39,6 +41,20 @@ class Source(BaseModel):
     relative: str = Field(default="", max_length=4096)
 
 
+class FolderLayout(BaseModel):
+    mode: Literal["default", "custom"] = "custom"
+    structure_enabled: StrictBool | None = None
+    input_path: str | None = None
+    layout: dict[str, Any] | None = None
+
+
+class ChildDefinition(BaseModel):
+    name: str = Field(max_length=180)
+    start_datetime: str
+    end_datetime: str
+    folder_layout: FolderLayout | None = None
+
+
 class EventDefinition(BaseModel):
     existing_id: str | None = None
     event_kind: Literal["event", "no_event"] = "event"
@@ -47,8 +63,8 @@ class EventDefinition(BaseModel):
     end_date: str | None = None
     preserve_day_folders: bool = False
     segments: list[dict[str, str]] = Field(default_factory=list, max_length=200)
-    children: list[dict[str, str]] = Field(default_factory=list, max_length=200)
-    folder_layout: dict[str, Any] | None = None
+    children: list[ChildDefinition] = Field(default_factory=list, max_length=200)
+    folder_layout: FolderLayout | None = None
 
 
 class Draft(BaseModel):
@@ -76,6 +92,10 @@ class Confirm(PlanCommand):
     probe_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
+class ReviewCopy(BaseModel):
+    family_key: str = Field(min_length=1, max_length=4096)
+
+
 class ScriptHost(PlanCommand):
     appdata: str = Field(max_length=4096)
     source: str = Field(max_length=4096)
@@ -91,7 +111,7 @@ def _errors():
     except PermissionError as error:
         raise HTTPException(403, "Für den gewählten Ordner fehlt die Leseberechtigung.") from error
     except (AdoptionError, DatasetError, ExecutionError, LibraryRegistryError,
-            RootOperationError, OSError, ValueError, TypeError) as error:
+            RootOperationError, OSError, ValueError, TypeError, KeyError) as error:
         raise HTTPException(409, str(error)) from error
 
 
@@ -197,13 +217,15 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         library = context()
         with _errors():
             result = inventory_status(library, job_id)
+            result["plan"] = plan_status(library, job_id)
             with database_connection(library.database_path) as connection:
                 item = _job(connection, library.library_id, job_id)
                 result["draft"] = json.loads(item["draft_json"])
                 result["draft_revision"] = item["draft_revision"]
+                result["layout_default"] = get_global_default(connection)
+                result["review_count"] = review_count(connection, job_id, result["plan"].get("id"))
             with running_lock:
                 result["scan_running"] = key(library, job_id) in running
-            result["plan"] = plan_status(library, job_id)
         return result
 
     @router.post("/jobs/{job_id}/scan", status_code=202)
@@ -246,6 +268,17 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         with _errors():
             return inventory_errors(context(), job_id, after=after)
 
+    @router.get("/jobs/{job_id}/review")
+    def review(job_id: str, after: str = ""):
+        with _errors():
+            return review_cases(context(), job_id, after=after)
+
+    @router.post("/jobs/{job_id}/review/copy")
+    def copy_case(job_id: str, payload: ReviewCopy):
+        library = context()
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
+            return copy_review(library, job_id, payload.family_key)
+
     @router.get("/events")
     def existing(day: str = Query(pattern=r"^\d{4}-\d{2}-\d{2}$")):
         with _errors(), database_connection(context().database_path) as connection:
@@ -285,6 +318,11 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         library = context()
         with _errors(), admission(library):
             return create_plan(library, registry_path(), job_id, draft_revision=draft.revision)
+
+    @router.get("/jobs/{job_id}/directories")
+    def directories(job_id: str, after: str = ""):
+        with _errors():
+            return plan_directories(context(), job_id, after=after)
 
     @router.get("/jobs/{job_id}/moves")
     def moves(job_id: str, after: str = ""):

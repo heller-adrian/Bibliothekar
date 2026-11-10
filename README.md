@@ -131,7 +131,7 @@ Like any file-management software, Bibliothekar is **not a replacement for an in
 
 ## Scope
 
-**Release candidate version:** 1.0.1. This release candidate adds manual adoption of existing photo collections. See the [adoption guide](docs/legacy-adoption.md) for setup, a first transfer and recovery.
+**Release candidate version:** 1.0.1. This release candidate adds manual and scripted adoption of existing photo collections within one ZFS dataset. See the [adoption guide](docs/legacy-adoption.md) for setup, a first transfer and recovery.
 
 The **1.0.0 milestone** focuses on the stable camera-file workflow. Bibliothekar is **not** a photo gallery, an Immich replacement or an AI-based photo selector. Possible future integrations (including Immich and optional AI-assisted preselection) are separate work, not promised features of 1.0.0.
 

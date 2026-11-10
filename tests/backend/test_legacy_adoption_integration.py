@@ -12,6 +12,7 @@ from app.database import database_connection
 from app.event_access import event_file_rows
 from app.event_inventory import scan_event_inventory
 from app.legacy_adoption_catalogue import catalogue_job_id
+from app.legacy_adoption_dataset import prove as kernel_dataset_proof
 from app.library_context import resolve_library_context
 from tests.backend.test_f14_root_operations import fixture
 from tests.backend.test_pre4_operation_separation import ready
@@ -315,11 +316,99 @@ def test_script_host_proof_release_and_independent_archive_verification(
     assert Path(move["target"]).read_bytes() == b"synthetic script photo"
 
 
+def test_review_family_is_copied_to_general_once_and_survives_discard(
+    ready, tmp_path, monkeypatch, synthetic_dataset,
+):
+    import errno
+    from app import legacy_adoption_host as host
+    from app.metadata_correction import metadata_area_paths, scan_metadata_area
+    from app.source_filter import LEGACY_REVIEW_STAGING
+    from tests.backend.test_legacy_adoption_host import _macos_rename
+
+    _, workspace, registry, _, _ = ready
+    source = tmp_path.resolve() / "legacy-source"
+    source.mkdir()
+    originals = {"bad.raf": b"raw", "bad.jpg": b"jpeg", "bad.raf.xmp": b"sidecar", "good.jpg": b"good"}
+    for name, content in originals.items():
+        (source / name).write_bytes(content)
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+    monkeypatch.setattr(main, "DATABASE_INITIALIZATION_ERROR", None)
+    monkeypatch.setattr(
+        "app.legacy_adoption_inventory.read_bound_metadata",
+        lambda descriptors, _cancel: {
+            fd: {"EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00"} if os.pread(fd, 4, 0) == b"good" else {}
+            for fd in descriptors
+        },
+    )
+    if sys.platform == "darwin":
+        monkeypatch.setattr(host, "rename_noreplace", _macos_rename)
+    client = TestClient(main.app)
+    api = "/api/legacy-adoption"
+    job_id = _json(client, "POST", api + "/jobs", status=201, json={"root": "nas"})["id"]
+    job = api + "/jobs/" + job_id
+    _json(client, "POST", job + "/scan", status=202)
+    assert _json(client, "GET", job)["review_count"] == 1
+    [case] = _json(client, "GET", job + "/review")
+    assert case["family_key"] == "bad"
+    assert case["state"] == "open"
+    assert "missing_capture_time" in case["reasons"]
+    assert {item["relative_path"] for item in case["files"]} == set(originals) - {"good.jpg"}
+    command = {"family_key": case["family_key"]}
+    rename = host.rename_noreplace
+
+    def interrupt_after_publication(src, src_name, dst, dst_name):
+        rename(src, src_name, dst, dst_name)
+        if src_name.startswith("legacy-"):
+            raise OSError(errno.EIO, "synthetic interruption after workspace publication")
+
+    with monkeypatch.context() as interrupted:
+        interrupted.setattr(host, "rename_noreplace", interrupt_after_publication)
+        _json(client, "POST", job + "/review/copy", status=409, json=command)
+    assert _json(client, "GET", job + "/review")[0]["state"] == "copying"
+    copied = _json(client, "POST", job + "/review/copy", json=command)
+    assert copied["file_count"] == 3
+    assert copied["state"] == "copied"
+    assert _json(client, "POST", job + "/review/copy", json=command) == copied
+    assert _json(client, "GET", job + "/review")[0]["state"] == "copied"
+    assert all((source / name).read_bytes() == data for name, data in originals.items())
+    draft = _json(client, "PUT", job + "/draft", json={"revision": 0, "events": [{
+        "name": "Review fixture", "start_date": "2026-07-21", "end_date": "2026-07-21",
+    }], "capture_overrides": {"bad": "2026-07-21T11:00:00"}})
+    _json(client, "POST", job + "/plan", json={"revision": draft["revision"]})
+    assert [move["relative_path"] for move in _json(client, "GET", job + "/moves")] == ["good.jpg"]
+    _json(client, "DELETE", job)
+    general = metadata_area_paths(area="general", workspace_root=workspace, library_id="second", create=False)["root"]
+    assert not list((general / LEGACY_REVIEW_STAGING).iterdir())
+    family = general / copied["target_relative"]
+    assert {path.name: path.read_bytes() for path in family.iterdir()} == {
+        key: data for key, data in originals.items() if key != "good.jpg"
+    }
+    library = resolve_library_context(registry, "second")
+    monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: [])
+    scan = scan_metadata_area(area="general", workspace_root=workspace, library_id="second",
+                              database_path=library.database_path)
+    assert {item["filename"] for item in scan["files"]} == set(originals) - {"good.jpg"}
+
+
+def test_review_capacity_gate_accounts_for_entire_family(monkeypatch):
+    from types import SimpleNamespace
+    from app.legacy_adoption_paths import AdoptionError
+    from app.legacy_adoption_review import _check_capacity
+
+    members = [("photo.raf", ".copy-0", {"size_bytes": 8192}),
+               ("photo.raf.xmp", ".copy-1", {"size_bytes": 2048})]
+    monkeypatch.setattr(os, "fstatvfs", lambda _descriptor: SimpleNamespace(f_bavail=4, f_frsize=4096))
+    with pytest.raises(AdoptionError, match="nicht genug Speicherplatz"):
+        _check_capacity(0, members)
+    monkeypatch.setattr(os, "fstatvfs", lambda _descriptor: SimpleNamespace(f_bavail=5, f_frsize=4096))
+    _check_capacity(0, members)
+
+
 @pytest.mark.skipif(
     sys.platform != "linux" or os.environ.get("GITHUB_ACTIONS") != "true",
     reason="Der echte Read-only-Bind-Mount läuft auf dem isolierten Linux-Runner.",
 )
-def test_adoption_reads_actual_read_only_archive(inventory):
+def test_adoption_reads_actual_read_only_archive(inventory, monkeypatch):
     import errno
     import subprocess
     from dataclasses import replace
@@ -328,17 +417,47 @@ def test_adoption_reads_actual_read_only_archive(inventory):
     from app.legacy_adoption_plan import create_plan
     from tests.backend.test_legacy_adoption_plan import _draft
 
-    context, source, registry = inventory
-    physical = context.archive_root
-    mount = physical.with_name("read-only-archive")
-    mount.mkdir()
-    subprocess.run(["sudo", "-n", "mount", "--bind", str(physical), str(mount)], check=True)
+    context, fixture_source, registry = inventory
+    physical, source = context.archive_root, fixture_source
+    native_dataset = os.environ.get("ADOPTION_ZFS_ROOT")
+    if native_dataset:
+        from app import legacy_adoption_dataset
+        from app.legacy_adoption_paths import bound_directory
+
+        monkeypatch.setattr(legacy_adoption_dataset, "prove", kernel_dataset_proof)
+        physical = Path(native_dataset) / "archive"
+        source = Path(native_dataset) / "source"
+        physical.mkdir()
+        source.mkdir()
+        other = Path(os.environ["ADOPTION_ZFS_OTHER"])
+        with bound_directory(source) as left, bound_directory(other) as right:
+            with pytest.raises(legacy_adoption_dataset.DatasetError, match="nicht auf demselben"):
+                kernel_dataset_proof(source, other, left, right)
+
+    mount = context.archive_root.with_name("read-only-archive")
+    source_mount = context.archive_root.with_name("read-only-source")
+    mounted = []
     try:
-        subprocess.run(["sudo", "-n", "mount", "-o", "remount,bind,ro", str(mount)], check=True)
-        assert os.statvfs(mount).f_flag & os.ST_RDONLY
-        with pytest.raises(OSError) as denied:
-            (mount / "attempt").write_bytes(b"must fail")
-        assert denied.value.errno == errno.EROFS
+        for native, view in ((physical, mount), (source, source_mount)):
+            view.mkdir()
+            subprocess.run(["sudo", "-n", "mount", "--bind", str(native), str(view)], check=True)
+            mounted.append(view)
+            subprocess.run(["sudo", "-n", "mount", "-o", "remount,bind,ro", str(view)], check=True)
+            assert os.statvfs(view).f_flag & os.ST_RDONLY
+            with pytest.raises(OSError) as denied:
+                (view / "attempt").write_bytes(b"must fail")
+            assert denied.value.errno == errno.EROFS
+        if native_dataset:
+            nested = source / "nested"
+            nested.mkdir()
+            subprocess.run(["sudo", "-n", "mount", "--bind", str(other), str(source_mount / "nested")], check=True)
+            mounted.append(source_mount / "nested")
+            with bound_directory(source_mount) as left, bound_directory(mount) as right:
+                with pytest.raises(legacy_adoption_dataset.DatasetError, match="weitere Einbindung"):
+                    kernel_dataset_proof(source_mount, mount, left, right)
+            subprocess.run(["sudo", "-n", "umount", str(mounted[-1])], check=True)
+            mounted.pop()
+            nested.rmdir()
         library = replace(context, archive_root=mount)
         from app.library_registry import register_library
         library.work_root.mkdir()
@@ -353,9 +472,11 @@ def test_adoption_reads_actual_read_only_archive(inventory):
             return physical / Path(path).relative_to(mount)
 
         (source / "proof.raf").write_bytes(b"RO archive synthetic")
-        job = create_job(library, source)
+        job = create_job(library, source_mount)
         scan_inventory(library, job)
         plan = create_plan(library, registry, job, _draft())
+        if native_dataset:
+            assert plan["dataset"]["dataset"].endswith("/media")
         from app.legacy_adoption_catalogue import prepare_documents
         from app.legacy_adoption_export import directory_scaffold, event_documents
         from app.legacy_adoption_plan import plan_moves
@@ -367,11 +488,13 @@ def test_adoption_reads_actual_read_only_archive(inventory):
             with factory(library, job) as handle, ZipFile(handle) as files:
                 files.extractall(physical)
         for move in plan_moves(library, job):
-            Path(move["source"]).rename(writable_target(move["target"]))
+            original = source / Path(move["source"]).relative_to(source_mount)
+            original.rename(writable_target(move["target"]))
         assert verify_execution(library, job, plan["id"])["state"] == "verified"
         change_phase(library, job, plan["id"], "registering", from_phases={"registration_pending"})
         from app.legacy_adoption_registration import finalize_adoption
         assert finalize_adoption.__wrapped__(library, registry, job, plan["id"])["state"] == "completed"
         assert os.statvfs(mount).f_flag & os.ST_RDONLY
     finally:
-        subprocess.run(["sudo", "-n", "umount", str(mount)], check=True)
+        for view in reversed(mounted):
+            subprocess.run(["sudo", "-n", "umount", str(view)], check=True)

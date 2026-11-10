@@ -1551,7 +1551,7 @@ from app.ui_pre import TRANSLATIONS as PRE_TRANSLATIONS, PATTERNS as PRE_PATTERN
 UI_TRANSLATIONS.update(PRE_TRANSLATIONS)
 UI_PATTERNS[:0]=PRE_PATTERNS
 
-I18N_UI_JS = r"""
+_I18N_UI_TEMPLATE = r"""
 (function () {
   "use strict";
   const dictionary = __DICTIONARY__;
@@ -1864,6 +1864,13 @@ I18N_UI_JS = r"""
     init();
   }
 })();
-""".replace("__DICTIONARY__", json.dumps(UI_TRANSLATIONS, ensure_ascii=False)).replace(
-    "__PATTERNS__", json.dumps(UI_PATTERNS, ensure_ascii=False)
-)
+"""
+
+
+def i18n_ui_js(translations=None, patterns=()):
+    return _I18N_UI_TEMPLATE.replace(
+        "__DICTIONARY__", json.dumps({**UI_TRANSLATIONS, **(translations or {})}, ensure_ascii=False),
+    ).replace("__PATTERNS__", json.dumps([*patterns, *UI_PATTERNS], ensure_ascii=False))
+
+
+I18N_UI_JS = i18n_ui_js()
