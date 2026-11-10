@@ -10,7 +10,7 @@ import os
 import sqlite3
 
 
-REGISTRY_SCHEMA_VERSION = 3
+REGISTRY_SCHEMA_VERSION = 4
 MAIN_LIBRARY_ID = "main"
 
 
@@ -173,6 +173,9 @@ REGISTRY_MIGRATIONS: dict[int, str] = {
 
         CREATE INDEX idx_family_claims_library_state
         ON family_claims(library_id, claim_state);
+    """,
+    4: """
+        CREATE INDEX idx_source_media_sha ON source_media(sha256);
     """,
 }
 

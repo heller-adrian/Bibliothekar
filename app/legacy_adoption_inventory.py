@@ -84,8 +84,40 @@ def inventory_status(library: LibraryContext, job_id: str) -> dict:
     }
 
 
+def _inventory_groups(rows, source):
+    for key, group in groupby(rows, key=lambda row: row["family_key"]):
+        members = [dict(row) for row in group]
+        files = [json.loads(row["metadata_json"]) for row in members if row["metadata_json"]]
+        family = {"family_key": key, "status": "review_required"}
+        if files:
+            family = summarize_file_metadata(source, files)["families"][0]
+            if any(row["error"] for row in members) or any(row["review_required"] for row in files):
+                family["status"] = "review_required"
+        yield family, members, files
+
+
+def inventory_chronology(library: LibraryContext, job_id: str, *, year: str = ""):
+    if year and (len(year) != 4 or not year.isascii() or not year.isdigit()):
+        raise AdoptionError("Ungültiges Jahr.")
+    with database_connection(library.database_path) as connection:
+        connection.execute("BEGIN")
+        job = _job(connection, library.library_id, job_id)
+        if job["state"] != "inventoried":
+            raise AdoptionError("Die Inventur muss zuerst abgeschlossen werden.")
+        counts = connection.execute(
+            """SELECT substr(capture_time, 1, :length) AS period, count(*) AS families,
+                      sum(review_required) AS review
+                 FROM legacy_adoption_families
+                WHERE job_id = :job AND (:year = '' OR capture_time LIKE :year || '-%')
+                GROUP BY period ORDER BY period""",
+            {"job": job_id, "length": 10 if year else 4, "year": year},
+        )
+        return [dict(row) for row in counts]
+
+
 def inventory_families(
     library: LibraryContext, job_id: str, *, after: str = "", limit: int = 100,
+    day: str | None = None,
 ) -> list[dict]:
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN")
@@ -94,25 +126,20 @@ def inventory_families(
             raise AdoptionError("Die Inventur muss zuerst abgeschlossen werden.")
         rows = connection.execute(
             """WITH page AS (
-                   SELECT DISTINCT family_key FROM legacy_adoption_inventory
+                   SELECT family_key FROM legacy_adoption_families
                     WHERE job_id = :job AND family_key > :after
+                      AND (:day IS NULL OR substr(capture_time, 1, 10) = :day
+                           OR (:day = '' AND capture_time IS NULL))
                     ORDER BY family_key LIMIT :limit
                )
                SELECT inventory.* FROM legacy_adoption_inventory AS inventory
                JOIN page USING (family_key)
                WHERE job_id = :job ORDER BY family_key, relative_path""",
-            {"job": job_id, "after": after, "limit": max(1, min(limit, 200))},
+            {"job": job_id, "after": after, "limit": max(1, min(limit, 200)), "day": day},
         )
         result = []
-        for key, group in groupby(rows, key=lambda row: row["family_key"]):
-            members = [dict(row) for row in group]
-            files = [json.loads(row["metadata_json"]) for row in members if row["metadata_json"]]
+        for family, members, files in _inventory_groups(rows, Path(job["source_root"])):
             errors = [row for row in members if row["error"]]
-            family = {"family_key": key, "status": "review_required"}
-            if files:
-                family = summarize_file_metadata(Path(job["source_root"]), files)["families"][0]
-                if errors or any(row["review_required"] for row in files):
-                    family["status"] = "review_required"
             result.append({
                 **family,
                 "files": files,
@@ -137,8 +164,9 @@ def discard_job(library: LibraryContext, job_id: str) -> None:
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         job = _job(connection, library.library_id, job_id)
-        if job["state"] not in {"ready", "scanning", "inventoried", "discarded"}:
+        if connection.execute("SELECT 1 FROM legacy_adoption_plans WHERE job_id = ?", (job_id,)).fetchone():
             raise AdoptionError("Der Auftrag kann in diesem Zustand nicht verworfen werden.")
+        connection.execute("DELETE FROM legacy_adoption_families WHERE job_id = ?", (job_id,))
         connection.execute("DELETE FROM legacy_adoption_inventory WHERE job_id = ?", (job_id,))
         connection.execute(
             """UPDATE legacy_adoption_jobs SET state = 'discarded', scan_error = NULL
@@ -266,6 +294,8 @@ def scan_inventory(library: LibraryContext, job_id: str, *, cancellation_callbac
         job = _job(connection, library.library_id, job_id)
         if job["state"] not in {"ready", "scanning", "inventoried"}:
             raise AdoptionError("Dieser Auftrag kann nicht inventarisiert werden.")
+        if connection.execute("SELECT 1 FROM legacy_adoption_plans WHERE job_id = ?", (job_id,)).fetchone():
+            raise AdoptionError("Der gespeicherte Verschiebeplan muss zuerst zurückgenommen werden.")
         if Path(job["archive_root"]) != library.archive_root:
             raise AdoptionError("Die Archivwurzel der Zielbibliothek hat sich geändert.")
         generation = job["scan_generation"] + 1
@@ -326,6 +356,19 @@ def scan_inventory(library: LibraryContext, job_id: str, *, cancellation_callbac
             connection.execute(
                 "DELETE FROM legacy_adoption_inventory WHERE job_id = ? AND seen_generation != ?",
                 (job_id, generation),
+            )
+            connection.execute("DELETE FROM legacy_adoption_families WHERE job_id = ?", (job_id,))
+            rows = connection.execute(
+                """SELECT * FROM legacy_adoption_inventory
+                    WHERE job_id = ? AND family_key IS NOT NULL ORDER BY family_key, relative_path""",
+                (job_id,),
+            )
+            connection.executemany(
+                """INSERT INTO legacy_adoption_families (job_id, family_key, capture_time, review_required)
+                   VALUES (?, ?, ?, ?)""",
+                ((job_id, family["family_key"], family.get("selected_capture_time"),
+                  family["status"] == "review_required")
+                 for family, _, _ in _inventory_groups(rows, source)),
             )
             connection.execute("UPDATE legacy_adoption_jobs SET state = 'inventoried' WHERE id = ?", (job_id,))
     except Exception as error:
