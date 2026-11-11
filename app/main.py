@@ -530,7 +530,20 @@ def _root_request(fn):
                     ident=kwargs.get('job_id') or (args[0] if args else None)
                     from app.root_operations import _read
                     accepted={p for p in accepted if _read(Path(p),{}).get('ids',{}).get('job_id')==ident}
-                if accepted:retry=operation_health.qualified_retry(context.workspace_root,accepted)
+                elif fn.__name__=='api_archive_change':
+                    bound=__import__('inspect').signature(fn).bind(*args,**kwargs)
+                    ident=bound.arguments['cr_id']
+                    accepted={r['path'] for r in operation_health.inspect(context.workspace_root)['reservations']
+                              if not r['live'] and r['qualified'] and r.get('kind')=='archive'
+                              and r.get('library')==context.library_id
+                              and r.get('database')==str(context.database_path.absolute())
+                              and r.get('ids')=={'cr_id':ident,'function':'app.event_change_apply.finish_event_change'}}
+                if accepted:
+                    if fn.__name__=='api_archive_change':
+                        from app.archive_change_recovery import qualified_finish_retry
+                        retry=qualified_finish_retry(context.workspace_root,accepted)
+                    else:
+                        retry=operation_health.qualified_retry(context.workspace_root,accepted)
             from app.operation_scopes import admission as scoped_admission
             extra = ('metadata',) if 'metadata' in fn.__name__ else ()
             if fn.__name__=='api_correct_metadata':
@@ -544,9 +557,11 @@ def _root_request(fn):
             if 'trash' in fn.__name__:extra = (*extra, 'trash')
             with retry, scoped_admission(context.workspace_root, context.library_id, extra=extra), admission(context):
                 result=fn(*args,**kwargs)
-                if accepted and fn.__name__=='api_reintegrate_metadata_families':
+                if accepted and fn.__name__ in {'api_reintegrate_metadata_families','api_archive_change'}:
                     operation_health.finish_qualified_retry(context.workspace_root)
-            if accepted and fn.__name__=='api_reintegrate_metadata_families':
+            if accepted and (fn.__name__=='api_reintegrate_metadata_families'
+                             or (fn.__name__=='api_archive_change'
+                                 and operation_health.inspect(context.workspace_root)['issues'])):
                 startup_database()
             return result
         except RootOperationError as error:
@@ -14278,13 +14293,19 @@ def api_archive_change(cr_id: str) -> JSONResponse:
     try:
         change_request = get_event_change_request(current_database_file(), cr_id)
         if change_request is None:
-            raise EventChangeApplyError("ChangeRequest nicht gefunden.")
-        event_id = str(change_request["event_id"])
-        selected_ids = _change_request_selected_family_ids(change_request)
-        previously_assigned = _assigned_family_ids_for_root_event(event_id)
+            event_id = ''
+            selected_ids = set()
+            previously_assigned = set()
+        else:
+            event_id = str(change_request["event_id"])
+            selected_ids = (set() if change_request.get('delete_event') else
+                            _change_request_selected_family_ids(change_request))
+            previously_assigned = _assigned_family_ids_for_root_event(event_id)
         result = finish_event_change(
             current_database_file(), cr_id, current_archive_root(), current_workspace_root()
         )
+        if result.get('event_deleted'):
+            previously_assigned.update(result.get('released_family_ids') or [])
         if selected_ids:
             _promote_global_family_ids_owned(
                 event_id,

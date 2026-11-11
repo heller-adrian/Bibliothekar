@@ -52,4 +52,4 @@ def test_events_ui_has_visible_change_request_verification_feedback():
     assert 'Fehlt am Ziel' in source
     assert 'Liegt noch am alten Ort' in source
     assert 'SHA-256 abweichend' in source
-    assert 'Änderung abschließen & SSD freigeben' in source
+    assert 'Änderung abschließen & Arbeitsbereich freigeben' in source

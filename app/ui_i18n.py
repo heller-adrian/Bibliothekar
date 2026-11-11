@@ -458,7 +458,7 @@ UI_TRANSLATIONS.update({
   "Alle vorgesehenen alten Ordner sind bereits entfernt.": "All designated old folders have already been removed.",
   "Finder-Arbeit erledigt · weiter zu Prüfen": "Finder work complete · proceed to verification",
   "✓ Prüfung erfolgreich": "✓ Verification successful",
-  "Änderung abschließen & SSD freigeben": "Finish change & release SSD inventory",
+  "Änderung abschließen & Arbeitsbereich freigeben": "Complete archive change and release workspace",
   "Archivdateien werden geprüft und sicher auf die SSD kopiert …": "Checking archive files and safely copying them to the SSD…",
   "SSD-Kopien werden nach Größe und SHA-256 geprüft …": "Checking SSD copies by size and SHA-256…",
   "Alle SSD-Kopien sind vollständig geprüft.": "All SSD copies have been verified.",
