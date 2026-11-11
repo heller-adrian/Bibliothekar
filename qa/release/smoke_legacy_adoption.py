@@ -117,6 +117,14 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
         return
     assert api("/api/setup/adoption", method="POST", payload={"decision": "adopting"}) == {"next": "/legacy-adoption"}
     assert "Bestehende Fotosammlung übernehmen".encode() in request("/legacy-adoption")
+    sources = api("/api/legacy-adoption/sources")
+    assert sources["preferred"] == "nas"
+    assert len(sources["roots"]) == 1
+    nas = sources["roots"][0]
+    assert nas["key"] == "nas" and nas["read_only"] and nas["dataset"].endswith("/media")
+    folder = api("/api/legacy-adoption/source?root=nas&relative=first")
+    assert folder["read_only"] and folder["dataset"] == nas["dataset"]
+    assert folder["folders"] == ["old-folders"]
     day = "21" if method == "manual" else "22"
     def adopt(execution, relative, existing_event=None):
         host_source = source / relative

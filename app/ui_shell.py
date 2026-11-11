@@ -8055,6 +8055,13 @@ border-radius:var(--bk-radius);background:var(--bk-surface);box-shadow:var(--bk-
 .bk-setup-choice-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:24px}
 """
 
+SETUP_CONTROL_CSS = """
+#bk-setup-theme{min-height:36px;max-width:14rem;padding:6px 10px;border:1px solid var(--bk-line);
+  border-radius:8px;background:var(--bk-surface-2);color:var(--bk-ink);font:inherit}
+#bk-setup-theme:hover{border-color:var(--bk-muted)}
+#bk-setup-theme:focus-visible{outline:2px solid var(--bk-blue);outline-offset:2px}
+"""
+
 SETUP_THEME_JS = """
 (() => {
   const root=document.documentElement, select=document.getElementById("bk-setup-theme");
@@ -8081,7 +8088,7 @@ def apply_setup_shell(html: str, *, localization_js: str = I18N_UI_JS) -> str:
         f"<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n", 1)
     html = html.replace("</head>",
         '<link rel="icon" type="image/svg+xml" href="/assets/bibliothekar-logo-symbol-background.svg">\n'
-        f"<style>{BIBLIOTHEKAR_CSS}\n{BIBLIOTHEKAR_0451_CSS}\n{BIBLIOTHEKAR_0505_LANGUAGE_CSS}\n{_BRAND_HEADER_CSS}\n{_SETUP_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_CSS}\n{BIBLIOTHEKAR_0451_CSS}\n{BIBLIOTHEKAR_0505_LANGUAGE_CSS}\n{_BRAND_HEADER_CSS}\n{_SETUP_CSS}\n{SETUP_CONTROL_CSS}</style>\n"
         "</head>", 1)
     return html.replace("<body>",
         '<body class="bibliothekar-redesign" data-bk-setup="true">\n'

@@ -1,3 +1,4 @@
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -70,6 +71,38 @@ def test_draft_preview_counts_the_same_eligible_families_as_the_move_plan(invent
     assert preview_draft(context, job, excluded)['events'][0]['families'] == 0
     overridden = {**_draft(), 'capture_overrides': {key: '2026-07-26T12:00:00'}}
     assert preview_draft(context, job, overridden)['events'][0]['families'] == 0
+
+
+def test_saved_plan_with_more_than_two_hundred_items_keeps_every_assignment(inventory):
+    from app.legacy_adoption_api import Draft
+    from app.legacy_adoption_plan import preview_draft
+
+    context, source, registry = inventory
+    dates = [date(2024, 1, 1) + timedelta(days=index) for index in range(201)]
+    for index in range(len(dates)):
+        (source / f"image-{index:03}.jpg").write_bytes(f"synthetic file {index}".encode())
+    job = _scan(context, source)
+    with database_connection(context.database_path) as connection:
+        keys = connection.execute(
+            "SELECT family_key FROM legacy_adoption_families WHERE job_id=? ORDER BY family_key", (job,),
+        ).fetchall()
+        connection.executemany(
+            "UPDATE legacy_adoption_families SET capture_time=? WHERE job_id=? AND family_key=?",
+            [(day.isoformat() + "T12:00:00", job, row[0]) for day, row in zip(dates, keys, strict=True)],
+        )
+    items = [{"event_kind": "no_event", "segments": [{"day_key": dates[0].isoformat()}]}]
+    items.extend({"name": "Test event", "start_date": day.isoformat(), "end_date": day.isoformat()} for day in dates[1:])
+    with pytest.raises(AdoptionError, match="mindestens ein Ereignis oder einen Sammelordner"):
+        create_plan(context, registry, job, {"events": []})
+    for count in (0, 1, 200, 201):
+        draft = Draft(events=items[:count]).model_dump(exclude_none=True)
+        preview = preview_draft(context, job, draft)
+        assert preview["valid"] and len(preview["events"]) == count
+        assert sum(item["families"] for item in preview["events"]) == count
+        assert preview["coverage"]["unassigned"] == 201 - count
+    plan = create_plan(context, registry, job, Draft(events=items).model_dump(exclude_none=True))
+    assert plan["move_families"] == plan["move_files"] == len(plan["events"]) == 201
+    assert {event["event_kind"] for event in plan["events"]} == {"event", "no_event"}
 
 
 def _existing(context, folder_name="Urlaub"):

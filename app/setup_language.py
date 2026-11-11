@@ -83,10 +83,19 @@ body.bk-setup-page .bk-setup-lang { margin-bottom:16px; }
     height:auto;
   }
 }
+@media(min-width:821px) {
+  body[data-bk-library-onboarding]{display:flex!important;justify-content:flex-start;align-items:center;gap:20px}
+  body[data-bk-library-onboarding] .bk-setup-brand{position:static;transform:none;width:min(440px,calc(100vw - 48px))}
+}
 .bk-setup-lang{display:flex;justify-content:flex-end;gap:6px;margin:0 0 18px}
 .bk-setup-lang button{width:auto!important;min-width:43px;margin:0!important;padding:7px 10px!important;
 border:1px solid #586774!important;border-radius:8px;background:transparent!important;font-size:.85rem!important}
 .bk-setup-lang button[aria-pressed=true]{background:#1974c6!important;border-color:#1974c6!important;color:white!important}
+html[data-bk-theme=light] .bk-setup-lang button{color:var(--bk-ink)!important}
+html[data-bk-theme=light] .bk-setup-lang button[aria-pressed=true]{
+  background:color-mix(in srgb,var(--bk-blue) 16%,var(--bk-surface))!important;
+  border-color:var(--bk-blue)!important;color:var(--bk-ink)!important}
+.bk-setup-lang button:focus-visible{outline:2px solid var(--bk-blue);outline-offset:2px}
 [data-bk-setup-lang][hidden]{display:none!important}
 html[data-bk-locale=en] [data-bk-setup-lang=de],
 html[data-bk-locale=de] [data-bk-setup-lang=en]{display:none!important}
@@ -134,7 +143,7 @@ def _label(en: str, de: str) -> str:
 def localize_setup_html(html: str, page: str) -> str:
     if page == "onboarding":
         html=html.replace('<body><main><section class="card">',
-            '<body class="bk-setup-page" data-bk-setup-title-en="Bibliothekar · Set up library" '
+            '<body class="bk-setup-page" data-bk-library-onboarding data-bk-setup-title-en="Bibliothekar · Set up library" '
             'data-bk-setup-title-de="Bibliothekar · Bibliothek einrichten">'
             '<main><section class="card">'+_SWITCH,1)
         html=html.replace('<h1>Erste Bibliothek einrichten</h1>',
@@ -176,13 +185,6 @@ def localize_setup_html(html: str, page: str) -> str:
             'data-bk-setup-de="Bibliothek prüfen und anlegen" data-bk-preserve-language>'
             'Check and create library</button>',1)
         html=html.replace('id="status" role="status"', 'id="status" role="status" data-bk-preserve-language',1)
-        html=html.replace('statusEl.textContent="Bibliothek wird geprüft …"',
-            'statusEl.textContent=bkSetupText("Checking library…","Bibliothek wird geprüft …")',1)
-        html=html.replace('statusEl.textContent="Bibliothek eingerichtet. Bibliothekar wird geöffnet …"',
-            'statusEl.textContent=bkSetupText("Library created. Opening Bibliothekar…",'
-            '"Bibliothek eingerichtet. Bibliothekar wird geöffnet …")',1)
-        html=html.replace('statusEl.textContent=e.message',
-            'statusEl.textContent=window.BibliothekarI18n?.t(e.message)||e.message',1)
         html=html.replace('payload.display_name||"Bibliothek"', 'payload.display_name||"Library"',1)
     elif page == "login":
         html=html.replace('<body><main><h1>Bibliothekar</h1>',

@@ -71,6 +71,39 @@ def _adopt(client):
     return _json(client, "POST", "/api/setup/adoption", json={"decision": "adopting"})
 
 
+def test_adoption_source_browser_recommends_nas_and_rechecks_selected_folder(fresh_main, tmp_path, monkeypatch):
+    from app import legacy_adoption_dataset
+
+    client = _onboard(fresh_main)
+    _adopt(client)
+    nas = tmp_path.resolve() / "nas-source"
+    other = nas / "different-dataset"
+    other.mkdir(parents=True)
+    saved = tmp_path.resolve() / "unqualified-backups"
+    saved.mkdir()
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", nas)
+    monkeypatch.setattr(main, "IMPORT_ROOT", saved)
+
+    def prove(source, archive, source_fd, archive_fd):
+        if source != nas:
+            raise legacy_adoption_dataset.DatasetError(legacy_adoption_dataset.DATASET_REQUIRED)
+        return {"dataset": "pool/photos", "device": str(os.fstat(source_fd).st_dev)}
+
+    monkeypatch.setattr(legacy_adoption_dataset, "prove", prove)
+    roots = _json(client, "GET", "/api/legacy-adoption/sources")
+    assert roots["preferred"] == "nas"
+    assert [item["key"] for item in roots["roots"]] == ["nas"]
+    browse = _json(client, "GET", "/api/legacy-adoption/source?root=nas")
+    assert browse["dataset"] == "pool/photos" and browse["folders"] == ["different-dataset"]
+    incompatible = _json(client, "GET", "/api/legacy-adoption/source?root=nas&relative=different-dataset")
+    assert incompatible["dataset"] is None and incompatible["reason"] == legacy_adoption_dataset.DATASET_REQUIRED
+
+    # A stale selection is never sufficient to create an inventory job.
+    response = _json(client, "POST", "/api/legacy-adoption/jobs", status=409,
+                     json={"root": "nas", "relative": "different-dataset"})
+    assert response["detail"] == legacy_adoption_dataset.DATASET_REQUIRED
+
+
 def test_first_setup_choice_blocks_regular_work_and_skip_is_permanent(fresh_main):
     from app.ui_shell import BIBLIOTHEKAR_JS
 

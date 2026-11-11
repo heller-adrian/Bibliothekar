@@ -1,9 +1,10 @@
 """Build and persist manual legacy moves without changing the archive catalogue."""
+from bisect import bisect_right
 from collections import Counter
 from contextlib import closing, ExitStack
 from datetime import date, datetime
 from functools import lru_cache
-from itertools import combinations, groupby
+from itertools import groupby
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -29,7 +30,12 @@ from app.legacy_adoption_paths import (
 )
 from app.metadata import LOCAL_TIMEZONE
 from app.operation_health import read_session
+from app.released_ranges import merge_intervals
 from app.subevents import assignment_target, normalize_subevents
+
+
+MAX_PLAN_ITEMS = 2000
+MAX_DRAFT_CONFLICTS = 50
 
 
 def _event_id():
@@ -151,6 +157,24 @@ def _draft_event(connection, definition, naming, defaults, *, allow_existing=Fal
     }
 
 
+def _draft_intervals(events):
+    return sorted(
+        (start, end, index)
+        for index, event in enumerate(events)
+        for start, end in merge_intervals(event["ranges"])
+    )
+
+
+def _draft_overlaps(intervals):
+    """Yield a conflicting pair per overlapping interval, in chronological order."""
+    furthest = None
+    for current in intervals:
+        if furthest is not None and current[0] <= furthest[1] and current[2] != furthest[2]:
+            yield furthest, current
+        if furthest is None or current[1] > furthest[1]:
+            furthest = current
+
+
 def _assert_timeline(connection, job_id, events):
     for event in events:
         for start, end in event["ranges"]:
@@ -160,16 +184,22 @@ def _assert_timeline(connection, job_id, events):
                 conflict = (normal or free)[0]
                 raise AdoptionError("Zeitüberschneidung mit „" + conflict["name"] + "“. "
                                     "Prüfe den gespeicherten Zeitraum.")
-    for first, second in combinations(events, 2):
-        if first["id"] == second["id"] or any(
-            a <= d and c <= b for a, b in first["ranges"] for c, d in second["ranges"]
-        ):
-            raise AdoptionError("Die im Auftrag gewählten Ereignisse überschneiden sich.")
+    intervals = _draft_intervals(events)
+    if len({event["id"] for event in events}) != len(events) or next(_draft_overlaps(intervals), None):
+        raise AdoptionError("Die im Auftrag gewählten Ereignisse überschneiden sich.")
+    return intervals
+
+
+def _assigned_index(intervals, starts, capture):
+    if not capture:
+        return None
+    time = capture[:19]
+    at = bisect_right(starts, time) - 1
+    return intervals[at][2] if at >= 0 and time <= intervals[at][1] else None
 
 
 def preview_draft(library, job_id, draft, *, allow_existing=False):
     """Read-only planning feedback, never a move/registration authority."""
-    from bisect import bisect_right
     with database_connection(library.database_path) as connection:
         connection.execute('BEGIN')
         if not allow_existing:
@@ -178,40 +208,46 @@ def preview_draft(library, job_id, draft, *, allow_existing=False):
         if job['state'] != 'inventoried':
             raise AdoptionError('Die Inventur muss zuerst abgeschlossen werden.')
         definitions = draft.get('events') or []
-        if not definitions:
-            return {'valid': True, 'conflicts': [], 'events': []}
+        if len(definitions) > MAX_PLAN_ITEMS:
+            raise AdoptionError(f"Pro Auftrag sind bis zu {MAX_PLAN_ITEMS} Planobjekte möglich.")
         naming = naming_snapshot_for_new_event(naming_from_library_settings(library.settings))
         defaults = get_global_default(connection)
         events = [
             _draft_event(connection, definition, naming, defaults, allow_existing=allow_existing)
             for definition in definitions
         ]
+        intervals = _draft_intervals(events)
         conflicts = []
         for index, event in enumerate(events):
             for start, end in event['ranges']:
                 existing = continuous_event_overlaps(connection, job_id, start, end, exclude_event_id=event['id'])
                 existing += no_event_segment_overlaps(connection, job_id, start, end, exclude_event_id=event['id'])
-                for other in existing:
+                for other in existing[:MAX_DRAFT_CONFLICTS - len(conflicts)]:
                     conflicts.append({'index': index, 'kind': 'archive' if other['status'] == 'archived' else 'catalogue',
                                       'existing_id': other.get('event_id') or other['id'], 'name': other['name'],
                                       'start': max(start, other.get('effective_start', other['start_datetime'])),
                                       'end': min(end, other.get('effective_end', other['end_datetime']))})
-        for (first_index, first), (second_index, second) in combinations(enumerate(events), 2):
-            if first['id'] == second['id'] or any(a <= d and c <= b for a, b in first['ranges'] for c, d in second['ranges']):
-                conflicts.append({'index': first_index, 'other_index': second_index, 'kind': 'draft',
-                                  'name': second['name'], 'start': first['start_datetime'], 'end': first['end_datetime']})
+                if len(conflicts) == MAX_DRAFT_CONFLICTS:
+                    return {'valid': False, 'conflicts': conflicts, 'events': []}
+        for first, second in _draft_overlaps(intervals):
+            start, end, index = first
+            other_start, other_end, other_index = second
+            conflicts.append({'index': index, 'other_index': other_index, 'kind': 'draft',
+                              'name': events[other_index]['name'], 'start': max(start, other_start),
+                              'end': min(end, other_end)})
+            if len(conflicts) == MAX_DRAFT_CONFLICTS:
+                break
         if conflicts:
             return {'valid': False, 'conflicts': conflicts, 'events': []}
-        # Keep the final plan's existing timeline and folder collision gate.
-        _assert_timeline(connection, job_id, events)
         prefixes = [target_key(str(event_root_relative(event))) for event in events]
         if len(set(prefixes)) != len(prefixes):
             raise AdoptionError('Mehrere Ereignisse beanspruchen denselben Zielordner.')
-        intervals = sorted((start, end, index) for index, event in enumerate(events) for start, end in event['ranges'])
         starts = [item[0] for item in intervals]
         counts = [{'families': 0, 'days': set()} for _ in events]
         overrides = {key: _local_capture(value) for key, value in draft.get('capture_overrides', {}).items()}
         exclusions = set(draft.get('exclude_families') or [])
+        coverage = {'unassigned': 0, 'review': 0, 'excluded': 0}
+        unassigned_days = set()
         for row in connection.execute(
             '''SELECT families.family_key,families.capture_time,families.review_required,copy.state AS review_copy
                FROM legacy_adoption_families families
@@ -219,17 +255,19 @@ def preview_draft(library, job_id, draft, *, allow_existing=False):
                WHERE families.job_id=?''', (job_id,),
         ):
             key = row['family_key']
-            if key in exclusions or row['review_copy'] or (row['review_required'] and key not in overrides):
-                continue
             capture = overrides.get(key, row['capture_time'])
-            if not capture:
-                continue
-            at = bisect_right(starts, capture[:19]) - 1
-            if at >= 0 and capture[:19] <= intervals[at][1]:
-                count = counts[intervals[at][2]]
-                count['families'] += 1
-                count['days'].add(capture[:10])
-        return {'valid': True, 'conflicts': [], 'events': [
+            if key in exclusions or row['review_copy']:
+                coverage['excluded'] += 1
+            elif not capture or (row['review_required'] and key not in overrides):
+                coverage['review'] += 1
+            elif (index := _assigned_index(intervals, starts, capture)) is None:
+                coverage['unassigned'] += 1
+                unassigned_days.add(capture[:10])
+            else:
+                counts[index]['families'] += 1
+                counts[index]['days'].add(capture[:10])
+        return {'valid': True, 'conflicts': [], 'coverage': {**coverage, 'unassigned_days': sorted(unassigned_days)[:12]},
+                'events': [
             {'name': event['name'], 'start': event['start_datetime'], 'end': event['end_datetime'],
              'families': count['families'], 'days': len(count['days'])}
             for event, count in zip(events, counts)
@@ -385,7 +423,7 @@ def _suggest_folder_moves(connection, plan_id, source_fd, archive_entry, candida
             continue
 
 
-def _plan_moves(connection, registry, job, plan_id, events, draft, source_fd, archive_fd):
+def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, source_fd, archive_fd):
     archive_entry = _archive_probe(archive_fd)
     for event in events:
         prefix = event_root_relative(event)
@@ -395,6 +433,7 @@ def _plan_moves(connection, registry, job, plan_id, events, draft, source_fd, ar
         elif archive_entry(str(prefix)) is not None:
             raise AdoptionError("Der neue Ereignisordner existiert bereits: " + str(prefix))
 
+    starts = [item[0] for item in intervals]
     overrides = {key: _local_capture(value) for key, value in (draft.get("capture_overrides") or {}).items()}
     exclusions = set(draft.get("exclude_families") or [])
     target_stems = draft.get("target_stems") or {}
@@ -421,12 +460,10 @@ def _plan_moves(connection, registry, job, plan_id, events, draft, source_fd, ar
             continue
         if not capture:
             continue
-        eligible = [event for event in events if any(a <= capture[:19] <= b for a, b in event["ranges"])]
-        if not eligible:
+        index = _assigned_index(intervals, starts, capture)
+        if index is None:
             continue
-        if len(eligible) != 1:
-            raise AdoptionError("Die Aufnahmezeit trifft mehrere Ereignisse: " + key)
-        event = eligible[0]
+        event = events[index]
         if key.strip() != key:
             raise AdoptionError("Der Familienname ist für die globale Registry ungeeignet: " + key)
         assigned, leaf, leaf_key, layout = _target_leaf(event, capture)
@@ -501,7 +538,7 @@ def _plan_moves(connection, registry, job, plan_id, events, draft, source_fd, ar
     if not added:
         raise AdoptionError("Die Auswahl enthält keine neuen, vollständig datierten Dateifamilien.")
     if any(event["id"] not in added for event in events):
-        raise AdoptionError("Mindestens ein gewähltes Ereignis erhält keine neuen Dateifamilien.")
+        raise AdoptionError("Mindestens ein gespeichertes Ereignis oder ein Sammelordner enthält keine neuen Dateifamilien.")
     _suggest_folder_moves(connection, plan_id, source_fd, archive_entry, candidates, target_counts)
 
 
@@ -535,8 +572,10 @@ def create_plan(library, registry_path: Path, job_id: str, draft=None, *, draft_
                 raise AdoptionError("Der Entwurf wurde in einer anderen Sitzung geändert. Lade ihn erneut.")
             draft = json.loads(job["draft_json"])
         definitions = (draft or {}).get("events")
-        if not isinstance(definitions, list) or not 1 <= len(definitions) <= 200:
-            raise AdoptionError("Wähle mindestens ein Ereignis und höchstens 200 Ereignisse.")
+        if not isinstance(definitions, list) or not definitions:
+            raise AdoptionError("Lege mindestens ein Ereignis oder einen Sammelordner an.")
+        if len(definitions) > MAX_PLAN_ITEMS:
+            raise AdoptionError(f"Pro Auftrag sind bis zu {MAX_PLAN_ITEMS} Planobjekte möglich.")
         if job["state"] != "inventoried":
             raise AdoptionError("Die Inventur muss zuerst abgeschlossen werden.")
         if connection.execute("SELECT 1 FROM legacy_adoption_plans WHERE job_id = ?", (job_id,)).fetchone():
@@ -550,7 +589,7 @@ def create_plan(library, registry_path: Path, job_id: str, draft=None, *, draft_
         prefixes = [target_key(str(event_root_relative(event))) for event in events]
         if len(set(prefixes)) != len(prefixes):
             raise AdoptionError("Mehrere Ereignisse beanspruchen denselben Zielordner.")
-        _assert_timeline(connection, job_id, events)
+        intervals = _assert_timeline(connection, job_id, events)
         connection.execute(
             """INSERT INTO legacy_adoption_plans (job_id, id, state, draft_json, events_json)
                VALUES (?, ?, 'prepared', ?, ?)""",
@@ -558,7 +597,7 @@ def create_plan(library, registry_path: Path, job_id: str, draft=None, *, draft_
         )
         with ExitStack() as stack:
             source, archive = _roots(stack, library, job)
-            _plan_moves(connection, registry, job, plan_id, events, draft, source, archive)
+            _plan_moves(connection, registry, job, plan_id, events, intervals, draft, source, archive)
         connection.execute("UPDATE legacy_adoption_plans SET events_json = ? WHERE id = ?", (json.dumps(events), plan_id))
     return plan_status(library, job_id)
 

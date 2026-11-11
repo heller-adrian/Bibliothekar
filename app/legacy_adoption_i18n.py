@@ -4,6 +4,27 @@ import re
 
 
 TRANSLATIONS = {
+    "Dateifamilie": "Family",
+    "Tag ausgewählt": "day selected",
+    "Der Arbeitsbereich muss ein absoluter Containerpfad sein.": "The workspace must be an absolute container path.",
+    "Das Archiv muss ein absoluter Containerpfad sein.": "The archive must be an absolute container path.",
+    "Der verwaltete Stamm für Bibliotheks-Arbeitsbereiche ist nicht vollständig zugreifbar.":
+        "The managed library workspace directory cannot be fully accessed.",
+    "Der Archiv-Mount ist nicht nachweislich read-only. Bitte diesen Host Path in TrueNAS einzeln als Read Only einbinden.":
+        "The archive mount could not be verified as read-only. Set this host path to Read Only in TrueNAS.",
+    "Arbeitsbereich und Archiv dürfen nicht ineinander liegen.": "The workspace and archive cannot be nested inside one another.",
+    "Fuer „Ohne Ereignis“ muss mindestens ein Tag ausgewaehlt werden.": "Choose at least one day for the collection folder.",
+    "Ein „Ohne Ereignis“-Zeitsegment ist ungueltig.": "A time range in the collection folder is invalid.",
+    "Fotosammlung wird gelesen …": "Reading photo collection…",
+    "Inventur unterbrochen": "Inventory interrupted",
+    "Inventur fortsetzen": "Resume inventory",
+    "Quelle und Ziel werden geprüft …": "Checking the source and target…",
+    "Binde einen NAS-Quellordner auf dem Dataset des Zielarchivs schreibgeschützt ein.":
+        "Mount a NAS source folder read-only on the same dataset as the target archive.",
+    "Die Quelle ist nicht lesend erreichbar.": "The source folder cannot be opened for reading.",
+    "Die Quell-Einbindung ist nicht schreibgeschützt.": "The source mount is not read-only.",
+    "ZFS-Dataset": "ZFS dataset",
+
     "Schließe laufende Vorgänge oder offene Wiederherstellungen ab.": "Finish active operations or resolve pending recovery.",
     "Schließe offene Archivänderungen ab.": "Finish open archive changes.",
     "Schließe offene Import- und Hintergrundaufträge ab.": "Finish pending imports and background jobs.",
@@ -213,6 +234,27 @@ TRANSLATIONS = {
     "Ordner für Exporte, optional": "Export folder, optional",
     "Ein Ordnerpfad wurde doppelt angegeben.": "A folder path appears twice.",
     "Der Exportordner muss in der Ordnerliste vorkommen.": "The export folder must appear in the folder list.",
+    "Wähle Aufnahmetage wie im Arbeitsbereich. Klick und Strg/Cmd wählen einzelne Tage, Umschalt wählt einen Bereich. Du kannst auch ohne ausgewählte Tage planen.":
+        "Select capture days as in Workspace. Click and Ctrl/Cmd select individual days; Shift selects a range. You can also plan without selecting days.",
+    "+ Ereignis": "+ Event",
+    "+ Sammelordner ohne Ereignis": "+ Collection folder without event",
+    "Gespeicherte Planobjekte": "Saved plan items",
+    "Eine Dateifamilie ist noch nicht zugeordnet.": "One media family is still unassigned.",
+    "Alle gespeicherten Planobjekte fließen in den Verschiebeplan ein.": "The move plan includes all saved plan items.",
+    "Ordne diese Aufnahmen zu oder prüfe sie im nächsten Schritt. Ohne Zuordnung bleiben sie an der Quelle.":
+        "Assign these captures or review them in the next step. Unassigned captures stay at the source.",
+    "Dateifamilien ohne Zuordnung und ausgenommene Prüffälle bleiben an der Quelle. Prüfe sie in der Liste der Prüffälle.":
+        "Unassigned and excluded families stay at the source. Check them in the review list.",
+    "Mindestens ein gespeichertes Ereignis oder ein Sammelordner enthält keine neuen Dateifamilien.":
+        "At least one saved event or collection folder has no new media families.",
+    "Lege mindestens ein Ereignis oder einen Sammelordner an.": "Create at least one event or collection folder.",
+    "Weitere Planobjekte": "More plan items",
+    "Aufnahmetag": "Capture day",
+    "Gib ein Datum und entweder beide Uhrzeiten oder keine Uhrzeit an.": "Enter a date and either both times or neither.",
+    "Lasse beide Uhrzeiten leer, um den ganzen Tag zu übernehmen.": "Leave both times empty to include the whole day.",
+    "Tag oder Zeitabschnitt hinzufügen": "Add day or time range",
+    "Für jeden Monat mit ausgewählten Tagen wird ein Sammelordner angelegt.": "Each month with selected days gets its own collection folder.",
+    "Ungespeicherte Änderungen an diesem Planobjekt verwerfen?": "Discard unsaved changes to this plan item?",
     "Neues Ereignis oder Sammelordner": "New event or collection folder",
     "Entwurf bearbeiten": "Edit draft",
     "Normales Ereignis": "Regular event",
@@ -415,6 +457,18 @@ def _regex_literal(value):
 
 
 PATTERNS = [
+    (r"^Der Archiv-Mount ist nicht verfügbar: (.+)$", "The archive mount is unavailable: $1"),
+    (r"^Der Archiv-Mount ist nicht lesbar: (.+)$", "The archive mount cannot be read: $1"),
+    (r"^Der verwaltete Stamm für Bibliotheks-Arbeitsbereiche ist nicht verfügbar: (.+)$",
+     "The managed library workspace directory is unavailable: $1"),
+    (r"^library_workspace_name_collision: (.+)$", "A workspace with that name already exists: $1"),
+    (r"^Der Arbeitsbereich überschneidet sich mit (.+)\.$", "The workspace overlaps with $1."),
+    (r"^Das Archiv überschneidet sich mit (.+)\.$", "The archive overlaps with $1."),
+    (r"^Am (\d{4}-\d{2}-\d{2}) muss das Ende nach dem Beginn liegen\.$", "On $1, the end must follow the start."),
+    (r"^Die „Ohne Ereignis“-Zeitsegmente am (\d{4}-\d{2}-\d{2}) ueberlappen sich\.$",
+     "The time ranges for $1 in this collection folder overlap."),
+    (r"^(\d+) Dateifamilien sind noch nicht zugeordnet\.$", "$1 media families are still unassigned."),
+    (r"^Pro Auftrag sind bis zu (\d+) Planobjekte möglich\.$", "Each adoption job supports up to $1 plan items."),
     *[(r"^" + _regex_literal(german) + r"(.+)$", english + "$1") for german, english in _PREFIXES.items()],
     (r"^(\d+) Prüffälle – Überprüfung erforderlich$", "$1 cases require review"),
     (r"^(\d+) Dateien · (\d+) Familien · (\d+) Bytes$", "$1 files · $2 families · $3 bytes"),

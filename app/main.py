@@ -1107,8 +1107,9 @@ def _onboarding_required() -> bool:
 
 
 def _library_onboarding_html() -> str:
-    from app.ui_i18n import I18N_UI_JS
-    from app.ui_shell import BIBLIOTHEKAR_0451_HEAD_JS, BIBLIOTHEKAR_CSS, SETUP_THEME_CONTROL, SETUP_THEME_JS
+    from app.legacy_adoption_i18n import PATTERNS, TRANSLATIONS
+    from app.ui_i18n import i18n_ui_js
+    from app.ui_shell import BIBLIOTHEKAR_0451_HEAD_JS, BIBLIOTHEKAR_CSS, SETUP_CONTROL_CSS, SETUP_THEME_CONTROL, SETUP_THEME_JS
     workspaces_root = str(
         storage_paths(WORKSPACE_PATH)["workspaces_root"]
     )
@@ -1120,14 +1121,13 @@ def _library_onboarding_html() -> str:
 <title>Bibliothekar · Set up library</title>
 <script src="/auth/client.js"></script>
 <script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>
-<style>{BIBLIOTHEKAR_CSS}</style>
+<style>{BIBLIOTHEKAR_CSS}{SETUP_CONTROL_CSS}</style>
 <style>
 :root{{--bg:var(--bk-paper);--surface:var(--bk-surface);--border:var(--bk-line);--text:var(--bk-ink);--muted:var(--bk-muted);--accent:var(--bk-blue);--danger:var(--bk-danger)}}
 *{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--text);font-family:Futura, "Helvetica Neue", Helvetica, Arial, sans-serif}}
 main{{width:min(760px,calc(100% - 32px));margin:7vh auto}} .card{{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:28px}}
 h1{{margin:0 0 8px;font-size:2rem}} p{{color:var(--muted);line-height:1.5}} label{{display:grid;gap:7px;margin:18px 0}}
 input{{width:100%;padding:13px 14px;border-radius:11px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit}}
-#bk-setup-theme{{max-width:14rem;background:var(--bg);color:var(--text);font:inherit}}
 html[data-bk-theme=light]:has(body.bk-setup-page){{color-scheme:light}}
 body.bk-setup-page .card{{color:var(--text)}}
 button{{border:0;border-radius:11px;padding:13px 18px;background:var(--accent);color:white;font:inherit;font-weight:650;cursor:pointer}}
@@ -1148,18 +1148,22 @@ button:disabled{{opacity:.45;cursor:default}} #status{{white-space:pre-wrap;marg
 <script>
 const nameEl=document.getElementById("name"),workEl=document.getElementById("work"),archiveEl=document.getElementById("archive"),statusEl=document.getElementById("status"),button=document.getElementById("create");
 async function json(url,options={{}}){{const r=await fetch(url,options);let d={{}};try{{d=await r.json()}}catch{{}}if(!r.ok)throw new Error(typeof d.detail==="string"?d.detail:JSON.stringify(d.detail||d));return d}}
-button.addEventListener("click",async()=>{{button.disabled=true;statusEl.className="";statusEl.textContent="Bibliothek wird geprüft …";try{{
+let statusMessage="";
+function showSetupStatus(message=statusMessage){{statusMessage=message;
+statusEl.textContent=message.split("\\n").map(line=>window.BibliothekarI18n.t(line)).join("\\n")}}
+window.addEventListener("bk-language-changed",()=>showSetupStatus());
+button.addEventListener("click",async()=>{{button.disabled=true;statusEl.className="";showSetupStatus("Bibliothek wird geprüft …");try{{
 const payload={{display_name:nameEl.value,work_root:workEl.value,archive_root:archiveEl.value}};
 const managedName=String(payload.display_name||"Bibliothek").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,32)||"bibliothek";
 const check=await json("/api/libraries/check",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{work_root:payload.work_root,archive_root:payload.archive_root,default_library_id:payload.work_root?"":managedName}})}});
 if(!check.valid)throw new Error((check.errors||[]).join("\\n"));
 await json("/api/libraries",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify(payload)}});
-statusEl.textContent="Bibliothek eingerichtet. Bibliothekar wird geöffnet …";location.assign("/");
-}}catch(e){{statusEl.className="error";statusEl.textContent=e.message;button.disabled=false;}}}});
+showSetupStatus("Bibliothek eingerichtet. Bibliothekar wird geöffnet …");location.assign("/");
+}}catch(e){{statusEl.className="error";showSetupStatus(e.message);button.disabled=false;}}}});
 </script></body></html>"""
     from app.setup_language import localize_setup_html
     html = localize_setup_html(html, "onboarding")
-    return html.replace("</body>", f"<script>{I18N_UI_JS}</script><script>{SETUP_THEME_JS}</script></body>")
+    return html.replace("</body>", f"<script>{i18n_ui_js(TRANSLATIONS, PATTERNS)}</script><script>{SETUP_THEME_JS}</script></body>")
 
 
 @app.middleware("http")
@@ -14374,9 +14378,10 @@ async def adoption_access_middleware(request: Request, call_next):
     method = request.method
     start = (method, path) == ("POST", "/api/legacy-adoption/jobs")
     decision = (method, path) == ("POST", "/api/setup/adoption")
-    later_entry = request.query_params.get("mode") == "library" and (
-        start or (method == "GET" and path in {"/legacy-adoption", "/api/legacy-adoption/source"})
-    )
+    source_entry = method == "GET" and path in {
+        "/legacy-adoption", "/api/legacy-adoption/source", "/api/legacy-adoption/sources",
+    }
+    later_entry = request.query_params.get("mode") == "library" and (start or source_entry)
     eligibility = (method, path) == ("GET", "/api/legacy-adoption/eligibility")
     exclusive = start or decision or (method, path) == ("POST", "/api/libraries")
     try:
@@ -14415,9 +14420,7 @@ async def adoption_access_middleware(request: Request, call_next):
                     method == "POST" and path == "/api/settings/storage-replace"
                 ):
                     return await call_next(request)
-                if setup["decision"] == "adopting" and not later_entry and (
-                    start or (method == "GET" and path in {"/legacy-adoption", "/api/legacy-adoption/source"})
-                ):
+                if setup["decision"] == "adopting" and not later_entry and (start or source_entry):
                     if path == "/legacy-adoption" and request.query_params.get("job"):
                         return RedirectResponse("/legacy-adoption", status_code=303)
                     return await call_next(request)

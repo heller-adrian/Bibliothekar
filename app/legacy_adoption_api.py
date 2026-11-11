@@ -21,7 +21,7 @@ from app.legacy_adoption_export import directory_scaffold, event_documents, mani
 from app.legacy_adoption_host import ExecutionError
 from app.legacy_adoption_inventory import (
     _job, create_job, discard_job, inventory_chronology, inventory_errors, inventory_families,
-    inventory_status, scan_inventory,
+    inventory_status, qualify_source, scan_inventory,
 )
 from app.legacy_adoption_package import (
     inspect_runner, locked_script, permit, prepare_probe, probe_details, read_manifest, script_details, script_status,
@@ -31,7 +31,7 @@ from app.legacy_adoption_mode import (
     adoption_execution_access, choose_initial_setup, later_adoption_blockers, require_initial_adoption,
     require_later_adoption, reserve_adoption,
 )
-from app.legacy_adoption_plan import create_plan, plan_directories, plan_moves, plan_status
+from app.legacy_adoption_plan import MAX_PLAN_ITEMS, create_plan, plan_directories, plan_moves, plan_status
 from app.legacy_adoption_registration import finalize_adoption
 from app.legacy_adoption_review import copy_review, review_cases, review_count
 from app.legacy_adoption_verify import plan_issues, reopen_plan
@@ -77,7 +77,7 @@ class EventDefinition(BaseModel):
 
 
 class Draft(BaseModel):
-    events: list[EventDefinition] = Field(default_factory=list, max_length=200)
+    events: list[EventDefinition] = Field(default_factory=list, max_length=MAX_PLAN_ITEMS)
     capture_overrides: dict[str, str] = Field(default_factory=dict, max_length=10000)
     exclude_families: list[str] = Field(default_factory=list, max_length=10000)
     target_stems: dict[str, str] = Field(default_factory=dict, max_length=10000)
@@ -218,31 +218,68 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             headers={"Cache-Control": "no-store"},
         )
 
+    def managed_roots():
+        return tuple(
+            Path(row[field]) for row in list_libraries(registry_path(), active_only=False, registered_only=True)
+            for field in ("archive_root", "workspace_root", "work_root", "database_path")
+        )
+
+    def source_evidence(library, path, roots):
+        try:
+            *_, evidence, read_only = qualify_source(library, path, other_managed_roots=roots)
+        except (AdoptionError, DatasetError) as error:
+            return {"dataset": None, "read_only": False, "reason": str(error)}
+        except OSError:
+            return {"dataset": None, "read_only": False, "reason": "Die Quelle ist nicht lesend erreichbar."}
+        return {"dataset": evidence["dataset"], "read_only": read_only, "reason": None}
+
+    @router.get("/sources")
+    def sources(request: Request):
+        library = context()
+        with _errors():
+            require_adoption(request, library)
+            roots = managed_roots()
+            choices = []
+            for key in ("nas", "saved"):
+                path = source_root_path(key)
+                if path is None:
+                    continue
+                try:
+                    with bound_directory(path):
+                        proof = source_evidence(library, path, roots)
+                except (AdoptionError, OSError):
+                    continue
+                # A NAS mount can contain a compatible subfolder. A generic
+                # backup root is only useful if the root itself is eligible.
+                if key == "nas" or (proof["dataset"] and proof["read_only"]):
+                    choices.append({"key": key, **proof})
+            preferred = next((item["key"] for item in choices if item["dataset"] and item["read_only"]), None)
+        return {"roots": choices, "preferred": preferred or (choices[0]["key"] if choices else None)}
+
     @router.get("/source")
     def source_folders(request: Request, root: Literal["nas", "saved"] = "nas", relative: str = ""):
+        library = context()
         with _errors():
-            require_adoption(request, context())
+            require_adoption(request, library)
             path = source_path(root, relative)
             with bound_directory(path) as descriptor, os.scandir(descriptor) as entries:
                 folders = sorted(
                     entry.name for entry in entries if not entry.name.startswith(".")
                     and entry.is_dir(follow_symlinks=False)
                 )
+            proof = source_evidence(library, path, managed_roots())
         rel = Path(relative)
         return {"path": str(path), "relative": "" if str(rel) == "." else str(rel),
                 "parent": None if not rel.parts else ("" if str(rel.parent) == "." else str(rel.parent)),
-                "folders": folders}
+                "folders": folders, **proof}
 
     @router.post("/jobs", status_code=201)
     def new_job(source: Source, request: Request):
         library = context()
         with _errors(), admission(library):
             require_adoption(request, library)
-            roots = tuple(
-                Path(row[field]) for row in list_libraries(registry_path(), active_only=False, registered_only=True)
-                for field in ("archive_root", "workspace_root", "work_root", "database_path")
-            )
-            identifier = create_job(library, source_path(source.root, source.relative), other_managed_roots=roots)
+            identifier = create_job(library, source_path(source.root, source.relative),
+                                    other_managed_roots=managed_roots())
             reserve_adoption(registry_path(), library.library_id, identifier,
                              access_kind="library" if is_later(request) else "initial")
         return {"id": identifier}

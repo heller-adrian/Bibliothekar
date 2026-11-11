@@ -29,9 +29,9 @@ def _overlaps(left: Path, right: Path) -> bool:
     return left == right or left in right.parents or right in left.parents
 
 
-def create_job(
+def qualify_source(
     library: LibraryContext, source: Path, *, other_managed_roots: tuple[Path, ...] = (),
-) -> str:
+):
     source = absolute_root(source)
     archive = absolute_root(library.archive_root)
     managed = (archive, library.workspace_root, library.work_root,
@@ -44,7 +44,16 @@ def create_job(
         if source_identity == archive_identity:
             raise AdoptionError("Bestandsquelle und Archiv bezeichnen denselben Ordner.")
         evidence = dataset.prove(source, archive, source_fd, archive_fd)
+        read_only = bool(os.fstatvfs(source_fd).f_flag & os.ST_RDONLY)
+    return source, archive, source_identity, archive_identity, evidence, read_only
 
+
+def create_job(
+    library: LibraryContext, source: Path, *, other_managed_roots: tuple[Path, ...] = (),
+) -> str:
+    source, archive, source_identity, archive_identity, evidence, _ = qualify_source(
+        library, source, other_managed_roots=other_managed_roots,
+    )
     job_id = uuid4().hex
     with database_connection(library.database_path) as connection:
         connection.execute(
