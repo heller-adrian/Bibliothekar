@@ -10,6 +10,10 @@ on:
         type: boolean
         default: false
         required: true
+      adoption_qa_run:
+        description: Successful full Backend QA run ID for this exact RC2 commit
+        type: string
+        default: ''
   workflow_call:
 
 permissions:
@@ -49,8 +53,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Require authorized ref and new release request for patch publishing
+      - name: Require an authorized release ref and trigger
         shell: bash
+        env:
+          ADOPTION_QA_INPUT: ${{ inputs.adoption_qa_run }}
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
@@ -58,6 +64,17 @@ jobs:
               if [[ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]]; then
                 echo 'Stable publishing requires explicit workflow dispatch from main.' >&2
                 exit 1
+              fi
+              ;;
+            refs/heads/patch/1.0.1-legacy-adoption)
+              test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
+              test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
+              [[ "$ADOPTION_QA_INPUT" =~ ^[0-9]+$ ]]
+              if git ls-remote --exit-code --tags origin 'refs/tags/v1.0.1-rc.2' >/dev/null; then
+                echo 'Release candidate tag already exists.' >&2
+                exit 1
+              else
+                test "$?" = 2
               fi
               ;;
             refs/heads/patch/*)
@@ -69,16 +86,6 @@ jobs:
                   grep -Eq '^\.github/release-requests/[^/]+\.txt$'; then
                 echo 'No added or modified release request in triggering commit.' >&2
                 exit 1
-              fi
-              if [[ "$GITHUB_REF" == 'refs/heads/patch/1.0.1-legacy-adoption' ]]; then
-                git diff-tree --root --no-commit-id --diff-filter=AM --name-only -r "$GITHUB_SHA" |
-                  grep -Fxq '.github/release-requests/v1.0.1-rc.1.txt'
-                if git ls-remote --exit-code --tags origin 'refs/tags/v1.0.1-rc.1' >/dev/null; then
-                  echo 'Release candidate tag already exists.' >&2
-                  exit 1
-                else
-                  test "$?" = 2
-                fi
               fi
               ;;
             *) echo "Unauthorized release ref: $GITHUB_REF" >&2; exit 1 ;;
@@ -140,27 +147,23 @@ jobs:
           print('APPROVED: 2634/2634 exact-case backend QA, container, frontend, preflight and coverage.')
           PY
           echo 'Verified source identity and successful GitHub qualification #42002573062.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Verify full backend qualification for the 1.0.1 source
+      - name: Verify full backend qualification for the exact RC2 commit
         if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          QA_SOURCE: ${{ github.sha }}
+          ADOPTION_QA_INPUT: ${{ inputs.adoption_qa_run }}
         run: |
           set -euo pipefail
-          request=.github/release-requests/v1.0.1-rc.1.txt
-          mapfile -t qualification < "$request"
-          test "${#qualification[@]}" = 3
-          test "${qualification[0]}" = 'v1.0.1-rc.1'
-          qa_source="${qualification[1]}"
-          qa_run="${qualification[2]}"
-          [[ "$qa_source" =~ ^[a-f0-9]{40}$ && "$qa_run" =~ ^[0-9]+$ ]]
-          test "$(git rev-parse HEAD^)" = "$qa_source"
-          test "$(git diff --name-only "$qa_source" HEAD)" = "$request"
+          qa_run="$ADOPTION_QA_INPUT"
+          [[ "$qa_run" =~ ^[0-9]+$ ]]
+          test "$(git rev-parse HEAD)" = "$QA_SOURCE"
           test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
           evidence="$RUNNER_TEMP/adoption-qualification"
           mkdir "$evidence"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$qa_run" > "$evidence/run.json"
-          attempt="$(jq -er --arg sha "$qa_source" '
+          attempt="$(jq -er --arg sha "$QA_SOURCE" '
             select(.status == "completed" and .conclusion == "success"
               and .path == ".github/workflows/qa-tests.yml"
               and .head_branch == "patch/1.0.1-legacy-adoption" and .head_sha == $sha
@@ -176,11 +179,10 @@ jobs:
           assert len(jobs) == len(required) and {job["name"] for job in jobs} == required
           assert all(job["status"] == "completed" and job["conclusion"] == "success" for job in jobs)
           PY
-          gh run download "$qa_run" --repo "$GITHUB_REPOSITORY" --name "backend-coverage-$attempt" --dir "$evidence"
-          jq -e --arg sha "$qa_source" '
-            .source == $sha and .status == "PASS" and .partitions == 8
-            and .collected > 0 and .collected == .tested_once and .read_only_mount == "PASS"
-          ' "$evidence/coverage-summary.json"
+          gh run download "$qa_run" --repo "$GITHUB_REPOSITORY" --pattern 'backend-qa-part-*' --dir "$evidence"
+          gh run download "$qa_run" --repo "$GITHUB_REPOSITORY" --name "backend-coverage-$attempt" --dir "$evidence/published"
+          python qa/release/verify_backend_coverage.py "$evidence" "$evidence/verified.json"
+          diff -u "$evidence/published/coverage-summary.json" "$evidence/verified.json"
           echo "ADOPTION_QA_RUN=$qa_run" >> "$GITHUB_ENV"
           echo "Verified complete backend and read-only mount qualification in run $qa_run." >> "$GITHUB_STEP_SUMMARY"
 
@@ -277,11 +279,10 @@ jobs:
       - name: Record published digest
         run: echo '${{ steps.publish.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify and publish the 1.0.1 release candidate
+      - name: Verify the immutable RC2 image with native ZFS
         if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption'
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
           IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
         run: |
@@ -290,28 +291,39 @@ jobs:
           test "$VERSION" = '1.0.1'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           [[ "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
-          tag='v1.0.1-rc.1'
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
-            echo "Release candidate tag already exists: $tag" >&2
-            exit 1
-          else
-            test "$?" = 2
-          fi
           image="$REGISTRY/$IMAGE_NAME"
-          bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh "$image@$IMAGE_DIGEST" "$GITHUB_SHA"
-          cat > "$RUNNER_TEMP/legacy-release-body.md" <<EOF
-          Bibliothekar 1.0.1 release candidate for manual or scripted adoption within one ZFS dataset.
+          evidence="$RUNNER_TEMP/adoption-qualification"
+          bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh "$image@$IMAGE_DIGEST" "$GITHUB_SHA" |
+            tee "$evidence/container-smoke.log"
+          jq -n --arg source "$GITHUB_SHA" --arg image "$image" --arg digest "$IMAGE_DIGEST" \
+            --arg qa_run "$ADOPTION_QA_RUN" --arg image_run "$GITHUB_RUN_ID" \
+            '{tag:"v1.0.1-rc.2", source:$source, image:$image, digest:$digest, qa_run:$qa_run, image_run:$image_run}' \
+            > "$evidence/qualified-image.json"
+          cat > "$evidence/release-notes.md" <<EOF
+          Bibliothekar 1.0.1 RC2 offers collection adoption during initial setup of an empty Main Library.
 
           Source commit: \`$GITHUB_SHA\`
           Test image: \`$image:patch-$VERSION-$GITHUB_SHA\`
           Verified image digest: \`$image@$IMAGE_DIGEST\`
 
           [Adoption guide](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/legacy-adoption.md)
-          [Backend QA and read-only bind mount](https://github.com/$GITHUB_REPOSITORY/actions/runs/$ADOPTION_QA_RUN)
-          [Container smoke](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)
+          [Full Backend QA](https://github.com/$GITHUB_REPOSITORY/actions/runs/$ADOPTION_QA_RUN)
+          [Container and ZFS checks](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)
           EOF
-          gh release create "$tag" --prerelease --latest=false --target "$GITHUB_SHA" \
-            --title "Bibliothekar $tag" --notes-file "$RUNNER_TEMP/legacy-release-body.md"
+
+      # Workflow-file changes require an authorized maintainer token when
+      # tagging this commit. The workflow token builds and verifies the image.
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption'
+        with:
+          name: rc2-qualified-image
+          path: |
+            ${{ runner.temp }}/adoption-qualification/qualified-image.json
+            ${{ runner.temp }}/adoption-qualification/verified.json
+            ${{ runner.temp }}/adoption-qualification/container-smoke.log
+            ${{ runner.temp }}/adoption-qualification/release-notes.md
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Publish stable GitHub release
         if: github.ref == 'refs/heads/main'

@@ -23,6 +23,8 @@ def open_request(client, request, *, expected, retry_busy=False, recovery_status
         except urllib.error.HTTPError as error:
             with error:
                 content = error.read().decode("utf-8", errors="replace")
+            if error.code == expected:
+                return content.encode("utf-8")
             try:
                 detail = json.loads(content)
             except ValueError:
@@ -52,7 +54,7 @@ def open_request(client, request, *, expected, retry_busy=False, recovery_status
             time.sleep(0.25)
 
 
-def smoke(container: str, source: Path, archive: Path, appdata: Path) -> None:
+def smoke(container: str, source: Path, archive: Path, appdata: Path, method: str) -> None:
     def address():
         return "http://" + subprocess.check_output(["docker", "port", container, "8080/tcp"], text=True).strip()
 
@@ -100,79 +102,98 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path) -> None:
     })["library"]
     assert library["library_id"] == "main"
     assert api("/api/health")["version"] == "1.0.1"
+    choice = request("/workspace")
+    assert "Hast du eine bestehende Fotosammlung?".encode() in choice
+    assert b'id="bk-settings-dialog"' not in choice
+    assert api("/api/jobs", expected=409)["code"] == "initial_setup_required"
+    assert api("/api/settings/event-folder-layout", expected=409)["code"] == "initial_setup_required"
+    if method == "skip":
+        assert api("/api/setup/adoption", method="POST", payload={"decision": "skipped"}) == {"next": "/"}
+        assert b'id="bk-settings-dialog"' in request("/")
+        assert api("/api/legacy-adoption/jobs", method="POST", expected=409, payload={"root": "nas"})[
+            "code"
+        ] == "legacy_adoption_inactive"
+        print("Explicit skip released normal access.")
+        return
+    assert api("/api/setup/adoption", method="POST", payload={"decision": "adopting"}) == {"next": "/legacy-adoption"}
     assert "Bestehende Fotosammlung übernehmen".encode() in request("/legacy-adoption")
-
-    for method, day in (("manual", "21"), ("script", "22")):
-        host_source = source / method
-        originals = {str(path.relative_to(host_source)): hashlib.sha256(path.read_bytes()).hexdigest()
-                     for path in host_source.rglob("*") if path.is_file()}
-        assert len(originals) == 2
-        job_id = api("/api/legacy-adoption/jobs", method="POST", expected=201,
-                     payload={"root": "nas", "relative": method})["id"]
-        job = "/api/legacy-adoption/jobs/" + job_id
-        api(job + "/scan", method="POST", expected=202)
-        for attempt in range(60):
-            state = api(job)
-            if state["state"] == "inventoried":
-                break
-            if state["scan_error"] or attempt == 59:
-                raise AssertionError(state)
-            time.sleep(1)
-        assert state["files"] == 2 and state["families"] == 1
-        assert state["dataset"]["dataset"].endswith("/media")
-        assert api(job + "/chronology") == [{"period": "2026", "families": 1, "review": 0}]
-        for relative, digest in originals.items():
-            assert hashlib.sha256((host_source / relative).read_bytes()).hexdigest() == digest
-        if method == "manual":
-            assert not list(archive.iterdir())
-        name = "Smoke " + method
-        draft = api(job + "/draft", method="PUT", payload={"revision": 0, "events": [{
-            "name": name, "start_date": "2026-07-" + day, "end_date": "2026-07-" + day,
-            "preserve_day_folders": True,
-        }]})
-        if method == "script":
-            subprocess.run(["docker", "restart", container], check=True)
-            base = address()
-            wait_ready()
-            login()
-            resumed = api(job)
-            assert resumed["draft_revision"] == draft["revision"] and resumed["draft"]["events"][0]["name"] == name
-            assert b'id="safety"' in request("/")
-            assert resumed["id"] == job_id
-        plan = api(job + "/plan", method="POST", payload={"revision": draft["revision"]})
-        api(job + "/documents", method="POST")
-        command = {"plan_id": plan["id"]}
-        confirmation = {**command, "method": method, "acknowledged": True}
-        if method == "script":
-            probe = api(job + "/script/probe", method="POST", payload={
-                **command, "appdata": str(appdata), "source": str(host_source), "archive": str(archive),
-            })
-            subprocess.run(["sudo", "-n", "/bin/bash", "-c", probe["command"]], check=True)
-            assert api(job + "/script/probe")["verified"]
-            confirmation["probe_sha256"] = probe["sha256"]
-        api(job + "/confirm", method="POST", payload=confirmation)
-        moves = api(job + "/moves")
-        if method == "manual":
-            for artifact in ("folders", "documents"):
-                with ZipFile(BytesIO(request(job + "/download/" + artifact))) as package:
-                    package.extractall(archive)
-            for move in moves:
-                original = source / Path(move["source"]).relative_to("/sources/nas")
-                target = archive / Path(move["target"]).relative_to("/main-library")
-                original.rename(target)
-        else:
-            shell = api(job + "/script/release", method="POST", payload=command)["command"]
-            subprocess.run(["sudo", "-n", "/bin/bash", "-c", shell], check=True)
-            assert api(job + "/script")["status"]["state"] == "completed"
+    day = "21" if method == "manual" else "22"
+    host_source = source
+    originals = {str(path.relative_to(host_source)): hashlib.sha256(path.read_bytes()).hexdigest()
+                 for path in host_source.rglob("*") if path.is_file()}
+    assert len(originals) == 2
+    job_id = api("/api/legacy-adoption/jobs", method="POST", expected=201,
+                 payload={"root": "nas"})["id"]
+    job = "/api/legacy-adoption/jobs/" + job_id
+    api(job + "/scan", method="POST", expected=202)
+    for attempt in range(60):
+        state = api(job)
+        if state["state"] == "inventoried":
+            break
+        if state["scan_error"] or attempt == 59:
+            raise AssertionError(state)
+        time.sleep(1)
+    assert state["files"] == 2 and state["families"] == 1
+    assert state["dataset"]["dataset"].endswith("/media")
+    assert api(job + "/chronology") == [{"period": "2026", "families": 1, "review": 0}]
+    for relative, digest in originals.items():
+        assert hashlib.sha256((host_source / relative).read_bytes()).hexdigest() == digest
+    assert not list(archive.iterdir())
+    name = "Smoke " + method
+    draft = api(job + "/draft", method="PUT", payload={"revision": 0, "events": [{
+        "name": name, "start_date": "2026-07-" + day, "end_date": "2026-07-" + day,
+        "preserve_day_folders": True,
+    }]})
+    if method == "script":
+        subprocess.run(["docker", "restart", container], check=True)
+        base = address()
+        wait_ready()
+        login()
+        resumed = api(job)
+        assert resumed["draft_revision"] == draft["revision"] and resumed["draft"]["events"][0]["name"] == name
+        assert b'id="safety"' in request("/")
+        assert resumed["id"] == job_id
+    plan = api(job + "/plan", method="POST", payload={"revision": draft["revision"]})
+    api(job + "/documents", method="POST")
+    command = {"plan_id": plan["id"]}
+    confirmation = {**command, "method": method, "acknowledged": True}
+    if method == "script":
+        probe = api(job + "/script/probe", method="POST", payload={
+            **command, "appdata": str(appdata), "source": str(host_source), "archive": str(archive),
+        })
+        subprocess.run(["sudo", "-n", "/bin/bash", "-c", probe["command"]], check=True)
+        assert api(job + "/script/probe")["verified"]
+        confirmation["probe_sha256"] = probe["sha256"]
+    api(job + "/confirm", method="POST", payload=confirmation)
+    assert api("/api/setup/adoption", method="POST", expected=409, payload={"decision": "skipped"})[
+        "code"
+    ] == "legacy_adoption_active"
+    moves = api(job + "/moves")
+    if method == "manual":
+        for artifact in ("folders", "documents"):
+            with ZipFile(BytesIO(request(job + "/download/" + artifact))) as package:
+                package.extractall(archive)
         for move in moves:
+            original = source / Path(move["source"]).relative_to("/sources/nas")
             target = archive / Path(move["target"]).relative_to("/main-library")
-            assert hashlib.sha256(target.read_bytes()).hexdigest() == move["sha256"]
-        assert api(job + "/verify", method="POST", payload=command)["state"] == "verified"
-        assert api(job + "/finalize", method="POST", payload=command)["state"] == "completed"
-        assert api(job + "/finalize", method="POST", payload=command,
-                   repeat_finalize=True)["state"] == "completed"
-    print("Manual and scripted adoption passed with native ZFS and separate read-only container mounts.")
+            original.rename(target)
+    else:
+        shell = api(job + "/script/release", method="POST", payload=command)["command"]
+        subprocess.run(["sudo", "-n", "/bin/bash", "-c", shell], check=True)
+        assert api(job + "/script")["status"]["state"] == "completed"
+    for move in moves:
+        target = archive / Path(move["target"]).relative_to("/main-library")
+        assert hashlib.sha256(target.read_bytes()).hexdigest() == move["sha256"]
+    assert api(job + "/verify", method="POST", payload=command)["state"] == "verified"
+    assert api(job + "/finalize", method="POST", payload=command)["state"] == "completed"
+    assert api(job + "/finalize", method="POST", payload=command,
+               repeat_finalize=True)["state"] == "completed"
+    assert b'id="bk-settings-dialog"' in request("/workspace")
+    assert api("/api/legacy-adoption/jobs", method="POST", expected=409, payload={"root": "nas"})[
+        "code"
+    ] == "legacy_adoption_inactive"
+    print(f"{method} adoption passed with native ZFS and separate read-only container mounts.")
 
 
 if __name__ == "__main__":
-    smoke(sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4]))
+    smoke(sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3]), Path(sys.argv[4]), sys.argv[5])

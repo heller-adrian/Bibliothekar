@@ -94,23 +94,28 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           from app.events_ui import EVENTS_HTML
-          from app.ui_shell import BIBLIOTHEKAR_JS
+          from app.ui_shell import BIBLIOTHEKAR_JS, FOLDER_LAYOUT_JS
+          from app.main import _library_onboarding_html
           from app.legacy_adoption_i18n import PATTERNS
-          from app.legacy_adoption_ui import wizard_html
+          from app.legacy_adoption_ui import setup_choice_html, wizard_html
           import json
           import re
           scripts=re.findall(r'<script[^>]*>(.*?)</script>',EVENTS_HTML,flags=re.S)
           assert scripts
           Path("/tmp/bibliothekar-events.js").write_text("\n".join(scripts))
-          Path("/tmp/bibliothekar-shell.js").write_text(BIBLIOTHEKAR_JS)
-          scripts = re.findall(r"<script>(.*?)</script>", wizard_html("main"), re.S)
-          assert len(scripts) == 3
-          Path("/tmp/bibliothekar-adoption.js").write_text("\n".join(scripts))
+          Path("/tmp/bibliothekar-shell.js").write_text(FOLDER_LAYOUT_JS + "\n" + BIBLIOTHEKAR_JS)
+          for name, html in (("adoption", wizard_html("main")), ("choice", setup_choice_html("choice")),
+                             ("onboarding", _library_onboarding_html())):
+              scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
+              assert scripts
+              Path(f"/tmp/bibliothekar-{name}.js").write_text("\n".join(scripts))
           Path("/tmp/bibliothekar-adoption-patterns.json").write_text(json.dumps(PATTERNS))
           PY
           node --check /tmp/bibliothekar-shell.js
           node --check /tmp/bibliothekar-events.js
           node --check /tmp/bibliothekar-adoption.js
+          node --check /tmp/bibliothekar-choice.js
+          node --check /tmp/bibliothekar-onboarding.js
           node -e 'for (const [source] of require("/tmp/bibliothekar-adoption-patterns.json")) new RegExp(source, "u")'
       - name: Verify adoption including the kernel read-only bind mount
         if: steps.scope.outputs.request-only != 'true'
@@ -123,6 +128,7 @@ jobs:
             "tests/backend/test_legacy_adoption_host.py",
             "tests/backend/test_legacy_adoption_plan.py",
             "tests/backend/test_legacy_adoption_integration.py",
+            "tests/backend/test_rc2_archive_finish_recovery.py",
             "tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.hash_chunk]",
             "tests/backend/test_f12_no_clobber.py::test_real_sigkill_around_atomic_publication_and_three_startups[import.publish_before]"
           ]
