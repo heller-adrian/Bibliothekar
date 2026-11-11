@@ -14374,6 +14374,10 @@ async def adoption_access_middleware(request: Request, call_next):
     method = request.method
     start = (method, path) == ("POST", "/api/legacy-adoption/jobs")
     decision = (method, path) == ("POST", "/api/setup/adoption")
+    later_entry = request.query_params.get("mode") == "library" and (
+        start or (method == "GET" and path in {"/legacy-adoption", "/api/legacy-adoption/source"})
+    )
+    eligibility = (method, path) == ("GET", "/api/legacy-adoption/eligibility")
     exclusive = start or decision or (method, path) == ("POST", "/api/libraries")
     try:
         async with contextmanager_in_threadpool(adoption_access(REGISTRY_DATABASE_FILE, exclusive=exclusive)) as active:
@@ -14384,7 +14388,10 @@ async def adoption_access_middleware(request: Request, call_next):
             decision_path = path in {"/setup/adoption", "/api/setup/adoption"}
             if active:
                 wizard = "/legacy-adoption?" + urlencode({"library": active["library_id"], "job": active["job_id"]})
-                recovery_only = setup is None or active["library_id"] != setup["library_id"]
+                later = active["access_kind"] == "library" and setup is None
+                initial = setup is not None and active["library_id"] == setup["library_id"]
+                recovery_only = not (later or initial)
+                request.state.legacy_adoption_later = later
                 request.state.legacy_adoption_recovery = recovery_only
                 job_path = "/api/legacy-adoption/jobs/" + active["job_id"]
                 if path == "/legacy-adoption" and read:
@@ -14404,9 +14411,11 @@ async def adoption_access_middleware(request: Request, call_next):
                 code = "legacy_adoption_recovery_only" if recovery_only and adoption_path else "legacy_adoption_active"
             elif setup:
                 wizard = "/setup/adoption" if setup["decision"] == "choice" else "/legacy-adoption"
-                if (method == "GET" and path == "/setup/adoption") or decision:
+                if (method == "GET" and path == "/setup/adoption") or decision or (
+                    method == "POST" and path == "/api/settings/storage-replace"
+                ):
                     return await call_next(request)
-                if setup["decision"] == "adopting" and (
+                if setup["decision"] == "adopting" and not later_entry and (
                     start or (method == "GET" and path in {"/legacy-adoption", "/api/legacy-adoption/source"})
                 ):
                     if path == "/legacy-adoption" and request.query_params.get("job"):
@@ -14414,6 +14423,13 @@ async def adoption_access_middleware(request: Request, call_next):
                     return await call_next(request)
                 code = "initial_setup_required"
             elif adoption_path or decision_path:
+                if later_entry or eligibility:
+                    request.state.legacy_adoption_later = True
+                    if path == "/legacy-adoption" and request.query_params.get("job"):
+                        return RedirectResponse("/legacy-adoption?" + urlencode({
+                            "library": _requested_library_id(request), "mode": "library",
+                        }), status_code=303)
+                    return await call_next(request)
                 # The exact completion request can be repeated after a lost
                 # response. It cannot create a job or change the plan.
                 if method == "POST" and path.startswith("/api/legacy-adoption/jobs/") and path.endswith("/finalize"):

@@ -72,7 +72,7 @@ def _adopt(client):
 
 
 def test_first_setup_choice_blocks_regular_work_and_skip_is_permanent(fresh_main):
-    from app.ui_shell import _shell_markup
+    from app.ui_shell import BIBLIOTHEKAR_JS
 
     client = _onboard(fresh_main)
     for path in ("/", "/workspace?library=second", "/transfer", "/?settings=libraries", "/legacy-adoption"):
@@ -96,9 +96,11 @@ def test_first_setup_choice_blocks_regular_work_and_skip_is_permanent(fresh_main
     restarted = TestClient(main.app, follow_redirects=False)
     assert restarted.get("/workspace").headers["location"] == "/setup/adoption"
     assert _json(restarted, "POST", "/api/setup/adoption", json={"decision": "skipped"}) == {"next": "/"}
+    main.ADOPTION_STARTUP_THREAD.join(timeout=10)
+    assert not main.ADOPTION_STARTUP_THREAD.is_alive()
     assert restarted.get("/").status_code == 200
     assert restarted.get("/legacy-adoption").headers["location"] == "/"
-    assert "bk-legacy-adoption" not in _shell_markup("workspace", "media")
+    assert "data-bk-library-adopt" in BIBLIOTHEKAR_JS
     second_archive = fresh_main[3].with_name("second-archive")
     second_archive.mkdir()
     second = _json(restarted, "POST", "/api/libraries", status=201, json={
@@ -128,6 +130,56 @@ def test_existing_catalogue_blocks_adoption_and_is_preserved(fresh_main):
         assert tuple(connection.execute("SELECT id, name, revision FROM events").fetchone()) == (
             "EXISTING", "Urlaub", 1,
         )
+
+
+def test_later_adoption_rechecks_incomplete_library_and_operations(ready):
+    from app.root_operations import reserve
+    from tests.backend.test_legacy_adoption_plan import _existing
+
+    _, workspace, registry, databases, _ = ready
+    library = resolve_library_context(registry, "second")
+    _existing(library)
+    client = TestClient(main.app, follow_redirects=False)
+    api = "/api/legacy-adoption"
+    wizard = "/legacy-adoption?library=second&mode=library"
+
+    def blockers():
+        return _json(client, "GET", api + "/eligibility", library="second")["blockers"]
+
+    def blocked_start():
+        assert client.get(wizard).status_code == 409
+        _json(client, "POST", api + "/jobs?mode=library", library="second", status=409, json={"root": "nas"})
+
+    assert blockers() == []
+    assert client.get(wizard).status_code == 200
+    for status in ("planned", "applied"):
+        with database_connection(databases[1]) as connection:
+            connection.execute("UPDATE events SET status = ?", (status,))
+        assert any("Urlaub" in item for item in blockers())
+        blocked_start()
+    with database_connection(databases[1]) as connection:
+        connection.execute("UPDATE events SET status = 'archived'")
+        connection.execute(
+            """INSERT INTO event_change_requests (
+                 id, event_id, job_id, event_name, notes, parent_folder, start_date, end_date, selected_family_ids,
+                 proposed_at, created_at, updated_at
+               ) VALUES ('pending', 'EXISTING', 'old', 'Urlaub', '', 'Urlaub', '2026', '2026', '[]', 'now', 'now', 'now')"""
+        )
+    assert blockers() == ["Schließe offene Archivänderungen ab."]
+    blocked_start()
+    with database_connection(databases[1]) as connection:
+        connection.execute("UPDATE event_change_requests SET status = 'aenderbar_abgebrochen'")
+        connection.execute("UPDATE jobs SET state = 'queued'")
+    assert blockers() == ["Schließe offene Import- und Hintergrundaufträge ab."]
+    blocked_start()
+    with database_connection(databases[1]) as connection:
+        connection.execute("UPDATE jobs SET state = 'completed'")
+    with reserve(workspace, library_id="second", database=databases[1], kind="synthetic-adoption-blocker"):
+        assert blockers() == ["Schließe laufende Vorgänge oder offene Wiederherstellungen ab."]
+        blocked_start()
+    assert blockers() == []
+    with database_connection(databases[1]) as connection:
+        assert connection.execute("SELECT count(*) FROM legacy_adoption_jobs").fetchone()[0] == 0
 
 
 def test_first_setup_uses_the_normal_authentication_and_csrf_guard(fresh_main, monkeypatch):
@@ -184,7 +236,8 @@ def test_rc1_registry_upgrade_keeps_active_job_for_recovery_only(
     reserve_adoption(registry, library.library_id, job_id)
     with database_connection(registry) as connection:
         connection.execute("DROP TABLE initial_library_setup")
-        connection.execute("DELETE FROM registry_schema_versions WHERE version = 7")
+        connection.execute("ALTER TABLE legacy_adoption_active DROP COLUMN access_kind")
+        connection.execute("DELETE FROM registry_schema_versions WHERE version >= 7")
     initialize_library_registry(registry)
     assert pending_initial_setup(registry) is None
     client = TestClient(main.app, follow_redirects=False)
@@ -231,7 +284,9 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
     monkeypatch.setattr(
         "app.legacy_adoption_inventory.read_bound_metadata",
         lambda descriptors, _cancel: {
-            fd: {"EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00"} for fd in descriptors
+            fd: {"EXIF:ExifIFD:DateTimeOriginal":
+                 "2026:07:25 12:00:00" if os.pread(fd, 7, 0) == b"outside" else "2026:07:21 12:00:00"}
+            for fd in descriptors
         },
     )
     client = _onboard(fresh_main)
@@ -269,7 +324,7 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
     revision = _json(client, "PUT", job + "/draft", json={**draft, "revision": 0})["revision"]
     assert revision == 1
     assert _json(other, "GET", job)["draft"]["events"][0]["name"] == "Synthetisch"
-    _json(other, "PUT", job + "/draft", json={"revision": revision, "events": [{"existing_id": "archive"}]}, status=422)
+    _json(other, "PUT", job + "/draft", json={"revision": revision, "events": [{"existing_id": "archive"}]}, status=409)
     _json(other, "POST", "/api/setup/adoption", json={"decision": "skipped"}, status=409)
     _json(other, "PUT", job + "/draft", json={**draft, "revision": 0}, status=409)
     _json(other, "POST", job + "/plan", json={"revision": 0}, status=409)
@@ -333,13 +388,65 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
     assert Path(move["target"]).read_bytes() == b"synthetic RAW bytes"
 
 
+    # A second collection extends the same event after the initial setup has completed.
+    from app.event_inventory import event_root_relative
+    original_document = library.archive_root / event_root_relative(plan["events"][0]) / "event.json"
+    previous_document = original_document.read_bytes()
+    added = source / "extra.raf"
+    added.write_bytes(b"second collection RAW bytes")
+    (source / "same-photo.raf").write_bytes(b"synthetic RAW bytes")
+    (source / "outside.raf").write_bytes(b"outside the saved period")
+    assert _json(client, "GET", api + "/eligibility") == {"eligible": True, "blockers": []}
+    assert client.get("/legacy-adoption?mode=library").status_code == 200
+    second_id = _json(client, "POST", api + "/jobs?mode=library", status=201, json={"root": "nas"})["id"]
+    second_job = api + "/jobs/" + second_id
+    assert pending_initial_setup(registry) is None
+    assert client.get("/workspace").headers["location"].endswith("job=" + second_id)
+    _json(client, "POST", second_job + "/scan", status=202)
+    matches = _json(client, "GET", second_job + "/events?day=2026-07-21")
+    assert [item["id"] for item in matches] == [event_id]
+    assert _json(client, "GET", second_job + "/events?day=2026-07-22") == []
+    extension = {"events": [{"existing_id": event_id}]}
+    assert _json(client, "POST", second_job + "/draft/check", json=extension)["events"][0]["families"] == 2
+    saved = _json(client, "PUT", second_job + "/draft", json={**extension, "revision": 0})
+    second_plan = _json(client, "POST", second_job + "/plan", json={"revision": saved["revision"]})
+    assert second_plan["events"][0]["id"] == event_id and second_plan["counts"]["duplicate"] == 1
+    assert second_plan["move_files"] == second_plan["move_families"] == 1
+    assert any(item["family_key"] == "outside" and "unassigned_event" in item["reasons"]
+               for item in _json(client, "GET", second_job + "/review"))
+    assert original_document.read_bytes() == previous_document
+    _json(client, "POST", second_job + "/documents")
+    second_command = {"plan_id": second_plan["id"]}
+    _json(client, "POST", second_job + "/confirm",
+          json={**second_command, "method": "manual", "acknowledged": True})
+    for item in ("folders", "documents"):
+        response = client.get(second_job + "/download/" + item)
+        assert response.status_code == 200
+        with ZipFile(BytesIO(response.content)) as archive:
+            archive.extractall(library.archive_root)
+    [extra_move] = [item for item in _json(client, "GET", second_job + "/moves") if item["target"]]
+    added.rename(extra_move["target"])
+    assert _json(client, "POST", second_job + "/verify", json=second_command)["state"] == "verified"
+    assert _json(client, "POST", second_job + "/finalize", json=second_command)["state"] == "completed"
+    assert _json(client, "POST", second_job + "/finalize", json=second_command)["state"] == "completed"
+    assert pending_initial_setup(registry) is None and client.get("/").status_code == 200
+    assert Path(move["target"]).read_bytes() == b"synthetic RAW bytes"
+    assert (source / "same-photo.raf").read_bytes() == b"synthetic RAW bytes"
+    assert (source / "outside.raf").read_bytes() == b"outside the saved period"
+    assert original_document.read_bytes() != previous_document
+    with database_connection(database) as connection:
+        extended_rows = event_file_rows(connection, event_id)
+        assert {row["id"] for row in extended_rows} >= {media_row["id"]}
+        assert len(extended_rows) == 2
+        period = connection.execute("SELECT start_datetime, end_datetime FROM events WHERE id = ?", (event_id,)).fetchone()
+        assert tuple(period) == ("2026-07-21T00:00:00", "2026-07-21T23:59:59")
+
     # Open, edit and delete through the same tools used by standard events.
     import shutil
     from app.archive_change_assistant import build_archive_change_assistant
     from app.archive_release_stock import verify_archive_release_copies, verify_archive_release_removal
     from app.event_change_apply import confirm_event_change, finish_event_change, verify_event_change
     from app.event_change_request import get_event_change_files, propose_archived_event_deletion, propose_event_change
-    from app.event_inventory import event_root_relative
     from app.workspace_layout import backup_root
 
     anchor_job = catalogue_job_id(plan)
@@ -350,7 +457,7 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
         "event_kind": "event", "event_name": "Umbenannt", "parent_folder": renamed, "child_folder": "",
         "uses_time_range": False, "preserve_day_folders": True, "start_date": "2026-07-21",
         "end_date": "2026-07-21", "start_time": "00:00", "end_time": "23:59",
-        "selected_day_keys": ["2026-07-21"], "selected_family_ids": [media_row["family_id"]],
+        "selected_day_keys": ["2026-07-21"], "selected_family_ids": [row["family_id"] for row in extended_rows],
         "_folder_layout_explicit": True, "folder_layout": event["folder_layout"],
     }
     request = propose_event_change(database, anchor_job, event_id, preview, event_name="Umbenannt",
@@ -479,6 +586,28 @@ def test_script_host_proof_release_and_independent_archive_verification(
     _json(client, "POST", job + "/documents")
     command = {"plan_id": plan["id"]}
     library = resolve_library_context(registry, "main")
+    # Test automatic discovery against synthetic Docker metadata. The real
+    # Linux/ZFS container run executes the returned shell command itself.
+    from app import legacy_adoption_discover as discovery
+
+    auto = _json(client, "POST", job + "/script/probe", json=command)
+    assert auto["host"] is None and not auto["verified"]
+    package_root = appdata / "legacy-adoption" / job_id
+    assert {path.name for path in package_root.iterdir()} >= {"probe.json", "execution.lock", "journal.jsonl"}
+    config = json.loads(shlex.split(auto["command"])[-1])
+    mounts = [{"Destination": str(path), "Source": str(path), "Type": "bind"}
+              for path in (appdata, source, library.archive_root)]
+    monkeypatch.setattr(discovery, "load_runner", lambda *_: host)
+    if sys.platform == "darwin":
+        monkeypatch.setattr(host, "probe_roots", lambda *args: None)
+    with pytest.raises(ValueError, match="complete host mapping"):
+        discovery.main(config, [mounts[:-1]])
+    assert not _json(client, "GET", job + "/script/probe")["verified"]
+    discovery.main(config, [mounts])
+    proved = _json(client, "GET", job + "/script/probe")
+    assert proved["verified"] and proved["host"]["package"] == str(package_root)
+    assert proved["dataset"] == "synthetic/test"
+    assert original.read_bytes() == b"synthetic script photo"
     probe = _json(client, "POST", job + "/script/probe", json={
         **command, "appdata": str(appdata), "source": str(source), "archive": str(library.archive_root),
     })

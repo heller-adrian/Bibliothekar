@@ -4,6 +4,45 @@ import re
 
 
 TRANSLATIONS = {
+    "Schließe laufende Vorgänge oder offene Wiederherstellungen ab.": "Finish active operations or resolve pending recovery.",
+    "Schließe offene Archivänderungen ab.": "Finish open archive changes.",
+    "Schließe offene Import- und Hintergrundaufträge ab.": "Finish pending imports and background jobs.",
+    "Noch nicht vollständig archivierte Ereignisse": "Events that still need to be archived",
+    "Zurück zu den Bibliotheken": "Back to libraries",
+    "Zu bestehendem Ereignis hinzufügen": "Add to existing event",
+    "Archivereignis ergänzen": "Extend archived event",
+    "Aufnahmen innerhalb des gespeicherten Zeitraums zugeordnet.": "Assigned the media within the event’s saved time range.",
+
+    "Zu übernehmende Dateien": "Files to adopt",
+    "Dateifamilien im Verschiebeplan": "File families to move",
+    "Datenvolumen": "Data volume",
+    "Neue Ereignisse und Sammelordner": "New events and collection folders",
+    "Zu ergänzende Archivereignisse": "Archived events to extend",
+    "Offene Prüffälle": "Items to review",
+    "Duplikate bleiben an der Quelle": "Duplicates remain at the source",
+    "Duplikate sind bereits registriert oder in diesem Plan mit identischem Inhalt enthalten.": "Duplicates are already registered or have identical content to another file in this plan.",
+    "Technische Plandetails": "Technical plan details",
+    "Bestätigtes Skriptmanifest": "Confirmed script manifest",
+    "TrueNAS-Shell-Befehl": "TrueNAS shell command",
+    "Skript vorbereiten": "Prepare script",
+    "Bestätigte Hostpfade": "Verified host paths",
+    "Hostpfade und gemeinsames ZFS-Dataset bestätigt.": "Host paths and shared ZFS dataset verified.",
+    "Führe den Prüfbefehl in der TrueNAS-Shell aus und lies den Nachweis anschließend ein. Die Prüfung verschiebt keine Dateien.":
+        "Run the check command in the TrueNAS shell, then read the proof. The check moves no files.",
+    "Der Hostnachweis fehlt. Prüfe die Ausgabe in der TrueNAS-Shell oder verwende die technische Pfadzuordnung.":
+        "The host proof is missing. Check the output in the TrueNAS shell or use the manual host mapping.",
+    "Technischer Ausnahmeweg: Hostpfade manuell zuordnen": "Technical fallback: map host paths manually",
+    "Verwende diesen Weg, wenn Docker die Hostpfade nicht eindeutig ermitteln kann.": "Use this option if Docker cannot identify the host paths.",
+    "Manuelle Hostpfadprüfung vorbereiten": "Prepare manual host check",
+    "Erweiterte Details zu Skript und Prüfung": "Advanced script and verification details",
+    "Starte den Prüfbefehl selbst in der TrueNAS-Shell. Bibliothekar verwendet die bereits ausgewählte Quelle und das Zielarchiv.":
+        "Run the check command yourself in the TrueNAS shell. Bibliothekar uses the selected source and target archive.",
+    "Nach dieser Bestätigung müssen die geplanten Verschiebungen abgeschlossen, überprüft oder kontrolliert rückgängig gemacht werden.":
+        "After confirmation, complete and verify the planned moves or follow the rollback procedure.",
+    "Quelle und Ziel müssen auf demselben ZFS-Dataset liegen. Führe währenddessen keine weiteren Änderungen am Archiv durch.":
+        "The source and target must be on the same ZFS dataset. Leave the rest of the archive unchanged during the transfer.",
+    "Führe zuerst die Host- und Dataset-Prüfung durch.": "Complete the host and dataset check first.",
+
     "Ersteinrichtung · Bibliothekar": "Initial setup · Bibliothekar",
     "Hauptbibliothek einrichten": "Set up your main library",
     "Hast du eine bestehende Fotosammlung?": "Do you have an existing photo collection?",

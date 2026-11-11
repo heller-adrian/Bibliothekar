@@ -132,6 +132,22 @@ def test_new_plan_rejects_extension_and_existing_catalogue(inventory):
         assert connection.execute("SELECT count(*) FROM event_assignments").fetchone()[0] == 0
 
 
+def test_later_extension_rejects_collision_with_archived_original(inventory):
+    context, source, registry = inventory
+    event_id = _existing(context)
+    archived = context.archive_root / "2026" / "Urlaub" / "Alle" / "same.raf"
+    archived.parent.mkdir()
+    archived.write_bytes(b"archived original")
+    (source / "same.raf").write_bytes(b"different capture with the same name")
+    job = _scan(context, source)
+    with pytest.raises(AdoptionError, match="Zieldatei existiert bereits"):
+        create_plan(context, registry, job, {"events": [{"existing_id": event_id}]}, allow_existing=True)
+    assert archived.read_bytes() == b"archived original"
+    assert (source / "same.raf").read_bytes() == b"different capture with the same name"
+    with database_connection(context.database_path) as connection:
+        assert connection.execute("SELECT count(*) FROM legacy_adoption_plans").fetchone()[0] == 0
+
+
 def _frozen_rc1_extension(context, registry, job, *, existing_media=False):
     """Build the persisted RC1 projection that verification must still understand."""
     import hashlib

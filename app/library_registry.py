@@ -11,7 +11,7 @@ import os
 import sqlite3
 
 
-REGISTRY_SCHEMA_VERSION = 7
+REGISTRY_SCHEMA_VERSION = 8
 MAIN_LIBRARY_ID = "main"
 
 
@@ -200,6 +200,11 @@ REGISTRY_MIGRATIONS: dict[int, str] = {
             library_id TEXT NOT NULL REFERENCES libraries(library_id) ON DELETE CASCADE,
             decision TEXT NOT NULL CHECK (decision IN ('choice', 'adopting', 'skipped'))
         );
+    """,
+    8: """
+        ALTER TABLE legacy_adoption_active ADD COLUMN access_kind TEXT NOT NULL DEFAULT 'legacy'
+            CHECK (access_kind IN ('legacy', 'initial', 'library'));
+        ALTER TABLE initial_library_setup ADD COLUMN completed_plan_id TEXT REFERENCES legacy_adoption_receipts(plan_id);
     """,
 }
 
@@ -583,7 +588,7 @@ def register_library(
         )
         if initial_setup:
             connection.execute(
-                "INSERT INTO initial_library_setup VALUES (1, ?, 'choice')", (clean_id,),
+                "INSERT INTO initial_library_setup (singleton, library_id, decision) VALUES (1, ?, 'choice')", (clean_id,),
             )
         connection.commit()
     except sqlite3.IntegrityError as error:

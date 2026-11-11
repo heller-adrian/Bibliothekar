@@ -26,7 +26,7 @@ for method in manual script skip; do
   sudo install -d -m 0750 -o 568 -g 568 "$install_root/appdata" "$install_root/workspace"
   if [[ "$method" != skip ]]; then
     if [[ "$method" == manual ]]; then day=21; else day=22; fi
-    directory="$source/old-folders/camera/import"
+    directory="$source/first/old-folders/camera/import"
     mkdir -p "$directory"
     printf 'synthetic raw for %s\n' "$method" > "$directory/sample.raf"
     cat > "$directory/sample.xmp" <<XML

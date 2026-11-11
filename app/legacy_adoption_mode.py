@@ -24,7 +24,7 @@ def adoption_reservation(registry_path):
         ).fetchone() is None:
             return None
         reservation = registry.execute(
-            """SELECT a.job_id, a.library_id, l.database_path
+            """SELECT a.*, l.database_path
                  FROM legacy_adoption_active a LEFT JOIN libraries l USING (library_id)
                 WHERE a.singleton = 1""",
         ).fetchone()
@@ -42,7 +42,10 @@ def adoption_reservation(registry_path):
         ).fetchone()
     if job is None:
         raise AdoptionError("Der aktive Übernahmeauftrag ist in der Bibliotheksdatenbank nicht verfügbar.")
-    return {"job_id": reservation["job_id"], "library_id": reservation["library_id"], **dict(job)}
+    return {
+        "job_id": reservation["job_id"], "library_id": reservation["library_id"],
+        "access_kind": dict(reservation).get("access_kind", "legacy"), **dict(job),
+    }
 
 
 def active_adoption(registry_path):
@@ -61,20 +64,25 @@ def pending_initial_setup(registry_path):
             "SELECT 1 FROM sqlite_master WHERE name = 'initial_library_setup' AND type = 'table'",
         ).fetchone():
             return None
-        setup = registry.execute("SELECT library_id, decision FROM initial_library_setup").fetchone()
+        setup = registry.execute("SELECT * FROM initial_library_setup").fetchone()
         if setup is None or setup["decision"] == "skipped":
             return None
         if setup["decision"] == "adopting":
-            reservation = adoption_reservation(registry_path)
-            if reservation and reservation["plan_state"] == "completed":
-                receipt = registry.execute(
+            completed = dict(setup).get("completed_plan_id")
+            if completed is None:
+                reservation = adoption_reservation(registry_path)
+                if (reservation and reservation["access_kind"] != "library"
+                        and reservation["library_id"] == setup["library_id"]
+                        and reservation["plan_state"] == "completed"):
+                    completed = reservation["plan_id"]
+            if completed:
+                if not registry.execute(
                     "SELECT 1 FROM legacy_adoption_receipts WHERE plan_id = ? AND library_id = ?",
-                    (reservation["plan_id"], setup["library_id"]),
-                ).fetchone()
-                if reservation["library_id"] != setup["library_id"] or not receipt:
+                    (completed, setup["library_id"]),
+                ).fetchone():
                     raise AdoptionError("Der Abschlussnachweis der Ersteinrichtung fehlt.")
                 return None
-        return dict(setup)
+        return {"library_id": setup["library_id"], "decision": setup["decision"]}
 
 
 def require_no_managed_data(connection):
@@ -121,17 +129,68 @@ def adoption_access(registry_path, *, exclusive=False):
         yield active_adoption(path)
 
 
-def reserve_adoption(registry_path, library_id, job_id):
+def reserve_adoption(registry_path, library_id, job_id, *, access_kind="legacy"):
     """Caller holds the exclusive access lock through job creation and reservation."""
-    if active_adoption(registry_path) is not None:
+    previous = adoption_reservation(registry_path)
+    if previous and previous["state"] != "discarded" and previous["plan_state"] != "completed":
         raise AdoptionError("Es ist bereits eine Bestandsübernahme aktiv.")
     with source_registry_transaction(registry_path) as registry:
+        if (access_kind == "library" and previous and previous["access_kind"] != "library"
+                and previous["plan_state"] == "completed"):
+            # Seal a pre-upgrade setup receipt before replacing the singleton.
+            registry.execute(
+                """UPDATE initial_library_setup SET completed_plan_id = ?
+                   WHERE library_id = ? AND decision = 'adopting' AND completed_plan_id IS NULL""",
+                (previous["plan_id"], previous["library_id"]),
+            )
         registry.execute(
-            """INSERT INTO legacy_adoption_active (singleton, library_id, job_id)
-               VALUES (1, ?, ?)
-               ON CONFLICT(singleton) DO UPDATE SET library_id = excluded.library_id, job_id = excluded.job_id""",
-            (library_id, job_id),
+            """INSERT INTO legacy_adoption_active (singleton, library_id, job_id, access_kind)
+               VALUES (1, ?, ?, ?) ON CONFLICT(singleton) DO UPDATE SET
+                 library_id = excluded.library_id, job_id = excluded.job_id, access_kind = excluded.access_kind""",
+            (library_id, job_id, access_kind),
         )
+
+
+def later_adoption_blockers(library):
+    """The request gate owns the application-wide lock during actual job creation."""
+    from app.operation_health import inspect
+    from app.root_operations import RootOperationError, assert_no_pending
+
+    messages = []
+    health = inspect(library.workspace_root)
+    if health["reservations"] or not health["writes_allowed"]:
+        messages.append("Schließe laufende Vorgänge oder offene Wiederherstellungen ab.")
+    with closing(_read(library.database_path)) as connection:
+        events = connection.execute(
+            """SELECT name FROM events WHERE status != 'archived' OR pending_delete != 0
+               ORDER BY name LIMIT 5"""
+        ).fetchall()
+        if events:
+            messages.append("Noch nicht vollständig archivierte Ereignisse: " + ", ".join(row["name"] for row in events))
+        if connection.execute(
+            """SELECT 1 FROM event_change_requests
+               WHERE status NOT IN ('aenderbar_archiviert', 'aenderbar_abgebrochen') LIMIT 1"""
+        ).fetchone():
+            messages.append("Schließe offene Archivänderungen ab.")
+        if connection.execute(
+            """SELECT 1 FROM jobs
+               WHERE state IN ('queued', 'copying', 'verifying', 'analyzing', 'analyzing_metadata',
+                               'organizing', 'moving', 'running', 'interrupted') LIMIT 1"""
+        ).fetchone():
+            messages.append("Schließe offene Import- und Hintergrundaufträge ab.")
+    if not messages:
+        try:
+            assert_no_pending(library.workspace_root, [library.database_path], library_id=library.library_id)
+        except RootOperationError as error:
+            messages.append("Schließe laufende Vorgänge oder offene Wiederherstellungen ab.")
+            messages.append(str(error))
+    return messages
+
+
+def require_later_adoption(library):
+    blockers = later_adoption_blockers(library)
+    if blockers:
+        raise AdoptionError("\n".join(blockers))
 
 
 def adoption_execution_access(registry_path):

@@ -4406,6 +4406,7 @@ BIBLIOTHEKAR_JS = r"""
       +'<div class="bk-library-actions">'
       +'<button type="button" data-bk-library-save>Speichern</button>'
       +'<button type="button" data-bk-library-check>Prüfen</button>'
+      +(!inactive?'<button type="button" data-bk-library-adopt>Bestehende Sammlung übernehmen</button>':'')
       +(row.is_main?'':(
         inactive
           ? '<button type="button" data-bk-library-activate class="bk-positive-action">Aktivieren</button>'
@@ -4448,6 +4449,28 @@ BIBLIOTHEKAR_JS = r"""
       const name = card.querySelector("[data-bk-library-name]");
       const work = card.querySelector("[data-bk-library-work]");
       const archive = card.querySelector("[data-bk-library-archive]");
+      const adopt = card.querySelector("[data-bk-library-adopt]");
+      adopt?.addEventListener("click", async () => {
+        adopt.disabled = true;
+        try {
+          const params = new URLSearchParams({library:id,mode:"library"});
+          const result = await bkJson("/api/legacy-adoption/eligibility?"+params);
+          if (result.eligible) {
+            window.location.assign("/legacy-adoption?"+params);
+            return;
+          }
+          const translate = text => window.BibliothekarI18n?.t(text) || text;
+          const messages = result.blockers.map(text => {
+            const separator = text.indexOf(": ");
+            return separator === -1 ? translate(text) : translate(text.slice(0,separator))+text.slice(separator);
+          });
+          setLibraryCardStatus(card, messages.join("\n"));
+        } catch (error) {
+          setLibraryCardStatus(card, error.message);
+        } finally {
+          adopt.disabled = false;
+        }
+      });
       card.querySelector("[data-bk-library-save]")?.addEventListener("click", async () => {
         try {
           await bkJson("/api/libraries/"+encodeURIComponent(id), {
@@ -7903,6 +7926,12 @@ FOLDER_LAYOUT_JS = r"""
 """
 
 
+_BRAND_HEADER_CSS = """
+:root{--bk-brand-header:#15222c;--bk-brand-header-ink:#f8f4e9}
+.bk-shell,.bk-setup-banner{background:var(--bk-brand-header);color:var(--bk-brand-header-ink)}
+"""
+
+
 def apply_shell(html: str, *, active_area: str, subarea: str | None = None,
                 localization_js: str | None = None) -> str:
     result = re.sub(
@@ -7918,7 +7947,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None,
         '<link rel="icon" type="image/svg+xml" href="/assets/bibliothekar-logo-symbol-background.svg?v=0.56.2">\n'
         '<link rel="apple-touch-icon" sizes="192x192" href="/assets/bibliothekar-icon-192.png?v=0.56.2">\n'
         '<meta name="apple-mobile-web-app-capable" content="yes">\n'
-        f"<style>{BIBLIOTHEKAR_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_CSS}\n{_BRAND_HEADER_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0310_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0311_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0350_CSS}</style>\n"
@@ -8011,10 +8040,11 @@ _SETUP_BANNER = f"""
 
 _SETUP_CSS = """
 .bk-setup-banner{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;
-padding:10px clamp(12px,3vw,32px);background:var(--bk-surface);border-bottom:1px solid var(--bk-line)}
-.bk-setup-banner img{box-sizing:content-box;object-fit:contain;background:#102034;border-radius:12px;padding:4px 12px}
+padding:10px clamp(12px,3vw,32px);background:var(--bk-brand-header);color:var(--bk-brand-header-ink);border-bottom:1px solid var(--bk-line)}
+.bk-setup-banner img{box-sizing:content-box;object-fit:contain;padding:4px 0;max-width:100%}
 .bk-setup-appearance,.bk-setup-appearance label{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
-.bk-setup-appearance button[aria-pressed="true"]{border-color:var(--bk-blue);color:var(--bk-blue)}
+.bk-setup-appearance :is(button,select){min-height:32px;padding:4px 8px;border-radius:8px;border:1px solid var(--bk-line);background:var(--bk-surface);color:var(--bk-ink)}
+.bk-setup-appearance button[aria-pressed="true"]{border-color:var(--bk-blue);font-weight:750}
 body[data-bk-setup]{--bk-area-accent:var(--bk-blue)}
 body[data-bk-setup] main{max-width:none}
 body[data-bk-setup] [hidden]{display:none!important}
@@ -8051,7 +8081,7 @@ def apply_setup_shell(html: str, *, localization_js: str = I18N_UI_JS) -> str:
         f"<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n", 1)
     html = html.replace("</head>",
         '<link rel="icon" type="image/svg+xml" href="/assets/bibliothekar-logo-symbol-background.svg">\n'
-        f"<style>{BIBLIOTHEKAR_CSS}\n{BIBLIOTHEKAR_0451_CSS}\n{BIBLIOTHEKAR_0505_LANGUAGE_CSS}\n{_SETUP_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_CSS}\n{BIBLIOTHEKAR_0451_CSS}\n{BIBLIOTHEKAR_0505_LANGUAGE_CSS}\n{_BRAND_HEADER_CSS}\n{_SETUP_CSS}</style>\n"
         "</head>", 1)
     return html.replace("<body>",
         '<body class="bibliothekar-redesign" data-bk-setup="true">\n'

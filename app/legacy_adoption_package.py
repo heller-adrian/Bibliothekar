@@ -27,13 +27,13 @@ def _sha(data):
 
 
 @contextmanager
-def _package(plan_id, *, create=False, expected=None):
-    if not re.fullmatch(r"[a-f0-9]{32}", plan_id):
+def _package(identifier, *, create=False, expected=None):
+    if not re.fullmatch(r"[a-f0-9]{32}", identifier):
         raise AdoptionError("Ungültige Kennung für das Skriptpaket.")
     base = appdata_root()
     if base is None:
         raise AdoptionError("Für die Skriptmethode muss dauerhaftes AppData eingerichtet sein.")
-    path = base / PACKAGE_ROOT / plan_id
+    path = base / PACKAGE_ROOT / identifier
     if create:
         for entry in (path.parent, path):
             with qualified(entry.parent, directory=True) as (parent, check):
@@ -102,8 +102,46 @@ def _command(mode, descriptor, paths, digest):
             " | sha256sum --check --strict && " + shlex.join(command))
 
 
-def prepare_probe(library, job_id, plan_id, host_appdata, host_source, host_archive):
-    paths = _host_paths(plan_id, host_appdata, host_source, host_archive)
+def _probe_package(job_id, plan_id):
+    base = appdata_root()
+    if base is not None and (base / PACKAGE_ROOT / job_id).exists():
+        return job_id
+    return plan_id  # Packages prepared before the job-based layout.
+
+
+def _host_proof(descriptor, probe, digest):
+    proof = _read_json(descriptor, "host-proof.json")
+    if not isinstance(proof, dict) or set(proof) != {"probe", "package", "source", "archive"} or proof["probe"] != digest:
+        return None
+    paths = {key: proof[key] for key in ("package", "source", "archive")}
+    if probe["host"] is not None:
+        return paths if paths == probe["host"] else None
+    package = PurePosixPath(paths["package"])
+    if package.name != probe["job_id"] or package.parent.name != PACKAGE_ROOT:
+        return None
+    checked = _host_paths(probe["job_id"], str(package.parent.parent), paths["source"], paths["archive"])
+    return paths if paths == checked else None
+
+
+def _probe_result(descriptor, probe, digest):
+    paths = _host_proof(descriptor, probe, digest)
+    if probe["host"] is not None:
+        command = _command("probe", descriptor, probe["host"], digest)
+    else:
+        config = {
+            "probe": digest, "container": probe["container"], "identity": host.inode(os.fstat(descriptor)),
+            # The discovery command loads both modules from the verified bytes.
+            "scripts": {name: _sha(Path(__file__).with_name(name).read_bytes()) for name in reversed(RUNNER_FILES)},
+        }
+        source = Path(__file__).with_name("legacy_adoption_discover.py").read_text()
+        command = shlex.join(["python3", "-I", "-B", "-c", source, json.dumps(config)])
+    return {"command": command, "host": paths or probe["host"], "sha256": digest,
+            "verified": paths is not None, "dataset": probe["dataset"]["dataset"]}
+
+
+def prepare_probe(library, job_id, plan_id, host_appdata=None, host_source=None, host_archive=None):
+    supplied = (host_appdata, host_source, host_archive)
+    paths = _host_paths(job_id, *supplied) if any(value is not None for value in supplied) else None
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN")
         job = _job(connection, library.library_id, job_id)
@@ -114,37 +152,41 @@ def prepare_probe(library, job_id, plan_id, host_appdata, host_source, host_arch
             raise AdoptionError("Der aktuelle Plan muss für die Hostpfadprüfung unverbindlich vorbereitet sein.")
         with ExitStack() as stack:
             _roots(stack, library, job)
-            descriptor = stack.enter_context(_package(plan_id, create=True))
+            descriptor = stack.enter_context(_package(job_id, create=True))
             _initialize_files(descriptor)
             stack.enter_context(host.package_lock(descriptor))
             for name in RUNNER_FILES:
-                source = Path(__file__).with_name(name).read_bytes()
-                host.write_atomic(descriptor, name, source)
-            digest = _put_json(descriptor, "probe.json", {
+                host.write_atomic(descriptor, name, Path(__file__).with_name(name).read_bytes())
+            probe = {
                 "job_id": job_id, "plan_id": plan_id, "library_id": library.library_id, "host": paths,
+                "container": {
+                    "package": str(appdata_root() / PACKAGE_ROOT / job_id),
+                    "source": job["source_root"], "archive": job["archive_root"],
+                },
                 "dataset": json.loads(job["dataset_json"]),
                 "source_inode": [job["source_device"], job["source_inode"]],
                 "archive_inode": [job["archive_device"], job["archive_inode"]],
-            })
-            return {"command": _command("probe", descriptor, paths, digest), "host": paths, "sha256": digest}
+            }
+            digest = _put_json(descriptor, "probe.json", probe)
+            return _probe_result(descriptor, probe, digest)
 
 
 def probe_details(library, job_id, plan_id):
     base = appdata_root()
-    if base is None or not (base / PACKAGE_ROOT / plan_id).is_dir():
+    identifier = _probe_package(job_id, plan_id)
+    if base is None or not (base / PACKAGE_ROOT / identifier).is_dir():
         return {}
-    with _package(plan_id) as descriptor:
+    with _package(identifier) as descriptor:
         try:
             data = host.read_bytes(descriptor, "probe.json")
         except FileNotFoundError:
             return {}
         probe = json.loads(data)
-        if (probe["job_id"], probe["plan_id"], probe["library_id"]) != (job_id, plan_id, library.library_id):
+        if (probe["job_id"], probe["library_id"]) != (job_id, library.library_id):
             raise AdoptionError("Die Hostpfadprüfung gehört zu einem anderen Auftrag.")
-        digest = _sha(data)
-        paths = probe["host"]
-        return {"command": _command("probe", descriptor, paths, digest), "host": paths, "sha256": digest,
-                "verified": _read_json(descriptor, "host-proof.json") == {"probe": digest, **paths}}
+        if probe["plan_id"] != plan_id:
+            return {}
+        return _probe_result(descriptor, probe, _sha(data))
 
 
 def _approved_host(descriptor, library, job, plan_id, probe_digest):
@@ -157,9 +199,10 @@ def _approved_host(descriptor, library, job, plan_id, probe_digest):
     probe = json.loads(data)
     if (probe["job_id"], probe["plan_id"], probe["library_id"]) != (job["id"], plan_id, library.library_id):
         raise AdoptionError("Die Hostpfadprüfung gehört zu einem anderen Auftrag.")
-    if _read_json(descriptor, "host-proof.json") != {"probe": _sha(data), **probe["host"]}:
+    paths = _host_proof(descriptor, probe, probe_digest)
+    if paths is None:
         raise AdoptionError("Der Nachweis fehlt. Führe den Prüfungsbefehl in der TrueNAS-Shell aus.")
-    return probe
+    return {**probe, "host": paths}
 
 
 def _bound_proof(root, path, size, expected):
@@ -173,7 +216,7 @@ def _bound_proof(root, path, size, expected):
 def prepare_manifest(connection, library, job, plan, probe_digest):
     plan_id = plan["id"]
     with ExitStack() as stack:
-        descriptor = stack.enter_context(_package(plan_id))
+        descriptor = stack.enter_context(_package(_probe_package(job["id"], plan_id)))
         stack.enter_context(host.package_lock(descriptor))
         probe = _approved_host(descriptor, library, job, plan_id, probe_digest)
         source, archive = _roots(stack, library, job)
@@ -233,11 +276,18 @@ def _script_row(library, job_id, plan_id):
         return row
 
 
+def _script_package(script, job_id, plan_id):
+    identifier = PurePosixPath(json.loads(script["host_json"])["package"]).name
+    if identifier not in {job_id, plan_id}:
+        raise AdoptionError("Die Kennung des freigegebenen Skriptpakets stimmt nicht überein.")
+    return identifier
+
+
 @contextmanager
 def locked_script(library, job_id, plan_id):
     script = _script_row(library, job_id, plan_id)
     expected = [script["package_device"], script["package_inode"]]
-    with _package(plan_id, expected=expected) as descriptor, host.package_lock(descriptor):
+    with _package(_script_package(script, job_id, plan_id), expected=expected) as descriptor, host.package_lock(descriptor):
         yield descriptor, script
 
 
@@ -263,7 +313,7 @@ def script_status(descriptor, script):
 def script_details(library, job_id, plan_id):
     script = _script_row(library, job_id, plan_id)
     expected = [script["package_device"], script["package_inode"]]
-    with _package(plan_id, expected=expected) as descriptor:
+    with _package(_script_package(script, job_id, plan_id), expected=expected) as descriptor:
         status = script_status(descriptor, script)
         running = False
         try:
@@ -277,6 +327,16 @@ def script_details(library, job_id, plan_id):
                 and allowed.get("mode") in {"apply", "rollback"}):
             result["command"] = _command(allowed["mode"], descriptor, result["host"], script["manifest_sha256"])
         return result
+
+
+def read_manifest(library, job_id, plan_id):
+    script = _script_row(library, job_id, plan_id)
+    expected = [script["package_device"], script["package_inode"]]
+    with _package(_script_package(script, job_id, plan_id), expected=expected) as descriptor:
+        content = host.read_bytes(descriptor, "manifest.json")
+        if _sha(content) != script["manifest_sha256"]:
+            raise AdoptionError("Das Skriptmanifest stimmt nicht mit dem bestätigten Auftrag überein.")
+        return content
 
 
 def inspect_runner(name):

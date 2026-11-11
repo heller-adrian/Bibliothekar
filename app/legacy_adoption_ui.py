@@ -18,11 +18,12 @@ def setup_choice_html(decision: str) -> str:
     return apply_setup_shell(_CHOICE.replace("{{primary}}", primary), localization_js=_I18N_JS)
 
 
-def wizard_html(library_id: str, *, recovery_only: bool = False) -> str:
+def wizard_html(library_id: str, *, later: bool = False, recovery_only: bool = False) -> str:
     html = apply_setup_shell(_PAGE, localization_js=_I18N_JS)
     return re.sub(r'(<body\b[^>]*)(>)',
                   lambda match: (match[1] + ' data-library="' + escape(library_id, quote=True) + '"'
-                                 + (' data-recovery-only="true"' if recovery_only else '') + match[2]),
+                                 + (' data-recovery-only="true"' if recovery_only else '')
+                                 + (' data-later="true"' if later else '') + match[2]),
                   html, count=1)
 
 
@@ -68,9 +69,17 @@ _PAGE = r"""<!doctype html>
 <title>Bestandsübernahme · Bibliothekar</title>
 <style>
 .legacy-adoption{width:100%;max-width:1600px;margin:auto;padding:24px;box-sizing:border-box;color:var(--bk-ink)}
-.legacy-adoption :is(section,fieldset){min-width:0;background:var(--bk-surface);border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:24px;margin:18px 0;box-shadow:var(--bk-shadow)}
-.legacy-adoption fieldset{margin:12px 0;box-shadow:none}
-.legacy-adoption legend{font-weight:700;padding:0 8px;max-width:100%;box-sizing:border-box}
+.legacy-adoption section{min-width:0;background:var(--bk-surface);border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:24px;margin:18px 0;box-shadow:var(--bk-shadow)}
+.legacy-adoption .adoption-card{min-width:0;border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:clamp(12px,2vw,22px);margin:12px 0}
+.legacy-adoption .adoption-card>:first-child{margin-top:0}
+.adoption-card h4{font-size:1rem;margin:0 0 12px}
+.adoption-card .adoption-ack{align-items:start;gap:10px;margin:16px 0}
+.adoption-card .adoption-ack input{flex:none;margin-top:.25em}
+.adoption-proof{overflow-wrap:anywhere}
+.adoption-plan-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr));gap:12px;margin:18px 0}
+.adoption-plan-facts div{padding:10px 12px;background:var(--bk-surface-2);border-radius:10px;overflow-wrap:anywhere}
+.adoption-plan-facts dt{font-size:.875rem;color:var(--bk-muted)}
+.adoption-plan-facts dd{font-weight:650;margin:3px 0 0}
 .legacy-adoption h1{font-size:clamp(1.5rem,3vw,2.25rem);margin:12px 0 24px}
 .legacy-adoption :is(h2,h3){margin:0 0 16px}
 .legacy-adoption label{display:flex;flex-direction:column;gap:7px;min-width:0}
@@ -90,11 +99,17 @@ _PAGE = r"""<!doctype html>
 .legacy-adoption summary{cursor:pointer;padding:8px 0}
 .legacy-adoption textarea{min-height:5rem;width:100%}
 .legacy-adoption :focus-visible{outline:3px solid var(--bk-blue);outline-offset:3px}
-@media(max-width:640px){.legacy-adoption{padding:12px}.legacy-adoption :is(section,fieldset){padding:16px}.legacy-adoption .inline>*{max-width:100%}}
+@media(max-width:640px){.legacy-adoption{padding:12px}.legacy-adoption section{padding:16px}.legacy-adoption .inline>*{max-width:100%}}
 .adoption-heading{display:flex;justify-content:space-between;align-items:start;gap:16px}
 .adoption-stepper{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
 .legacy-adoption :is(button:not(.day-card),summary.adoption-control){min-height:40px;padding:8px 14px;font:inherit;font-weight:650}
+.legacy-adoption .adoption-toolbar{align-items:center}
+.legacy-adoption .adoption-toolbar :is(button,summary.adoption-control){box-sizing:border-box;min-height:36px;padding:6px 12px;font-size:.875rem;font-weight:600}
 .legacy-adoption summary.adoption-control{display:inline-flex;align-items:center;border-radius:11px}
+#periods:not(:empty){display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 10px}
+.legacy-adoption :is(input:not([type=checkbox],[type=radio]),select,textarea){min-height:38px;padding:7px 10px;background:var(--bk-surface-2);color:var(--bk-ink);border:1px solid var(--bk-line);border-radius:8px;font:inherit}
+.legacy-adoption input[type=checkbox]{accent-color:var(--bk-blue)}
+.legacy-adoption .adoption-command{width:100%;font: .85rem/1.4 ui-monospace,monospace;overflow-wrap:anywhere}
 .legacy-adoption button:disabled{opacity:.45;cursor:not-allowed}
 .adoption-planning{grid-template-columns:minmax(0,1.5fr) minmax(19rem,1fr)!important}
 .legacy-adoption .adoption-month{padding:12px;box-shadow:none;margin:14px 0}
@@ -139,10 +154,16 @@ _PAGE = r"""<!doctype html>
 const $ = id => document.getElementById(id);
 const library = document.body.dataset.library;
 const recoveryOnly = document.body.dataset.recoveryOnly === "true";
-const afterDiscard = recoveryOnly ? "/" : "/setup/adoption";
+const later = document.body.dataset.later === "true";
+const librarySettings = "/?"+new URLSearchParams({library,settings:"libraries"});
+const afterDiscard = later ? librarySettings : recoveryOnly ? "/" : "/setup/adoption";
 const currentUrl = new URL(location.href);
 let jobId = currentUrl.searchParams.get("job") || "";
 $("choice").hidden = Boolean(jobId);
+if(later) {
+  $("choice").textContent="Zurück zu den Bibliotheken";
+  $("choice").href=librarySettings;
+}
 let job = null, draft = {}, draftRevision = 0, year = "", day = null;
 let familyCursor = "", moveCursor = "", reviewCursor = "", directoryCursor = "", timer = 0, scriptTimer = 0;
 let selectedSource = null;
@@ -193,6 +214,13 @@ function navigation(){
   },true));
   if(viewStep==="execute")nav.append(action("Weiter: Archiv prüfen",()=>goStep("verify"),true));
 }
+window.addEventListener("bk-language-changed",()=>{
+  navigation();
+  if($("adoption-new"))$("adoption-new").textContent="＋ "+t("Neu");
+  if($("days"))renderDays();
+  if($("inventory-counts"))$("inventory-counts").textContent=inventoryCounts();
+  document.querySelectorAll(".adoption-command").forEach(area=>area.setAttribute("aria-label",t("TrueNAS-Shell-Befehl")));
+});
 window.addEventListener("popstate",()=>{
   if(dirty.size){rememberView(viewStep);report("Speichere deine Eingaben zuerst.");return;}
   viewStep=new URL(location.href).searchParams.get("step")||"";
@@ -291,7 +319,9 @@ function link(text, path) {
 function slot(id, type="div") {const el=node(type);el.id=id;return el;}
 async function browse(relative) {
   const root=$("source-root").value;
-  const data=await api(base+"/source?"+new URLSearchParams({root,relative}));
+  const query=new URLSearchParams({root,relative});
+  if(later)query.set("mode","library");
+  const data=await api(base+"/source?"+query);
   const host=$("source");
   const bar=node("div",undefined,"inline");
   bar.append(node("code",data.path));
@@ -314,7 +344,9 @@ async function openJob(id) {
   requireSaved();
   jobId=id;
   year="";day=null;familyCursor="";moveCursor="";reviewCursor="";
-  const url=new URL(location.href);url.searchParams.set("job",id);
+  const url=new URL(location.href);
+  url.searchParams.set("job",id);
+  url.searchParams.set("library",library);
   history.replaceState(null,"",url);
   await refresh();
 }
@@ -360,7 +392,7 @@ async function mutate(path, method="POST", body) {
   try {
     const result=await api(jobPath(path),method,body);
     if(path==="/finalize" && result.state==="completed") {
-      location.replace("/");
+      location.replace("/?"+new URLSearchParams({library}));
       return result;
     }
     if(path==="/rollback/check" && result.execution?.phase==="rolled_back") {
@@ -376,6 +408,10 @@ async function mutate(path, method="POST", body) {
     if (checking) await refresh().catch(()=>{});
     throw error;
   }
+}
+function inventoryCounts() {
+  return [t(label(job.state)),job.files+" "+t("Dateien"),job.families+" "+t("Familien"),
+    job.errors+" "+t("Pfadfehler")].join(" · ");
 }
 function render() {
   const phase=job.plan.execution?.phase;
@@ -402,9 +438,9 @@ function render() {
   if(recoveryOnly)$("safety").textContent="Dieser Auftrag stammt aus einer älteren Version. Prüfe den gespeicherten Stand und verwirf den Entwurf oder verwende die angezeigte Wiederherstellung.";
   const host=$("work");
   const status=section("Lesende Inventur");
-  status.append(line(job.source_root),
-    line([t(label(job.state)),job.files+" "+t("Dateien"),job.families+" "+t("Familien"),
-      job.errors+" "+t("Pfadfehler")].join(" · ")));
+  const counts=line(inventoryCounts());
+  counts.id="inventory-counts";
+  status.append(line(job.source_root),counts);
   if (job.scan_error) status.append(line(job.scan_error));
   if (job.review_count) {
     status.append(action(job.review_count+" Prüffälle – Überprüfung erforderlich",async()=>{
@@ -442,11 +478,14 @@ function renderDraft(host) {
   const panel=section("Ereignisse planen");
   panel.append(line("Wähle Aufnahmetage wie im Arbeitsbereich. Klick und Strg/Cmd wählen einzelne Tage, Umschalt wählt einen Bereich. Mit Plus kannst du auch ohne Auswahl ein Ereignis anlegen."));
   const toolbar=node("div",undefined,"inline adoption-toolbar");
-  const plus=node("details");plus.append(node("summary","＋ "+t("Neu"),"primary adoption-control"));
+  const plus=node("details");
+  const newButton=node("summary","＋ "+t("Neu"),"primary adoption-control");
+  newButton.id="adoption-new";
+  plus.append(newButton);
   const menu=node("div",undefined,"stack");
   const startEditor=kind=>{
     const days=[...selectedDays].sort();
-    const index=kind==="child" ? draft.events.findIndex(event=>event.event_kind!=="no_event") : undefined;
+    const index=kind==="child" ? draft.events.findIndex(event=>!event.existing_id && event.event_kind!=="no_event") : undefined;
     eventEditor(index===-1?undefined:index,days[0]||"",kind);
     plus.open=false;$("event-editor").scrollIntoView({block:"nearest"});
   };
@@ -525,7 +564,19 @@ async function showDay() {
   $("families").replaceChildren();
   familyCursor="";
   if (day) {
-    $("matches").append(action("Diesen Tag im Formular verwenden",()=>eventEditor(undefined,day)));
+    const requestedDay=day;
+    $("matches").append(action("Diesen Tag im Formular verwenden",()=>eventEditor(undefined,requestedDay)));
+    if(later) {
+      const matches=await api(jobPath("/events?"+new URLSearchParams({day:requestedDay})));
+      if(day!==requestedDay || !$("matches"))return;
+      for(const item of matches) {
+        const card=node("div",undefined,"row");
+        const title=node("strong",item.name);title.dataset.bkPreserveLanguage="";
+        card.append(title,line(item.start_datetime.slice(0,10)+" → "+item.end_datetime.slice(0,10)),
+          action("Zu bestehendem Ereignis hinzufügen",()=>addExisting(item)));
+        $("matches").append(card);
+      }
+    }
   }
   if($("family-diagnostics")?.open)await showFamilies();
 }
@@ -637,6 +688,17 @@ async function setDraft(value, editor) {
   savedEditor(editor);
   showDraftEvents();
 }
+async function addExisting(item, candidate=draft, replaceAt=null, editor=null) {
+  const events=candidate.events.filter((event,index)=>event.existing_id!==item.id && index!==replaceAt);
+  events.push({existing_id:item.id,name:item.name});
+  await setDraft({...candidate,events},editor);
+  $("planning-conflicts")?.remove();
+  if(editor) {
+    editor.replaceChildren();
+    editor.hidden=true;
+  }
+  report("Aufnahmen innerhalb des gespeicherten Zeitraums zugeordnet.");
+}
 function showConflicts(checked,candidate,editor){
   $("planning-conflicts")?.remove();
   const panel=node("section");panel.id="planning-conflicts";panel.setAttribute("role","alert");
@@ -646,6 +708,9 @@ function showConflicts(checked,candidate,editor){
     const row=node("div",undefined,"row");
     const title=node("strong",(proposed.name||t("Sammelordner ohne Ereignis"))+" ↔ "+conflict.name);title.dataset.bkPreserveLanguage="";
     row.append(title,line(conflict.start.slice(0,10)+" → "+conflict.end.slice(0,10)));
+    if(later && conflict.kind==="archive")row.append(action("Zu bestehendem Ereignis hinzufügen",()=>addExisting({
+      id:conflict.existing_id,name:conflict.name,
+    },candidate,conflict.index,editor)));
     row.append(action("Zeitraum ändern",()=>{
       if(editor?.isConnected)editor.querySelector('input[type="date"],textarea')?.focus();
       else eventEditor(conflict.index);
@@ -660,7 +725,7 @@ function showDraftEvents() {
   if(!draft.events.length)el.append(line("Noch keine Ereignisse geplant. Wähle Plus, um zu beginnen."));
   draft.events.forEach((item,index)=>{
     const row=node("details",undefined,"adoption-event-card");
-    const kind=item.event_kind==="no_event"?"Sammelordner ohne Ereignis":"Neues Ereignis";
+    const kind=item.existing_id?"Archivereignis ergänzen":item.event_kind==="no_event"?"Sammelordner ohne Ereignis":"Neues Ereignis";
     const dates=item.event_kind==="no_event"?(item.segments||[]).map(segment=>segment.day_key):[item.start_date,item.end_date].filter(Boolean);
     const summary=node("summary");const title=node("strong",item.name||t(kind));title.dataset.bkPreserveLanguage="";
     summary.append(title,node("span",t(kind),"subtle"),node("span",[...new Set(dates)].join(" → "),"subtle"));
@@ -670,7 +735,7 @@ function showDraftEvents() {
     row.append(line((stats?.days??matches.length)+" "+t("Tage")+" · "+(stats?.families??matches.reduce((sum,day)=>sum+day.families,0))+" "+t("Familien")));
     if(stats && !dates.length)row.append(line(stats.start.slice(0,10)+" → "+stats.end.slice(0,10)));
     const controls=node("div",undefined,"inline");
-    controls.append(action("Bearbeiten",()=>eventEditor(index)));
+    if(!item.existing_id)controls.append(action("Bearbeiten",()=>eventEditor(index)));
     controls.append(action("Entfernen",async()=>{await setDraft({...draft,events:draft.events.filter((_,at)=>at!==index)});report("Entwurf entfernt.");}));
     row.append(controls);el.append(row);
   });
@@ -688,8 +753,8 @@ function layoutRows(layout) {
   return result;
 }
 function layoutEditor(title,saved,inherit=false) {
-  const panel=node("fieldset");
-  panel.append(node("legend",title));
+  const panel=node("div",undefined,"adoption-card");
+  panel.append(node("h4",title));
   const type=node("select");
   const modes=[["default","Bibliotheksstandard"],["custom","Eigene Ordnerstruktur"],["disabled","Ohne zusätzliche Ordner"]];
   if (inherit) modes.unshift(["inherit","Struktur des Ereignisses übernehmen"]);
@@ -731,9 +796,9 @@ function layoutEditor(title,saved,inherit=false) {
 function eventEditor(index, selectedDay="",newKind="event") {
   requireSaved($("event-editor"));
   const item=draft.events[index] || {};
-  const form=node("fieldset");
+  const form=node("div",undefined,"adoption-card");
   watchDraft(form);
-  form.append(node("legend",index===undefined?"Neues Ereignis oder Sammelordner":"Entwurf bearbeiten"));
+  form.append(node("h3",index===undefined?"Neues Ereignis oder Sammelordner":"Entwurf bearbeiten"));
   const type=node("select");
   for (const [value,title] of [["event","Normales Ereignis"],["no_event","Sammelordner ohne Ereignis"]]) {
     const option=node("option",title);option.value=value;type.append(option);
@@ -801,14 +866,38 @@ function renderPlan(host) {
   const run=path=>mutate(path,"POST",command);
   const completed=plan.state==="completed";
   panel.append(line(label(phase || plan.state)));
-  panel.append(line([plan.dataset?.dataset, plan.move_files+" Dateien", plan.move_bytes+" Bytes"].filter(Boolean).join(" · ")));
-  panel.append(line(plan.source_root+" → "+plan.archive_root));
-  panel.append(line(Object.entries(plan.counts).map(([state,count])=>t(label(state))+": "+count).join(" · ")));
+  const locale=window.BibliothekarI18n.getLocale();
+  const format=new Intl.NumberFormat(locale);
+  const unit=["B","KiB","MiB","GiB","TiB"];
+  const power=Math.min(unit.length-1,Math.floor(Math.log(Math.max(1,plan.move_bytes))/Math.log(1024)));
+  const facts=node("dl",undefined,"adoption-plan-facts");
+  for (const [title,value] of [
+    ["Zu übernehmende Dateien",format.format(plan.move_files)],
+    ["Dateifamilien im Verschiebeplan",format.format(plan.move_families)],
+    ["Datenvolumen",format.format(plan.move_bytes / 1024**power)+" "+unit[power]],
+    ["Zielbibliothek",plan.library_name],
+    ["Neue Ereignisse und Sammelordner",format.format(plan.events.filter(event=>!event.existing).length)],
+    ["Zu ergänzende Archivereignisse",format.format(plan.events.filter(event=>event.existing).length)],
+    ["Offene Prüffälle",format.format(job.review_count)],
+    ["Duplikate bleiben an der Quelle",format.format(plan.counts.duplicate || 0)],
+  ]) {
+    const fact=node("div");fact.append(node("dt",title),node("dd",value));facts.append(fact);
+  }
+  panel.append(facts);
+  if (plan.counts.duplicate) panel.append(line("Duplikate sind bereits registriert oder in diesem Plan mit identischem Inhalt enthalten."));
+  const diagnostics=node("details",undefined,"adoption-proof");
+  diagnostics.append(node("summary","Technische Plandetails"),
+    line("ZFS-Dataset: "+(plan.dataset?.dataset || "—")),
+    node("code",plan.source_root+" → "+plan.archive_root),
+    line(Object.entries(plan.counts).map(([state,count])=>t(label(state))+": "+count).join(" · ")));
+  panel.append(diagnostics);
   if (!completed && phase!=="rolled_back") panel.append(line(
     "Vor größeren Dateiänderungen empfehlen wir, einen ZFS-Snapshot oder eine andere geeignete Sicherung anzulegen. Diese zusätzliche Sicherheitsmaßnahme ist freiwillig."
   ));
   const files=node("div",undefined,"inline");
-  files.append(link("Verschiebeplan mit Rückwegen",jobPath("/download/manifest")));
+  const manifest=link("Verschiebeplan mit Rückwegen",jobPath("/download/manifest"));
+  if(phase && plan.execution?.method==="manual") files.append(manifest);
+  else diagnostics.append(line(""),manifest);
   if (phase==="manual") {
     panel.append(line("Stelle die Ordner im Archiv über SMB bereit und verschiebe nur die aufgeführten Dateien. Sichere frühere Ereignisdokumente vor dem Ersetzen."));
     files.append(link("Leeres Ordnergerüst",jobPath("/download/folders")),
@@ -845,7 +934,12 @@ function renderPlan(host) {
     }
   }
   const scripted=plan.execution?.method==="script";
-  if (scripted && !completed && phase!=="rolled_back") panel.append(slot("script-state"));
+  if (scripted && !completed && phase!=="rolled_back") {
+    panel.append(slot("script-state"));
+    const details=node("details");
+    details.append(node("summary","Erweiterte Details zu Skript und Prüfung"),scriptLinks(true));
+    panel.append(details);
+  }
   if (!recoveryOnly && viewStep==="verify" && !scripted && ["manual","verifying","repair"].includes(phase)) {
     controls.append(action("Archiv prüfen",()=>run("/verify"),true));
   }
@@ -875,7 +969,8 @@ function renderPlan(host) {
 }
 
 function commandBox(command) {
-  const area=node("textarea");
+  const area=node("textarea",undefined,"adoption-command");
+  area.setAttribute("aria-label",t("TrueNAS-Shell-Befehl"));
   area.readOnly=true;
   area.value=command;
   const host=node("div",undefined,"stack");
@@ -886,8 +981,16 @@ function commandBox(command) {
   }));
   return host;
 }
+function scriptLinks(confirmed=false) {
+  const links=node("div",undefined,"stack");
+  links.append(link("Python-Skript ansehen",jobPath("/script/source/legacy_adoption_host.py")),
+    link("Code für die Dataset-Prüfung ansehen",jobPath("/script/source/legacy_adoption_dataset.py")),
+    confirmed ? link("Bestätigtes Skriptmanifest",jobPath("/script/manifest")) :
+      link("Verschiebeplan mit Rückwegen",jobPath("/download/manifest")));
+  return links;
+}
 function renderConfirmation(panel,command) {
-  const confirmation=node("fieldset");
+  const confirmation=node("div",undefined,"adoption-card");
   const method=node("select");
   for (const [value,title] of [["manual","Manuelle Durchführung über SMB"],["script","Skriptgestützte Durchführung auf TrueNAS"]]) {
     const option=node("option",title);
@@ -898,58 +1001,64 @@ function renderConfirmation(panel,command) {
   choice.append(method);
   const scripts=node("div",undefined,"stack");
   scripts.hidden=true;
+  const proofState=node("div",undefined,"adoption-proof");
+  proofState.setAttribute("role","status");
   const [appWrap,appdata]=field("AppData auf dem TrueNAS-Host","text");
   const [sourceWrap,source]=field("Quellordner auf dem TrueNAS-Host","text");
   const [archiveWrap,archive]=field("Archivordner auf dem TrueNAS-Host","text");
-  const proofState=node("div");
+  const [wrap,ack]=field("Ich bestätige die Sicherheitsbedingungen und den angezeigten Plan.","checkbox");
+  wrap.classList.add("adoption-ack");
   let probe=null;
   function showProbe(result) {
+    if (probe?.sha256!==result.sha256) ack.checked=false;
     probe=result;
     proofState.replaceChildren();
-    if (result.command) {
-      appdata.value=result.host.package.split("/").slice(0,-2).join("/");
-      source.value=result.host.source;
-      archive.value=result.host.archive;
-      proofState.append(line(result.verified?"Die Hostpfade sind bestätigt.":
-        "Führe diesen reinen Prüfungsbefehl in der TrueNAS-Shell aus und lies danach den Nachweis ein."),
-        commandBox(result.command));
+    if (!result.command) return;
+    if (result.verified) {
+      const paths=node("details");
+      paths.append(node("summary","Bestätigte Hostpfade"),node("code",result.host.source+" → "+result.host.archive));
+      proofState.append(line("Hostpfade und gemeinsames ZFS-Dataset bestätigt."),line(result.dataset),paths);
+      return;
     }
+    proofState.append(line("Führe den Prüfbefehl in der TrueNAS-Shell aus und lies den Nachweis anschließend ein. Die Prüfung verschiebt keine Dateien."),
+      commandBox(result.command));
   }
-  async function readProbe() { showProbe(await api(jobPath("/script/probe"))); }
-  for (const input of [appdata,source,archive]) input.addEventListener("input",()=>{
-    probe=null;
-    proofState.replaceChildren();
-  });
-  scripts.append(
-    line("Bibliothekar erstellt ein Python-Skript, das die geplanten Dateiverschiebungen auf deinem TrueNAS-System durchführen kann. Du startest dieses Skript eigenverantwortlich über die TrueNAS-Shell."),
-    line("Du kannst das Skript vor der Ausführung einsehen, seinen Inhalt prüfen und es bei Bedarf mit Sicherheitssoftware untersuchen lassen. Eine automatische Sicherheitsprüfung ersetzt keine Kontrolle der tatsächlich vorgesehenen Dateioperationen."),
-    line("Das Skript darf ausschließlich die zuvor bestätigten Verschiebungen innerhalb desselben ZFS-Datasets durchführen. Vorhandene Dateien dürfen nicht unkontrolliert überschrieben oder gelöscht werden."),
-    link("Python-Skript ansehen",jobPath("/script/source/legacy_adoption_host.py")),
-    link("Code für die Dataset-Prüfung ansehen",jobPath("/script/source/legacy_adoption_dataset.py")),
+  async function readProbe() {
+    const result=await api(jobPath("/script/probe"));
+    showProbe(result);
+    if (!result.verified) report("Der Hostnachweis fehlt. Prüfe die Ausgabe in der TrueNAS-Shell oder verwende die technische Pfadzuordnung.");
+  }
+  const fallback=node("details",undefined,"adoption-card");
+  fallback.append(node("summary","Technischer Ausnahmeweg: Hostpfade manuell zuordnen"),
+    line("Verwende diesen Weg, wenn Docker die Hostpfade nicht eindeutig ermitteln kann."),
     appWrap,sourceWrap,archiveWrap,
-    action("Hostpfadprüfung vorbereiten",async()=>{
+    action("Manuelle Hostpfadprüfung vorbereiten",async()=>{
       showProbe(await api(jobPath("/script/probe"),"POST",{
         ...command,appdata:appdata.value,source:source.value,archive:archive.value
       }));
-    }),
-    action("Hostnachweis einlesen",readProbe),
-    proofState);
+    }));
+  const advanced=node("details");
+  advanced.append(node("summary","Erweiterte Details zu Skript und Prüfung"),
+    scriptLinks(),fallback);
+  const actions=node("div",undefined,"inline");
+  actions.append(action("Skript vorbereiten",async()=>{
+    showProbe(await api(jobPath("/script/probe"),"POST",command));
+  }), action("Hostnachweis einlesen",readProbe));
+  scripts.append(line("Starte den Prüfbefehl selbst in der TrueNAS-Shell. Bibliothekar verwendet die bereits ausgewählte Quelle und das Zielarchiv."),
+    actions,proofState,advanced);
   method.addEventListener("change",()=>{
     scripts.hidden=method.value!=="script";
     ack.checked=false;
-    if (!scripts.hidden && !probe) readProbe().catch(error=>report(error.message));
+    if (!scripts.hidden && !probe) api(jobPath("/script/probe")).then(showProbe).catch(error=>report(error.message));
   });
-  confirmation.append(node("legend","Verbindliche Sicherheitsbestätigung"),choice,scripts,
-    line("Du bist dabei, die geplante Bestandsübernahme verbindlich zu starten."),
-    line("Nach dieser Bestätigung kann der Übernahmeauftrag nicht mehr einfach verworfen werden. Die vorgesehenen Verschiebungen müssen abgeschlossen, überprüft oder gegebenenfalls über den vorgesehenen Wiederherstellungsweg rückgängig gemacht werden."),
-    line("Bitte vergewissere dich, dass Quelle und Ziel auf demselben ZFS-Dataset liegen und während der Durchführung keine weiteren Änderungen am Archiv vorgenommen werden."),
-    line("Möchtest du fortfahren?"));
-  const [wrap,ack]=field("Ich bestätige die Sicherheitsbedingungen und den angezeigten Plan.","checkbox");
-  confirmation.append(wrap,action("Durchführung verbindlich starten",()=>{
-    if (!ack.checked) throw new Error("Bitte bestätige zuerst die Sicherheitsbedingungen.");
-    if (method.value==="script" && !probe?.verified) throw new Error("Prüfe zuerst die drei tatsächlichen Hostpfade.");
-    return mutate("/confirm","POST",{...command,method:method.value,acknowledged:true,probe_sha256:probe?.sha256});
-  },true));
+  confirmation.append(node("h3","Verbindliche Sicherheitsbestätigung"),choice,scripts,
+    line("Nach dieser Bestätigung müssen die geplanten Verschiebungen abgeschlossen, überprüft oder kontrolliert rückgängig gemacht werden."),
+    line("Quelle und Ziel müssen auf demselben ZFS-Dataset liegen. Führe währenddessen keine weiteren Änderungen am Archiv durch."),
+    wrap,action("Durchführung verbindlich starten",()=>{
+      if (!ack.checked) throw new Error("Bitte bestätige zuerst die Sicherheitsbedingungen.");
+      if (method.value==="script" && !probe?.verified) throw new Error("Führe zuerst die Host- und Dataset-Prüfung durch.");
+      return mutate("/confirm","POST",{...command,method:method.value,acknowledged:true,probe_sha256:probe?.sha256});
+    },true));
   panel.append(confirmation);
 }
 async function pollScript() {
@@ -1036,7 +1145,7 @@ $("start").addEventListener("click",async()=>{
   const button=$("start");
   button.disabled=true;
   try {
-    const created=await api(base+"/jobs","POST",selectedSource);
+    const created=await api(base+"/jobs"+(later?"?mode=library":""),"POST",selectedSource);
     await openJob(created.id);
     await mutate("/scan");
   } catch (error) {

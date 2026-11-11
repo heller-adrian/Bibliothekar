@@ -7,6 +7,7 @@ The server binds loopback only and stops on POST /__stop-review.
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import sys
 from pathlib import Path
 from threading import Thread
 
@@ -20,6 +21,11 @@ from tests.backend.test_legacy_adoption_inventory import synthetic_dataset
 def test_browser_review(fresh_main, synthetic_dataset, tmp_path, tmp_path_factory, monkeypatch):
     main.startup_database()
     assert main.DATABASE_INITIALIZATION_ERROR is None
+    appdata = tmp_path / "script-appdata"
+    appdata.mkdir()
+    monkeypatch.setattr("app.legacy_adoption_package.appdata_root", lambda: appdata)
+    if sys.platform == "darwin":
+        monkeypatch.setattr("app.legacy_adoption_host.mount_id", lambda _: 1)
     source = tmp_path_factory.mktemp('rc2-ui-source').resolve()
     from datetime import date, timedelta
     for index in range(20):

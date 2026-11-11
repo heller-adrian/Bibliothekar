@@ -57,7 +57,9 @@ def test_0270_archive_change_dialog_is_mandatory_and_reload_safe():
     assert "let mandatoryArchiveChangeContext = null;" in html
     assert 'window.addEventListener("beforeunload"' in html
     assert 'changeRequestDialog.addEventListener("cancel"' in html
-    assert 'changeRequestClose.textContent = "Änderung verwerfen"' in html
+    assert 'changeRequestClose.textContent = String(cr.status)==="aenderbar_vorschlagen"' in html
+    assert 'bk0511EventLabel("Änderung verwerfen","Discard change")' in html
+    assert 'bk0511EventLabel("Änderung sicher zurücknehmen","Safely reverse change")' in html
     assert "findOpenArchiveChangeRequest(eventId)" in html
     assert "await showChangeRequestDetail(pendingChange.id, {resume:true})" in html
     assert "await showChangeRequestDetail(pendingArchive.id, {resume:true})" in html
@@ -75,7 +77,7 @@ def test_0271_archive_change_ui_is_compact_three_step_assistant():
     assert "Freigewordene Archivdateien werden zuerst sicher in den Arbeitsbereich zurückgeholt." in html
     assert "Änderung abschließen & Arbeitsbereich freigeben" in html
     assert 'id="change-work-progress"' in html
-    assert "Arbeitsbereich-Originale und Hilfslinks sicher freigeben" in html
+    assert 'bk0511EventLabel("Arbeitsbereich und Hilfslinks sicher freigeben …","Safely releasing workspace and helper links…")' in html
     assert "change_step" in html
     assert "change-arrow" not in html
     assert ">↓<" not in html

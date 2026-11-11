@@ -55,6 +55,7 @@ else:
     own=ro._control_location(w);state=ro._read(own/'state.json');nonce=state['storage_initialization']['reservation_id']
     assert state['format']==3 and not list(own.glob('operation-*.json'))
     library=post('/api/libraries',{'display_name':'RC12 Test','work_root':'','archive_root':str(archive)},201)['library']
+    assert post('/api/setup/adoption',{'decision':'skipped'}) == {'next':'/'}
     m.startup_database();assert m.DATABASE_INITIALIZATION_ERROR is None,m.DATABASE_INITIALIZATION_ERROR
     assert ro._read(own/'state.json')['storage_initialization']['reservation_id']==nonce
     if case in ('restore','replace','inode','pending'):
