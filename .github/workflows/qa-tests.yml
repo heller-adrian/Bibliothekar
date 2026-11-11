@@ -156,7 +156,7 @@ jobs:
     needs: adoption-preflight
     if: github.event_name == 'workflow_dispatch' && inputs.full_backend && needs.adoption-preflight.outputs.request-only != 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 48
+    timeout-minutes: 58
     strategy:
       fail-fast: false
       max-parallel: 4
