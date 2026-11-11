@@ -36,7 +36,7 @@ from app.trash import (
 )
 from app.ui_shell import apply_shell
 from app import view_cache
-from app.legacy_adoption_mode import active_adoption, adoption_access
+from app.legacy_adoption_mode import active_adoption, adoption_access, pending_initial_setup
 from app.root_operations import RootOperationBusy, RootOperationError, protect, reserve, mutate, assert_workspace_startable, _identity, generation, admission
 from app import background_mutation_cancel as cancel_queue
 from app.background_activity import current_activity, clear_finished_activity
@@ -799,6 +799,9 @@ def _requested_library_id(request: Request) -> str:
     adoption = getattr(request.state, "legacy_adoption", None)
     if adoption is not None:
         return adoption["library_id"]
+    setup = getattr(request.state, "initial_setup", None)
+    if setup is not None:
+        return setup["library_id"]
     fallback = _default_requested_library_id()
     return str(
         request.headers.get("X-Bibliothekar-Library")
@@ -1105,6 +1108,7 @@ def _onboarding_required() -> bool:
 
 def _library_onboarding_html() -> str:
     from app.ui_i18n import I18N_UI_JS
+    from app.ui_shell import BIBLIOTHEKAR_0451_HEAD_JS, BIBLIOTHEKAR_CSS, SETUP_THEME_CONTROL, SETUP_THEME_JS
     workspaces_root = str(
         storage_paths(WORKSPACE_PATH)["workspaces_root"]
     )
@@ -1115,12 +1119,17 @@ def _library_onboarding_html() -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Bibliothekar · Set up library</title>
 <script src="/auth/client.js"></script>
+<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>
+<style>{BIBLIOTHEKAR_CSS}</style>
 <style>
-:root{{color-scheme:dark;--bg:#0c1115;--surface:#172027;--border:#34414a;--text:#f2f4f5;--muted:#aeb8bf;--accent:#58aaf2;--danger:#ff716f}}
+:root{{--bg:var(--bk-paper);--surface:var(--bk-surface);--border:var(--bk-line);--text:var(--bk-ink);--muted:var(--bk-muted);--accent:var(--bk-blue);--danger:var(--bk-danger)}}
 *{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--text);font-family:Futura, "Helvetica Neue", Helvetica, Arial, sans-serif}}
 main{{width:min(760px,calc(100% - 32px));margin:7vh auto}} .card{{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:28px}}
 h1{{margin:0 0 8px;font-size:2rem}} p{{color:var(--muted);line-height:1.5}} label{{display:grid;gap:7px;margin:18px 0}}
-input{{width:100%;padding:13px 14px;border-radius:11px;border:1px solid var(--border);background:#10171c;color:var(--text);font:inherit}}
+input{{width:100%;padding:13px 14px;border-radius:11px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit}}
+#bk-setup-theme{{max-width:14rem;background:var(--bg);color:var(--text);font:inherit}}
+html[data-bk-theme=light]:has(body.bk-setup-page){{color-scheme:light}}
+body.bk-setup-page .card{{color:var(--text)}}
 button{{border:0;border-radius:11px;padding:13px 18px;background:var(--accent);color:white;font:inherit;font-weight:650;cursor:pointer}}
 button:disabled{{opacity:.45;cursor:default}} #status{{white-space:pre-wrap;margin-top:15px;color:var(--muted)}} #status.error{{color:var(--danger)}} .hint{{font-size:.9rem}}
 </style>
@@ -1133,6 +1142,7 @@ button:disabled{{opacity:.45;cursor:default}} #status{{white-space:pre-wrap;marg
 <p class="hint">Leer lassen: Bibliothekar erzeugt unter <code>{workspaces_root}</code> automatisch einen Ordner aus dem Bibliotheksnamen.</p>
 <label>Archiv · eigener RO-Mount<input id="archive" value="" placeholder="/main-library"></label>
 <button id="create" type="button">Bibliothek prüfen und anlegen</button>
+{SETUP_THEME_CONTROL}
 <div id="status" role="status"></div>
 </section></main>
 <script>
@@ -1149,7 +1159,7 @@ statusEl.textContent="Bibliothek eingerichtet. Bibliothekar wird geöffnet …";
 </script></body></html>"""
     from app.setup_language import localize_setup_html
     html = localize_setup_html(html, "onboarding")
-    return html.replace("</body>", f"<script>{I18N_UI_JS}</script></body>")
+    return html.replace("</body>", f"<script>{I18N_UI_JS}</script><script>{SETUP_THEME_JS}</script></body>")
 
 
 @app.middleware("http")
@@ -1191,14 +1201,13 @@ async def library_context_middleware(request: Request, call_next):
             return JSONResponse(status_code=409,content={'detail':'operation_recovery_required','storage_state':'READY','operations':operational})
     if _onboarding_required():
         path = request.url.path
-        allowed_api = (
-            path.startswith("/api/libraries")
-            or path == "/api/settings/storage-paths"
-            or path == "/api/health"
-        )
+        allowed_api = (request.method, path) in {
+            ("POST", "/api/libraries"), ("POST", "/api/libraries/check"),
+            ("GET", "/api/health"),
+        }
         if not allowed_api:
             if request.method == "GET" and not path.startswith("/api/"):
-                return HTMLResponse(_library_onboarding_html(), status_code=200)
+                return HTMLResponse(_library_onboarding_html(), headers={"Cache-Control": "no-store"})
             return JSONResponse(
                 status_code=409,
                 content={
@@ -2382,7 +2391,7 @@ def release_worker_loop() -> None:
         try:
             while not RELEASE_WORKER_STOP.is_set():
                 with adoption_access(REGISTRY_DATABASE_FILE) as active:
-                    if active or not process_background_release():
+                    if active or pending_initial_setup(REGISTRY_DATABASE_FILE) or not process_background_release():
                         break
         except RootOperationBusy:
             pass
@@ -2411,7 +2420,7 @@ def cancel_worker_loop() -> None:
         try:
             while not CANCEL_WORKER_STOP.is_set():
                 with adoption_access(REGISTRY_DATABASE_FILE) as active:
-                    if active or not process_background_mutation_cancel():
+                    if active or pending_initial_setup(REGISTRY_DATABASE_FILE) or not process_background_mutation_cancel():
                         break
         except RootOperationBusy:
             pass
@@ -2468,7 +2477,10 @@ def worker_loop() -> None:
     while not WORKER_STOP.is_set():
         try:
             with adoption_access(REGISTRY_DATABASE_FILE) as active:
-                claimed = None if active else _claim_runtime_job(last_library_id)
+                if active or pending_initial_setup(REGISTRY_DATABASE_FILE):
+                    claimed = None
+                else:
+                    claimed = _claim_runtime_job(last_library_id)
                 if claimed is not None:
                     context, job = claimed
                     process_claimed_job(job, library_context=context)
@@ -2494,7 +2506,7 @@ def _after_adoption(fn):
         while not WORKER_STOP.is_set():
             try:
                 with adoption_access(REGISTRY_DATABASE_FILE) as active:
-                    if not active:
+                    if not active and not pending_initial_setup(REGISTRY_DATABASE_FILE):
                         return fn(*args, **kwargs)
             except RootOperationBusy:
                 pass
@@ -2589,7 +2601,7 @@ def _coordinate_startup(fn):
                     complete(WORKSPACE_PATH, startup_reservation)
             from app.appdata import finish as finish_appdata
             finish_appdata(WORKSPACE_PATH)
-            if active_adoption(REGISTRY_DATABASE_FILE):
+            if active_adoption(REGISTRY_DATABASE_FILE) or pending_initial_setup(REGISTRY_DATABASE_FILE):
                 _defer_startup_for_adoption(coordinated)
                 return
             # Domain recovery never owns the already completed technical lease.
@@ -4331,6 +4343,16 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
                             updated_at=datetime.now(timezone.utc).isoformat(),
                         )
                 ensure_library_identity(database_path, library_id)
+                initial_setup = False
+                if first_library:
+                    from app.managed_storage_health import catalog_has_history, empty_bootstrap_registry
+                    if not catalog_has_history(database_path):
+                        try:
+                            empty_bootstrap_registry(REGISTRY_DATABASE_FILE, WORKSPACE_PATH, database_path)
+                        except ValueError:
+                            pass  # Retired libraries or prior stock are an existing installation.
+                        else:
+                            initial_setup = True
                 projection = (
                     {"jobs": 0, "families": 0, "files": 0}
                     if first_library
@@ -4349,6 +4371,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
                     archive_root=Path(str(checked["archive_root"])),
                     is_main=first_library,
                     is_active=True,
+                    initial_setup=initial_setup,
                     settings={
                         "created_by": f"bibliothekar-{DEPLOYMENT_VERSION}",
                         "projected_imports": projection,
@@ -14345,42 +14368,76 @@ async def adoption_access_middleware(request: Request, call_next):
     if read and (path.startswith("/assets/") or path in {
         "/healthz", "/api/health", "/manifest.webmanifest", "/favicon.ico",
         "/apple-touch-icon.png", "/api/settings/storage-health",
-        "/api/settings/recovery-diagnostics",
+        "/api/settings/recovery-diagnostics", "/api/operations/status",
     }):
         return await call_next(request)
-    start = path == "/api/legacy-adoption/jobs" and request.method == "POST"
-    guard = adoption_access(REGISTRY_DATABASE_FILE, exclusive=start)
+    method = request.method
+    start = (method, path) == ("POST", "/api/legacy-adoption/jobs")
+    decision = (method, path) == ("POST", "/api/setup/adoption")
+    exclusive = start or decision or (method, path) == ("POST", "/api/libraries")
     try:
-        async with contextmanager_in_threadpool(guard) as active:
+        async with contextmanager_in_threadpool(adoption_access(REGISTRY_DATABASE_FILE, exclusive=exclusive)) as active:
+            setup = pending_initial_setup(REGISTRY_DATABASE_FILE)
+            request.state.initial_setup = setup
             request.state.legacy_adoption = active
+            adoption_path = path == "/legacy-adoption" or path.startswith("/api/legacy-adoption/")
+            decision_path = path in {"/setup/adoption", "/api/setup/adoption"}
             if active:
                 wizard = "/legacy-adoption?" + urlencode({"library": active["library_id"], "job": active["job_id"]})
+                recovery_only = setup is None or active["library_id"] != setup["library_id"]
+                request.state.legacy_adoption_recovery = recovery_only
+                job_path = "/api/legacy-adoption/jobs/" + active["job_id"]
                 if path == "/legacy-adoption" and read:
-                    if (request.query_params.get("job"), request.query_params.get("library")) != (
+                    if (request.query_params.get("job"), request.query_params.get("library")) == (
                         active["job_id"], active["library_id"],
                     ):
-                        return RedirectResponse(wizard, status_code=303)
-                elif path == "/api/libraries" and read:
-                    pass
-                elif not path.startswith("/api/legacy-adoption/") or start:
-                    if read and not path.startswith("/api/"):
-                        return RedirectResponse(wizard, status_code=303)
-                    return JSONResponse(status_code=409, content={
-                        "detail": "Eine Bestandsübernahme ist aktiv.", "code": "legacy_adoption_active",
-                        "wizard": wizard,
-                    })
-                elif path.startswith("/api/legacy-adoption/jobs/") and (
-                    path.split("/", 5)[4] != active["job_id"]
+                        return await call_next(request)
+                    return RedirectResponse(wizard, status_code=303)
+                if path == job_path or path.startswith(job_path + "/"):
+                    recovery_action = (
+                        (method == "DELETE" and path == job_path)
+                        or (method == "POST" and path in {job_path + "/rollback/start", job_path + "/rollback/check"})
+                        or (method == "POST" and path == job_path + "/finalize" and active["phase"] == "registering")
+                    )
+                    if read or not recovery_only or recovery_action:
+                        return await call_next(request)
+                code = "legacy_adoption_recovery_only" if recovery_only and adoption_path else "legacy_adoption_active"
+            elif setup:
+                wizard = "/setup/adoption" if setup["decision"] == "choice" else "/legacy-adoption"
+                if (method == "GET" and path == "/setup/adoption") or decision:
+                    return await call_next(request)
+                if setup["decision"] == "adopting" and (
+                    start or (method == "GET" and path in {"/legacy-adoption", "/api/legacy-adoption/source"})
                 ):
-                    return JSONResponse(status_code=409, content={
-                        "detail": "Ein anderer Übernahmeauftrag ist aktiv.", "code": "legacy_adoption_active",
-                        "wizard": wizard,
-                    })
-            elif not read and path.startswith("/api/legacy-adoption/jobs/") and not path.endswith("/finalize"):
-                return JSONResponse(status_code=409, content={
-                    "detail": "Es ist kein Übernahmeauftrag aktiv.", "code": "legacy_adoption_inactive",
-                })
-            return await call_next(request)
+                    if path == "/legacy-adoption" and request.query_params.get("job"):
+                        return RedirectResponse("/legacy-adoption", status_code=303)
+                    return await call_next(request)
+                code = "initial_setup_required"
+            elif adoption_path or decision_path:
+                # The exact completion request can be repeated after a lost
+                # response. It cannot create a job or change the plan.
+                if method == "POST" and path.startswith("/api/legacy-adoption/jobs/") and path.endswith("/finalize"):
+                    from app.legacy_adoption_mode import adoption_reservation
+                    completed = adoption_reservation(REGISTRY_DATABASE_FILE)
+                    if completed and completed["plan_state"] == "completed" and (
+                        path == "/api/legacy-adoption/jobs/" + completed["job_id"] + "/finalize"
+                    ):
+                        request.state.legacy_adoption = completed
+                        return await call_next(request)
+                if read and not path.startswith("/api/"):
+                    return RedirectResponse("/", status_code=303)
+                return JSONResponse(status_code=409, content={"code": "legacy_adoption_inactive",
+                    "detail": "Die Bestandsübernahme ist nur während der Ersteinrichtung verfügbar."})
+            else:
+                return await call_next(request)
+            if (method, path) == ("POST", "/api/settings/storage-recheck"):
+                return await call_next(request)
+            if read and not path.startswith("/api/"):
+                return RedirectResponse(wizard, status_code=303)
+            return JSONResponse(status_code=409, content={
+                "detail": "Bitte schließe die Einrichtung oder den aktiven Übernahmeauftrag ab.",
+                "code": code, "wizard": wizard,
+            })
     except RootOperationBusy:
         return JSONResponse(status_code=409, content={
             "detail": "Ein anderer Vorgang läuft noch. Bitte versuche es erneut.",

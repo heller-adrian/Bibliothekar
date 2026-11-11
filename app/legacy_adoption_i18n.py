@@ -4,6 +4,27 @@ import re
 
 
 TRANSLATIONS = {
+    "Ersteinrichtung · Bibliothekar": "Initial setup · Bibliothekar",
+    "Hauptbibliothek einrichten": "Set up your main library",
+    "Hast du eine bestehende Fotosammlung?": "Do you have an existing photo collection?",
+    "Bestehende Sammlung übernehmen": "Adopt an existing collection",
+    "Mit einer leeren Bibliothek beginnen": "Start with an empty library",
+    "Bestandsübernahme fortsetzen": "Continue collection adoption",
+    "Zur Einrichtungsentscheidung": "Back to the setup choice",
+    "Gemeinsamen Quellordner auswählen": "Choose the common source folder",
+    "Lesende Inventur": "Read-only inventory",
+    "Verschiebeplan anzeigen": "Show move plan",
+    "Duplikat bleibt an der Quelle": "Duplicate remains at source",
+    "Prüfe den gespeicherten Zeitraum.": "Review the saved date range.",
+    "Wenn du eine bestehende Sammlung übernehmen möchtest, lege sie vorab in einem gemeinsamen Quellordner ab. Bibliothekar erfasst auch verschachtelte Ordner und gruppiert die Aufnahmen nach Datum.":
+        "To adopt a collection, first gather it under a common source folder. Bibliothekar scans nested folders and groups photos by capture date.",
+    "Lege alle Fotos, die du übernehmen möchtest, unter einem gemeinsamen Quellordner ab. Die Inventur durchsucht seine Unterordner und gruppiert Aufnahmen anhand der Aufnahmezeit.":
+        "Put all photos you want to adopt under one common source folder. The inventory scans its subfolders and groups media by capture time.",
+    "Dieser Auftrag stammt aus einer älteren Version. Prüfe den gespeicherten Stand und verwirf den Entwurf oder verwende die angezeigte Wiederherstellung.":
+        "This job was created in an earlier version. Review the saved state, then discard the draft or use the recovery action shown.",
+    "Die Hauptbibliothek enthält bereits verwaltete Daten.": "The main library already contains managed data.",
+    "Bitte schließe die Einrichtung oder den aktiven Übernahmeauftrag ab.": "Complete setup or resolve the active adoption job.",
+
     "Struktur": "Structure",
     "Ordnername": "Folder name",
     "Das Ereignis umfasst alle Aufnahmetage zwischen dem ersten und letzten Datum. Prüfe die Datumsspanne vor dem Speichern.": "The event includes every capture day between the first and last date. Check the date range before saving.",
@@ -28,13 +49,12 @@ TRANSLATIONS = {
     "Tage ausgewählt": "days selected",
     "Tage": "days",
     "Noch keine Ereignisse geplant. Wähle Plus, um zu beginnen.": "No events planned yet. Choose Plus to start.",
-    "Archivereignis ergänzen": "Extend archived event",
     "Entwurf entfernt.": "Draft removed.",
     "Entwurf gespeichert.": "Draft saved.",
     "Zeitkonflikte lösen": "Resolve time conflicts",
     "Zeitraum ändern": "Change date range",
     "Zeitkonflikt: Korrigiere die markierte Planung. Gespeicherte Entwürfe bleiben erhalten.": "Time conflict: Correct the highlighted plan. Saved drafts are preserved.",
-    "Gespeicherte Entwürfe bleiben erhalten. Korrigiere den betroffenen Zeitraum oder ergänze das vorhandene Archivereignis.": "Saved drafts are preserved. Correct the affected date range or extend the existing archived event.",
+    "Gespeicherte Entwürfe bleiben erhalten. Korrigiere den betroffenen Zeitraum.": "Saved drafts are preserved. Correct the affected date range.",
     "Wähle Aufnahmetage wie im Arbeitsbereich. Klick und Strg/Cmd wählen einzelne Tage, Umschalt wählt einen Bereich. Mit Plus kannst du auch ohne Auswahl ein Ereignis anlegen.": "Select capture days as in Workspace. Click and Ctrl/Cmd select individual days; Shift selects a range. Use Plus to create an event even without selecting days.",
     "Inventur neu starten? Der bisherige Entwurf wird verworfen. Originaldateien bleiben unverändert.": "Restart inventory? The current draft will be discarded. Original files remain unchanged.",
     "Sicherheit und Zeitbedarf": "Safety and time required",
@@ -119,8 +139,6 @@ TRANSLATIONS = {
         "Select a year and a day. The event date ranges determine which confirmed families are included.",
     "Verschiebeplan erstellen": "Create move plan",
     "Ohne gesichertes Datum": "No verified date",
-    "Vorhandenes Ereignis ergänzen": "Add to an existing event",
-    "Archivereignis im Entwurf gespeichert.": "Archived event saved to the draft.",
     "Diesen Tag im Formular verwenden": "Use this day in the form",
     "Prüffälle": "Review cases",
     "Aufnahmezeit fehlt": "Missing capture time",

@@ -4,16 +4,62 @@ import re
 
 from app.legacy_adoption_i18n import TRANSLATIONS, PATTERNS
 from app.ui_i18n import i18n_ui_js
-from app.ui_shell import apply_shell
+from app.ui_shell import apply_setup_shell
 
 _I18N_JS = i18n_ui_js(TRANSLATIONS, PATTERNS)
 
 
-def wizard_html(library_id: str) -> str:
-    html = apply_shell(_PAGE, active_area="assistant", subarea="adoption", localization_js=_I18N_JS)
+def setup_choice_html(decision: str) -> str:
+    primary = (
+        '<a class="primary" href="/legacy-adoption">Bestandsübernahme fortsetzen</a>'
+        if decision == "adopting"
+        else '<button class="primary" type="button" data-decision="adopting">Bestehende Sammlung übernehmen</button>'
+    )
+    return apply_setup_shell(_CHOICE.replace("{{primary}}", primary), localization_js=_I18N_JS)
+
+
+def wizard_html(library_id: str, *, recovery_only: bool = False) -> str:
+    html = apply_setup_shell(_PAGE, localization_js=_I18N_JS)
     return re.sub(r'(<body\b[^>]*)(>)',
-                  lambda match: match[1] + ' data-library="' + escape(library_id, quote=True) + '"' + match[2],
+                  lambda match: (match[1] + ' data-library="' + escape(library_id, quote=True) + '"'
+                                 + (' data-recovery-only="true"' if recovery_only else '') + match[2]),
                   html, count=1)
+
+
+_CHOICE = """<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ersteinrichtung · Bibliothekar</title></head>
+<body>
+<main class="bk-setup-choice">
+<section>
+<p>Hauptbibliothek einrichten</p>
+<h1>Hast du eine bestehende Fotosammlung?</h1>
+<p>Wenn du eine bestehende Sammlung übernehmen möchtest, lege sie vorab in einem gemeinsamen Quellordner ab. Bibliothekar erfasst auch verschachtelte Ordner und gruppiert die Aufnahmen nach Datum.</p>
+<div class="bk-setup-choice-actions">
+{{primary}}
+<button type="button" data-decision="skipped">Mit einer leeren Bibliothek beginnen</button>
+</div>
+<p id="setup-status" role="status"></p>
+</section>
+</main>
+<script>
+document.querySelectorAll("[data-decision]").forEach(button=>button.addEventListener("click",async()=>{
+  const buttons=document.querySelectorAll("[data-decision]");
+  buttons.forEach(item=>item.disabled=true);
+  try {
+    const response=await fetch("/api/setup/adoption",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({decision:button.dataset.decision})});
+    const result=await response.json();
+    if(!response.ok)throw new Error(result.detail);
+    location.replace(result.next);
+  } catch (error) {
+    document.getElementById("setup-status").textContent=error.message;
+    buttons.forEach(item=>item.disabled=false);
+  }
+}));
+</script>
+</body></html>"""
 
 
 _PAGE = r"""<!doctype html>
@@ -63,7 +109,7 @@ _PAGE = r"""<!doctype html>
 </head>
 <body>
 <main class="bk-page legacy-adoption">
-<header class="adoption-heading"><div><a id="back" href="/">Zur Bibliothek</a><h1>Bestehende Fotosammlung übernehmen</h1></div><div id="top-actions"></div></header>
+<header class="adoption-heading"><div><a id="choice" href="/setup/adoption">Zur Einrichtungsentscheidung</a><h1>Bestehende Fotosammlung übernehmen</h1></div><div id="top-actions"></div></header>
 <nav id="wizard-steps" class="adoption-stepper" aria-label="Übernahmeschritte"></nav>
 <details id="introduction" open><summary>Sicherheit und Zeitbedarf</summary>
   <p>Die Übernahme einer bestehenden Fotosammlung ist ein umfangreicher Vorgang und kann längere Zeit dauern. Abhängig von der Anzahl und Größe der Dateien können Inventur, Planung und Sicherheitsprüfung mehrere Stunden benötigen. Bitte plane ausreichend Zeit ein und führe die Übernahme möglichst ohne Zeitdruck durch.</p>
@@ -74,37 +120,29 @@ _PAGE = r"""<!doctype html>
 <div id="message" role="status" aria-live="polite"></div>
 <div id="dirty" role="status" aria-live="polite"></div>
 <section id="setup">
-  <h2>1. Bestehende Fotosammlung auswählen</h2>
+  <h2>Gemeinsamen Quellordner auswählen</h2>
+  <p>Lege alle Fotos, die du übernehmen möchtest, unter einem gemeinsamen Quellordner ab. Die Inventur durchsucht seine Unterordner und gruppiert Aufnahmen anhand der Aufnahmezeit.</p>
   <div class="inline">
     <label>Quellenbereich <select id="source-root"><option value="nas">NAS-Quelle</option><option value="saved">Eingebundene Sicherungen</option></select></label>
     <button type="button" id="browse">Ordner anzeigen</button>
   </div>
   <div id="source" class="stack"></div>
-  <fieldset id="choose-library" hidden>
-    <legend>2. Zielbibliothek auswählen oder anlegen</legend>
+  <div id="selected-source" class="inline" hidden>
     <p id="chosen-source"></p>
-    <div class="inline">
-      <label>Zielbibliothek <select id="library"></select></label>
-      <button type="button" id="start">Dataset prüfen und Inventur starten</button>
-    </div>
-    <details>
-      <summary>Neue Bibliothek anlegen</summary>
-      <label>Anzeigename <input id="new-name" type="text"></label>
-      <label>Archivpfad im Container <input id="new-archive" type="text"></label>
-      <label>Arbeitsordner im Container, optional <input id="new-work" type="text"></label>
-      <button type="button" id="create-library">Bibliothek anlegen</button>
-    </details>
-  </fieldset>
-  <h3 style="margin-top:1rem">Gespeicherte Aufträge</h3><div id="jobs" class="stack"></div>
+    <button type="button" id="start" class="primary">Dataset prüfen und Inventur starten</button>
+  </div>
 </section>
 <div id="work"></div><nav id="wizard-navigation" class="inline" aria-label="Schrittnavigation"></nav>
 </main>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
-let library = document.body.dataset.library;
+const library = document.body.dataset.library;
+const recoveryOnly = document.body.dataset.recoveryOnly === "true";
+const afterDiscard = recoveryOnly ? "/" : "/setup/adoption";
 const currentUrl = new URL(location.href);
 let jobId = currentUrl.searchParams.get("job") || "";
+$("choice").hidden = Boolean(jobId);
 let job = null, draft = {}, draftRevision = 0, year = "", day = null;
 let familyCursor = "", moveCursor = "", reviewCursor = "", directoryCursor = "", timer = 0, scriptTimer = 0;
 let selectedSource = null;
@@ -113,6 +151,11 @@ let selectedDays=new Set(), dayRows=[], selectionAnchor="", dayPage=60, selected
 const steps=[["setup","Einrichten"],["inventory","Inventur"],["plan","Ereignisse planen"],["review","Plan prüfen"],["execution","Methode wählen"],["execute","Durchführen"],["verify","Prüfen und abschließen"]];
 function allowedSteps(){
   if(!job || job.state==="discarded")return ["setup"];
+  if(recoveryOnly){
+    if(!job.plan.id)return ["inventory"];
+    if(!job.plan.execution)return ["inventory","review"];
+    return ["review",job.plan.execution.phase==="registering"?"verify":"execute"];
+  }
   if(!job.plan.id)return job.state==="inventoried" ? ["inventory","plan"] : ["inventory"];
   if(!job.plan.execution)return ["inventory","review","execution"];
   return job.plan.state==="completed" ? ["review","verify"] : ["review","execute","verify"];
@@ -124,7 +167,7 @@ function rememberView(step,push=false){
 }
 async function goStep(step){
   requireSaved();
-  if(step==="plan" && job.plan.id && !job.plan.execution)await mutate("/reopen");
+  if(step==="plan" && job?.plan.id && !job.plan.execution)await mutate("/reopen");
   if(!allowedSteps().includes(step))return;
   rememberView(step,true);await refresh();
   document.querySelector(".adoption-heading").scrollIntoView({block:"start"});
@@ -139,7 +182,7 @@ function navigation(){
     return button;
   }));
   const nav=$("wizard-navigation");nav.replaceChildren();
-  if(!job)return;
+  if(!job || recoveryOnly)return;
   const previous={plan:"inventory",review:job.plan.execution?null:"plan",execution:"review",verify:job.plan.state==="completed"?null:"execute"}[viewStep];
   if(previous)nav.append(action("Zurück",()=>goStep(previous)));
   if(viewStep==="inventory" && job.state==="inventoried")nav.append(action("Weiter: Ereignisse planen",()=>goStep("plan"),true));
@@ -188,7 +231,7 @@ const labels = {
  registration_pending:"Registrierung ausstehend", registering:"Registrierung läuft",
  rolling_back:"Wiederherstellung läuft", rolled_back:"Wiederherstellung geprüft",
  media_verified:"Medien geprüft", verified:"Medien und Ereignisdokumente geprüft", completed:"Registriert",
- pending:"Ausstehend", duplicate:"Bereits registriert", missing:"Zieldatei fehlt", unsafe:"Unsicherer Pfad",
+ pending:"Ausstehend", duplicate:"Duplikat bleibt an der Quelle", missing:"Zieldatei fehlt", unsafe:"Unsicherer Pfad",
  size_mismatch:"Dateigröße weicht ab", sha256_mismatch:"Prüfsumme weicht ab", source_present:"Datei auch an der Quelle",
  identity_mismatch:"Die Zieldatei hat eine andere Dateiidentität als das Original"
 };
@@ -246,24 +289,6 @@ function link(text, path) {
   return el;
 }
 function slot(id, type="div") {const el=node(type);el.id=id;return el;}
-async function lists() {
-  const data = await api("/api/libraries");
-  $("library").replaceChildren(...data.libraries.map(item => {
-    const option=node("option",item.display_name);
-    option.value=item.library_id;
-    option.dataset.bkPreserveLanguage="";
-    option.selected=item.library_id===library;
-    return option;
-  }));
-  const jobs = await api(base+"/jobs");
-  $("jobs").replaceChildren(...jobs.map(item => {
-    const row=node("div",undefined,"inline");
-    row.append(node("span",item.source_root+" · "+t(label(item.plan_state || item.state)),"paths"),
-      action("Auftrag öffnen", async () => { await openJob(item.id); }));
-    return row;
-  }));
-  if (!jobs.length) $("jobs").append(line("In dieser Bibliothek ist noch kein Auftrag gespeichert."));
-}
 async function browse(relative) {
   const root=$("source-root").value;
   const data=await api(base+"/source?"+new URLSearchParams({root,relative}));
@@ -274,8 +299,8 @@ async function browse(relative) {
   bar.append(action("Diesen Quellordner wählen",()=>{
     selectedSource={root,relative:data.relative};
     $("chosen-source").textContent=data.path;
-    $("choose-library").hidden=false;
-    $("library").focus();
+    $("selected-source").hidden=false;
+    $("start").focus();
   },true));
   const children=node("div",undefined,"inline");
   for (const name of data.folders) {
@@ -310,7 +335,7 @@ async function refresh() {
   draftRevision=state.draft_revision;
   draft={events:[],capture_overrides:{},exclude_families:[],target_stems:{},...state.draft};
   let checked=null;
-  if(job.state==="inventoried" && !job.plan.id && previewRevision!==draftRevision){
+  if(!recoveryOnly && job.state==="inventoried" && !job.plan.id && previewRevision!==draftRevision){
     checked=await api(jobPath("/draft/check"),"POST",draft);
     draftStats=checked.events;previewRevision=draftRevision;
   }
@@ -334,6 +359,14 @@ async function mutate(path, method="POST", body) {
   if (checking) $("safety").textContent="Bitte keine Dateien mehr verändern. Bibliothekar prüft und registriert gerade den übernommenen Archivbestand.";
   try {
     const result=await api(jobPath(path),method,body);
+    if(path==="/finalize" && result.state==="completed") {
+      location.replace("/");
+      return result;
+    }
+    if(path==="/rollback/check" && result.execution?.phase==="rolled_back") {
+      location.replace(afterDiscard);
+      return result;
+    }
     const target={"/plan":"review","/confirm":"execute","/verify":"verify","/finalize":"verify","/reopen":"plan","/scan":"inventory"}[path];
     if(target)rememberView(target);
     await refresh();
@@ -351,7 +384,7 @@ function render() {
   $("introduction").hidden=false;$("introduction").open=viewStep==="setup";
   $("setup").hidden=viewStep!=="setup";
   $("top-actions").replaceChildren();
-  $("back").hidden=!terminal;
+  $("choice").hidden=true;
   $("safety").hidden=terminal;
   const warnings={
     manual:"Jetzt sind ausschließlich die im freigegebenen Plan beschriebenen manuellen Verschiebungen erlaubt.",
@@ -366,8 +399,9 @@ function render() {
     ["operations_done","verifying","registration_pending","registering"].includes(phase) ? warnings.checking :
     "Bitte keine manuellen Änderungen an der alten Fotosammlung oder am Zielarchiv vornehmen. Andernfalls kann der gespeicherte Übernahmeplan ungültig werden."
   );
+  if(recoveryOnly)$("safety").textContent="Dieser Auftrag stammt aus einer älteren Version. Prüfe den gespeicherten Stand und verwirf den Entwurf oder verwende die angezeigte Wiederherstellung.";
   const host=$("work");
-  const status=section("3. Lesende Inventur");
+  const status=section("Lesende Inventur");
   status.append(line(job.source_root),
     line([t(label(job.state)),job.files+" "+t("Dateien"),job.families+" "+t("Familien"),
       job.errors+" "+t("Pfadfehler")].join(" · ")));
@@ -383,8 +417,8 @@ function render() {
     status.append(cases);
   }
   const buttons=node("div",undefined,"inline");
-  if (job.scan_running) buttons.append(action("Inventur pausieren",()=>mutate("/pause")));
-  else if (!job.plan.id) buttons.append(action(job.state==="ready"?"Inventur starten":"Inventur erneut starten",async()=>{
+  if (!recoveryOnly && job.scan_running) buttons.append(action("Inventur pausieren",()=>mutate("/pause")));
+  else if (!recoveryOnly && !job.plan.id) buttons.append(action(job.state==="ready"?"Inventur starten":"Inventur erneut starten",async()=>{
     if(job.state!=="ready" && !confirm(t("Inventur neu starten? Der bisherige Entwurf wird verworfen. Originaldateien bleiben unverändert.")))return;
     await mutate("/scan");
   },true));
@@ -392,7 +426,7 @@ function render() {
     if (!confirm("Auftrag und Entwurf verwerfen? Originaldateien bleiben erhalten.")) return;
     await api(jobPath(),"DELETE");
     dirty.clear();
-    location.href=$("back").href;
+    location.replace(afterDiscard);
   });discard.classList.add("danger-button");$("top-actions").append(discard);}
   if (job.errors) buttons.append(action("Pfadfehler anzeigen", async()=>{
     const rows=await api(jobPath("/errors"));
@@ -412,7 +446,7 @@ function renderDraft(host) {
   const menu=node("div",undefined,"stack");
   const startEditor=kind=>{
     const days=[...selectedDays].sort();
-    const index=kind==="child" ? draft.events.findIndex(event=>!event.existing_id && event.event_kind!=="no_event") : undefined;
+    const index=kind==="child" ? draft.events.findIndex(event=>event.event_kind!=="no_event") : undefined;
     eventEditor(index===-1?undefined:index,days[0]||"",kind);
     plus.open=false;$("event-editor").scrollIntoView({block:"nearest"});
   };
@@ -491,17 +525,6 @@ async function showDay() {
   $("families").replaceChildren();
   familyCursor="";
   if (day) {
-    const matches=await api(base+"/events?"+new URLSearchParams({day}));
-    for (const item of matches) {
-      const row=node("div",undefined,"row");
-      row.append(line(item.name+" · "+item.start_datetime.slice(0,10)+" bis "+item.end_datetime.slice(0,10)),
-        action("Vorhandenes Ereignis ergänzen",async()=>{
-          if (draft.events.some(event=>event.existing_id===item.id)) return;
-          await setDraft({...draft,events:[...draft.events,{existing_id:item.id,name:item.name}]});
-          report("Archivereignis im Entwurf gespeichert.");
-        }));
-      $("matches").append(row);
-    }
     $("matches").append(action("Diesen Tag im Formular verwenden",()=>eventEditor(undefined,day)));
   }
   if($("family-diagnostics")?.open)await showFamilies();
@@ -545,7 +568,7 @@ async function showReview(reset=false) {
       }
     }
     if (item.target_relative) row.append(line("Arbeitsordner in General · "+item.target_relative));
-    if (item.can_copy) row.append(action("Zur Metadatenkorrektur kopieren",async()=>{
+    if (!recoveryOnly && item.can_copy) row.append(action("Zur Metadatenkorrektur kopieren",async()=>{
       if (!confirm("Die vollständige Dateifamilie benötigt zusätzlichen Speicherplatz im Workspace. Jetzt nach General kopieren?")) return;
       await api(jobPath("/review/copy"),"POST",{family_key:item.family_key});
       await showReview(true);
@@ -617,19 +640,12 @@ async function setDraft(value, editor) {
 function showConflicts(checked,candidate,editor){
   $("planning-conflicts")?.remove();
   const panel=node("section");panel.id="planning-conflicts";panel.setAttribute("role","alert");
-  panel.append(node("h3","Zeitkonflikte lösen"),line("Gespeicherte Entwürfe bleiben erhalten. Korrigiere den betroffenen Zeitraum oder ergänze das vorhandene Archivereignis."));
+  panel.append(node("h3","Zeitkonflikte lösen"),line("Gespeicherte Entwürfe bleiben erhalten. Korrigiere den betroffenen Zeitraum."));
   for(const conflict of checked.conflicts){
     const proposed=candidate.events[conflict.index];
     const row=node("div",undefined,"row");
     const title=node("strong",(proposed.name||t("Sammelordner ohne Ereignis"))+" ↔ "+conflict.name);title.dataset.bkPreserveLanguage="";
     row.append(title,line(conflict.start.slice(0,10)+" → "+conflict.end.slice(0,10)));
-    if(conflict.kind==="archive")row.append(action("Vorhandenes Ereignis ergänzen",async()=>{
-      const events=candidate.events.filter((item,index)=>index!==conflict.index && item.existing_id!==conflict.existing_id);
-      events.push({existing_id:conflict.existing_id,name:conflict.name});
-      await setDraft({...candidate,events},editor);panel.remove();
-      $("event-editor").replaceChildren();$("event-editor").hidden=true;
-      report("Archivereignis im Entwurf gespeichert.");
-    }));
     row.append(action("Zeitraum ändern",()=>{
       if(editor?.isConnected)editor.querySelector('input[type="date"],textarea')?.focus();
       else eventEditor(conflict.index);
@@ -644,7 +660,7 @@ function showDraftEvents() {
   if(!draft.events.length)el.append(line("Noch keine Ereignisse geplant. Wähle Plus, um zu beginnen."));
   draft.events.forEach((item,index)=>{
     const row=node("details",undefined,"adoption-event-card");
-    const kind=item.existing_id?"Archivereignis ergänzen":item.event_kind==="no_event"?"Sammelordner ohne Ereignis":"Neues Ereignis";
+    const kind=item.event_kind==="no_event"?"Sammelordner ohne Ereignis":"Neues Ereignis";
     const dates=item.event_kind==="no_event"?(item.segments||[]).map(segment=>segment.day_key):[item.start_date,item.end_date].filter(Boolean);
     const summary=node("summary");const title=node("strong",item.name||t(kind));title.dataset.bkPreserveLanguage="";
     summary.append(title,node("span",t(kind),"subtle"),node("span",[...new Set(dates)].join(" → "),"subtle"));
@@ -654,7 +670,7 @@ function showDraftEvents() {
     row.append(line((stats?.days??matches.length)+" "+t("Tage")+" · "+(stats?.families??matches.reduce((sum,day)=>sum+day.families,0))+" "+t("Familien")));
     if(stats && !dates.length)row.append(line(stats.start.slice(0,10)+" → "+stats.end.slice(0,10)));
     const controls=node("div",undefined,"inline");
-    if(!item.existing_id)controls.append(action("Bearbeiten",()=>eventEditor(index)));
+    controls.append(action("Bearbeiten",()=>eventEditor(index)));
     controls.append(action("Entfernen",async()=>{await setDraft({...draft,events:draft.events.filter((_,at)=>at!==index)});report("Entwurf entfernt.");}));
     row.append(controls);el.append(row);
   });
@@ -786,8 +802,8 @@ function renderPlan(host) {
   const completed=plan.state==="completed";
   panel.append(line(label(phase || plan.state)));
   panel.append(line([plan.dataset?.dataset, plan.move_files+" Dateien", plan.move_bytes+" Bytes"].filter(Boolean).join(" · ")));
-  panel.append(node("code",plan.source_root+" → "+plan.archive_root));
-  for (const [state,count] of Object.entries(plan.counts)) panel.append(node("span",t(label(state))+": "+count+"  "));
+  panel.append(line(plan.source_root+" → "+plan.archive_root));
+  panel.append(line(Object.entries(plan.counts).map(([state,count])=>t(label(state))+": "+count).join(" · ")));
   if (!completed && phase!=="rolled_back") panel.append(line(
     "Vor größeren Dateiänderungen empfehlen wir, einen ZFS-Snapshot oder eine andere geeignete Sicherung anzulegen. Diese zusätzliche Sicherheitsmaßnahme ist freiwillig."
   ));
@@ -820,7 +836,7 @@ function renderPlan(host) {
     panel.append(groups);
   }
   const controls=node("div",undefined,"inline");
-  if (!phase && !completed) {
+  if (!recoveryOnly && !phase && !completed) {
     controls.append(
       action(plan.documents_at?"Ereignisdokumente neu vorbereiten":"Ereignisdokumente vorbereiten",()=>mutate("/documents")),
       action("Plan zur Bearbeitung öffnen",()=>mutate("/reopen")));
@@ -830,11 +846,11 @@ function renderPlan(host) {
   }
   const scripted=plan.execution?.method==="script";
   if (scripted && !completed && phase!=="rolled_back") panel.append(slot("script-state"));
-  if (viewStep==="verify" && !scripted && ["manual","verifying","repair"].includes(phase)) {
+  if (!recoveryOnly && viewStep==="verify" && !scripted && ["manual","verifying","repair"].includes(phase)) {
     controls.append(action("Archiv prüfen",()=>run("/verify"),true));
   }
-  if (phase==="repair" && !scripted) controls.append(action("Manuelle Schritte fortsetzen",()=>run("/resume")));
-  if (viewStep==="verify" && ["registration_pending","registering"].includes(phase)) {
+  if (!recoveryOnly && phase==="repair" && !scripted) controls.append(action("Manuelle Schritte fortsetzen",()=>run("/resume")));
+  if (viewStep==="verify" && (phase==="registering" || (!recoveryOnly && phase==="registration_pending"))) {
     controls.append(action("Übernahme registrieren",()=>run("/finalize"),true));
   }
   if (["manual","script_prepared","operations_done","verifying","repair","registration_pending"].includes(phase)) {
@@ -849,7 +865,6 @@ function renderPlan(host) {
     else controls.append(action("Befehl für die Skriptrücknahme bereitstellen",()=>run("/rollback/start")));
     controls.append(action("Wiederherstellung prüfen und Auftrag beenden",()=>run("/rollback/check"),true));
   }
-  if (phase==="rolled_back" || completed) controls.append(link("Zur Bibliothek", $("back").href));
   if (plan.issues) controls.append(action("Prüfprobleme anzeigen",async()=>{
     const issues=await api(jobPath("/issues"));
     $("issues").replaceChildren(...issues.map(item=>line([item.relative_path,t(item.issue)].filter(Boolean).join(" · "))));
@@ -959,10 +974,10 @@ async function pollScript() {
       delete target.dataset.command;
       target.replaceChildren();
     }
-    if (!result.running && ["script_prepared","repair"].includes(phase) && !result.command) {
+    if (!recoveryOnly && !result.running && ["script_prepared","repair"].includes(phase) && !result.command) {
       nodes.push(action("Skriptbefehl bereitstellen",()=>run("/script/release"),true));
     }
-    if (!result.running && status?.state==="completed" && status.mode==="apply" &&
+    if (!recoveryOnly && !result.running && status?.state==="completed" && status.mode==="apply" &&
         ["script_prepared","operations_done","verifying","repair"].includes(phase)) {
       nodes.push(action("Archiv unabhängig prüfen",()=>run("/verify"),true));
     }
@@ -1010,22 +1025,10 @@ async function showMoves(reset=false) {
     target.append(more);
   }
 }
-function selectLibrary(identifier) {
-  library=identifier;
-  $("back").href="/?library="+encodeURIComponent(library);
-  const url=new URL(location.href);
-  url.searchParams.set("library",library);
-  history.replaceState(null,"",url);
-}
-selectLibrary(library);
-$("library").addEventListener("change",()=>{
-  selectLibrary($("library").value);
-  lists().catch(error=>report(error.message));
-});
 $("browse").addEventListener("click",()=>browse("").catch(error=>report(error.message)));
 $("source-root").addEventListener("change",()=>{
   selectedSource=null;
-  $("choose-library").hidden=true;
+  $("selected-source").hidden=true;
   $("source").replaceChildren();
 });
 $("start").addEventListener("click",async()=>{
@@ -1042,29 +1045,10 @@ $("start").addEventListener("click",async()=>{
     button.disabled=false;
   }
 });
-$("create-library").addEventListener("click",async()=>{
-  const button=$("create-library");
-  button.disabled=true;
-  try {
-    const created=await api("/api/libraries","POST",{
-      display_name:$("new-name").value,archive_root:$("new-archive").value,work_root:$("new-work").value
-    });
-    selectLibrary(created.library.library_id);
-    await lists();
-    $("new-name").value="";
-    $("new-archive").value="";
-    $("new-work").value="";
-    report("Zielbibliothek angelegt.");
-  } catch (error) {
-    report(error.message);
-  } finally {
-    button.disabled=false;
-  }
-});
 (async()=>{
   try {
     if(!jobId)navigation();else $("setup").hidden=true;
-    await lists(); if (jobId) await refresh();
+    if (jobId) await refresh();
   }
   catch(error) { report(error.message); }
 })();

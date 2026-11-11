@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import domain_recovery, main, operation_health
+from app.legacy_adoption_mode import pending_initial_setup
 from app.database import database_connection
 from app.event_access import event_file_rows
 from app.event_inventory import scan_event_inventory
@@ -20,18 +21,206 @@ from tests.backend.test_legacy_adoption_plan import inventory, library
 from tests.backend.test_legacy_adoption_inventory import synthetic_dataset
 
 
-def _json(client, method, path, *, library="second", status=200, **kwargs):
+def _json(client, method, path, *, library="main", status=200, **kwargs):
     response = client.request(method, path, headers={"X-Bibliothekar-Library": library}, **kwargs)
     assert response.status_code == status, response.text
     return response.json()
 
 
-def test_wizard_and_f14_recovery_in_secondary_library(ready, tmp_path, monkeypatch, synthetic_dataset):
+@pytest.fixture
+def fresh_main(tmp_path, monkeypatch):
+    case = tmp_path.resolve() / "first-install"
+    workspace, private, archive = (case / name for name in ("workspace", "database", "archive"))
+    for path in (workspace, private, archive):
+        path.mkdir(parents=True)
+    config = case / "settings.json"
+    config.write_text("{}")
+    database, registry = private / "main.sqlite3", private / "registry.sqlite3"
+    for key, path in {"WORKSPACE": workspace, "DATABASE_DIR": private, "REGISTRY_DATABASE": registry,
+                      "CONFIG": config, "ARCHIVE_ROOT": archive, "LOG_DIR": case / "logs"}.items():
+        monkeypatch.setenv("KAMERA_" + key, str(path))
+    monkeypatch.delenv("BIBLIOTHEKAR_DEFAULT_DIRECTORY_LANGUAGE", raising=False)
+    for key, path in {"WORKSPACE_PATH": workspace, "DATABASE_FILE": database, "DATABASE_DIRECTORY": private,
+                      "REGISTRY_DATABASE_FILE": registry, "CONFIG_PATH": config, "ARCHIVE_ROOT": archive,
+                      "LOG_PATH": case / "logs"}.items():
+        monkeypatch.setattr(main, key, path)
+    monkeypatch.setattr(main, "_mount_read_only", lambda path: True)
+    monkeypatch.setattr(main, "MAIN_LIBRARY_CONTEXT", main.build_main_library_context())
+    # Exercise real storage startup and HTTP registration without asynchronous claims.
+    monkeypatch.setattr(main, "_start_runtime_workers", lambda **kwargs: None)
+    return workspace, database, registry, archive
+
+
+def _onboard(fresh_main):
+    _, _, registry, archive = fresh_main
+    main.startup_database()
+    assert main.DATABASE_INITIALIZATION_ERROR is None
+    client = TestClient(main.app, follow_redirects=False)
+    before = client.get("/")
+    assert before.status_code == 200 and "Set up your first library" in before.text
+    assert client.get("/api/jobs").status_code == 409
+    result = _json(client, "POST", "/api/libraries", status=201, json={
+        "display_name": "Synthetic Main", "archive_root": str(archive),
+    })
+    assert result["library"]["library_id"] == "main"
+    assert pending_initial_setup(registry) == {"library_id": "main", "decision": "choice"}
+    return client
+
+
+def _adopt(client):
+    return _json(client, "POST", "/api/setup/adoption", json={"decision": "adopting"})
+
+
+def test_first_setup_choice_blocks_regular_work_and_skip_is_permanent(fresh_main):
+    from app.ui_shell import _shell_markup
+
+    client = _onboard(fresh_main)
+    for path in ("/", "/workspace?library=second", "/transfer", "/?settings=libraries", "/legacy-adoption"):
+        response = client.get(path)
+        assert response.status_code == 303 and response.headers["location"] == "/setup/adoption"
+    choice = client.get("/setup/adoption")
+    assert choice.status_code == 200 and choice.headers["cache-control"] == "no-store"
+    assert "Do you have an existing photo collection?" in choice.text
+    assert "Adopt an existing collection" in choice.text and "Start with an empty library" in choice.text
+    assert 'id="bk-settings-dialog"' not in choice.text and 'class="bk-shell"' not in choice.text
+    for method, path in (("GET", "/api/jobs"), ("POST", "/api/jobs/folder-import"),
+                         ("GET", "/api/libraries"), ("POST", "/api/libraries"),
+                         ("GET", "/api/settings/event-folder-layout"),
+                         ("PUT", "/api/settings/event-folder-layout"),
+                         ("GET", "/api/operations/catalogue"), ("POST", "/api/legacy-adoption/jobs")):
+        assert _json(client, method, path, status=409)["code"] == "initial_setup_required"
+    assert client.get("/healthz").status_code == 200
+    assert client.get("/api/settings/storage-health").status_code == 200
+    # Run actual technical startup against the same persisted registry.
+    main.startup_database()
+    restarted = TestClient(main.app, follow_redirects=False)
+    assert restarted.get("/workspace").headers["location"] == "/setup/adoption"
+    assert _json(restarted, "POST", "/api/setup/adoption", json={"decision": "skipped"}) == {"next": "/"}
+    assert restarted.get("/").status_code == 200
+    assert restarted.get("/legacy-adoption").headers["location"] == "/"
+    assert "bk-legacy-adoption" not in _shell_markup("workspace", "media")
+    second_archive = fresh_main[3].with_name("second-archive")
+    second_archive.mkdir()
+    second = _json(restarted, "POST", "/api/libraries", status=201, json={
+        "display_name": "Other library", "archive_root": str(second_archive),
+    })["library"]
+    assert second["library_id"] != "main" and pending_initial_setup(fresh_main[2]) is None
+    assert _json(restarted, "POST", "/api/setup/adoption", status=409, json={"decision": "adopting"})[
+        "code"
+    ] == "legacy_adoption_inactive"
+
+
+def test_existing_catalogue_blocks_adoption_and_is_preserved(fresh_main):
+    from tests.backend.test_legacy_adoption_plan import _existing
+
+    _, database, registry, _ = fresh_main
+    client = _onboard(fresh_main)
+    library = resolve_library_context(registry, "main")
+    _existing(library)
+    assert "verwaltete Daten" in _json(client, "POST", "/api/setup/adoption", status=409,
+                                       json={"decision": "adopting"})["detail"]
+    assert pending_initial_setup(registry)["decision"] == "choice"
+    _json(client, "POST", "/api/setup/adoption", json={"decision": "skipped"})
+    assert _json(client, "POST", "/api/legacy-adoption/jobs", status=409, json={"root": "nas"})[
+        "code"
+    ] == "legacy_adoption_inactive"
+    with database_connection(database) as connection:
+        assert tuple(connection.execute("SELECT id, name, revision FROM events").fetchone()) == (
+            "EXISTING", "Urlaub", 1,
+        )
+
+
+def test_first_setup_uses_the_normal_authentication_and_csrf_guard(fresh_main, monkeypatch):
+    _onboard(fresh_main)
+    password = "synthetic-setup-authorization"
+    monkeypatch.delenv("BIBLIOTHEKAR_AUTH_TEST_BYPASS")
+    monkeypatch.delenv("BIBLIOTHEKAR_ADMIN_PASSWORD_FILE", raising=False)
+    monkeypatch.setenv("BIBLIOTHEKAR_ADMIN_PASSWORD", password)
+    client = TestClient(main.app, follow_redirects=False)
+    assert client.get("/workspace").headers["location"].startswith("/login")
+    assert client.post("/api/setup/adoption", json={"decision": "skipped"}).status_code == 401
+    _json(client, "POST", "/auth/login", json={"password": password})
+    assert _json(client, "GET", "/auth/status")["authenticated"]
+    assert client.get("/workspace").headers["location"] == "/setup/adoption"
+    assert client.post("/api/setup/adoption", json={"decision": "skipped"}).status_code == 403
+    headers = {"X-Bibliothekar-CSRF": client.cookies["bibliothekar_csrf"]}
+    forbidden = client.post("/api/setup/adoption", headers={**headers, "Origin": "https://wrong.invalid"},
+                            json={"decision": "skipped"})
+    assert forbidden.status_code == 403
+    assert client.post("/api/setup/adoption", headers=headers, json={"decision": "skipped"}).status_code == 200
+    assert client.get("/workspace").status_code == 200
+
+
+@pytest.mark.parametrize("confirmed", [False, True], ids=["draft", "confirmed"])
+def test_rc1_registry_upgrade_keeps_active_job_for_recovery_only(
+    ready, tmp_path, monkeypatch, synthetic_dataset, confirmed,
+):
+    from app.legacy_adoption_catalogue import prepare_documents
+    from app.legacy_adoption_execution import confirm_plan
+    from app.legacy_adoption_inventory import create_job, scan_inventory
+    from app.legacy_adoption_mode import reserve_adoption
+    from app.legacy_adoption_plan import create_plan, plan_moves
+    from app.library_registry import initialize_library_registry
+    from tests.backend.test_legacy_adoption_plan import _draft
+
+    _, _, registry, _, _ = ready
+    library = resolve_library_context(registry, "second")
+    source = tmp_path.resolve() / "rc1-source"
+    source.mkdir()
+    original = source / "unmodified.raf"
+    original.write_bytes(b"existing original")
+    job_id = create_job(library, source)
+    if confirmed:
+        monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata",
+                            lambda descriptors, _: {fd: {"EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00"}
+                                                     for fd in descriptors})
+        scan_inventory(library, job_id)
+        plan = create_plan(library, registry, job_id, _draft())
+        prepare_documents(library, job_id)
+        confirm_plan(library, job_id, plan["id"], "manual", acknowledged=True)
+        target = Path(plan_moves(library, job_id)[0]["target"])
+        target.parent.mkdir(parents=True)
+        original.rename(target)
+    reserve_adoption(registry, library.library_id, job_id)
+    with database_connection(registry) as connection:
+        connection.execute("DROP TABLE initial_library_setup")
+        connection.execute("DELETE FROM registry_schema_versions WHERE version = 7")
+    initialize_library_registry(registry)
+    assert pending_initial_setup(registry) is None
+    client = TestClient(main.app, follow_redirects=False)
+    response = client.get("/workspace")
+    assert response.status_code == 303
+    assert 'data-recovery-only="true"' in client.get(response.headers["location"]).text
+    job = "/api/legacy-adoption/jobs/" + job_id
+    assert _json(client, "GET", job)["id"] == job_id
+    assert _json(client, "POST", job + "/scan", status=409)["code"] == "legacy_adoption_recovery_only"
+    assert _json(client, "PUT", job + "/draft", status=409, json={"revision": 0})[
+        "code"
+    ] == "legacy_adoption_recovery_only"
+    if confirmed:
+        command = {"plan_id": plan["id"]}
+        assert target.read_bytes() == b"existing original" and not original.exists()
+        _json(client, "DELETE", job, status=409)
+        _json(client, "POST", job + "/finalize", status=409, json=command)
+        assert _json(client, "POST", job + "/rollback/start", json=command)["execution"]["phase"] == "rolling_back"
+        _json(client, "POST", job + "/rollback/check", status=409, json=command)
+        target.rename(original)
+        assert _json(client, "POST", job + "/rollback/check", json=command)["execution"]["phase"] == "rolled_back"
+    else:
+        _json(client, "DELETE", job)
+    assert client.get("/workspace").status_code == 200
+    assert _json(client, "POST", "/api/legacy-adoption/jobs", status=409, json={"root": "nas"})[
+        "code"
+    ] == "legacy_adoption_inactive"
+    assert original.read_bytes() == b"existing original"
+
+
+def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypatch, synthetic_dataset):
     from io import BytesIO
     from app import legacy_adoption_registration as registration
     from app.legacy_adoption_paths import AdoptionError
 
-    _, workspace, registry, databases, _ = ready
+    workspace, database, registry, _ = fresh_main
     source = tmp_path.resolve() / "legacy-source"
     day = source / "2026" / "07" / "2026-07-21"
     day.mkdir(parents=True)
@@ -45,18 +234,21 @@ def test_wizard_and_f14_recovery_in_secondary_library(ready, tmp_path, monkeypat
             fd: {"EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00"} for fd in descriptors
         },
     )
-    library = resolve_library_context(registry, "second")
-    client = TestClient(main.app)
+    client = _onboard(fresh_main)
+    assert _adopt(client) == {"next": "/legacy-adoption"}
+    library = resolve_library_context(registry, "main")
     wizard = client.get("/legacy-adoption?library=second")
     assert wizard.status_code == 200
-    assert 'data-library="second"' in wizard.text
+    assert 'data-library="main"' in wizard.text
     api = "/api/legacy-adoption"
     assert _json(client, "GET", api + "/source")["folders"] == ["2026"]
     job_id = _json(client, "POST", api + "/jobs", status=201, json={"root":"nas"})["id"]
     job = api + "/jobs/" + job_id
     _json(client, "POST", job + "/scan", status=202)
     assert _json(client, "GET", job)["state"] == "inventoried"
-    assert [item["id"] for item in _json(client, "GET", api + "/jobs", library="main")] == [job_id]
+    assert _json(client, "GET", job + "/chronology?year=2026") == [
+        {"period": "2026-07-21", "families": 1, "review": 0},
+    ]
     assert _json(client, "GET", job, library="main")["id"] == job_id
     assert _json(client, "GET", api + "/jobs/other", status=409)["code"] == "legacy_adoption_active"
     assert _json(client, "POST", api + "/jobs", library="main", status=409, json={"root": "nas"})[
@@ -66,9 +258,9 @@ def test_wizard_and_f14_recovery_in_secondary_library(ready, tmp_path, monkeypat
     for old_url in ("/", "/workspace?library=main", "/legacy-adoption?library=main"):
         redirect = other.get(old_url)
         assert redirect.status_code == 303
-        assert redirect.headers["location"] == f"/legacy-adoption?library=second&job={job_id}"
+        assert redirect.headers["location"] == f"/legacy-adoption?library=main&job={job_id}"
     wizard = other.get(redirect.headers["location"], headers={"X-Bibliothekar-Library": "main"})
-    assert wizard.status_code == 200 and 'data-library="second"' in wizard.text
+    assert wizard.status_code == 200 and 'data-library="main"' in wizard.text
     assert _json(other, "GET", "/api/jobs", status=409)["code"] == "legacy_adoption_active"
     assert _json(other, "POST", "/api/jobs", status=409)["code"] == "legacy_adoption_active"
     assert other.get("/healthz").status_code == 200
@@ -76,7 +268,9 @@ def test_wizard_and_f14_recovery_in_secondary_library(ready, tmp_path, monkeypat
                          "preserve_day_folders":True}]}
     revision = _json(client, "PUT", job + "/draft", json={**draft, "revision": 0})["revision"]
     assert revision == 1
-    assert _json(client, "GET", job)["draft"]["events"][0]["name"] == "Synthetisch"
+    assert _json(other, "GET", job)["draft"]["events"][0]["name"] == "Synthetisch"
+    _json(other, "PUT", job + "/draft", json={"revision": revision, "events": [{"existing_id": "archive"}]}, status=422)
+    _json(other, "POST", "/api/setup/adoption", json={"decision": "skipped"}, status=409)
     _json(other, "PUT", job + "/draft", json={**draft, "revision": 0}, status=409)
     _json(other, "POST", job + "/plan", json={"revision": 0}, status=409)
     plan = _json(client, "POST", job + "/plan", json={"revision": revision})
@@ -113,24 +307,25 @@ def test_wizard_and_f14_recovery_in_secondary_library(ready, tmp_path, monkeypat
     _json(client, "POST", job + "/finalize", json={"plan_id": plan["id"]}, status=409)
     [lease] = operation_health.inspect(workspace)["reservations"]
     assert lease["ids"]["operation_id"] == plan["id"]
-    assert lease["library"] == "second"
+    assert lease["library"] == "main"
     assert not lease["live"]
     event_id = plan["events"][0]["id"]
-    with database_connection(databases[1]) as connection:
+    with database_connection(database) as connection:
         assert event_file_rows(connection, event_id) == []
 
     monkeypatch.setattr(registration, "source_registry_transaction", original)
-    assert domain_recovery.replay(workspace, registry, database=databases[0])
+    assert domain_recovery.replay(workspace, registry, database=database)
     assert operation_health.inspect(workspace)["writes_allowed"]
-    assert _json(client, "GET", job)["plan"]["state"] == "completed"
-    assert _json(client, "GET", "/api/jobs", library="main")["count"] == 0
+    assert pending_initial_setup(registry) is None
+    assert _json(client, "GET", job, status=409)["code"] == "legacy_adoption_inactive"
+    assert client.get("/workspace").status_code == 200
     assert _json(client, "POST", job + "/finalize", json={"plan_id": plan["id"]})["state"] == "completed"
 
     inventory = scan_event_inventory(
-        databases[1], library.archive_root, catalogue_job_id(plan), event_id,
+        database, library.archive_root, catalogue_job_id(plan), event_id,
         root_kind="camera_archive",
     )
-    with database_connection(databases[1]) as connection:
+    with database_connection(database) as connection:
         [media_row] = event_file_rows(connection, event_id)
         assert media_row["current_root_kind"] == "camera_archive"
         assert media_row["sha256_original"] == move["sha256"]
@@ -156,58 +351,60 @@ def test_wizard_and_f14_recovery_in_secondary_library(ready, tmp_path, monkeypat
         "uses_time_range": False, "preserve_day_folders": True, "start_date": "2026-07-21",
         "end_date": "2026-07-21", "start_time": "00:00", "end_time": "23:59",
         "selected_day_keys": ["2026-07-21"], "selected_family_ids": [media_row["family_id"]],
+        "_folder_layout_explicit": True, "folder_layout": event["folder_layout"],
     }
-    request = propose_event_change(databases[1], anchor_job, event_id, preview, event_name="Umbenannt",
+    request = propose_event_change(database, anchor_job, event_id, preview, event_name="Umbenannt",
                                    archive_root=library.archive_root, workspace_path=workspace)
     change_id = request["change_request_id"]
-    confirm_event_change(databases[1], change_id, library.archive_root, workspace)
-    assistant = build_archive_change_assistant(databases[1], library.archive_root, workspace, change_id, scan_live=True)
+    confirm_event_change(database, change_id, library.archive_root, workspace)
+    assistant = build_archive_change_assistant(database, library.archive_root, workspace, change_id, scan_live=True)
     assert [item["kind"] for item in assistant["operations"]] == ["rename_archive_folder", "replace_event_document"]
-    assert not verify_event_change(databases[1], change_id, library.archive_root, workspace)["complete"]
+    assert not verify_event_change(database, change_id, library.archive_root, workspace)["complete"]
     new_folder = old_folder.with_name(renamed)
     old_folder.rename(new_folder)
     replacement = assistant["operations"][1]
     source_relative = replacement["source"].split("/", 1)[1]
     from app.workspace_layout import shared_work_root
     shutil.copyfile(shared_work_root(workspace) / source_relative, new_folder / "event.json")
-    assert verify_event_change(databases[1], change_id, library.archive_root, workspace)["complete"]
-    finish_event_change(databases[1], change_id, library.archive_root, workspace)
-    with database_connection(databases[1]) as connection:
+    assert verify_event_change(database, change_id, library.archive_root, workspace)["complete"]
+    finish_event_change(database, change_id, library.archive_root, workspace)
+    with database_connection(database) as connection:
         assert connection.execute("SELECT name FROM events WHERE id = ?", (event_id,)).fetchone()[0] == "Umbenannt"
 
-    deletion = propose_archived_event_deletion(databases[1], anchor_job, event_id, archive_root=library.archive_root)
+    deletion = propose_archived_event_deletion(database, anchor_job, event_id, archive_root=library.archive_root)
     deletion_id = deletion["change_request_id"]
-    confirm_event_change(databases[1], deletion_id, library.archive_root, workspace)
-    release_rows = [row for row in get_event_change_files(databases[1], deletion_id)
+    confirm_event_change(database, deletion_id, library.archive_root, workspace)
+    release_rows = [row for row in get_event_change_files(database, deletion_id)
                     if row.get("workspace_release_path")]
     assert release_rows
     for row in release_rows:
         released = backup_root(workspace) / row["workspace_release_path"]
         released.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(library.archive_root / row["old_path"], released)
-    assert verify_archive_release_copies(databases[1], library.archive_root, workspace, deletion_id)["complete"]
+    assert verify_archive_release_copies(database, library.archive_root, workspace, deletion_id)["complete"]
     # The synthetic user removes the event folder only after the release copy is verified.
     shutil.rmtree(new_folder)
-    assert verify_archive_release_removal(databases[1], library.archive_root, workspace, deletion_id)["complete"]
-    assert verify_event_change(databases[1], deletion_id, library.archive_root, workspace)["complete"]
-    finish_event_change(databases[1], deletion_id, library.archive_root, workspace)
-    with database_connection(databases[1]) as connection:
+    assert verify_archive_release_removal(database, library.archive_root, workspace, deletion_id)["complete"]
+    assert verify_event_change(database, deletion_id, library.archive_root, workspace)["complete"]
+    finish_event_change(database, deletion_id, library.archive_root, workspace)
+    with database_connection(database) as connection:
         assert connection.execute("SELECT 1 FROM events WHERE id = ?", (event_id,)).fetchone() is None
         assert connection.execute("SELECT current_root_kind FROM files WHERE id = ?",
                                   (media_row["id"],)).fetchone()[0] == "shared_workspace"
 
 
-def test_exclusive_mode_waits_for_ordinary_work_and_discard_restores_access(
-    ready, tmp_path, monkeypatch, synthetic_dataset,
+def test_exclusive_mode_holds_until_explicit_skip(
+    fresh_main, tmp_path, monkeypatch, synthetic_dataset,
 ):
     from app.legacy_adoption_mode import active_adoption, adoption_access
 
-    _, _, registry, _, _ = ready
+    _, _, registry, _ = fresh_main
     source = tmp_path.resolve() / "legacy-source"
     source.mkdir()
     monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
     monkeypatch.setattr(main, "DATABASE_INITIALIZATION_ERROR", None)
-    client = TestClient(main.app, follow_redirects=False)
+    client = _onboard(fresh_main)
+    assert _adopt(client) == {"next": "/legacy-adoption"}
     jobs = "/api/legacy-adoption/jobs"
     with adoption_access(registry):
         result = _json(client, "POST", jobs, status=409, json={"root": "nas"})
@@ -215,7 +412,8 @@ def test_exclusive_mode_waits_for_ordinary_work_and_discard_restores_access(
     assert active_adoption(registry) is None
 
     job_id = _json(client, "POST", jobs, status=201, json={"root": "nas"})["id"]
-    assert active_adoption(registry) == {"job_id": job_id, "library_id": "second"}
+    assert active_adoption(registry)["job_id"] == job_id
+    assert active_adoption(registry)["library_id"] == "main"
 
     calls = []
     stop = main.WORKER_STOP
@@ -225,17 +423,20 @@ def test_exclusive_mode_waits_for_ordinary_work_and_discard_restores_access(
     assert calls == []
     _json(client, "DELETE", jobs + "/" + job_id)
     assert active_adoption(registry) is None
-    assert _json(client, "GET", "/api/jobs", library="main")["count"] == 0
+    assert _json(client, "GET", "/api/jobs", status=409)["code"] == "initial_setup_required"
+    restarted = TestClient(main.app, follow_redirects=False)
+    assert restarted.get("/setup/adoption").status_code == 200
+    assert _json(restarted, "POST", "/api/setup/adoption", json={"decision": "skipped"}) == {"next": "/"}
+    assert pending_initial_setup(registry) is None
+    assert _json(restarted, "GET", "/api/jobs", library="main")["count"] == 0
     stop.clear()
     main.worker_loop()
     assert calls == [None]
-    next_id = _json(client, "POST", jobs, status=201, json={"root": "nas"})["id"]
-    assert next_id != job_id
-    assert active_adoption(registry)["job_id"] == next_id
+    assert _json(restarted, "POST", jobs, status=409, json={"root": "nas"})["code"] == "legacy_adoption_inactive"
 
 
 def test_script_host_proof_release_and_independent_archive_verification(
-    ready, tmp_path, monkeypatch, synthetic_dataset,
+    fresh_main, tmp_path, monkeypatch, synthetic_dataset,
 ):
     import json
     import shlex
@@ -244,7 +445,7 @@ def test_script_host_proof_release_and_independent_archive_verification(
     from app import legacy_adoption_host as host, legacy_adoption_package as package
     from tests.backend.test_legacy_adoption_host import _macos_rename
 
-    _, _, registry, _, _ = ready
+    _, _, registry, _ = fresh_main
     root = tmp_path.resolve()
     source = root / "source with space"
     appdata = root / "app's data"
@@ -265,7 +466,8 @@ def test_script_host_proof_release_and_independent_archive_verification(
     if sys.platform == "darwin":
         monkeypatch.setattr(host, "mount_id", lambda _fd: 1)
         monkeypatch.setattr(host, "rename_noreplace", _macos_rename)
-    client = TestClient(main.app)
+    client = _onboard(fresh_main)
+    _adopt(client)
     api = "/api/legacy-adoption"
     job_id = _json(client, "POST", api + "/jobs", status=201, json={"root": "nas"})["id"]
     job = api + "/jobs/" + job_id
@@ -276,7 +478,7 @@ def test_script_host_proof_release_and_independent_archive_verification(
     plan = _json(client, "POST", job + "/plan", json={"revision": saved["revision"]})
     _json(client, "POST", job + "/documents")
     command = {"plan_id": plan["id"]}
-    library = resolve_library_context(registry, "second")
+    library = resolve_library_context(registry, "main")
     probe = _json(client, "POST", job + "/script/probe", json={
         **command, "appdata": str(appdata), "source": str(source), "archive": str(library.archive_root),
     })
@@ -311,13 +513,13 @@ def test_script_host_proof_release_and_independent_archive_verification(
     assert _json(client, "GET", job + "/script")["status"]["state"] == "completed"
     assert _json(client, "POST", job + "/verify", json=command)["execution"]["phase"] == "registration_pending"
     assert external(apply) == 1
-    assert _json(client, "POST", job + "/finalize", json=command)["execution"]["phase"] == "completed"
     [move] = _json(client, "GET", job + "/moves")
+    assert _json(client, "POST", job + "/finalize", json=command)["execution"]["phase"] == "completed"
     assert Path(move["target"]).read_bytes() == b"synthetic script photo"
 
 
 def test_review_family_is_copied_to_general_once_and_survives_discard(
-    ready, tmp_path, monkeypatch, synthetic_dataset,
+    fresh_main, tmp_path, monkeypatch, synthetic_dataset,
 ):
     import errno
     from app import legacy_adoption_host as host
@@ -325,7 +527,7 @@ def test_review_family_is_copied_to_general_once_and_survives_discard(
     from app.source_filter import LEGACY_REVIEW_STAGING
     from tests.backend.test_legacy_adoption_host import _macos_rename
 
-    _, workspace, registry, _, _ = ready
+    workspace, _, registry, _ = fresh_main
     source = tmp_path.resolve() / "legacy-source"
     source.mkdir()
     originals = {"bad.raf": b"raw", "bad.jpg": b"jpeg", "bad.raf.xmp": b"sidecar", "good.jpg": b"good"}
@@ -342,7 +544,8 @@ def test_review_family_is_copied_to_general_once_and_survives_discard(
     )
     if sys.platform == "darwin":
         monkeypatch.setattr(host, "rename_noreplace", _macos_rename)
-    client = TestClient(main.app)
+    client = _onboard(fresh_main)
+    _adopt(client)
     api = "/api/legacy-adoption"
     job_id = _json(client, "POST", api + "/jobs", status=201, json={"root": "nas"})["id"]
     job = api + "/jobs/" + job_id
@@ -377,15 +580,15 @@ def test_review_family_is_copied_to_general_once_and_survives_discard(
     _json(client, "POST", job + "/plan", json={"revision": draft["revision"]})
     assert [move["relative_path"] for move in _json(client, "GET", job + "/moves")] == ["good.jpg"]
     _json(client, "DELETE", job)
-    general = metadata_area_paths(area="general", workspace_root=workspace, library_id="second", create=False)["root"]
+    general = metadata_area_paths(area="general", workspace_root=workspace, library_id="main", create=False)["root"]
     assert not list((general / LEGACY_REVIEW_STAGING).iterdir())
     family = general / copied["target_relative"]
     assert {path.name: path.read_bytes() for path in family.iterdir()} == {
         key: data for key, data in originals.items() if key != "good.jpg"
     }
-    library = resolve_library_context(registry, "second")
+    library = resolve_library_context(registry, "main")
     monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: [])
-    scan = scan_metadata_area(area="general", workspace_root=workspace, library_id="second",
+    scan = scan_metadata_area(area="general", workspace_root=workspace, library_id="main",
                               database_path=library.database_path)
     assert {item["filename"] for item in scan["files"]} == set(originals) - {"good.jpg"}
 

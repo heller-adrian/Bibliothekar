@@ -34,32 +34,23 @@ def _scan(context, source):
     return job
 
 
-@pytest.mark.parametrize('case', ['archive', 'draft', 'collection', 'free', 'screenshot10'])
+@pytest.mark.parametrize('case', ['draft', 'collection', 'free'])
 def test_read_only_draft_preview_identifies_conflicting_event(inventory, case):
     from app.legacy_adoption_plan import preview_draft
     context, source, _ = inventory
     (source / 'preview.JPG').write_bytes(b'synthetic preview')
     job = _scan(context, source)
     proposed = _draft()
-    if case in {'archive', 'free', 'screenshot10'}:
-        _existing(context)
     if case == 'draft':
         proposed['events'].append({**proposed['events'][0], 'name': 'Second'})
     elif case == 'collection':
         proposed['events'].append({'event_kind': 'no_event', 'segments': [{'day_key': '2026-07-21'}]})
     elif case == 'free':
         proposed['events'][0].update(start_date='2026-07-19', end_date='2026-07-19')
-    elif case == 'screenshot10':
-        proposed['events'] = [{'name': 'Test einlesen 1', 'start_date': '2026-07-21', 'end_date': '2026-07-21'},
-                              {'name': 'Test einlesen 2', 'start_date': '2026-07-19', 'end_date': '2026-07-19'}]
     before = {str(p): p.read_bytes() for p in context.archive_root.rglob('*') if p.is_file()}
     result = preview_draft(context, job, proposed)
     assert result['valid'] == (case == 'free')
-    if case in {'archive', 'screenshot10'}:
-        assert all(item['kind'] == 'archive' and item['existing_id'] == 'EXISTING' for item in result['conflicts'])
-        if case == 'screenshot10':
-            assert {item['index'] for item in result['conflicts']} == {0}
-    elif case in {'draft', 'collection'}:
+    if case in {'draft', 'collection'}:
         assert result['conflicts'][0]['kind'] == 'draft'
     assert before == {str(p): p.read_bytes() for p in context.archive_root.rglob('*') if p.is_file()}
     with database_connection(context.database_path) as connection:
@@ -81,7 +72,7 @@ def test_draft_preview_counts_the_same_eligible_families_as_the_move_plan(invent
     assert preview_draft(context, job, overridden)['events'][0]['families'] == 0
 
 
-def _existing(context):
+def _existing(context, folder_name="Urlaub"):
     event_id = "EXISTING"
     with database_connection(context.database_path) as connection:
         connection.execute(
@@ -93,9 +84,9 @@ def _existing(context):
                    id, job_id, event_level, name, start_datetime, end_datetime, folder_name, status,
                    created_at, updated_at, archived_at, time_model_version
                ) VALUES (?, 'old', 'parent', 'Urlaub', '2026-07-20T00:00:00', '2026-07-24T23:59:59',
-                         'Urlaub', 'archived', '2026', '2026', '2026', 2)""", (event_id,),
+                         ?, 'archived', '2026', '2026', '2026', 2)""", (event_id, folder_name),
         )
-    folder = context.archive_root / "2026" / "Urlaub"
+    folder = context.archive_root / "2026" / folder_name
     folder.mkdir(parents=True)
     (folder / "event.json").write_text('{"event":{"id":"EXISTING"}}')
     return event_id
@@ -123,19 +114,54 @@ def test_new_plan_and_chronology(inventory):
         assert connection.execute("SELECT count(*) FROM files").fetchone()[0] == 0
 
 
-def test_existing_event_suggested_and_selected_without_catalogue_change(inventory):
+def test_new_plan_rejects_extension_and_existing_catalogue(inventory):
+    from app.legacy_adoption_plan import preview_draft
+
     context, source, registry = inventory
-    event_id = _existing(context)
     (source / "extra.jpg").write_bytes(b"extra")
     job = _scan(context, source)
-    with pytest.raises(AdoptionError, match="Urlaub"):
-        create_plan(context, registry, job, _draft())
-    plan = create_plan(context, registry, job, {"events": [{"existing_id": event_id}]})
-    assert plan["events"][0]["existing"]
-    assert "/2026/Urlaub/" in plan_moves(context, job)[0]["target"]
+    with pytest.raises(AdoptionError, match="nicht ergänzt"):
+        create_plan(context, registry, job, {"events": [{"existing_id": "EXISTING"}]})
+    event_id = _existing(context)
+    with pytest.raises(AdoptionError, match="verwaltete Daten"):
+        create_plan(context, registry, job, _draft(start_date="2026-08-01", end_date="2026-08-02"))
+    with pytest.raises(AdoptionError, match="verwaltete Daten"):
+        preview_draft(context, job, _draft())
     with database_connection(context.database_path) as connection:
         assert connection.execute("SELECT revision FROM events WHERE id=?", (event_id,)).fetchone()[0] == 1
         assert connection.execute("SELECT count(*) FROM event_assignments").fetchone()[0] == 0
+
+
+def _frozen_rc1_extension(context, registry, job, *, existing_media=False):
+    """Build the persisted RC1 projection that verification must still understand."""
+    import hashlib
+    import json
+
+    from app.legacy_adoption_plan import _existing_event
+
+    plan = create_plan(context, registry, job, _draft())
+    folder_name = plan["events"][0]["folder_name"]
+    event_id = _existing(context, folder_name)
+    folder = context.archive_root / "2026" / folder_name
+    previous = folder / "old.jpg"
+    if existing_media:
+        previous.write_bytes(b"original")
+    with database_connection(context.database_path) as connection:
+        event = _existing_event(connection, event_id)
+        connection.execute("UPDATE legacy_adoption_plans SET events_json = ? WHERE id = ?",
+                           (json.dumps([event]), plan["id"]))
+        connection.execute(
+            "UPDATE legacy_adoption_moves SET parent_event_id = ?, assigned_event_id = ? WHERE plan_id = ?",
+            (event_id, event_id, plan["id"]),
+        )
+        for path in folder.iterdir():
+            content = path.read_bytes()
+            connection.execute(
+                "INSERT INTO legacy_adoption_baseline VALUES (?, ?, ?, ?, ?)",
+                (plan["id"], str(path.relative_to(context.archive_root)), len(content),
+                 hashlib.sha256(content).hexdigest(), content if path.name == "event.json" else None),
+            )
+    return event_id, previous
 
 
 def test_collision_and_exact_global_duplicates(inventory):
@@ -217,12 +243,9 @@ def test_verification_detects_archived_media_changes(inventory):
     from app.legacy_adoption_verify import plan_issues, verify_media
 
     context, source, registry = inventory
-    event_id = _existing(context)
-    previous = context.archive_root / "2026/Urlaub/old.jpg"
-    previous.write_bytes(b"original")
     (source / "extra.jpg").write_bytes(b"extra")
     job = _scan(context, source)
-    create_plan(context, registry, job, {"events": [{"existing_id": event_id}]})
+    _, previous = _frozen_rc1_extension(context, registry, job, existing_media=True)
     move = plan_moves(context, job)[0]
     target = Path(move["target"])
     for folder in ("Alle", "Sortiert", "Export"):
@@ -263,11 +286,10 @@ def test_projects_canonical_event_documents_without_registering(inventory):
     from app.legacy_adoption_verify import verify_media
 
     context, source, registry = inventory
-    event_id = _existing(context)
     (source / "pair.raf").write_bytes(b"raw")
     (source / "pair.xmp").write_bytes(b"sidecar")
     job = _scan(context, source)
-    create_plan(context, registry, job, {"events": [{"existing_id": event_id}]})
+    event_id, _ = _frozen_rc1_extension(context, registry, job)
     [document] = prepare_documents(context, job)
     with event_documents(context, job, originals=True) as handle, ZipFile(handle) as originals:
         assert json.loads(originals.read(document["relative_path"]))["event"]["id"] == event_id

@@ -11,7 +11,7 @@ import os
 import sqlite3
 
 
-REGISTRY_SCHEMA_VERSION = 6
+REGISTRY_SCHEMA_VERSION = 7
 MAIN_LIBRARY_ID = "main"
 
 
@@ -192,6 +192,13 @@ REGISTRY_MIGRATIONS: dict[int, str] = {
             singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
             library_id TEXT NOT NULL REFERENCES libraries(library_id),
             job_id TEXT NOT NULL
+        );
+    """,
+    7: """
+        CREATE TABLE initial_library_setup (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            library_id TEXT NOT NULL REFERENCES libraries(library_id) ON DELETE CASCADE,
+            decision TEXT NOT NULL CHECK (decision IN ('choice', 'adopting', 'skipped'))
         );
     """,
 }
@@ -437,6 +444,7 @@ def register_library(
     is_main: bool = False,
     is_active: bool = True,
     settings: dict[str, Any] | None = None,
+    initial_setup: bool = False,
     _expected_roots: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     clean_id = str(library_id or "").strip()
@@ -489,6 +497,11 @@ def register_library(
     connection = _connect(registry_path)
     try:
         connection.execute("BEGIN IMMEDIATE")
+        if initial_setup and (
+            clean_id != MAIN_LIBRARY_ID or not is_main or not is_active
+            or connection.execute("SELECT 1 FROM libraries WHERE is_registered = 1").fetchone()
+        ):
+            raise LibraryRegistryError("Die Ersteinrichtung ist nur für die erste Hauptbibliothek verfügbar.")
         existing = connection.execute(
             "SELECT created_at FROM libraries WHERE library_id = ?",
             (clean_id,),
@@ -568,6 +581,10 @@ def register_library(
                 None if is_active else now,
             ),
         )
+        if initial_setup:
+            connection.execute(
+                "INSERT INTO initial_library_setup VALUES (1, ?, 'choice')", (clean_id,),
+            )
         connection.commit()
     except sqlite3.IntegrityError as error:
         connection.rollback()

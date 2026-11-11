@@ -1,19 +1,17 @@
 """Routes for the adoption wizard within the active library context."""
 from contextlib import ExitStack, contextmanager
-from datetime import date
 import json
 import os
 from pathlib import Path
 from threading import Event, Lock
 from typing import Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
-from pydantic import BaseModel, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from app.database import database_connection
 from app.event_layout import get_global_default
-from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps
 from app.legacy_adoption_catalogue import prepare_documents
 from app.legacy_adoption_dataset import DatasetError
 from app.legacy_adoption_execution import change_phase, complete_rollback, confirm_plan, verify_execution
@@ -27,13 +25,19 @@ from app.legacy_adoption_package import (
     inspect_runner, locked_script, permit, prepare_probe, probe_details, script_details, script_status,
 )
 from app.legacy_adoption_paths import AdoptionError, bound_directory
-from app.legacy_adoption_mode import adoption_execution_access, reserve_adoption
+from app.legacy_adoption_mode import (
+    adoption_execution_access, choose_initial_setup, require_initial_adoption, reserve_adoption,
+)
 from app.legacy_adoption_plan import create_plan, plan_directories, plan_moves, plan_status
 from app.legacy_adoption_registration import finalize_adoption
 from app.legacy_adoption_review import copy_review, review_cases, review_count
 from app.legacy_adoption_verify import plan_issues, reopen_plan
 from app.library_registry import LibraryRegistryError, list_libraries
 from app.root_operations import RootOperationError, admission
+
+
+class SetupDecision(BaseModel):
+    decision: Literal["adopting", "skipped"]
 
 
 class Source(BaseModel):
@@ -56,7 +60,8 @@ class ChildDefinition(BaseModel):
 
 
 class EventDefinition(BaseModel):
-    existing_id: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
     event_kind: Literal["event", "no_event"] = "event"
     name: str = Field(default="", max_length=180)
     start_date: str | None = None
@@ -136,7 +141,7 @@ def _download(factory, filename, *, media_type="application/zip"):
 
 
 def install_legacy_adoption_routes(app, *, context, registry_path, source_root_path):
-    from app.legacy_adoption_ui import wizard_html
+    from app.legacy_adoption_ui import setup_choice_html, wizard_html
 
     router = APIRouter(prefix="/api/legacy-adoption", tags=["Bestandsübernahme"])
     running = {}
@@ -167,9 +172,26 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             with running_lock:
                 running.pop(key(library, job_id), None)
 
+    @app.get("/setup/adoption", response_class=HTMLResponse, include_in_schema=False)
+    def setup_choice(request: Request):
+        return HTMLResponse(
+            setup_choice_html(request.state.initial_setup["decision"]),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/api/setup/adoption")
+    def decide_setup(payload: SetupDecision):
+        library = context()
+        with _errors(), admission(library):
+            choose_initial_setup(registry_path(), library, payload.decision)
+        return {"next": "/legacy-adoption" if payload.decision == "adopting" else "/"}
+
     @app.get("/legacy-adoption", response_class=HTMLResponse, include_in_schema=False)
-    def wizard():
-        return HTMLResponse(wizard_html(context().library_id), headers={"Cache-Control": "no-store"})
+    def wizard(request: Request):
+        return HTMLResponse(
+            wizard_html(context().library_id, recovery_only=getattr(request.state, "legacy_adoption_recovery", False)),
+            headers={"Cache-Control": "no-store"},
+        )
 
     @router.get("/source")
     def source_folders(root: Literal["nas", "saved"] = "nas", relative: str = ""):
@@ -185,25 +207,11 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 "parent": None if not rel.parts else ("" if str(rel.parent) == "." else str(rel.parent)),
                 "folders": folders}
 
-    @router.get("/jobs")
-    def jobs(request: Request):
-        library = context()
-        active = getattr(request.state, "legacy_adoption", None)
-        job_id = active["job_id"] if active else None
-        with database_connection(library.database_path) as connection:
-            return [dict(row) for row in connection.execute(
-                """SELECT job.id, job.state, job.source_root, job.created_at,
-                          plan.state AS plan_state
-                     FROM legacy_adoption_jobs job LEFT JOIN legacy_adoption_plans plan ON plan.job_id = job.id
-                    WHERE job.library_id = ? AND job.state != 'discarded'
-                      AND (job.id = ? OR (? IS NULL AND plan.state = 'completed'))
-                    ORDER BY job.created_at DESC, job.id DESC""", (library.library_id, job_id, job_id),
-            )]
-
     @router.post("/jobs", status_code=201)
     def new_job(source: Source):
         library = context()
         with _errors(), admission(library):
+            require_initial_adoption(registry_path(), library)
             roots = tuple(
                 Path(row[field]) for row in list_libraries(registry_path(), active_only=False, registered_only=True)
                 for field in ("archive_root", "workspace_root", "work_root", "database_path")
@@ -279,31 +287,19 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         with _errors(), adoption_execution_access(registry_path()), admission(library):
             return copy_review(library, job_id, payload.family_key)
 
-    @router.get("/events")
-    def existing(day: str = Query(pattern=r"^\d{4}-\d{2}-\d{2}$")):
-        with _errors(), database_connection(context().database_path) as connection:
-            date.fromisoformat(day)
-            start, end = day + "T00:00:00", day + "T23:59:59"
-            normal = continuous_event_overlaps(connection, "", start, end)
-            free = no_event_segment_overlaps(connection, "", start, end)
-            matches = {row["id"] for row in normal if row["status"] == "archived"}
-            matches.update(row["event_id"] for row in free if row["status"] == "archived")
-            return [dict(row) for row in connection.execute(
-                """SELECT id, name, start_datetime, end_datetime FROM events WHERE parent_event_id IS NULL
-                    AND status = 'archived' AND pending_delete = 0 AND coalesce(linkage_kind, '') = ''
-                    ORDER BY start_datetime DESC, name""",
-            ) if row["id"] in matches]
-
     @router.post("/jobs/{job_id}/draft/check")
     def check_draft(job_id: str, draft: Draft):
         from app.legacy_adoption_plan import preview_draft
+        library = context()
         with _errors():
-            return preview_draft(context(), job_id, draft.model_dump(exclude_none=True))
+            require_initial_adoption(registry_path(), library)
+            return preview_draft(library, job_id, draft.model_dump(exclude_none=True))
 
     @router.put("/jobs/{job_id}/draft")
     def save_draft(job_id: str, draft: SaveDraft):
         library = context()
         with _errors(), admission(library), database_connection(library.database_path) as connection:
+            require_initial_adoption(registry_path(), library)
             connection.execute("BEGIN IMMEDIATE")
             item = _job(connection, library.library_id, job_id)
             if item["state"] != "inventoried" or connection.execute(
@@ -323,6 +319,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def freeze(job_id: str, draft: Freeze):
         library = context()
         with _errors(), admission(library):
+            require_initial_adoption(registry_path(), library)
             return create_plan(library, registry_path(), job_id, draft_revision=draft.revision)
 
     @router.get("/jobs/{job_id}/directories")
@@ -383,13 +380,16 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             return prepare_probe(library, job_id, command.plan_id, command.appdata, command.source, command.archive)
 
     @router.get("/jobs/{job_id}/script")
-    def script(job_id: str):
+    def script(job_id: str, request: Request):
         library = context()
         with _errors():
             plan = plan_status(library, job_id)
             if not plan.get("execution") or plan["execution"]["method"] != "script":
                 raise AdoptionError("Für diesen Auftrag ist kein Skript freigegeben.")
-            return script_details(library, job_id, plan["id"])
+            result = script_details(library, job_id, plan["id"])
+            if getattr(request.state, "legacy_adoption_recovery", False) and plan["execution"]["phase"] != "rolling_back":
+                result.pop("command", None)
+            return result
 
     @router.post("/jobs/{job_id}/script/release")
     def script_release(job_id: str, command: PlanCommand):
@@ -405,6 +405,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def confirm(job_id: str, command: Confirm):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
+            require_initial_adoption(registry_path(), library)
             return confirm_plan(library, job_id, command.plan_id, command.method,
                                 acknowledged=command.acknowledged, probe_digest=command.probe_sha256)
 
@@ -479,6 +480,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 planned["execution"] is None or planned["execution"]["phase"] != "registering"
             ):
                 with admission(library):
+                    require_initial_adoption(registry_path(), library)
                     change_phase(library, job_id, command.plan_id, "registering",
                                  from_phases={"registration_pending"})
             return finalize_adoption(library, registry_path(), job_id, command.plan_id)

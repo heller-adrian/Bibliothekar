@@ -13,36 +13,25 @@ from threading import Thread
 from fastapi.testclient import TestClient
 
 from app import main
-from tests.backend.test_rc2_archive_finish_recovery import deletion
+from tests.backend.test_legacy_adoption_integration import fresh_main
 from tests.backend.test_legacy_adoption_inventory import synthetic_dataset
 
 
-def test_browser_review(deletion, synthetic_dataset, tmp_path, tmp_path_factory, monkeypatch):
-    db, workspace, archive, _, _, _ = deletion
-    # Use the regular wizard/API with an isolated new source and known metadata.
-    # The previously confirmed archive deletion is not exercised by this fixture.
-    from app.database import database_connection
-    with database_connection(db) as connection:
-        connection.execute("DELETE FROM event_change_requests")
+def test_browser_review(fresh_main, synthetic_dataset, tmp_path, tmp_path_factory, monkeypatch):
+    main.startup_database()
+    assert main.DATABASE_INITIALIZATION_ERROR is None
     source = tmp_path_factory.mktemp('rc2-ui-source').resolve()
     from datetime import date, timedelta
     for index in range(20):
         day = date(2026, 7, 15) + timedelta(days=index)
-        folder = source / day.isoformat()
-        folder.mkdir()
+        folder = source / ('camera-' + str(index % 3)) / ('import-' + str(index))
+        folder.mkdir(parents=True)
         for member in range(3):
-            (folder / f'synthetic-{member}.JPG').write_bytes(day.strftime('%Y:%m:%d').encode() + b' 12:00:00 synthetic UI bytes')
+            (folder / f'synthetic-{member}.JPG').write_bytes(day.strftime('%Y:%m:%d').encode() + f' 12:00:00 synthetic UI bytes {member}'.encode())
     monkeypatch.setattr(main, 'NAS_SOURCE_ROOT', source)
     monkeypatch.setattr('app.legacy_adoption_inventory.read_bound_metadata',
                         lambda descriptors, _cancel: {fd: {'EXIF:ExifIFD:DateTimeOriginal': os.pread(fd, 19, 0).decode()} for fd in descriptors})
     client = TestClient(main.app)
-    created = client.post('/api/legacy-adoption/jobs', json={'root': 'nas'})
-    assert created.status_code == 201, created.text
-    job = created.json()['id']
-    scanned = client.post('/api/legacy-adoption/jobs/' + job + '/scan')
-    assert scanned.status_code == 202, scanned.text
-    assert client.get('/api/legacy-adoption/jobs/' + job).json()['state'] == 'inventoried'
-
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             self.forward()
@@ -71,11 +60,6 @@ def test_browser_review(deletion, synthetic_dataset, tmp_path, tmp_path_factory,
                 self.end_headers()
                 self.wfile.write(script)
                 return
-            if self.path.startswith('/legacy-adoption'):
-                import importlib
-                from app import legacy_adoption_i18n, ui_i18n, ui_shell, legacy_adoption_ui
-                for module in (ui_i18n, legacy_adoption_i18n, ui_shell, legacy_adoption_ui):
-                    importlib.reload(module)
             body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
             headers = {key: value for key, value in self.headers.items() if key.lower() not in {'host', 'connection', 'content-length'}}
             response = client.request(self.command, self.path, content=body or None, headers=headers,
@@ -92,9 +76,10 @@ def test_browser_review(deletion, synthetic_dataset, tmp_path, tmp_path_factory,
             pass
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-    url = f'http://127.0.0.1:{server.server_port}/legacy-adoption?library=main&job={job}&step=plan'
-    Path('/private/tmp/bibliothekar-rc2-ui-review.json').write_text(json.dumps({'url': url, 'port': server.server_port,
-                                                                           'job': job, 'fixture_root': str(tmp_path)}))
+    url = f'http://127.0.0.1:{server.server_port}/'
+    Path('/private/tmp/bibliothekar-rc2-ui-review.json').write_text(json.dumps({
+        'url': url, 'port': server.server_port, 'archive': str(fresh_main[3]), 'fixture_root': str(tmp_path),
+    }))
     print('SYNTHETIC_BROWSER_REVIEW_READY', url, flush=True)
     try:
         server.serve_forever()

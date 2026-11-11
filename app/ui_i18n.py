@@ -35,6 +35,7 @@ UI_TRANSLATIONS = {
   "Bibliotheken": "Libraries",
   "Sprache": "Language",
   "Sitzung": "Session",
+  "Darstellung": "Appearance",
   "Hell": "Light",
   "Dunkel": "Dark",
   "System": "System",
