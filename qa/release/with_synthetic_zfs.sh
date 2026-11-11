@@ -7,11 +7,11 @@ if [[ ${GITHUB_ACTIONS:-} != true || ${RUNNER_ENVIRONMENT:-} != github-hosted ||
 fi
 
 if ! command -v zpool >/dev/null || ! modinfo zfs >/dev/null 2>&1; then
-  sudo apt-get update -qq
+  packages=(zfsutils-linux)
   if ! modinfo zfs >/dev/null 2>&1; then
-    sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+    packages+=("linux-modules-extra-$(uname -r)")
   fi
-  sudo apt-get install -y zfsutils-linux
+  bash "$(dirname -- "${BASH_SOURCE[0]}")/install_runner_packages.sh" "${packages[@]}"
 fi
 sudo modprobe zfs
 test -c /dev/zfs
