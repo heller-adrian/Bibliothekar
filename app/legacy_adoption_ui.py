@@ -167,6 +167,7 @@ if(later) {
 let job = null, draft = {}, draftRevision = 0, year = "", day = null;
 let familyCursor = "", moveCursor = "", reviewCursor = "", directoryCursor = "", timer = 0, scriptTimer = 0;
 let selectedSource = null;
+let layoutGroup = 0;
 let viewStep=currentUrl.searchParams.get("step") || "";
 let selectedDays=new Set(), dayRows=[], selectionAnchor="", dayPage=60, selectedDaysJob="", draftStats=[], previewRevision=-1;
 const steps=[["setup","Einrichten"],["inventory","Inventur"],["plan","Ereignisse planen"],["review","Plan prüfen"],["execution","Methode wählen"],["execute","Durchführen"],["verify","Prüfen und abschließen"]];
@@ -773,7 +774,8 @@ function layoutEditor(title,saved,inherit=false) {
   const tree=node("div",undefined,"stack");
   const exported=node("select");
   const exportWrap=node("label","Exportordner");exportWrap.append(exported);
-  const radioName="adoption-folder-"+crypto.randomUUID();
+  // Radio groups only need to be unique within this page, including over LAN HTTP.
+  const radioName="adoption-folder-"+(++layoutGroup);
   function renderFolders(){
     window.BibliothekarFolderLayout.render({state,host:tree,exportSelect:exported,radioName,
       onChange:()=>{if(panel.isConnected)panel.dispatchEvent(new Event("input",{bubbles:true}));}});

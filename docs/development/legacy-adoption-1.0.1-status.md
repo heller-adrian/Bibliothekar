@@ -178,3 +178,39 @@ Auch [Run 43046963112](https://github.com/heller-adrian/Bibliothekar/actions/run
 [Run 43049167757](https://github.com/heller-adrian/Bibliothekar/actions/runs/43049167757) wurde mit `full_backend=true` für Commit `0b3b2336377e65ba84a334eac574007253a27d8e` im Branch von Draft-PR #41 gestartet. Nach Fortsetzung Paketinstallation, ZFS-Vorabtests und vollständigen Coverage-Nachweis prüfen. Bei Erfolg die Containerprüfung für denselben Commit starten.
 
 [Run 43049167757](https://github.com/heller-adrian/Bibliothekar/actions/runs/43049167757) stoppte vor dem ersten Test (APT Exit 100): Auch `archive.ubuntu.com` und `security.ubuntu.com` ließen sich auf dem Runner nicht auflösen. Der Installer versucht unabhängige HTTPS-Spiegel des Ubuntu-Archivs mit begrenzten Downloadzeiten, einschließlich `noble-security` und unveränderter APT-Signaturprüfung. Die Paketinstallation beginnt erst nach erfolgreichem Download. Die Spiegel-Endpunkte und das Fehlerverhalten sind lokal geprüft. Nächster Schritt: kurze PR-QA für den neuen Commit auswerten, danach bei Erfolg die vollständige Freigabe-QA starten.
+
+Kurze Linux-/ZFS-QA auf [Draft-PR #41](https://github.com/heller-adrian/Bibliothekar/pull/41): [Run 43051032806](https://github.com/heller-adrian/Bibliothekar/actions/runs/43051032806) für `3666f88990da7a7a6b26ace35c3f6ebaaf2169f3`. Der zuvor fehlgeschlagene Installationsschritt ist grün. Bei Erfolg der gesamten Kurzprüfung die vollständige Freigabe-QA für diesen exakten Commit starten; anschließend Container und ZFS-Smoke prüfen und RC2 veröffentlichen.
+
+[Run 43051032806](https://github.com/heller-adrian/Bibliothekar/actions/runs/43051032806) ist grün: ExifTool und ZFS-Pakete wurden über den Kernel.org-Spiegel installiert; 70 Linux-Vorabtests einschließlich des echten Read-only-Mounts sind bestanden. Der rote vollständige Lauf 43049167757 prüfte den vorherigen Commit. Die neue vollständige Freigabe-QA für `3666f88990da7a7a6b26ace35c3f6ebaaf2169f3` läuft mit `full_backend=true` als [Run 43053437390](https://github.com/heller-adrian/Bibliothekar/actions/runs/43053437390). Nächster Schritt nach Fortsetzung: alle acht Partitionen und den vollständigen Coverage-Nachweis prüfen; bei Erfolg Container-/ZFS-Prüfung für denselben Commit starten. RC2 ist noch nicht veröffentlicht.
+
+Die vollständige Freigabe-QA [43053437390](https://github.com/heller-adrian/Bibliothekar/actions/runs/43053437390) ist für `3666f88990da7a7a6b26ace35c3f6ebaaf2169f3` bestanden. Alle zehn Artefakte wurden abgerufen und ihre SHA-256-Digests geprüft. Der lokal aus den acht Partitionen nachgerechnete Coverage-Nachweis stimmt mit dem veröffentlichten Bericht überein: 2.702 von 2.702 Tests genau einmal erfolgreich. Die 70 Vorabtests mit dem echten Read-only-Archivmount sind ebenfalls bestanden.
+
+Container-Build und ZFS-Abnahme laufen als [Run 43070059080](https://github.com/heller-adrian/Bibliothekar/actions/runs/43070059080) für denselben Commit und mit QA-Nachweis `43053437390`. Bei Fortsetzung das Artefakt `rc2-qualified-image`, die Ergebnisse beider Übernahmewege und den Image-Digest prüfen. Bei Erfolg die GitHub-Vorabversion `v1.0.1-rc.2` mit diesem Commit und Digest veröffentlichen. Die reale TrueNAS-Abnahme folgt danach. Die Laufnotizen bleiben lokal, damit der Release-Commit unverändert bleibt.
+
+### RC2 veröffentlicht · reale TrueNAS-Abnahme offen
+
+[Containerlauf 43070059080](https://github.com/heller-adrian/Bibliothekar/actions/runs/43070059080) ist vollständig grün. Das ZFS-Protokoll bestätigt die manuelle und externe Python-Übernahme, getrennte schreibgeschützte Einbindungen, das bewusste Überspringen der Übernahme und eine spätere skriptgestützte Erweiterung mit automatischer Hostpfaderkennung. Das Artefakt enthält den vollständigen Backend-Nachweis. Der GHCR-Tag, das OCI-Manifest, die Linux/amd64-Konfiguration und deren Revisionslabel wurden gegen den geprüften Commit verifiziert.
+
+[GitHub-Vorabversion v1.0.1-rc.2](https://github.com/heller-adrian/Bibliothekar/releases/tag/v1.0.1-rc.2) wurde mit den Anhängen `qualification.json` und `rc2-qualified-image.zip` veröffentlicht. Der Tag zeigt auf `3666f88990da7a7a6b26ace35c3f6ebaaf2169f3`. GitHub- und GHCR-Referenzen für Stable, RC1, `main` und `latest` wurden vor und nach der Veröffentlichung verglichen.
+
+```text
+ghcr.io/heller-adrian/bibliothekar@sha256:2a0136a29bbb126b1343fc6fae465113503a97396eb7facdecda8645e86597ae
+```
+
+Für die reale Abnahme eine getrennte TrueNAS-Testinstallation mit eigener AppData, Workspace und kleinen austauschbaren Daten aufsetzen. Die [Übernahmeanleitung](https://github.com/heller-adrian/Bibliothekar/blob/3666f88990da7a7a6b26ace35c3f6ebaaf2169f3/docs/legacy-adoption.md) und den ursprünglichen RC1-Bericht als Prüfliste verwenden.
+
+1. ARC-001 zuerst mit zwei Testereignissen nachstellen, davon eines mit 16 zu prüfenden Dateien. Erfolgreiche Dateiprüfung, Datenbankabschluss und anschließenden Zugriff auf die regulären Funktionen getrennt prüfen.
+2. Erstübernahme manuell über SMB durchspielen. Ereignisplanung und Entwürfe vor und nach Browser- und Containerneustart prüfen. Danach eine getrennte Testinstallation für den Python-Weg verwenden. Den Hostnachweis in der TrueNAS-Shell erzeugen, einen unterbrochenen Lauf fortsetzen und SHA-256-Prüfung und Registrierung in Bibliothekar kontrollieren.
+3. Spätere Übernahme aus den Bibliothekseinstellungen prüfen, einschließlich Sperre bei offenen Vorgängen und Erweiterung eines archivierten Ereignisses. Erhalt der bestehenden Dateien und Zeitgrenzen kontrollieren. Die Befunde zu Planung, Navigation und Layout aus dem RC1-Bericht im Browser gegenprüfen.
+
+Die reale Abnahme wurde hier nicht ausgeführt. Nächster Schritt ist der Testbericht der getrennten TrueNAS-Installation, bevor die große Sammlung übernommen wird. Der Release-Commit bleibt unverändert.
+
+Für die reale Abnahme liegt das lokale Paket `/private/tmp/Bibliothekar_v1.0.1-rc.2_TrueNAS_Praxisabnahme.zip` mit 35 synthetischen Mediendateien, SHA-256-Liste und konkreten Prüfschritten bereit. Lokal sind die Prüfsummen sowie die von Bibliothekar erkannten Familien und Aufnahmetage der vier regulären Szenarien bestätigt. Das Paket enthält für ARC-001 acht JPEG/XMP-Paare im zu löschenden Ereignis und ein getrenntes Paar im zu erhaltenden Ereignis. Die praktische Ausführung auf der getrennten TrueNAS-Testinstallation steht aus.
+
+### RC3 · Befunde der RC2-Praxisabnahme
+
+Die TrueNAS-Abnahme vom 11. November 2026 erreichte Ersteinrichtung, Quellwahl, die Inventur mit 31 Dateien und 15 Familien sowie die Tagesauswahl. RC2-01 blockierte das Anlegen des ersten Ereignisses. Manuelle Übernahme, Python-Ausführung und Registrierung bleiben in der realen Umgebung offen. Bericht und Fortsetzungsauftrag wurden vollständig gelesen und alle elf Screenshots des PDFs visuell geprüft.
+
+RC2-01 wurde in Chromium mit echter App und isoliertem Katalog unter `http://truenas.test` reproduziert. In diesem Kontext waren `isSecureContext=false` und `crypto.randomUUID` nicht verfügbar. Die UUID diente ausschließlich dem Namen einer Radio-Gruppe. Ein Zähler pro Seite erzeugt jetzt eindeutige Namen. Erstellen, Speichern, Neuladen, Bearbeiten und Planerzeugung waren danach unter HTTP mit diesem Hostnamen, HTTP localhost und HTTPS localhost erfolgreich. ZFS- und Mountprüfungen waren in diesen lokalen Browsertests durch isolierte Testnachweise ersetzt.
+
+Weiter offen für RC3 sind RC2-02 bis RC2-09, die Browserprüfung der überarbeiteten Oberfläche und die vollständige Linux-/ZFS-/Containerfreigabe für den exakten neuen Commit. RC2 bleibt als bisherige Vorabversion erhalten.
