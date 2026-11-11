@@ -118,6 +118,8 @@ jobs:
           node -e 'for (const [source] of require("/tmp/bibliothekar-adoption-patterns.json")) new RegExp(source, "u")'
       - name: Verify adoption including the kernel read-only bind mount
         if: steps.scope.outputs.request-only != 'true'
+        env:
+          RECOVERY_PROBE: ${{ github.event_name == 'workflow_dispatch' && !inputs.full_backend }}
         run: |
           test "$(git rev-parse HEAD)" = "$QA_SOURCE"
           cat > "$RUNNER_TEMP/adoption-targets.json" <<'JSON'
@@ -132,6 +134,22 @@ jobs:
             "tests/backend/test_f12_no_clobber.py::test_real_sigkill_around_atomic_publication_and_three_startups[import.publish_before]"
           ]
           JSON
+          if [[ "$RECOVERY_PROBE" == true ]]; then
+            python - "$RUNNER_TEMP/adoption-targets.json" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          cases = json.loads(path.read_text())
+          cases += [
+              "tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[reconcile-reconcile.move1]",
+              "tests/backend/test_f11_trash_reservation.py::test_f11_delete_wins_restore_rejected[full]",
+              "tests/backend/test_f11_trash_reservation.py::test_f11_two_concurrent_requests[restore]",
+          ]
+          path.write_text(json.dumps(cases))
+          PY
+          fi
           bash qa/release/with_synthetic_zfs.sh python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" targets "$RUNNER_TEMP/adoption-targets.json"
           python - <<'PY'
           import os
@@ -148,6 +166,17 @@ jobs:
         with:
           name: adoption-preflight
           path: ${{ runner.temp }}/f14-qa/targets/results
+          retention-days: 14
+      - name: Retain synthetic recovery diagnostics on failure
+        if: failure() && steps.scope.outputs.request-only != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: adoption-recovery-diagnostics
+          path: |
+            ${{ runner.temp }}/f14-qa/targets/scratch/pytest/0562-evidence/thread-*.json
+            ${{ runner.temp }}/f14-qa/targets/scratch/pytest/0562-evidence/**/process.log
+            ${{ runner.temp }}/f14-qa/targets/scratch/pytest/**/f11-evidence/**/process.log
+          if-no-files-found: ignore
           retention-days: 14
 
   # Public pull requests must never execute their code on a self-hosted runner.
@@ -193,6 +222,17 @@ jobs:
             ${{ runner.temp }}/f14-qa/targets/results/result.xml
             ${{ runner.temp }}/f14-qa/targets/results/stdout.log
             ${{ runner.temp }}/f14-qa/targets/results/targets-incremental.jsonl
+          retention-days: 14
+      - name: Retain synthetic recovery diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-recovery-diagnostics-${{ matrix.partition }}
+          path: |
+            ${{ runner.temp }}/f14-qa/targets/scratch/pytest/0562-evidence/thread-*.json
+            ${{ runner.temp }}/f14-qa/targets/scratch/pytest/0562-evidence/**/process.log
+            ${{ runner.temp }}/f14-qa/targets/scratch/pytest/**/f11-evidence/**/process.log
+          if-no-files-found: ignore
           retention-days: 14
 
   backend-coverage:
