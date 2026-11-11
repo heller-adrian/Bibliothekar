@@ -294,6 +294,12 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                     ORDER BY start_datetime DESC, name""",
             ) if row["id"] in matches]
 
+    @router.post("/jobs/{job_id}/draft/check")
+    def check_draft(job_id: str, draft: Draft):
+        from app.legacy_adoption_plan import preview_draft
+        with _errors():
+            return preview_draft(context(), job_id, draft.model_dump(exclude_none=True))
+
     @router.put("/jobs/{job_id}/draft")
     def save_draft(job_id: str, draft: SaveDraft):
         library = context()

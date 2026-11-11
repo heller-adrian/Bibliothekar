@@ -164,6 +164,70 @@ def _assert_timeline(connection, job_id, events):
             raise AdoptionError("Die im Auftrag gewählten Ereignisse überschneiden sich.")
 
 
+def preview_draft(library, job_id, draft):
+    """Read-only planning feedback, never a move/registration authority."""
+    from bisect import bisect_right
+    with database_connection(library.database_path) as connection:
+        connection.execute('BEGIN')
+        job = _job(connection, library.library_id, job_id)
+        if job['state'] != 'inventoried':
+            raise AdoptionError('Die Inventur muss zuerst abgeschlossen werden.')
+        definitions = draft.get('events') or []
+        if not definitions:
+            return {'valid': True, 'conflicts': [], 'events': []}
+        naming = naming_snapshot_for_new_event(naming_from_library_settings(library.settings))
+        defaults = get_global_default(connection)
+        events = [_draft_event(connection, definition, naming, defaults) for definition in definitions]
+        conflicts = []
+        for index, event in enumerate(events):
+            for start, end in event['ranges']:
+                existing = continuous_event_overlaps(connection, job_id, start, end, exclude_event_id=event['id'])
+                existing += no_event_segment_overlaps(connection, job_id, start, end, exclude_event_id=event['id'])
+                for other in existing:
+                    conflicts.append({'index': index, 'kind': 'archive' if other['status'] == 'archived' else 'catalogue',
+                                      'existing_id': other.get('event_id') or other['id'], 'name': other['name'],
+                                      'start': max(start, other.get('effective_start', other['start_datetime'])),
+                                      'end': min(end, other.get('effective_end', other['end_datetime']))})
+        for (first_index, first), (second_index, second) in combinations(enumerate(events), 2):
+            if first['id'] == second['id'] or any(a <= d and c <= b for a, b in first['ranges'] for c, d in second['ranges']):
+                conflicts.append({'index': first_index, 'other_index': second_index, 'kind': 'draft',
+                                  'name': second['name'], 'start': first['start_datetime'], 'end': first['end_datetime']})
+        if conflicts:
+            return {'valid': False, 'conflicts': conflicts, 'events': []}
+        # Keep the final plan's existing timeline and folder collision gate.
+        _assert_timeline(connection, job_id, events)
+        prefixes = [target_key(str(event_root_relative(event))) for event in events]
+        if len(set(prefixes)) != len(prefixes):
+            raise AdoptionError('Mehrere Ereignisse beanspruchen denselben Zielordner.')
+        intervals = sorted((start, end, index) for index, event in enumerate(events) for start, end in event['ranges'])
+        starts = [item[0] for item in intervals]
+        counts = [{'families': 0, 'days': set()} for _ in events]
+        overrides = {key: _local_capture(value) for key, value in draft.get('capture_overrides', {}).items()}
+        exclusions = set(draft.get('exclude_families') or [])
+        for row in connection.execute(
+            '''SELECT families.family_key,families.capture_time,families.review_required,copy.state AS review_copy
+               FROM legacy_adoption_families families
+               LEFT JOIN legacy_adoption_review_copies copy USING(job_id,family_key)
+               WHERE families.job_id=?''', (job_id,),
+        ):
+            key = row['family_key']
+            if key in exclusions or row['review_copy'] or (row['review_required'] and key not in overrides):
+                continue
+            capture = overrides.get(key, row['capture_time'])
+            if not capture:
+                continue
+            at = bisect_right(starts, capture[:19]) - 1
+            if at >= 0 and capture[:19] <= intervals[at][1]:
+                count = counts[intervals[at][2]]
+                count['families'] += 1
+                count['days'].add(capture[:10])
+        return {'valid': True, 'conflicts': [], 'events': [
+            {'name': event['name'], 'start': event['start_datetime'], 'end': event['end_datetime'],
+             'families': count['families'], 'days': len(count['days'])}
+            for event, count in zip(events, counts)
+        ]}
+
+
 def _target_leaf(event, capture):
     prefix = event_root_relative(event)
     assigned = assignment_target(event["id"], event["children"], capture[:19])

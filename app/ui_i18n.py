@@ -8,6 +8,9 @@ from __future__ import annotations
 import json
 
 UI_TRANSLATIONS = {
+  "Ordnername": "Folder name",
+  "Bestehende Fotosammlung übernehmen": "Adopt existing photo collection",
+  "Ordner hinzufügen": "Add folder",
   "Verbindung, Integrität und Schema sind bestätigt. Fachliche Vorgänge werden getrennt geprüft.": "Connection, integrity and schema are confirmed. Domain operations are checked separately.",
   "Die Datenbankprüfung meldet einen Fehler. Ursprüngliche Speicherorte und konsistenten Sicherungsstand prüfen; keine Datenbank zurücksetzen.": "Database checks report an error. Check the original storage locations and a consistent backup; do not reset the database.",
   "Aufnahmezeit belastbar": "Reliable capture time",

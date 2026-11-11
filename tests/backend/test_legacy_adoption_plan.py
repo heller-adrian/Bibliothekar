@@ -34,6 +34,53 @@ def _scan(context, source):
     return job
 
 
+@pytest.mark.parametrize('case', ['archive', 'draft', 'collection', 'free', 'screenshot10'])
+def test_read_only_draft_preview_identifies_conflicting_event(inventory, case):
+    from app.legacy_adoption_plan import preview_draft
+    context, source, _ = inventory
+    (source / 'preview.JPG').write_bytes(b'synthetic preview')
+    job = _scan(context, source)
+    proposed = _draft()
+    if case in {'archive', 'free', 'screenshot10'}:
+        _existing(context)
+    if case == 'draft':
+        proposed['events'].append({**proposed['events'][0], 'name': 'Second'})
+    elif case == 'collection':
+        proposed['events'].append({'event_kind': 'no_event', 'segments': [{'day_key': '2026-07-21'}]})
+    elif case == 'free':
+        proposed['events'][0].update(start_date='2026-07-19', end_date='2026-07-19')
+    elif case == 'screenshot10':
+        proposed['events'] = [{'name': 'Test einlesen 1', 'start_date': '2026-07-21', 'end_date': '2026-07-21'},
+                              {'name': 'Test einlesen 2', 'start_date': '2026-07-19', 'end_date': '2026-07-19'}]
+    before = {str(p): p.read_bytes() for p in context.archive_root.rglob('*') if p.is_file()}
+    result = preview_draft(context, job, proposed)
+    assert result['valid'] == (case == 'free')
+    if case in {'archive', 'screenshot10'}:
+        assert all(item['kind'] == 'archive' and item['existing_id'] == 'EXISTING' for item in result['conflicts'])
+        if case == 'screenshot10':
+            assert {item['index'] for item in result['conflicts']} == {0}
+    elif case in {'draft', 'collection'}:
+        assert result['conflicts'][0]['kind'] == 'draft'
+    assert before == {str(p): p.read_bytes() for p in context.archive_root.rglob('*') if p.is_file()}
+    with database_connection(context.database_path) as connection:
+        assert connection.execute('SELECT COUNT(*) FROM legacy_adoption_plans').fetchone()[0] == 0
+        assert connection.execute('SELECT draft_revision FROM legacy_adoption_jobs WHERE id=?', (job,)).fetchone()[0] == 0
+
+
+def test_draft_preview_counts_the_same_eligible_families_as_the_move_plan(inventory):
+    from app.legacy_adoption_plan import preview_draft
+    context, source, _ = inventory
+    (source / 'preview.JPG').write_bytes(b'synthetic preview')
+    job = _scan(context, source)
+    with database_connection(context.database_path) as connection:
+        key = connection.execute('SELECT family_key FROM legacy_adoption_families WHERE job_id=?', (job,)).fetchone()[0]
+    assert preview_draft(context, job, _draft())['events'][0]['families'] == 1
+    excluded = {**_draft(), 'exclude_families': [key]}
+    assert preview_draft(context, job, excluded)['events'][0]['families'] == 0
+    overridden = {**_draft(), 'capture_overrides': {key: '2026-07-26T12:00:00'}}
+    assert preview_draft(context, job, overridden)['events'][0]['families'] == 0
+
+
 def _existing(context):
     event_id = "EXISTING"
     with database_connection(context.database_path) as connection:

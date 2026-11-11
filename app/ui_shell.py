@@ -4649,17 +4649,21 @@ BIBLIOTHEKAR_JS = r"""
     return null;
   }
 
-  function bkRenderFolderLayout() {
-    if(!folderSettings || !folderLayoutState) return;
-    const host=document.getElementById("bk-folder-layout-tree");
+  function bkRenderFolderLayout(custom=null) {
+    const state=custom?.state || folderLayoutState;
+    if((!custom && !folderSettings) || !state) return;
+    const render=()=>bkRenderFolderLayout(custom);
+    const changed=()=>custom?.onChange ? custom.onChange(state) : bkUpdateSettingsPreview();
+    const radioName=custom?.radioName || "bk-input-folder";
+    const host=custom?.host || document.getElementById("bk-folder-layout-tree");
     const enabled=document.getElementById("bk-folder-layout-enabled");
-    enabled.checked=Boolean(folderLayoutState.structure_enabled);
-    const flattened=bkFlattenLayout(folderLayoutState.layout?.nodes||[]);
-    const exportSelect=document.getElementById("bk-folder-export-node");
+    if(!custom && enabled) enabled.checked=Boolean(state.structure_enabled);
+    const flattened=bkFlattenLayout(state.layout?.nodes||[]);
+    const exportSelect=custom?.exportSelect || document.getElementById("bk-folder-export-node");
     if(exportSelect){
       const selectedExport=flattened.find(item=>String(item.node?.role||"").toLowerCase()==="export");
       exportSelect.innerHTML='<option value="">Kein Ordner fest als Exportordner klassifiziert</option>'
-        + flattened.map(item=>'<option value="'+String(item.node.id).replaceAll('"','&quot;')+'">'
+        + flattened.map(item=>'<option data-bk-preserve-language value="'+String(item.node.id).replaceAll('"','&quot;')+'">'
           +String(item.path).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;')
           +'</option>').join('');
       exportSelect.value=selectedExport ? String(selectedExport.node.id) : "";
@@ -4667,49 +4671,57 @@ BIBLIOTHEKAR_JS = r"""
     const rows=[{node:null,path:"",depth:0},...flattened.map(item=>({...item,depth:item.path.split("/").length}))];
     host.innerHTML=rows.map(item=>{
       const root=item.node===null;
-      const checked=String(folderLayoutState.input_path||"")===item.path;
-      if(root) return '<label class="bk-folder-input-root"><input class="bk-folder-input-radio" data-bk-input-node="" type="radio" name="bk-input-folder" value="" '+(checked?'checked':'')+'><strong>Direkt im Ereignis</strong><span style="color:var(--bk-muted)">Input</span></label>';
+      const checked=String(state.input_path||"")===item.path;
+      if(root) return '<label class="bk-folder-input-root"><input class="bk-folder-input-radio" data-bk-input-node="" type="radio" name="'+radioName+'" value="" '+(checked?'checked':'')+'><strong>Direkt im Ereignis</strong><span style="color:var(--bk-muted)">Input</span></label>';
       const id=String(item.node.id).replaceAll('"','&quot;');
       const name=String(item.node.name).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
       const pad=Math.max(0,(item.depth-1)*20);
       return '<div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;gap:7px;align-items:center;margin-left:'+pad+'px">'
-        +'<input class="bk-folder-input-radio" data-bk-input-node="'+id+'" type="radio" name="bk-input-folder" value="'+String(item.path).replaceAll('"','&quot;')+'" '+(checked?'checked':'')+' title="Als Input-Ordner">'
+        +'<input class="bk-folder-input-radio" data-bk-input-node="'+id+'" type="radio" name="'+radioName+'" value="'+String(item.path).replaceAll('"','&quot;')+'" '+(checked?'checked':'')+' title="Als Input-Ordner">'
         +'<input data-bk-layout-name="'+id+'" value="'+name+'" aria-label="Ordnername">'
         +'<button type="button" data-bk-layout-child="'+id+'" title="Unterordner hinzufügen">＋</button>'
         +'<button type="button" data-bk-layout-remove="'+id+'" class="danger-button" title="Ordner entfernen">×</button>'
         +'<span style="color:var(--bk-muted);font-size:.82rem">'+(checked?'Input':'')+'</span></div>';
     }).join("");
     host.querySelectorAll("[data-bk-layout-name]").forEach(input=>input.addEventListener("input",()=>{
-      const selected=host.querySelector('input[name="bk-input-folder"]:checked');
+      const selected=host.querySelector('[data-bk-input-node]:checked');
       const selectedNodeId=String(selected?.dataset?.bkInputNode||"");
-      const found=bkFindParent(folderLayoutState.layout.nodes,input.dataset.bkLayoutName);
+      const found=bkFindParent(state.layout.nodes,input.dataset.bkLayoutName);
       if(found) found.node.name=input.value;
       if(selectedNodeId){
-        const selectedRow=bkFlattenLayout(folderLayoutState.layout.nodes).find(item=>String(item.node?.id||"")===selectedNodeId);
-        folderLayoutState.input_path=selectedRow?.path||"";
+        const selectedRow=bkFlattenLayout(state.layout.nodes).find(item=>String(item.node?.id||"")===selectedNodeId);
+        state.input_path=selectedRow?.path||"";
       }else if(selected){
-        folderLayoutState.input_path=selected.value;
+        state.input_path=selected.value;
       }
-      bkUpdateSettingsPreview();
+      changed();
     }));
     host.querySelectorAll("[data-bk-layout-child]").forEach(button=>button.addEventListener("click",()=>{
-      const found=bkFindParent(folderLayoutState.layout.nodes,button.dataset.bkLayoutChild);
-      if(found){found.node.children=found.node.children||[];found.node.children.push({id:bkNodeId(),name:"Neuer Ordner",children:[]});bkRenderFolderLayout();}
+      const found=bkFindParent(state.layout.nodes,button.dataset.bkLayoutChild);
+      if(found){found.node.children=found.node.children||[];found.node.children.push({id:bkNodeId(),name:"Neuer Ordner",children:[]});render();}
     }));
     host.querySelectorAll("[data-bk-layout-remove]").forEach(button=>button.addEventListener("click",()=>{
-      const found=bkFindParent(folderLayoutState.layout.nodes,button.dataset.bkLayoutRemove);
+      const found=bkFindParent(state.layout.nodes,button.dataset.bkLayoutRemove);
       if(!found)return;
       const removedPath=bkFlattenLayout([found.node]).map(x=>x.path);
       const index=found.nodes.findIndex(n=>n.id===found.node.id);
       if(index>=0)found.nodes.splice(index,1);
-      if(removedPath.some(p=>String(folderLayoutState.input_path||"").endsWith(p)))folderLayoutState.input_path="";
-      bkRenderFolderLayout();
+      if(removedPath.some(p=>String(state.input_path||"").endsWith(p)))state.input_path="";
+      render();
     }));
-    host.querySelectorAll('input[name="bk-input-folder"]').forEach(radio=>radio.addEventListener("change",()=>{
-      if(radio.checked){folderLayoutState.input_path=radio.value;bkRenderFolderLayout();}
+    host.querySelectorAll('[data-bk-input-node]').forEach(radio=>radio.addEventListener("change",()=>{
+      if(radio.checked){state.input_path=radio.value;render();}
     }));
-    bkUpdateSettingsPreview();
+    if(custom && exportSelect) exportSelect.onchange=()=>{
+      for(const item of bkFlattenLayout(state.layout.nodes)){
+        if(item.node.role==="export")delete item.node.role;
+        if(item.node.id===exportSelect.value)item.node.role="export";
+      }
+      changed();
+    };
+    changed();
   }
+  window.BibliothekarFolderLayout={render:bkRenderFolderLayout,nodeId:bkNodeId,flatten:bkFlattenLayout};
 
   async function bkLoadFolderLayout() {
     if(!folderSettings)return;
@@ -5749,6 +5761,9 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 </section>
 """
 
+    if subarea == "adoption":
+        heading = ""  # The full-page workflow provides its own step heading.
+
     return f"""
 <header class="bk-shell">
   <a class="bk-brand bk-brand-new" href="/" aria-label="Bibliothekar Startseite">
@@ -5978,7 +5993,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <section class="bk-settings-group" id="bk-library-settings">
         <div><strong>Bibliotheken</strong><div style="color:var(--bk-muted);margin-top:4px">Anzeigenamen, Arbeitsbereiche und einzeln gemountete Archive verwalten</div></div>
         <div id="bk-library-management-list" class="bk-library-list"></div>
-        <div class="bk-library-actions"><button id="bk-legacy-adoption" type="button">Bestehende Fotosammlung übernehmen</button></div>
+
         <details class="bk-library-add-card">
           <summary>Bibliothek hinzufügen</summary>
           <div class="bk-library-form">
@@ -5993,6 +6008,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
             <div id="bk-new-library-status" class="bk-library-status"></div>
           </div>
         </details>
+        <div class="bk-library-actions" style="margin-top:24px;padding-top:20px;border-top:1px solid var(--bk-line)"><button id="bk-legacy-adoption" class="bk-positive-action" type="button">Bestehende Fotosammlung übernehmen</button></div>
       </section>
     </div>
   </div>
@@ -7878,7 +7894,8 @@ BIBLIOTHEKAR_0553_POLISH_CSS = r"""
 }
 """
 
-def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
+def apply_shell(html: str, *, active_area: str, subarea: str | None = None,
+                localization_js: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
         lambda match: match.group(0) + f'\n<script src="/auth/client.js"></script>\n<script>{BIBLIOTHEKAR_0505_LANGUAGE_HEAD_JS}</script>\n<style>{BIBLIOTHEKAR_0505_LANGUAGE_CSS}</style>\n<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n<script>{BIBLIOTHEKAR_0470_HEAD_JS}</script>\n',
@@ -7945,7 +7962,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         + f"<script>{BIBLIOTHEKAR_BOOTSTRAP_JS}</script>\n"
         + _shell_markup(area, subarea)
         + f"<script>{BIBLIOTHEKAR_0552_EARLY_LINKS_JS}</script>\n"
-        + f"<script>{I18N_UI_JS}</script>\n",
+        + f"<script>{I18N_UI_JS if localization_js is None else localization_js}</script>\n",
         1,
     )
     result = result.replace(

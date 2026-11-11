@@ -1,16 +1,19 @@
 """Browser wizard for planning and checking a legacy adoption."""
 from html import escape
+import re
 
 from app.legacy_adoption_i18n import TRANSLATIONS, PATTERNS
-from app.security import _client_code
 from app.ui_i18n import i18n_ui_js
+from app.ui_shell import apply_shell
 
 _I18N_JS = i18n_ui_js(TRANSLATIONS, PATTERNS)
 
 
 def wizard_html(library_id: str) -> str:
-    return (_PAGE.replace("__LIBRARY__", escape(library_id, quote=True))
-            .replace("__SECURITY__", _client_code()).replace("__I18N__", _I18N_JS))
+    html = apply_shell(_PAGE, active_area="assistant", subarea="adoption", localization_js=_I18N_JS)
+    return re.sub(r'(<body\b[^>]*)(>)',
+                  lambda match: match[1] + ' data-library="' + escape(library_id, quote=True) + '"' + match[2],
+                  html, count=1)
 
 
 _PAGE = r"""<!doctype html>
@@ -18,39 +21,55 @@ _PAGE = r"""<!doctype html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bestandsübernahme · Bibliothekar</title>
 <style>
-:root{color-scheme:light dark;font:16px/1.5 system-ui,sans-serif;--line:color-mix(in srgb,CanvasText 22%,Canvas)}
-body{margin:0;background:Canvas;color:CanvasText}
-main{max-width:74rem;margin:auto;padding:1.4rem}
-h1,h2,h3{line-height:1.2;margin:0 0 .65rem}p{margin:.5rem 0 .85rem}
-section,fieldset{border:1px solid var(--line);border-radius:.8rem;margin:1rem 0;padding:1rem}
-fieldset{margin:.6rem 0;min-width:0}
-button,input,select,textarea{font:inherit;color:inherit;background:Canvas;border:1px solid var(--line);border-radius:.4rem;padding:.35rem .55rem}
-button{cursor:pointer}button:disabled{cursor:wait;opacity:.55}
-button.primary{background:#2359a5;color:white;border-color:#2359a5}
-a{color:LinkText}label{display:flex;flex-direction:column;gap:.25rem;min-width:0}
-.inline{display:flex;gap:.65rem;align-items:center;flex-wrap:wrap}
-.inline label:has(input[type=checkbox]){flex-direction:row}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,19rem),1fr));gap:1rem}
-.stack{display:grid;gap:.6rem}
-.stack>div,.row{border-top:1px solid var(--line);padding:.55rem 0}
-code,.paths{overflow-wrap:anywhere}
-small,.subtle{opacity:.78}
-#message:not(:empty){border-left:.25rem solid #c27b24;padding:.5rem .75rem;white-space:pre-wrap}
-#safety{position:sticky;top:0;z-index:1;border-left:.25rem solid #c27b24;padding:.55rem .75rem;background:Canvas}
-#dirty:not(:empty){color:#a45616;font-weight:600}
-[hidden]{display:none!important}
-summary{cursor:pointer}textarea{min-height:4rem;width:min(100%,35rem);box-sizing:border-box}
+.legacy-adoption{width:100%;max-width:1600px;margin:auto;padding:24px;box-sizing:border-box;color:var(--bk-ink)}
+.legacy-adoption :is(section,fieldset){min-width:0;background:var(--bk-surface);border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:24px;margin:18px 0;box-shadow:var(--bk-shadow)}
+.legacy-adoption fieldset{margin:12px 0;box-shadow:none}
+.legacy-adoption legend{font-weight:700;padding:0 8px;max-width:100%;box-sizing:border-box}
+.legacy-adoption h1{font-size:clamp(1.5rem,3vw,2.25rem);margin:12px 0 24px}
+.legacy-adoption :is(h2,h3){margin:0 0 16px}
+.legacy-adoption label{display:flex;flex-direction:column;gap:7px;min-width:0}
+.legacy-adoption label:has(input[type=checkbox]){flex-direction:row;align-items:center;gap:9px;cursor:pointer}
+.legacy-adoption input[type=checkbox]{width:auto;margin:0;order:-1}
+.legacy-adoption :is(input,select,textarea){box-sizing:border-box;max-width:100%;min-width:0}
+.legacy-adoption .inline{display:flex;gap:12px;align-items:end;flex-wrap:wrap}
+.legacy-adoption .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:24px}
+.legacy-adoption .stack{display:grid;gap:12px}
+.legacy-adoption .row{border-top:1px solid var(--bk-line);padding:12px 0}
+.legacy-adoption :is(code,.paths){overflow-wrap:anywhere}
+.legacy-adoption :is(small,.subtle){color:var(--bk-muted)}
+.legacy-adoption :is(#message,#safety){border-left:4px solid var(--bk-yellow);padding:12px 16px;background:var(--bk-surface-2);border-radius:8px}
+.legacy-adoption #message:empty{display:none}
+.legacy-adoption #dirty{color:var(--bk-danger);font-weight:600}
+.legacy-adoption [hidden]{display:none!important}
+.legacy-adoption summary{cursor:pointer;padding:8px 0}
+.legacy-adoption textarea{min-height:5rem;width:100%}
+.legacy-adoption :focus-visible{outline:3px solid var(--bk-blue);outline-offset:3px}
+@media(max-width:640px){.legacy-adoption{padding:12px}.legacy-adoption :is(section,fieldset){padding:16px}.legacy-adoption .inline>*{max-width:100%}}
+.adoption-heading{display:flex;justify-content:space-between;align-items:start;gap:16px}
+.adoption-stepper{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.legacy-adoption :is(button:not(.day-card),summary.adoption-control){min-height:40px;padding:8px 14px;font:inherit;font-weight:650}
+.legacy-adoption summary.adoption-control{display:inline-flex;align-items:center;border-radius:11px}
+.legacy-adoption button:disabled{opacity:.45;cursor:not-allowed}
+.adoption-planning{grid-template-columns:minmax(0,1.5fr) minmax(19rem,1fr)!important}
+.legacy-adoption .adoption-month{padding:12px;box-shadow:none;margin:14px 0}
+.adoption-day-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;max-height:clamp(280px,62vh,640px);overflow:auto;padding:3px}
+.legacy-adoption .day-card{display:grid;grid-template-columns:auto minmax(0,1fr);text-align:left;padding:14px;gap:8px;border:1px solid var(--bk-line);border-radius:15px;background:var(--bk-surface);color:var(--bk-ink);user-select:none}
+.day-card .subtle{grid-column:2}
+.legacy-adoption .day-card.selected{border-color:var(--bk-blue);background:color-mix(in srgb,var(--bk-blue) 16%,var(--bk-surface))}
+.adoption-event-card{border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:14px;margin-bottom:12px}
+.adoption-event-card summary{display:grid;gap:6px}
+@media(max-width:900px){.adoption-planning{grid-template-columns:minmax(0,1fr)!important}.adoption-heading{flex-wrap:wrap}}
 </style>
 </head>
-<body data-library="__LIBRARY__">
-<main>
-<nav class="inline"><a id="back" href="/">Bibliothekar</a></nav>
-<h1>Bestehende Fotosammlung übernehmen</h1>
-<section id="introduction">
+<body>
+<main class="bk-page legacy-adoption">
+<header class="adoption-heading"><div><a id="back" href="/">Zur Bibliothek</a><h1>Bestehende Fotosammlung übernehmen</h1></div><div id="top-actions"></div></header>
+<nav id="wizard-steps" class="adoption-stepper" aria-label="Übernahmeschritte"></nav>
+<details id="introduction" open><summary>Sicherheit und Zeitbedarf</summary>
   <p>Die Übernahme einer bestehenden Fotosammlung ist ein umfangreicher Vorgang und kann längere Zeit dauern. Abhängig von der Anzahl und Größe der Dateien können Inventur, Planung und Sicherheitsprüfung mehrere Stunden benötigen. Bitte plane ausreichend Zeit ein und führe die Übernahme möglichst ohne Zeitdruck durch.</p>
   <p>Die alte Fotosammlung und das neue Zielarchiv müssen sich auf demselben ZFS-Dataset befinden. Unterschiedliche Ordner innerhalb desselben Datasets sind zulässig. Unterschiedliche Datasets werden nicht unterstützt, auch wenn sie auf demselben ZFS-Pool liegen.</p>
   <p>Liegt deine Fotosammlung auf einem anderen Dataset, kopiere sie vor der Bestandsübernahme eigenständig auf das Dataset des Zielarchivs.</p>
-</section>
+</details>
 <p id="safety" role="status">Bitte keine manuellen Änderungen an der alten Fotosammlung oder am Zielarchiv vornehmen. Andernfalls kann der gespeicherte Übernahmeplan ungültig werden.</p>
 <div id="message" role="status" aria-live="polite"></div>
 <div id="dirty" role="status" aria-live="polite"></div>
@@ -78,10 +97,8 @@ summary{cursor:pointer}textarea{min-height:4rem;width:min(100%,35rem);box-sizing
   </fieldset>
   <h3 style="margin-top:1rem">Gespeicherte Aufträge</h3><div id="jobs" class="stack"></div>
 </section>
-<div id="work"></div>
+<div id="work"></div><nav id="wizard-navigation" class="inline" aria-label="Schrittnavigation"></nav>
 </main>
-<script>__SECURITY__</script>
-<script>__I18N__</script>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -91,6 +108,53 @@ let jobId = currentUrl.searchParams.get("job") || "";
 let job = null, draft = {}, draftRevision = 0, year = "", day = null;
 let familyCursor = "", moveCursor = "", reviewCursor = "", directoryCursor = "", timer = 0, scriptTimer = 0;
 let selectedSource = null;
+let viewStep=currentUrl.searchParams.get("step") || "";
+let selectedDays=new Set(), dayRows=[], selectionAnchor="", dayPage=60, selectedDaysJob="", draftStats=[], previewRevision=-1;
+const steps=[["setup","Einrichten"],["inventory","Inventur"],["plan","Ereignisse planen"],["review","Plan prüfen"],["execution","Methode wählen"],["execute","Durchführen"],["verify","Prüfen und abschließen"]];
+function allowedSteps(){
+  if(!job || job.state==="discarded")return ["setup"];
+  if(!job.plan.id)return job.state==="inventoried" ? ["inventory","plan"] : ["inventory"];
+  if(!job.plan.execution)return ["inventory","review","execution"];
+  return job.plan.state==="completed" ? ["review","verify"] : ["review","execute","verify"];
+}
+function rememberView(step,push=false){
+  viewStep=step;
+  const url=new URL(location.href);url.searchParams.set("step",step);
+  history[push?"pushState":"replaceState"](null,"",url);
+}
+async function goStep(step){
+  requireSaved();
+  if(step==="plan" && job.plan.id && !job.plan.execution)await mutate("/reopen");
+  if(!allowedSteps().includes(step))return;
+  rememberView(step,true);await refresh();
+  document.querySelector(".adoption-heading").scrollIntoView({block:"start"});
+}
+function navigation(){
+  const allowed=allowedSteps();
+  if(!allowed.includes(viewStep))rememberView(allowed.at(-1));
+  $("wizard-steps").replaceChildren(...steps.map(([id,title],index)=>{
+    const button=action((index+1)+". "+t(title),()=>goStep(id),id===viewStep);
+    button.disabled=!allowed.includes(id);
+    button.setAttribute("aria-current",id===viewStep?"step":"false");
+    return button;
+  }));
+  const nav=$("wizard-navigation");nav.replaceChildren();
+  if(!job)return;
+  const previous={plan:"inventory",review:job.plan.execution?null:"plan",execution:"review",verify:job.plan.state==="completed"?null:"execute"}[viewStep];
+  if(previous)nav.append(action("Zurück",()=>goStep(previous)));
+  if(viewStep==="inventory" && job.state==="inventoried")nav.append(action("Weiter: Ereignisse planen",()=>goStep("plan"),true));
+  if(viewStep==="plan")nav.append(action("Weiter: Plan prüfen",()=>mutate("/plan","POST",{revision:draftRevision}),true));
+  if(viewStep==="review" && !job.plan.execution)nav.append(action("Weiter: Methode wählen",async()=>{
+    if(!job.plan.documents_at)await mutate("/documents");
+    await goStep("execution");
+  },true));
+  if(viewStep==="execute")nav.append(action("Weiter: Archiv prüfen",()=>goStep("verify"),true));
+}
+window.addEventListener("popstate",()=>{
+  if(dirty.size){rememberView(viewStep);report("Speichere deine Eingaben zuerst.");return;}
+  viewStep=new URL(location.href).searchParams.get("step")||"";
+  refresh().catch(error=>report(error.message));
+});
 const base = "/api/legacy-adoption";
 const dirty = new Set();
 function watchDraft(editor) {
@@ -238,15 +302,26 @@ async function refresh() {
   if (requested!==jobId) return;
   requireSaved();
   job=state;
+  if(selectedDaysJob!==jobId){
+    selectedDaysJob=jobId;
+    try{selectedDays=new Set(JSON.parse(sessionStorage.getItem("bk-adoption-days:"+jobId)||"[]").filter(day=>/^\d{4}-\d{2}-\d{2}$/.test(day)).slice(0,10000));}catch{selectedDays=new Set();}
+    previewRevision=-1;
+  }
   draftRevision=state.draft_revision;
   draft={events:[],capture_overrides:{},exclude_families:[],target_stems:{},...state.draft};
+  let checked=null;
+  if(job.state==="inventoried" && !job.plan.id && previewRevision!==draftRevision){
+    checked=await api(jobPath("/draft/check"),"POST",draft);
+    draftStats=checked.events;previewRevision=draftRevision;
+  }
   render();
+  if(checked && !checked.valid && $("event-editor"))showConflicts(checked,draft);
   if (job.scan_running) {
     timer=setTimeout(()=>refresh().catch(error=>report(error.message)),2000);
-  } else if (!job.plan.id && job.state==="inventoried") {
+  } else if (!job.plan.id && job.state==="inventoried" && viewStep==="plan") {
     await chronology();
   } else if (job.plan.id) {
-    await showMoves(true);
+    if($("moves"))await showMoves(true);
     if (job.plan.execution?.method==="script" && !["completed","rolled_back"].includes(job.plan.execution.phase)) {
       await pollScript();
     }
@@ -259,6 +334,8 @@ async function mutate(path, method="POST", body) {
   if (checking) $("safety").textContent="Bitte keine Dateien mehr verändern. Bibliothekar prüft und registriert gerade den übernommenen Archivbestand.";
   try {
     const result=await api(jobPath(path),method,body);
+    const target={"/plan":"review","/confirm":"execute","/verify":"verify","/finalize":"verify","/reopen":"plan","/scan":"inventory"}[path];
+    if(target)rememberView(target);
     await refresh();
     report();
     return result;
@@ -270,7 +347,10 @@ async function mutate(path, method="POST", body) {
 function render() {
   const phase=job.plan.execution?.phase;
   const terminal=job.state==="discarded" || job.plan.state==="completed";
-  $("setup").hidden=!terminal;
+  navigation();
+  $("introduction").hidden=false;$("introduction").open=viewStep==="setup";
+  $("setup").hidden=viewStep!=="setup";
+  $("top-actions").replaceChildren();
   $("back").hidden=!terminal;
   $("safety").hidden=terminal;
   const warnings={
@@ -304,58 +384,106 @@ function render() {
   }
   const buttons=node("div",undefined,"inline");
   if (job.scan_running) buttons.append(action("Inventur pausieren",()=>mutate("/pause")));
-  else if (!job.plan.id) buttons.append(action(job.state==="ready"?"Inventur starten":"Inventur erneut starten",()=>mutate("/scan")));
-  if (!job.plan.execution && !job.scan_running) buttons.append(action("Änderungen verwerfen",async()=>{
+  else if (!job.plan.id) buttons.append(action(job.state==="ready"?"Inventur starten":"Inventur erneut starten",async()=>{
+    if(job.state!=="ready" && !confirm(t("Inventur neu starten? Der bisherige Entwurf wird verworfen. Originaldateien bleiben unverändert.")))return;
+    await mutate("/scan");
+  },true));
+  if (!terminal && !job.plan.execution && !job.scan_running) { const discard=action("Änderungen verwerfen",async()=>{
     if (!confirm("Auftrag und Entwurf verwerfen? Originaldateien bleiben erhalten.")) return;
     await api(jobPath(),"DELETE");
     dirty.clear();
     location.href=$("back").href;
-  }));
+  });discard.classList.add("danger-button");$("top-actions").append(discard);}
   if (job.errors) buttons.append(action("Pfadfehler anzeigen", async()=>{
     const rows=await api(jobPath("/errors"));
     $("inventory-errors").replaceChildren(...rows.map(row=>line(row.relative_path+" · "+t(row.error))));
   }));
   status.append(buttons,slot("inventory-errors"));
-  host.replaceChildren(status);
-  if (job.plan.id) renderPlan(host);
-  else if (!job.scan_running && job.state==="inventoried") renderDraft(host);
+  host.replaceChildren();
+  if(viewStep==="inventory")host.append(status);
+  else if(job.plan.id)renderPlan(host);
+  else if(viewStep==="plan" && !job.scan_running && job.state==="inventoried")renderDraft(host);
 }
 function renderDraft(host) {
-  const panel=section("4. Aufnahmezeiten und Ereignisse planen");
-  panel.append(line("Wähle ein Jahr und einen Tag. Die Ereigniszeiträume bestimmen, welche bestätigten Familien in diesen Auftrag eingehen."));
-  const grid=node("div",undefined,"grid");
-  const chronologyPane=node("div");
-  chronologyPane.append(slot("periods"),slot("days"),slot("matches"),slot("families"));
-  const formPane=node("div");
-  formPane.append(node("h3","Entwurf"),slot("draft-events"),slot("event-editor"));
-  formPane.append(action("Verschiebeplan erstellen",()=>mutate("/plan","POST",{revision:draftRevision}),true));
-  grid.append(chronologyPane,formPane);
-  panel.append(grid);host.append(panel);
-  showDraftEvents();eventEditor();
+  const panel=section("Ereignisse planen");
+  panel.append(line("Wähle Aufnahmetage wie im Arbeitsbereich. Klick und Strg/Cmd wählen einzelne Tage, Umschalt wählt einen Bereich. Mit Plus kannst du auch ohne Auswahl ein Ereignis anlegen."));
+  const toolbar=node("div",undefined,"inline adoption-toolbar");
+  const plus=node("details");plus.append(node("summary","＋ "+t("Neu"),"primary adoption-control"));
+  const menu=node("div",undefined,"stack");
+  const startEditor=kind=>{
+    const days=[...selectedDays].sort();
+    const index=kind==="child" ? draft.events.findIndex(event=>!event.existing_id && event.event_kind!=="no_event") : undefined;
+    eventEditor(index===-1?undefined:index,days[0]||"",kind);
+    plus.open=false;$("event-editor").scrollIntoView({block:"nearest"});
+  };
+  menu.append(action("Neues Ereignis",()=>startEditor("event")),action("Neues Unterereignis",()=>startEditor("child")),action("Sammelordner ohne Ereignis",()=>startEditor("no_event")));plus.append(menu);
+  toolbar.append(plus,action("Alle auswählen",()=>{for(const row of dayRows)selectedDays.add(row.period);renderDays();}),action("Auswahl aufheben",()=>{selectedDays.clear();renderDays();}),slot("selection-count","span"));
+  panel.append(toolbar,slot("periods"));
+  const grid=node("div",undefined,"grid adoption-planning");
+  const chronologyPane=node("div");chronologyPane.append(slot("days"),slot("matches"));
+  const diagnostic=node("details");diagnostic.id="family-diagnostics";
+  diagnostic.append(node("summary","Dateifamilien und Aufnahmezeiten prüfen"),slot("families"));
+  diagnostic.addEventListener("toggle",()=>{if(diagnostic.open && !$("families").childElementCount)showFamilies().catch(error=>report(error.message));});
+  chronologyPane.append(diagnostic);
+  const formPane=node("div");formPane.append(node("h3","Gespeicherte Ereignisse"),slot("draft-events"),slot("event-editor"));
+  grid.append(chronologyPane,formPane);panel.append(grid);host.append(panel);
+  $("event-editor").hidden=true;showDraftEvents();
 }
 async function chronology() {
   requireSaved($("families"));
   const periods=await api(jobPath("/chronology"));
+  if(!periods.some(period=>period.period===year))year=periods.find(period=>period.period)?.period || "";
   const buttons=node("div",undefined,"inline");
-  for (const period of periods) {
-    const text=period.period || "Ohne gesichertes Datum";
-    buttons.append(action(text+" ("+period.families+")",async()=>{
-      year=period.period || "";day=period.period ? null : "";await chronology();
-    }));
+  for(const period of periods){
+    const button=action((period.period||t("Ohne gesichertes Datum"))+" ("+period.families+")",async()=>{
+      year=period.period||"";day=period.period?null:"";dayPage=60;await chronology();
+    });
+    button.setAttribute("aria-pressed",String(period.period===year));buttons.append(button);
   }
-  $("periods").replaceChildren(buttons);
-  $("days").replaceChildren();
-  $("matches").replaceChildren();
-  $("families").replaceChildren();
-  if (year) {
-    const days=await api(jobPath("/chronology?"+new URLSearchParams({year})));
-    const row=node("div",undefined,"inline");
-    for (const item of days) row.append(action(item.period+" ("+item.families+")",async()=>{
-      day=item.period;await showDay();
-    }));
-    $("days").append(row);
+  $("periods").replaceChildren(buttons);$("matches").replaceChildren();$("families").replaceChildren();
+  dayRows=year ? await api(jobPath("/chronology?"+new URLSearchParams({year}))) : [];
+  renderDays();
+  if(day!==null)await showDay();
+}
+function renderDays(){
+  const host=$("days");if(!host)return;
+  host.replaceChildren();
+  const months=new Map();
+  for(const item of dayRows.slice(0,dayPage)){
+    const month=item.period.slice(0,7);
+    if(!months.has(month)){
+      const group=node("section",undefined,"adoption-month");group.append(node("h3",month));
+      const cards=node("div",undefined,"adoption-day-grid");group.append(cards);months.set(month,cards);host.append(group);
+    }
+    const card=node("button",undefined,"day-card"+(selectedDays.has(item.period)?" selected":""));
+    card.type="button";card.dataset.day=item.period;card.setAttribute("role","checkbox");
+    card.setAttribute("aria-checked",String(selectedDays.has(item.period)));
+    card.append(node("span",selectedDays.has(item.period)?"☑":"□"),node("strong",item.period),node("span",item.families+" "+t("Familien"),"subtle"));
+    function choose(event){
+      requireSaved($("families"));
+      if(event.shiftKey && selectionAnchor){
+        const keys=dayRows.map(row=>row.period),a=keys.indexOf(selectionAnchor),b=keys.indexOf(item.period);
+        if(a>=0 && b>=0)for(const key of keys.slice(Math.min(a,b),Math.max(a,b)+1))selectedDays.add(key);
+      }else if(selectedDays.has(item.period))selectedDays.delete(item.period);
+      else selectedDays.add(item.period);
+      selectionAnchor=item.period;day=item.period;
+      renderDays();showDay().catch(error=>report(error.message));
+      $("days").querySelector('[data-day="'+item.period+'"]')?.focus();
+    }
+    card.addEventListener("mousedown",event=>{if(event.shiftKey)event.preventDefault();});
+    card.addEventListener("click",event=>{try{choose(event);}catch(error){report(error.message);}});
+    card.addEventListener("keydown",event=>{
+      if(!["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(event.key))return;
+      event.preventDefault();const cards=[...host.querySelectorAll("[data-day]")],at=cards.indexOf(card);
+      const next=cards[at+(["ArrowLeft","ArrowUp"].includes(event.key)?-1:1)];
+      if(next){next.focus();if(event.shiftKey)next.dispatchEvent(new MouseEvent("click",{bubbles:true,shiftKey:true}));}
+    });
+    months.get(month).append(card);
   }
-  if (day!==null) await showDay();
+  if(dayRows.length>dayPage)host.append(action("Weitere Tage",()=>{dayPage+=60;renderDays();}));
+  sessionStorage.setItem("bk-adoption-days:"+jobId,JSON.stringify([...selectedDays]));
+  $("selection-count").textContent=selectedDays.size+" "+t("Tage ausgewählt");
+  showDraftEvents();
 }
 async function showDay() {
   requireSaved($("families"));
@@ -376,7 +504,7 @@ async function showDay() {
     }
     $("matches").append(action("Diesen Tag im Formular verwenden",()=>eventEditor(undefined,day)));
   }
-  await showFamilies();
+  if($("family-diagnostics")?.open)await showFamilies();
 }
 const reviewReasons={
   missing_capture_time:"Aufnahmezeit fehlt",
@@ -477,24 +605,58 @@ async function showFamilies() {
   }
 }
 async function setDraft(value, editor) {
+  const checked=await api(jobPath("/draft/check"),"POST",value);
+  if(!checked.valid){showConflicts(checked,value,editor);throw new Error("Zeitkonflikt: Korrigiere die markierte Planung. Gespeicherte Entwürfe bleiben erhalten.");}
   const result=await api(jobPath("/draft"),"PUT",{...value,revision:draftRevision});
+  draftStats=checked.events;previewRevision=result.revision;
   draft=value;
   draftRevision=result.revision;
   savedEditor(editor);
   showDraftEvents();
 }
-function showDraftEvents() {
-  const el=$("draft-events");
-  el.replaceChildren();
-  draft.events.forEach((item,index)=>{
+function showConflicts(checked,candidate,editor){
+  $("planning-conflicts")?.remove();
+  const panel=node("section");panel.id="planning-conflicts";panel.setAttribute("role","alert");
+  panel.append(node("h3","Zeitkonflikte lösen"),line("Gespeicherte Entwürfe bleiben erhalten. Korrigiere den betroffenen Zeitraum oder ergänze das vorhandene Archivereignis."));
+  for(const conflict of checked.conflicts){
+    const proposed=candidate.events[conflict.index];
     const row=node("div",undefined,"row");
-    const title=item.existing_id ? "Ergänzung · "+(item.name || item.existing_id)
-      : item.event_kind==="no_event" ? "Sammelordner · "+item.segments.map(segment=>segment.day_key).join(", ")
-      : item.name+" · "+item.start_date+" bis "+item.end_date;
-    row.append(line(title));
-    if (!item.existing_id) row.append(action("Bearbeiten",()=>eventEditor(index)));
-    row.append(action("Entfernen",()=>setDraft({...draft,events:draft.events.filter((_,at)=>at!==index)})));
-    el.append(row);
+    const title=node("strong",(proposed.name||t("Sammelordner ohne Ereignis"))+" ↔ "+conflict.name);title.dataset.bkPreserveLanguage="";
+    row.append(title,line(conflict.start.slice(0,10)+" → "+conflict.end.slice(0,10)));
+    if(conflict.kind==="archive")row.append(action("Vorhandenes Ereignis ergänzen",async()=>{
+      const events=candidate.events.filter((item,index)=>index!==conflict.index && item.existing_id!==conflict.existing_id);
+      events.push({existing_id:conflict.existing_id,name:conflict.name});
+      await setDraft({...candidate,events},editor);panel.remove();
+      $("event-editor").replaceChildren();$("event-editor").hidden=true;
+      report("Archivereignis im Entwurf gespeichert.");
+    }));
+    row.append(action("Zeitraum ändern",()=>{
+      if(editor?.isConnected)editor.querySelector('input[type="date"],textarea')?.focus();
+      else eventEditor(conflict.index);
+    }));panel.append(row);
+  }
+  if($("event-editor"))$("event-editor").before(panel);
+  else $("work").prepend(panel);
+}
+function showDraftEvents() {
+  const el=$("draft-events");if(!el)return;
+  el.replaceChildren();
+  if(!draft.events.length)el.append(line("Noch keine Ereignisse geplant. Wähle Plus, um zu beginnen."));
+  draft.events.forEach((item,index)=>{
+    const row=node("details",undefined,"adoption-event-card");
+    const kind=item.existing_id?"Archivereignis ergänzen":item.event_kind==="no_event"?"Sammelordner ohne Ereignis":"Neues Ereignis";
+    const dates=item.event_kind==="no_event"?(item.segments||[]).map(segment=>segment.day_key):[item.start_date,item.end_date].filter(Boolean);
+    const summary=node("summary");const title=node("strong",item.name||t(kind));title.dataset.bkPreserveLanguage="";
+    summary.append(title,node("span",t(kind),"subtle"),node("span",[...new Set(dates)].join(" → "),"subtle"));
+    row.append(summary);
+    const matches=dayRows.filter(day=>item.event_kind==="no_event"?dates.includes(day.period):day.period>=item.start_date && day.period<=item.end_date);
+    const stats=draftStats[index];
+    row.append(line((stats?.days??matches.length)+" "+t("Tage")+" · "+(stats?.families??matches.reduce((sum,day)=>sum+day.families,0))+" "+t("Familien")));
+    if(stats && !dates.length)row.append(line(stats.start.slice(0,10)+" → "+stats.end.slice(0,10)));
+    const controls=node("div",undefined,"inline");
+    if(!item.existing_id)controls.append(action("Bearbeiten",()=>eventEditor(index)));
+    controls.append(action("Entfernen",async()=>{await setDraft({...draft,events:draft.events.filter((_,at)=>at!==index)});report("Entwurf entfernt.");}));
+    row.append(controls);el.append(row);
   });
 }
 function layoutRows(layout) {
@@ -525,55 +687,32 @@ function layoutEditor(title,saved,inherit=false) {
   const select=node("label","Struktur");
   select.append(type);
   const custom=node("div",undefined,"stack");
-  const paths=node("textarea");
-  const rows=layoutRows(saved?.layout || job.layout_default?.layout);
-  paths.value=rows.map(item=>item.path).join("\n");
-  const label=node("label","Ein Ordnerpfad pro Zeile, zum Beispiel Auswahl/Favoriten");
-  label.append(paths);
-  const [inputWrap,input]=field("Ordner für Originale, leer für das Ereignisblatt","text",
-    saved?.input_path ?? job.layout_default?.input_path ?? "");
-  const [exportWrap,exported]=field("Ordner für Exporte, optional","text",
-    rows.find(item=>item.role==="export")?.path || "");
-  custom.append(label,inputWrap,exportWrap);
-  function update() { custom.hidden=type.value!=="custom"; }
-  type.addEventListener("change",update);
-  update();
+  const state=structuredClone(saved?.layout ? saved : job.layout_default || {structure_enabled:true,input_path:"",layout:{version:2,nodes:[]}});
+  state.layout=state.layout || {version:2,nodes:[]};
+  const tree=node("div",undefined,"stack");
+  const exported=node("select");
+  const exportWrap=node("label","Exportordner");exportWrap.append(exported);
+  const radioName="adoption-folder-"+crypto.randomUUID();
+  function renderFolders(){
+    window.BibliothekarFolderLayout.render({state,host:tree,exportSelect:exported,radioName,
+      onChange:()=>{if(panel.isConnected)panel.dispatchEvent(new Event("input",{bubbles:true}));}});
+  }
+  custom.append(tree,action("Ordner hinzufügen",()=>{
+    state.layout.nodes.push({id:window.BibliothekarFolderLayout.nodeId(),name:t("Neuer Ordner"),children:[]});
+    renderFolders();
+  }),exportWrap);
+  function update(){custom.hidden=type.value!=="custom";if(!custom.hidden)renderFolders();}
+  type.addEventListener("change",update);update();
   panel.append(select,custom);
-
-  function value() {
-    if (type.value==="inherit") return undefined;
-    if (type.value==="default") return {mode:"default"};
-    if (type.value==="disabled") return {structure_enabled:false,input_path:""};
-    const nodes=[];
-    const byPath=new Map();
-    const declared=new Set();
-    for (const line of paths.value.split(/\n/)) {
-      const path=line.trim();
-      if (!path) continue;
-      if (declared.has(path)) throw new Error("Ein Ordnerpfad wurde doppelt angegeben.");
-      declared.add(path);
-      let parent=nodes;
-      let key="";
-      for (const name of path.split("/")) {
-        key=key ? key+"/"+name : name;
-        if (!byPath.has(key)) {
-          const folder={id:"custom-"+byPath.size,name,children:[]};
-          parent.push(folder);
-          byPath.set(key,folder);
-        }
-        parent=byPath.get(key).children;
-      }
-    }
-    const exportPath=exported.value.trim();
-    if (exportPath) {
-      if (!byPath.has(exportPath)) throw new Error("Der Exportordner muss in der Ordnerliste vorkommen.");
-      byPath.get(exportPath).role="export";
-    }
-    return {structure_enabled:true,input_path:input.value.trim(),layout:{version:2,nodes}};
+  function value(){
+    if(type.value==="inherit")return undefined;
+    if(type.value==="default")return {mode:"default"};
+    if(type.value==="disabled")return {structure_enabled:false,input_path:""};
+    return {...structuredClone(state),structure_enabled:true};
   }
   return [panel,value];
 }
-function eventEditor(index, selectedDay="") {
+function eventEditor(index, selectedDay="",newKind="event") {
   requireSaved($("event-editor"));
   const item=draft.events[index] || {};
   const form=node("fieldset");
@@ -583,10 +722,10 @@ function eventEditor(index, selectedDay="") {
   for (const [value,title] of [["event","Normales Ereignis"],["no_event","Sammelordner ohne Ereignis"]]) {
     const option=node("option",title);option.value=value;type.append(option);
   }
-  type.value=item.event_kind || "event";
+  type.value=item.event_kind || (newKind==="no_event"?"no_event":"event");
   const [nameWrap,name]=field("Ereignisname","text",item.name);
   const [startWrap,start]=field("Erster Tag","date",item.start_date || selectedDay);
-  const [endWrap,end]=field("Letzter Tag","date",item.end_date || selectedDay);
+  const [endWrap,end]=field("Letzter Tag","date",item.end_date || [...selectedDays].sort().at(-1) || selectedDay);
   const [keepWrap,keep]=field("Tagesordner erhalten","checkbox");
   keep.checked=Boolean(item.preserve_day_folders);
   const [folders,folderLayout]=layoutEditor("Ordnerstruktur für dieses Ereignis oder diesen Sammelordner",item.folder_layout);
@@ -605,11 +744,14 @@ function eventEditor(index, selectedDay="") {
     children.append(row);
   }
   for (const child of item.children || []) addChild(child);
-  continuous.append(nameWrap,dates,children,action("Unterereignis hinzufügen",()=>{addChild();markDirty(form);}));
+  if(newKind==="child")addChild();
+  continuous.append(nameWrap,dates);
+  if(selectedDay && selectedDays.size>1)continuous.append(line("Das Ereignis umfasst alle Aufnahmetage zwischen dem ersten und letzten Datum. Prüfe die Datumsspanne vor dem Speichern."));
+  continuous.append(children,action("Unterereignis hinzufügen",()=>{addChild();markDirty(form);}));
   const segments=node("label","Ein Zeitabschnitt pro Zeile, zum Beispiel 2026-07-21 12:00 17:30. Für einen ganzen Tag reicht das Datum.");
   const text=node("textarea");
   text.value=(item.segments || []).map(segment=>[segment.day_key,segment.start_time,segment.end_time].filter(Boolean).join(" ")).join("\n");
-  if (!text.value && selectedDay) text.value=selectedDay;
+  if (!text.value && selectedDay) text.value=([...selectedDays].sort().length?[...selectedDays].sort():[selectedDay]).join("\n");
   segments.append(text);
   function switchKind() { continuous.hidden=type.value!=="event"; segments.hidden=type.value==="event"; }
   type.addEventListener("change",switchKind);switchKind();
@@ -630,13 +772,14 @@ function eventEditor(index, selectedDay="") {
       const events=[...draft.events];
       if (index===undefined) events.push(value);else events[index]=value;
       await setDraft({...draft,events},form);
-      eventEditor();
+      $("event-editor").replaceChildren();$("event-editor").hidden=true;
+      report("Entwurf gespeichert.");
     }));
-  $("event-editor").replaceChildren(form);
+  $("event-editor").hidden=false;$("event-editor").replaceChildren(form);
 }
 function renderPlan(host) {
   const plan=job.plan;
-  const panel=section("5. Durchführung und Prüfung");
+  const panel=section(steps.find(([id])=>id===viewStep)?.[1]||"Durchführung und Prüfung");
   const phase=plan.execution?.phase;
   const command={plan_id:plan.id};
   const run=path=>mutate(path,"POST",command);
@@ -681,17 +824,17 @@ function renderPlan(host) {
     controls.append(
       action(plan.documents_at?"Ereignisdokumente neu vorbereiten":"Ereignisdokumente vorbereiten",()=>mutate("/documents")),
       action("Plan zur Bearbeitung öffnen",()=>mutate("/reopen")));
-    if (plan.documents_at) {
+    if (plan.documents_at && viewStep==="execution") {
       renderConfirmation(panel,command);
     }
   }
   const scripted=plan.execution?.method==="script";
   if (scripted && !completed && phase!=="rolled_back") panel.append(slot("script-state"));
-  if (!scripted && ["manual","verifying","repair"].includes(phase)) {
+  if (viewStep==="verify" && !scripted && ["manual","verifying","repair"].includes(phase)) {
     controls.append(action("Archiv prüfen",()=>run("/verify"),true));
   }
   if (phase==="repair" && !scripted) controls.append(action("Manuelle Schritte fortsetzen",()=>run("/resume")));
-  if (["registration_pending","registering"].includes(phase)) {
+  if (viewStep==="verify" && ["registration_pending","registering"].includes(phase)) {
     controls.append(action("Übernahme registrieren",()=>run("/finalize"),true));
   }
   if (["manual","script_prepared","operations_done","verifying","repair","registration_pending"].includes(phase)) {
@@ -711,7 +854,8 @@ function renderPlan(host) {
     const issues=await api(jobPath("/issues"));
     $("issues").replaceChildren(...issues.map(item=>line([item.relative_path,t(item.issue)].filter(Boolean).join(" · "))));
   }));
-  panel.append(controls,slot("issues"),slot("moves"));
+  const moves=node("details");moves.append(node("summary","Verschiebeplan anzeigen"),slot("moves"));
+  panel.append(controls,slot("issues"),moves);
   host.append(panel);
 }
 
@@ -918,7 +1062,10 @@ $("create-library").addEventListener("click",async()=>{
   }
 });
 (async()=>{
-  try { await lists(); if (jobId) await refresh(); }
+  try {
+    if(!jobId)navigation();else $("setup").hidden=true;
+    await lists(); if (jobId) await refresh();
+  }
   catch(error) { report(error.message); }
 })();
 </script>
