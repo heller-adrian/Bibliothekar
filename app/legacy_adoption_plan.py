@@ -291,11 +291,54 @@ def _target_leaf(event, capture):
     return assigned, prefix, leaf_key, layout
 
 
-def _plan_directories(connection, plan_id, leaf, layout, archive_entry):
-    directories = [leaf]
+def _leaf_directories(leaf, layout):
+    yield leaf
     if layout["structure_enabled"]:
-        directories.extend(leaf / part for part in layout_paths(layout["layout"]))
-    for directory in directories:
+        yield from (leaf / part for part in layout_paths(layout["layout"]))
+
+
+def preview_event_directories(library, job_id, draft, *, allow_existing=False):
+    """Show planned folders without creating a plan or inspecting archive contents."""
+    limit = 200
+    with database_connection(library.database_path) as connection:
+        connection.execute("BEGIN")
+        if _job(connection, library.library_id, job_id)["state"] != "inventoried":
+            raise AdoptionError("Die Inventur muss zuerst abgeschlossen werden.")
+        naming = naming_snapshot_for_new_event(naming_from_library_settings(library.settings))
+        defaults = get_global_default(connection)
+        events = [_draft_event(connection, definition, naming, defaults, allow_existing=allow_existing)
+                  for definition in draft["events"]]
+        directories = {str(event_root_relative(event)) for event in events}
+        intervals = _draft_intervals(events)
+        starts = [item[0] for item in intervals]
+        overrides = {key: _local_capture(value) for key, value in draft["capture_overrides"].items()}
+        exclusions = set(draft["exclude_families"])
+        seen_leaves = set()
+        rows = connection.execute(
+            """SELECT family_key, capture_time, review_required FROM legacy_adoption_families AS family
+               WHERE job_id = ? AND NOT EXISTS (
+                   SELECT 1 FROM legacy_adoption_review_copies AS copy
+                   WHERE copy.job_id = family.job_id AND copy.family_key = family.family_key
+               ) ORDER BY capture_time, family_key""", (job_id,),
+        )
+        for row in rows:
+            if len(directories) > limit:
+                break
+            key = row["family_key"]
+            capture = overrides.get(key, row["capture_time"])
+            if key in exclusions or not capture or (row["review_required"] and key not in overrides):
+                continue
+            index = _assigned_index(intervals, starts, capture)
+            if index is not None:
+                _, leaf, leaf_key, layout = _target_leaf(events[index], capture)
+                if leaf_key not in seen_leaves:
+                    seen_leaves.add(leaf_key)
+                    directories.update(map(str, _leaf_directories(leaf, layout)))
+    return {"directories": sorted(directories)[:limit], "truncated": len(directories) > limit}
+
+
+def _plan_directories(connection, plan_id, leaf, layout, archive_entry):
+    for directory in _leaf_directories(leaf, layout):
         for parent in (directory, *directory.parents):
             if not parent.parts:
                 continue

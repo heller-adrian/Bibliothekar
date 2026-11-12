@@ -35,6 +35,10 @@ TRANSLATIONS = {
     "Noch nicht vollständig archivierte Ereignisse": "Events that still need to be archived",
     "Zurück zu den Bibliotheken": "Back to libraries",
     "Zu bestehendem Ereignis hinzufügen": "Add to existing event",
+    "Vorschau der Zielstruktur": "Target structure preview",
+    "Öffnen": "Open",
+    "Die Vorschau zeigt bis zu 200 Ordner. Der vollständige Verschiebeplan ist im nächsten Schritt verfügbar.":
+        "The preview shows up to 200 folders. The full move plan is available in the next step.",
     "Archivereignis ergänzen": "Extend archived event",
     "Aufnahmen innerhalb des gespeicherten Zeitraums zugeordnet.": "Assigned the media within the event’s saved time range.",
 

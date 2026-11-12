@@ -95,12 +95,16 @@ async function capture(page,name){
     await editor.locator('input[type=text]').nth(1).fill('Child Test');
     await editor.locator('input[type=datetime-local]').first().fill('2026-07-21T12:00');
     await editor.locator('input[type=datetime-local]').last().fill('2026-07-21T13:00');
+    await editor.getByRole('button',{name:'Target structure preview'}).click();
+    await editor.locator('.adoption-structure-preview code').filter({hasText:'Child Test'}).first().waitFor();
     await capture(page,'editor');
     await editor.getByRole('button',{name:'Save in draft'}).click();
     await page.getByText('Lan Test',{exact:true}).waitFor();
     await page.getByText('One media family is still unassigned.',{exact:true}).waitFor();
     await page.reload();
     await page.locator('#draft-events summary').click();
+    await page.locator('#draft-events').getByRole('button',{name:'Open',exact:true}).click();
+    await page.locator('#draft-events .adoption-structure-preview code').filter({hasText:'Child Test'}).first().waitFor();
     await page.locator('#draft-events').getByRole('button',{name:'Edit',exact:true}).click();
     assert.equal(await editor.getByRole('textbox').first().inputValue(),'Lan Test');
     assert.equal(await editor.locator('input[type=text]').nth(1).inputValue(),'Child Test');

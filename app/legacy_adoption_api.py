@@ -377,6 +377,15 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             require_adoption(request, library)
             return preview_draft(library, job_id, draft.model_dump(exclude_none=True), allow_existing=is_later(request))
 
+    @router.post("/jobs/{job_id}/draft/structure")
+    def draft_structure(job_id: str, draft: Draft, request: Request):
+        from app.legacy_adoption_plan import preview_event_directories
+        library = context()
+        with _errors():
+            require_adoption(request, library)
+            return preview_event_directories(library, job_id, draft.model_dump(exclude_none=True),
+                                             allow_existing=is_later(request))
+
     @router.put("/jobs/{job_id}/draft")
     def save_draft(job_id: str, draft: SaveDraft, request: Request):
         library = context()
