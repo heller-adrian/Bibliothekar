@@ -9,11 +9,16 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from zipfile import ZipFile
 
 
-def open_request(client, request, *, expected, retry_busy=False, recovery_status=None):
+def open_request(client, request, *, expected, recovery_status=None):
+    # These POSTs acquire the exclusive adoption lock before calling the endpoint.
+    retry_busy = request.method == "POST" and urllib.parse.urlsplit(request.full_url).path in {
+        "/api/libraries", "/api/setup/adoption", "/api/legacy-adoption/jobs",
+    }
     attempts = 121 if recovery_status else (21 if retry_busy else 1)
     for attempt in range(attempts):
         try:
@@ -23,14 +28,14 @@ def open_request(client, request, *, expected, retry_busy=False, recovery_status
         except urllib.error.HTTPError as error:
             with error:
                 content = error.read().decode("utf-8", errors="replace")
-            if error.code == expected:
-                return content.encode("utf-8")
             try:
                 detail = json.loads(content)
             except ValueError:
                 detail = {}
             transient = (error.code == 409 and isinstance(detail, dict)
                          and detail.get("code") == "legacy_adoption_busy")
+            if error.code == expected and not (retry_busy and transient):
+                return content.encode("utf-8")
             recovery = (error.code == 409 and isinstance(detail, dict)
                         and isinstance(detail.get("detail"), str)
                         and detail["detail"].startswith("operation_recovery_required:")
@@ -50,7 +55,7 @@ def open_request(client, request, *, expected, retry_busy=False, recovery_status
                         and (health["writes_allowed"] is True or issues)), status
                 print("Repeated finalization is waiting for startup write admission.", flush=True)
             else:
-                print("Adoption start is waiting for the current operation to release its lock.", flush=True)
+                print(f"{request.method} {request.selector} is waiting for the adoption lock.", flush=True)
             time.sleep(0.25)
 
 
@@ -70,7 +75,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
         body = json.dumps(payload).encode() if payload is not None else None
         return open_request(
             client, urllib.request.Request(base + path, body, headers, method=method),
-            expected=expected, retry_busy=method == "POST" and path.split("?", 1)[0] == "/api/legacy-adoption/jobs",
+            expected=expected,
             recovery_status=(lambda: api("/api/settings/storage-health")) if repeat_finalize else None,
         )
 

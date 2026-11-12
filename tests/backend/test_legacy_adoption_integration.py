@@ -866,8 +866,16 @@ def test_adoption_reads_actual_read_only_archive(inventory, monkeypatch):
 
 
 
-@pytest.mark.parametrize("code,retries", [("legacy_adoption_busy", 1), ("legacy_adoption_active", 0)])
-def test_container_probe_retries_only_the_explicit_temporary_lock(monkeypatch, code, retries):
+@pytest.mark.parametrize("path,code,expected,attempts", [
+    ("/api/libraries", "legacy_adoption_busy", 201, 2),
+    ("/api/setup/adoption", "legacy_adoption_busy", 200, 2),
+    ("/api/legacy-adoption/jobs?mode=library", "legacy_adoption_busy", 201, 2),
+    ("/api/legacy-adoption/jobs", "legacy_adoption_busy", 409, 2),
+    ("/api/legacy-adoption/jobs", "legacy_adoption_active", 201, 1),
+    ("/api/legacy-adoption/jobs", "legacy_adoption_active", 409, 1),
+    ("/api/libraries/check", "legacy_adoption_busy", 200, 1),
+])
+def test_container_probe_retries_only_the_explicit_temporary_lock(monkeypatch, path, code, expected, attempts):
     from io import BytesIO
     import json
     import urllib.error
@@ -878,27 +886,70 @@ def test_container_probe_retries_only_the_explicit_temporary_lock(monkeypatch, c
     waits = []
 
     class Response(BytesIO):
-        status = 201
+        status = expected
 
     class Client:
         def open(self, request, timeout):
             calls.append(request)
-            if len(calls) == 1:
+            if len(calls) == 1 or expected == 409:
+                response_code = code if len(calls) == 1 else "legacy_adoption_inactive"
                 raise urllib.error.HTTPError(
                     request.full_url, 409, "Conflict", {},
-                    BytesIO(json.dumps({"code": code}).encode()),
+                    BytesIO(json.dumps({"code": response_code}).encode()),
                 )
-            return Response(b'{"id":"one-job"}')
+            return Response(b'{"created":true}')
 
     monkeypatch.setattr(probe.time, "sleep", waits.append)
-    request = urllib.request.Request("http://127.0.0.1/api/legacy-adoption/jobs", data=b"{}", method="POST")
-    if retries:
-        assert json.loads(probe.open_request(Client(), request, expected=201, retry_busy=True))["id"] == "one-job"
-        assert len(calls) == 2 and waits == [0.25]
+    request = urllib.request.Request("http://127.0.0.1" + path, data=b"{}", method="POST")
+    if expected == 409:
+        result = json.loads(probe.open_request(Client(), request, expected=expected))
+        assert result["code"] == (code if attempts == 1 else "legacy_adoption_inactive")
+    elif attempts == 2:
+        assert json.loads(probe.open_request(Client(), request, expected=expected)) == {"created": True}
     else:
-        with pytest.raises(AssertionError, match="legacy_adoption_active"):
-            probe.open_request(Client(), request, expected=201, retry_busy=True)
-        assert len(calls) == 1 and waits == []
+        with pytest.raises(AssertionError, match=code):
+            probe.open_request(Client(), request, expected=expected)
+    assert len(calls) == attempts and waits == [0.25] * (attempts - 1)
+
+
+def test_container_probe_creates_main_library_once_after_lock_release(fresh_main):
+    from contextlib import ExitStack
+    from io import BytesIO
+    import json
+    import urllib.error
+    import urllib.request
+    from app.legacy_adoption_mode import adoption_access
+    from qa.release import smoke_legacy_adoption as probe
+
+    _, _, registry, archive = fresh_main
+    main.startup_database()
+    client = TestClient(main.app, follow_redirects=False)
+    responses = []
+
+    class HTTPAdapter:
+        def open(self, request, timeout):
+            response = client.post(request.selector, content=request.data, headers=request.headers)
+            responses.append(response.status_code)
+            body = BytesIO(response.content)
+            if response.status_code == 409:
+                assert pending_initial_setup(registry) is None
+                lock.close()
+                raise urllib.error.HTTPError(request.full_url, 409, "Conflict", {}, body)
+            body.status = response.status_code
+            return body
+
+    request = urllib.request.Request("http://127.0.0.1/api/libraries", method="POST",
+                                     headers={"Content-Type": "application/json"}, data=json.dumps({
+                                         "display_name": "Smoke", "archive_root": str(archive),
+                                     }).encode())
+    with ExitStack() as lock:
+        lock.enter_context(adoption_access(registry))
+        result = json.loads(probe.open_request(HTTPAdapter(), request, expected=201))
+    assert responses == [409, 201]
+    assert result["library"]["library_id"] == "main"
+    assert pending_initial_setup(registry) == {"library_id": "main", "decision": "choice"}
+    assert _json(client, "POST", "/api/setup/adoption", json={"decision": "skipped"}) == {"next": "/"}
+    assert client.get("/").status_code == 200
 
 
 @pytest.mark.parametrize("failure", [None, "startup_error", "storage", "orphan", "domain", "unknown", "timeout"])
