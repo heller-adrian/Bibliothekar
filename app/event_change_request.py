@@ -948,8 +948,9 @@ def propose_event_change(
     plan = _compute_event_plan(database_path, job_id, event_id, preview, archive_root=archive_root)
     requested_layout_state = plan.get("folder_layout_state")
     target_leaf_layouts = plan.get("target_leaf_layouts")
-    if plan["normalized_subevents"] is not None:
-        preview["subevents"] = plan["normalized_subevents"]
+    normalized_subevents = plan.get("normalized_subevents")
+    if normalized_subevents is not None:
+        preview["subevents"] = normalized_subevents
     if target_leaf_layouts is not None:
         preview["target_leaf_layouts"] = target_leaf_layouts
     preview = dict(preview)

@@ -80,7 +80,8 @@ def test_0421_without_date_is_review_card_not_event_selection():
     assert 'location.href = "/metadata-correction?area=library"' in html
     assert 'data-open-metadata-review' in html
     assert "Nicht für Ereignisse auswählbar" in html
-    assert "aUndated !== bUndated" in html
+    render_days = html.split("function renderDays()", 1)[1]
+    assert "planningOverview().timeline_groups" in "".join(render_days.split())
 
 
 def test_0421_server_workspace_puts_undated_review_stock_first():

@@ -16,7 +16,7 @@ def test_0553_versions():
 
 
 def test_0553_setup_brand_is_visible_in_both_languages():
-    for html in (_login_html(), _login_html(unavailable=True), _library_onboarding_html()):
+    for html in (_login_html(), _login_html(unavailable=True)):
         assert 'class="bk-setup-page"' in html
         assert 'class="bk-setup-brand"' in html
         assert 'src="/assets/bibliothekar-logo-v3.svg?v=0.56.2"' in html
@@ -24,6 +24,13 @@ def test_0553_setup_brand_is_visible_in_both_languages():
         assert 'data-bk-setup-choice="en"' in html
         assert 'data-bk-setup-choice="de"' in html
         assert html.index('class="bk-setup-brand"') < html.index("<main>")
+
+    onboarding = _library_onboarding_html()
+    header = onboarding.split("<main>", 1)[0].split('<header class="bk-setup-banner">', 1)[1]
+    assert 'src="/assets/bibliothekar-logo-v3.svg?v=0.56.2"' in header
+    assert 'alt="Bibliothekar"' in header
+    assert 'data-bk-language-choice="en"' in header
+    assert 'data-bk-language-choice="de"' in header
 
 
 def test_0553_installed_desktop_has_no_fullscreen_loading_mask():

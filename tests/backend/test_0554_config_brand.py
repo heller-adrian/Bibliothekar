@@ -13,7 +13,6 @@ from app import __version__
 from app import main
 from app.config_bootstrap import ensure_settings_file
 from app.security import _login_html
-from app.main import _library_onboarding_html
 from app.setup_language import _CSS
 
 
@@ -88,7 +87,7 @@ def test_0554_startup_calls_bootstrap_before_database(tmp_path,monkeypatch):
     assert main.LIBRARY_REGISTRY_INITIALIZATION['newly_applied_versions']==[]
 
 
-def test_0554_desktop_logo_no_form_displacement_and_mobile_unchanged():
+def test_0554_login_logo_no_form_displacement_on_desktop_and_mobile():
     css=_CSS
     assert '@media(min-width:821px)' in css
     desktop=css.split('@media(min-width:821px)', 1)[1].split('.bk-setup-lang{', 1)[0]
@@ -99,7 +98,7 @@ def test_0554_desktop_logo_no_form_displacement_and_mobile_unchanged():
     assert "place-items:center;" in desktop
     assert "justify-self:center;" in desktop
     assert '@media(max-width:540px)' in css
-    for page in (_login_html(), _library_onboarding_html()):
+    for page in (_login_html(), _login_html(unavailable=True)):
         assert 'class="bk-setup-brand"' in page
         assert 'class="bk-setup-page"' in page
         assert 'data-bk-setup-choice="en"' in page

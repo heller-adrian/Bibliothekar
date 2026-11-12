@@ -17,7 +17,6 @@ BIBLIOTHEKAR_CSS = r"""
   --bk-line: #d9d2c5;
   --bk-red: #db3b3f;
   --bk-blue: #1974c6;
-  --bk-on-blue: #fff;
   --bk-yellow: #f3b82f;
   --bk-green: #37ad78;
   --bk-danger: #cf3d45;
@@ -35,7 +34,6 @@ html[data-bk-theme="dark"] {
   --bk-line: #303b43;
   --bk-red: #ee5155;
   --bk-blue: #4b9be2;
-  --bk-on-blue: #07141d;
   --bk-yellow: #f5c451;
   --bk-green: #55cb94;
   --bk-danger: #f06a70;
@@ -7930,7 +7928,8 @@ FOLDER_LAYOUT_JS = r"""
 
 
 _BRAND_HEADER_CSS = """
-:root{--bk-brand-header:#15222c;--bk-brand-header-ink:#f8f4e9}
+:root{--bk-brand-header:#15222c;--bk-brand-header-ink:#f8f4e9;--bk-on-blue:#fff}
+html[data-bk-theme="dark"]{--bk-on-blue:#07141d}
 .bk-shell,.bk-setup-banner{background:var(--bk-brand-header);color:var(--bk-brand-header-ink)}
 """
 
