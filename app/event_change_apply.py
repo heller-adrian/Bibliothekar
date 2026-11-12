@@ -1160,6 +1160,10 @@ def finish_event_change(
             if children:
                 connection.execute("DELETE FROM events WHERE parent_event_id = ?", (cr["event_id"],))
 
+        if cr.get("target_leaf_layouts_json") is not None:
+            from app.event_leaf_layouts import save_leaf_layouts
+            save_leaf_layouts(connection, str(cr["event_id"]), json.loads(cr["target_leaf_layouts_json"]), now=now)
+
         selected_family_rows = []
         if selected_ids:
             selected_family_rows = connection.execute(

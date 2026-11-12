@@ -1109,7 +1109,7 @@ def _onboarding_required() -> bool:
 def _library_onboarding_html() -> str:
     from app.legacy_adoption_i18n import PATTERNS, TRANSLATIONS
     from app.ui_i18n import i18n_ui_js
-    from app.ui_shell import BIBLIOTHEKAR_0451_HEAD_JS, BIBLIOTHEKAR_CSS, SETUP_CONTROL_CSS, SETUP_THEME_CONTROL, SETUP_THEME_JS
+    from app.ui_shell import BIBLIOTHEKAR_0451_HEAD_JS, BIBLIOTHEKAR_CSS, SETUP_BANNER, SETUP_CONTROL_CSS, SETUP_CSS, SETUP_THEME_JS, _BRAND_HEADER_CSS
     workspaces_root = str(
         storage_paths(WORKSPACE_PATH)["workspaces_root"]
     )
@@ -1121,20 +1121,20 @@ def _library_onboarding_html() -> str:
 <title>Bibliothekar · Set up library</title>
 <script src="/auth/client.js"></script>
 <script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>
-<style>{BIBLIOTHEKAR_CSS}{SETUP_CONTROL_CSS}</style>
+<style>{BIBLIOTHEKAR_CSS}{_BRAND_HEADER_CSS}{SETUP_CSS}{SETUP_CONTROL_CSS}</style>
 <style>
 :root{{--bg:var(--bk-paper);--surface:var(--bk-surface);--border:var(--bk-line);--text:var(--bk-ink);--muted:var(--bk-muted);--accent:var(--bk-blue);--danger:var(--bk-danger)}}
 *{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--text);font-family:Futura, "Helvetica Neue", Helvetica, Arial, sans-serif}}
 main{{width:min(760px,calc(100% - 32px));margin:7vh auto}} .card{{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:28px}}
-h1{{margin:0 0 8px;font-size:2rem}} p{{color:var(--muted);line-height:1.5}} label{{display:grid;gap:7px;margin:18px 0}}
+h1{{margin:0 0 8px;font-size:2rem}} p{{color:var(--muted);line-height:1.5}} main label{{display:grid;gap:7px;margin:18px 0}}
 input{{width:100%;padding:13px 14px;border-radius:11px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit}}
 html[data-bk-theme=light]:has(body.bk-setup-page){{color-scheme:light}}
 body.bk-setup-page .card{{color:var(--text)}}
-button{{border:0;border-radius:11px;padding:13px 18px;background:var(--accent);color:white;font:inherit;font-weight:650;cursor:pointer}}
+main button{{border:0;border-radius:11px;padding:13px 18px;background:var(--accent);color:var(--bk-on-blue);font:inherit;font-weight:650;cursor:pointer}}
 button:disabled{{opacity:.45;cursor:default}} #status{{white-space:pre-wrap;margin-top:15px;color:var(--muted)}} #status.error{{color:var(--danger)}} .hint{{font-size:.9rem}}
 </style>
 </head>
-<body><main><section class="card">
+<body>{SETUP_BANNER}<main><section class="card">
 <h1>Erste Bibliothek einrichten</h1>
 <p>Bibliothekar besitzt noch keine Bibliothek. Lege jetzt Name, Arbeitsbereich und das in TrueNAS read-only gemountete Archiv fest. Es wird kein technischer <code>main</code>-Arbeitsordner angelegt.</p>
 <label>Bibliotheksname<input id="name" value="" placeholder="z. B. Kamerabibliothek"></label>
@@ -1142,7 +1142,6 @@ button:disabled{{opacity:.45;cursor:default}} #status{{white-space:pre-wrap;marg
 <p class="hint">Leer lassen: Bibliothekar erzeugt unter <code>{workspaces_root}</code> automatisch einen Ordner aus dem Bibliotheksnamen.</p>
 <label>Archiv · eigener RO-Mount<input id="archive" value="" placeholder="/main-library"></label>
 <button id="create" type="button">Bibliothek prüfen und anlegen</button>
-{SETUP_THEME_CONTROL}
 <div id="status" role="status"></div>
 </section></main>
 <script>
@@ -9909,6 +9908,12 @@ def api_global_workspace_summary(
             return cached
 
     snapshot_stamp=view_cache.database_stamp(db_path)
+    with database_connection(db_path) as connection:
+        released_job_ids = {
+            str(row[0]) for row in connection.execute(
+                "SELECT DISTINCT job_id FROM released_free_families WHERE archive_origin=1"
+            )
+        }
     excluded_by_job = {
         job_id: blocked_family_ids(
             REGISTRY_DATABASE_FILE,
@@ -9916,7 +9921,7 @@ def api_global_workspace_summary(
             library_id=current_library_context().library_id,
             job_id=job_id,
         )
-        for job_id in selected
+        for job_id in set(selected) | released_job_ids
     }
     payload = build_global_workspace_summary(
         current_database_file(),

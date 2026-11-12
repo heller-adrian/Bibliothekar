@@ -4,6 +4,19 @@ import re
 
 
 TRANSLATIONS = {
+    "Vorschau": "Preview",
+    "Dieses Planobjekt entfernen?": "Remove this item from the plan?",
+    "Dieses Unterereignis aus dem Entwurf entfernen?": "Remove this subevent from the draft?",
+    "Das Ereignis umfasst alle Aufnahmetage zwischen dem ersten und letzten Datum.":
+        "The event includes every capture day between the first and last date.",
+    "Verschiebe die Dateien selbst anhand des bestätigten Plans.":
+        "Move the files yourself using the confirmed plan.",
+    "Prüfe die Hostpfade und führe den freigegebenen Befehl in der TrueNAS-Shell aus.":
+        "Verify the host paths and run the approved command in the TrueNAS shell.",
+    "Bestätige jetzt die Sicherheitsbedingungen, um die Durchführung freizugeben.":
+        "Confirm the safety conditions to authorize the moves.",
+    "Prüfe die Ausgabe in der TrueNAS-Shell. Bei einer nicht erkannten Einbindung kannst du die Hostpfadprüfung unter den erweiterten Details manuell vorbereiten.":
+        "Check the TrueNAS shell output. If a mount was not found, prepare the manual host path check under advanced details.",
     "Dateifamilie": "Family",
     "Tag ausgewählt": "day selected",
     "Der Arbeitsbereich muss ein absoluter Containerpfad sein.": "The workspace must be an absolute container path.",

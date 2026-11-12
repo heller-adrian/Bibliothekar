@@ -85,8 +85,8 @@ body.bk-setup-page .bk-setup-lang { margin-bottom:16px; }
 }
 @media(min-width:821px) {
   body[data-bk-library-onboarding]{display:flex!important;justify-content:flex-start;align-items:center;gap:20px}
-  body[data-bk-library-onboarding] .bk-setup-brand{position:static;transform:none;width:min(440px,calc(100vw - 48px))}
 }
+body[data-bk-library-onboarding] .bk-setup-banner{align-self:stretch}
 .bk-setup-lang{display:flex;justify-content:flex-end;gap:6px;margin:0 0 18px}
 .bk-setup-lang button{width:auto!important;min-width:43px;margin:0!important;padding:7px 10px!important;
 border:1px solid #586774!important;border-radius:8px;background:transparent!important;font-size:.85rem!important}
@@ -142,10 +142,9 @@ def _label(en: str, de: str) -> str:
 
 def localize_setup_html(html: str, page: str) -> str:
     if page == "onboarding":
-        html=html.replace('<body><main><section class="card">',
+        html=html.replace('<body>',
             '<body class="bk-setup-page" data-bk-library-onboarding data-bk-setup-title-en="Bibliothekar · Set up library" '
-            'data-bk-setup-title-de="Bibliothekar · Bibliothek einrichten">'
-            '<main><section class="card">'+_SWITCH,1)
+            'data-bk-setup-title-de="Bibliothekar · Bibliothek einrichten">',1)
         html=html.replace('<h1>Erste Bibliothek einrichten</h1>',
             '<h1 data-bk-setup-en="Set up your first library" '
             'data-bk-setup-de="Erste Bibliothek einrichten" data-bk-preserve-language>'
@@ -219,13 +218,14 @@ def localize_setup_html(html: str, page: str) -> str:
             '"Anmeldung fehlgeschlagen. Bitte prüfe Passwort und Konfiguration.")',1)
     else:
         raise ValueError(page)
-    html=html.replace(
-        "<main>",
-        '<div class="bk-setup-brand" aria-label="Bibliothekar">'
-        '<img src="/assets/bibliothekar-logo-v3.svg?v=0.56.2" alt="Bibliothekar" '
-        'width="360" height="98" decoding="async"></div><main>',
-        1,
-    )
+    if page == "login":
+        html=html.replace(
+            "<main>",
+            '<div class="bk-setup-brand" aria-label="Bibliothekar">'
+            '<img src="/assets/bibliothekar-logo-v3.svg?v=0.56.2" alt="Bibliothekar" '
+            'width="360" height="98" decoding="async"></div><main>',
+            1,
+        )
     html=html.replace(
         "</head>",
         '<link rel="icon" type="image/svg+xml" '

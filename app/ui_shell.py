@@ -17,6 +17,7 @@ BIBLIOTHEKAR_CSS = r"""
   --bk-line: #d9d2c5;
   --bk-red: #db3b3f;
   --bk-blue: #1974c6;
+  --bk-on-blue: #fff;
   --bk-yellow: #f3b82f;
   --bk-green: #37ad78;
   --bk-danger: #cf3d45;
@@ -34,6 +35,7 @@ html[data-bk-theme="dark"] {
   --bk-line: #303b43;
   --bk-red: #ee5155;
   --bk-blue: #4b9be2;
+  --bk-on-blue: #07141d;
   --bk-yellow: #f5c451;
   --bk-green: #55cb94;
   --bk-danger: #f06a70;
@@ -8026,7 +8028,7 @@ SETUP_THEME_CONTROL = """
 </label>
 """
 
-_SETUP_BANNER = f"""
+SETUP_BANNER = f"""
 <header class="bk-setup-banner">
   <img src="/assets/bibliothekar-logo-v3.svg?v=0.56.2" alt="Bibliothekar" width="190" height="52">
   <div class="bk-setup-appearance">
@@ -8039,7 +8041,7 @@ _SETUP_BANNER = f"""
 </header>
 """
 
-_SETUP_CSS = """
+SETUP_CSS = """
 .bk-setup-banner{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;
 padding:10px clamp(12px,3vw,32px);background:var(--bk-brand-header);color:var(--bk-brand-header-ink);border-bottom:1px solid var(--bk-line)}
 .bk-setup-banner img{box-sizing:content-box;object-fit:contain;padding:4px 0;max-width:100%}
@@ -8053,7 +8055,12 @@ body[data-bk-setup] [hidden]{display:none!important}
 .bk-setup-choice section{padding:clamp(20px,4vw,36px);border:1px solid var(--bk-line);
 border-radius:var(--bk-radius);background:var(--bk-surface);box-shadow:var(--bk-shadow)}
 .bk-setup-choice h1{margin-top:0}
-.bk-setup-choice-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:24px}
+.bk-setup-choice-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr));gap:12px;margin-top:24px}
+.bk-setup-choice-actions :is(a,button){display:flex;align-items:center;justify-content:center;text-align:center;
+box-sizing:border-box;min-height:48px;padding:10px 16px;border:1px solid var(--bk-line);border-radius:10px;
+background:var(--bk-surface-2);color:var(--bk-ink);font:inherit;font-weight:650;text-decoration:none}
+.bk-setup-choice-actions .primary{background:var(--bk-blue);color:var(--bk-on-blue);border-color:transparent}
+.bk-setup-choice-actions :focus-visible{outline:2px solid var(--bk-blue);outline-offset:3px}
 """
 
 SETUP_CONTROL_CSS = """
@@ -8089,11 +8096,11 @@ def apply_setup_shell(html: str, *, localization_js: str = I18N_UI_JS) -> str:
         f"<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n", 1)
     html = html.replace("</head>",
         '<link rel="icon" type="image/svg+xml" href="/assets/bibliothekar-logo-symbol-background.svg">\n'
-        f"<style>{BIBLIOTHEKAR_CSS}\n{BIBLIOTHEKAR_0451_CSS}\n{BIBLIOTHEKAR_0505_LANGUAGE_CSS}\n{_BRAND_HEADER_CSS}\n{_SETUP_CSS}\n{SETUP_CONTROL_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_CSS}\n{BIBLIOTHEKAR_0451_CSS}\n{BIBLIOTHEKAR_0505_LANGUAGE_CSS}\n{_BRAND_HEADER_CSS}\n{SETUP_CSS}\n{SETUP_CONTROL_CSS}</style>\n"
         "</head>", 1)
     return html.replace("<body>",
         '<body class="bibliothekar-redesign" data-bk-setup="true">\n'
-        + _SETUP_BANNER
+        + SETUP_BANNER
         + f"<script>{SETUP_THEME_JS}</script>\n"
         + f"<script>{localization_js}</script>\n"
         + f"<script>{FOLDER_LAYOUT_JS}</script>\n", 1)

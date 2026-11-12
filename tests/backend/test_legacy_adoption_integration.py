@@ -357,7 +357,10 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
     assert _json(other, "POST", "/api/jobs", status=409)["code"] == "legacy_adoption_active"
     assert other.get("/healthz").status_code == 200
     draft = {"events": [{"name":"Synthetisch", "start_date":"2026-07-21", "end_date":"2026-07-21",
-                         "preserve_day_folders":True}]}
+                         "preserve_day_folders":True, "folder_layout": {"input_path": "All", "layout": {
+                             "version": 2, "nodes": [{"id": "all", "name": "All"},
+                                                       {"id": "sorted", "name": "Sorted"}],
+                         }}}]}
     revision = _json(client, "PUT", job + "/draft", json={**draft, "revision": 0})["revision"]
     assert revision == 1
     assert _json(other, "GET", job)["draft"]["events"][0]["name"] == "Synthetisch"
@@ -501,7 +504,7 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
     import shutil
     from app.archive_change_assistant import build_archive_change_assistant
     from app.archive_release_stock import verify_archive_release_copies, verify_archive_release_removal
-    from app.event_change_apply import confirm_event_change, finish_event_change, verify_event_change
+    from app.event_change_apply import confirm_event_change, verify_event_change
     from app.event_change_request import get_event_change_files, propose_archived_event_deletion, propose_event_change
     from app.workspace_layout import backup_root
 
@@ -529,8 +532,18 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
     source_relative = replacement["source"].split("/", 1)[1]
     from app.workspace_layout import shared_work_root
     shutil.copyfile(shared_work_root(workspace) / source_relative, new_folder / "event.json")
-    assert verify_event_change(database, change_id, library.archive_root, workspace)["complete"]
-    finish_event_change(database, change_id, library.archive_root, workspace)
+    assert not list(new_folder.rglob("Export"))
+    sorted_folder = next(new_folder.rglob("Sorted"))
+    sorted_folder.rmdir()
+    incomplete = verify_event_change(database, change_id, library.archive_root, workspace)
+    assert not incomplete["complete"]
+    assert [item["path"] for item in incomplete["directories"] if item["status"] == "missing"] == [
+        sorted_folder.relative_to(library.archive_root).as_posix()
+    ]
+    sorted_folder.mkdir()
+    verified = verify_event_change(database, change_id, library.archive_root, workspace)
+    assert verified["complete"], verified
+    _json(client, "POST", f"/api/change-requests/{change_id}/archive")
     with database_connection(database) as connection:
         assert connection.execute("SELECT name FROM events WHERE id = ?", (event_id,)).fetchone()[0] == "Umbenannt"
 
@@ -549,11 +562,62 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
     shutil.rmtree(new_folder)
     assert verify_archive_release_removal(database, library.archive_root, workspace, deletion_id)["complete"]
     assert verify_event_change(database, deletion_id, library.archive_root, workspace)["complete"]
-    finish_event_change(database, deletion_id, library.archive_root, workspace)
+    _json(client, "POST", f"/api/change-requests/{deletion_id}/archive")
     with database_connection(database) as connection:
         assert connection.execute("SELECT 1 FROM events WHERE id = ?", (event_id,)).fetchone() is None
         assert connection.execute("SELECT current_root_kind FROM files WHERE id = ?",
                                   (media_row["id"],)).fetchone()[0] == "shared_workspace"
+    summary_path = "/api/workspace/summary?jobs=&physical_refresh=false"
+    response = client.get(summary_path)
+    assert response.status_code == 200, response.text
+    summary = response.json()
+    assert summary["selected_job_ids"] == []
+    groups = summary["released_archive_groups"]
+    assert len(groups) == 1
+    released_family_ids = [row["family_id"] for row in extended_rows]
+    assert set(groups[0]["family_ids"]) == set(released_family_ids)
+    assert summary["statistics"]["family_count"] == len(released_family_ids)
+    assert summary["statistics"]["file_count"] == len(extended_rows)
+    new_event = client.post(f"/api/jobs/{anchor_job}/events", json={
+        "event_kind": "event", "event_name": "Wieder eingeordnet", "start_date": "2026-07-21",
+        "end_date": "2026-07-21", "selected_day_keys": ["2026-07-21"],
+        "selected_family_ids": released_family_ids,
+    })
+    assert new_event.status_code == 200, new_event.text
+    summary = client.get(summary_path).json()
+    assert summary["released_archive_groups"] == []
+    assert [group["event_name"] for group in summary["planning_overview"]["event_groups"]] == ["Wieder eingeordnet"]
+    from app.archive_transfer import verify_event_archive
+    from app.sort_apply import CONFIRMATION_PHRASE, execute_sort_run, prepare_sort_run
+    from app.sort_plan import build_event_sort_plan
+    from app.ssd_release import finalize_manually_moved_event_if_verified
+
+    refiled = new_event.json()["parent_event"]
+    new_event_id, new_job = refiled["id"], refiled["job_id"]
+    compat = main.compatibility_workspace_root(library)
+    sorting = build_event_sort_plan(database, new_job, new_event_id, compat, verify_sha256=True)
+    assert sorting["summary"]["ready"], sorting["blockers"]
+    sort_run = prepare_sort_run(
+        database, new_job, new_event_id, compat,
+        expected_plan_token=sorting["plan_token"], confirmation_phrase=CONFIRMATION_PHRASE,
+    )
+    execute_sort_run(database, sort_run["id"], compat)
+    work_root = shared_work_root(compat)
+    relative_root = Path(refiled["start_datetime"][:4], refiled["folder_name"])
+    (work_root / relative_root).rename(library.archive_root / relative_root)
+    verification = verify_event_archive(database, library.archive_root, new_job, new_event_id,
+                                        workspace_path=compat)
+    assert verification["verified"], verification
+    finalized = finalize_manually_moved_event_if_verified(
+        database, compat, library.archive_root, new_job, new_event_id, verification,
+    )
+    assert finalized["manual_archive_finalized"]
+    with database_connection(database) as connection:
+        registered = event_file_rows(connection, new_event_id)
+        assert {(row["id"], row["family_id"], row["sha256_current"]) for row in registered} == {
+            (row["id"], row["family_id"], row["sha256_current"]) for row in extended_rows
+        }
+        assert all(row["current_root_kind"] == "camera_archive" for row in registered)
     old_receipt = client.get(completion_path)
     assert old_receipt.status_code == 200 and "Nicht mehr im Archiv" in old_receipt.text
     assert f"&amp;event={event_id}" not in old_receipt.text

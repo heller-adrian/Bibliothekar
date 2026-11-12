@@ -113,13 +113,18 @@ _PAGE = r"""<!doctype html>
 .adoption-back{display:inline-flex;align-items:center;min-height:36px;padding:6px 12px;border:1px solid var(--bk-line);border-radius:8px;background:var(--bk-surface-2);color:var(--bk-ink);font-weight:650;text-decoration:none}
 .adoption-back:hover{border-color:var(--bk-blue)}
 #source-notice:empty{display:none}
-.adoption-source-help{max-width:32rem;color:var(--bk-muted)}
-.adoption-source-help p{margin:8px 0 0}
+#source-actions{position:relative;align-items:center}
+.adoption-source-help>p{position:absolute;z-index:2;inset-inline-end:0;top:calc(100% + 6px);
+width:min(30rem,100%);box-sizing:border-box;margin:0;padding:14px 16px;border:1px solid var(--bk-line);
+border-radius:10px;background:var(--bk-surface);color:var(--bk-ink);box-shadow:var(--bk-shadow)}
+#source .adoption-source-path{align-items:center;padding-bottom:4px}
+#source-notice{margin-block:14px}
+#pick-source[aria-pressed=true]{border-color:var(--bk-green)}
 .adoption-folder-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,8.5rem),1fr));gap:10px}
 .legacy-adoption button.adoption-folder{display:grid;justify-items:center;align-content:start;gap:8px;padding:14px 10px;overflow-wrap:anywhere}
 .adoption-folder-icon{position:relative;width:26px;height:18px;border:2px solid currentColor;border-radius:4px;color:var(--bk-blue);margin-top:5px}
-.adoption-folder-icon::before{content:"";position:absolute;top:-6px;left:-2px;width:12px;height:6px;border:2px solid currentColor;border-bottom:0;border-radius:4px 4px 0 0}
-.legacy-adoption button.adoption-parent{min-height:32px;padding:4px 10px;font-size:.875rem}
+.adoption-folder-icon::before{content:"";position:absolute;top:-6px;left:-2px;width:10px;height:4px;border:2px solid currentColor;border-bottom:0;border-radius:4px 4px 0 0}
+.legacy-adoption button.adoption-parent{min-height:32px;padding:4px 10px;font-size:.875rem;margin-inline-end:6px}
 .adoption-stepper{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
 .legacy-adoption :is(button:not(.day-card),summary.adoption-control){min-height:40px;padding:8px 14px;font:inherit;font-weight:650}
 .legacy-adoption .adoption-toolbar{align-items:center}
@@ -139,8 +144,29 @@ _PAGE = r"""<!doctype html>
 .adoption-event-card{max-width:24rem;border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:6px 12px;margin-bottom:8px}
 .adoption-event-card summary{display:grid;gap:3px;overflow-wrap:anywhere}
 .adoption-event-card[open]{padding-bottom:12px}
-.adoption-structure-preview ul{max-height:18rem;overflow:auto;padding-left:1.4rem}
-.adoption-structure-preview li+li{margin-top:5px}
+.adoption-folder-tree{max-height:20rem;overflow:auto;margin:8px 0 0;padding:8px 12px;background:var(--bk-surface-2);border-radius:8px}
+.adoption-folder-tree :is(ul,li){list-style:none;margin:0;padding:0}
+.adoption-folder-tree ul ul{margin-inline-start:.55rem;padding-inline-start:.8rem;border-inline-start:1px solid var(--bk-line)}
+.adoption-folder-tree code{display:inline-block;padding:3px 0;overflow-wrap:anywhere}
+.adoption-stepper [aria-current=step]:disabled{border-color:var(--bk-blue);color:var(--bk-ink);opacity:1;cursor:default;
+background:color-mix(in srgb,var(--bk-blue) 17%,var(--bk-surface))}
+.adoption-compact:not([open]){width:fit-content;padding-block:4px}
+.adoption-target-preview{margin-block:12px 20px}
+.legacy-adoption .adoption-methods{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:12px;margin-block:12px}
+.legacy-adoption .adoption-methods label{display:grid;grid-template-columns:auto minmax(0,1fr);align-content:start;align-items:start;
+border:1px solid var(--bk-line);border-radius:10px;padding:14px;background:var(--bk-surface-2);cursor:pointer}
+.adoption-methods label:has(:checked){border-color:var(--bk-blue);box-shadow:inset 0 0 0 1px var(--bk-blue)}
+.adoption-methods label:has(:focus-visible){outline:3px solid var(--bk-blue);outline-offset:3px}
+.adoption-methods small{grid-column:2}
+.adoption-methods input{accent-color:var(--bk-blue);margin-top:.25em}
+.adoption-proof[data-verified=true]{border-inline-start:4px solid var(--bk-green);padding:10px 14px;
+background:color-mix(in srgb,var(--bk-green) 13%,var(--bk-surface));border-radius:8px}
+.adoption-proof[data-verified=true] p:first-child{margin:0;font-weight:700}
+#event-editor .bk-folder-input-root{display:flex;flex-direction:row;align-items:center;flex-wrap:wrap;
+min-height:38px;margin-block:5px 8px;gap:8px}
+#event-editor .adoption-interval{margin:-6px 0 4px}
+#wizard-navigation{justify-content:space-between;align-items:center}
+#wizard-navigation .primary{margin-inline-start:auto}
 .legacy-adoption dialog{width:min(760px,calc(100% - 24px));max-height:calc(100% - 24px);box-sizing:border-box;padding:clamp(16px,3vw,28px);border:1px solid var(--bk-line);border-radius:var(--bk-radius);background:var(--bk-surface);color:var(--bk-ink);box-shadow:var(--bk-shadow)}
 .legacy-adoption dialog::backdrop{background:rgb(5 12 18 / .65)}
 .legacy-adoption dialog .inline>label{flex:1 1 10rem}
@@ -170,7 +196,7 @@ _PAGE = r"""<!doctype html>
     <button type="button" id="browse">Ordner anzeigen</button>
     <button type="button" id="pick-source" class="primary" aria-pressed="false" disabled>Diesen Quellordner wählen</button>
     <button type="button" id="start" class="primary" hidden>Dataset prüfen und Inventur starten</button>
-    <details class="adoption-source-help"><summary>Fehlt dein Dataset?</summary>
+    <details id="source-help" class="adoption-source-help"><summary>Fehlt dein Dataset?</summary>
       <p>Bibliothekar zeigt Ordner auf dem ZFS-Dataset des Zielarchivs und die Wege dorthin. Lege deine Fotosammlung in einen getrennten Ordner auf diesem Dataset und binde ihn lesend ein.</p>
     </details>
   </div>
@@ -195,7 +221,7 @@ if(later) {
   $("choice").href=librarySettings;
 }
 let job = null, draft = {}, draftRevision = 0, year = "", day = null;
-let familyCursor = "", moveCursor = "", reviewCursor = "", directoryCursor = "", timer = 0, scriptTimer = 0;
+let familyCursor = "", moveCursor = "", reviewCursor = "", timer = 0, scriptTimer = 0;
 let selectedSource = null, browsedSource = null, browseVersion = 0;
 let draftPage = 40;
 let layoutGroup = 0;
@@ -208,13 +234,17 @@ function allowedSteps(){
   if(recoveryOnly){
     if(!job.plan.id)return ["inventory"];
     if(!job.plan.execution)return ["inventory","review"];
-    return ["review",job.plan.execution.phase==="registering"?"verify":"execute"];
+    return [job.plan.execution.phase==="registering"?"verify":"execute"];
   }
   if(!job.plan.id)return job.state==="inventoried" ? ["inventory","plan"] : ["inventory"];
   if(!job.plan.execution)return ["inventory","review","execution"];
-  return job.plan.state==="completed" ? ["review","verify"] : ["review","execute","verify"];
+  const phase=job.plan.execution.phase;
+  if(phase==="rolling_back")return ["execute"];
+  if(job.plan.state==="completed" || phase==="registering")return ["verify"];
+  return ["execute","verify"];
 }
 function rememberView(step,push=false){
+  if(viewStep!==step) $("introduction").open=false;
   viewStep=step;
   const url=new URL(location.href);url.searchParams.set("step",step);
   history[push?"pushState":"replaceState"](null,"",url);
@@ -224,19 +254,26 @@ async function goStep(step){
   if(step==="plan" && job?.plan.id && !job.plan.execution)await mutate("/reopen");
   if(!allowedSteps().includes(step))return;
   rememberView(step,true);await refresh();
-  document.querySelector(".adoption-heading").scrollIntoView({block:"start"});
+  window.scrollTo({top:0});
 }
 function navigation(){
   const allowed=allowedSteps();
   if(!allowed.includes(viewStep))rememberView(allowed.at(-1));
   $("wizard-steps").replaceChildren(...steps.map(([id,title],index)=>{
-    const button=action((index+1)+". "+t(title),()=>goStep(id),id===viewStep);
-    button.disabled=!allowed.includes(id);
+    const button=node("button",(index+1)+". "+t(title));
+    button.disabled=true;
     button.setAttribute("aria-current",id===viewStep?"step":"false");
     return button;
   }));
   const nav=$("wizard-navigation");nav.replaceChildren();
-  if(!job || recoveryOnly)return;
+  if(!job)return;
+  const phase=job.plan.execution?.phase;
+  if(viewStep==="verify" && (phase==="registering" || (!recoveryOnly && phase==="registration_pending"))){
+    if(!recoveryOnly && phase==="registration_pending")nav.append(action("Zurück",()=>goStep("execute")));
+    nav.append(action("Übernahme registrieren",()=>mutate("/finalize","POST",{plan_id:job.plan.id}),true));
+    return;
+  }
+  if(recoveryOnly)return;
   const previous={plan:"inventory",review:job.plan.execution?null:"plan",execution:"review",verify:job.plan.state==="completed"?null:"execute"}[viewStep];
   if(previous)nav.append(action("Zurück",()=>goStep(previous)));
   if(viewStep==="inventory" && job.state==="inventoried")nav.append(action("Weiter: Ereignisse planen",()=>goStep("plan"),true));
@@ -248,7 +285,7 @@ function navigation(){
     if(!job.plan.documents_at)await mutate("/documents");
     await goStep("execution");
   },true));
-  if(viewStep==="execute")nav.append(action("Weiter: Archiv prüfen",()=>goStep("verify"),true));
+  if(viewStep==="execute" && phase!=="rolling_back")nav.append(action("Weiter: Archiv prüfen",()=>goStep("verify"),true));
 }
 window.addEventListener("bk-language-changed",()=>{
   navigation();
@@ -259,6 +296,7 @@ window.addEventListener("bk-language-changed",()=>{
 });
 window.addEventListener("popstate",()=>{
   if(dirty.size){rememberView(viewStep);report("Speichere deine Eingaben zuerst.");return;}
+  $("introduction").open=false;
   viewStep=new URL(location.href).searchParams.get("step")||"";
   refresh().catch(error=>report(error.message));
 });
@@ -385,6 +423,7 @@ async function browse(relative) {
   const query=new URLSearchParams({root,relative});
   if(later)query.set("mode","library");
   browsedSource=null;selectedSource=null;
+  $("source-help").hidden=false;
   $("start").hidden=true;
   $("pick-source").setAttribute("aria-pressed","false");
   $("pick-source").classList.add("primary");
@@ -394,7 +433,7 @@ async function browse(relative) {
   browsedSource={root,...data};
   $("pick-source").disabled=!data.dataset;
   $("source-notice").textContent=data.reason || (data.read_only?"":"Die Quell-Einbindung ist nicht schreibgeschützt.");
-  const bar=node("div",undefined,"inline");
+  const bar=node("div",undefined,"inline adoption-source-path");
   if(data.parent!==null){
     const parent=action("‹ Übergeordneter Ordner",()=>browse(data.parent));
     parent.classList.add("adoption-parent");
@@ -837,23 +876,43 @@ function showDraftEvents() {
     if(stats && !dates.length)row.append(line(stats.start.slice(0,10)+" → "+stats.end.slice(0,10)));
     const controls=node("div",undefined,"inline");
     const structure=node("div",undefined,"adoption-structure-preview");
-    controls.append(action("Öffnen",async()=>structure.replaceChildren(await draftStructure([item]))));
+    controls.append(action("Vorschau",async()=>structure.replaceChildren(await draftStructure([item]))));
     if(!item.existing_id)controls.append(action("Bearbeiten",()=>eventEditor(index)));
-    controls.append(action("Entfernen",async()=>{await setDraft({...draft,events:draft.events.filter((_,at)=>at!==index)});report("Entwurf entfernt.");}));
+    const remove=action("Entfernen",async()=>{
+      if(!confirm(t("Dieses Planobjekt entfernen?")))return;
+      await setDraft({...draft,events:draft.events.filter((_,at)=>at!==index)});report("Entwurf entfernt.");
+    });
+    remove.classList.add("danger-button");controls.append(remove);
     row.append(controls,structure);el.append(row);
   });
   if(draftPage<draft.events.length)el.append(action("Weitere Planobjekte",()=>{draftPage+=40;showDraftEvents();}));
+}
+function folderTree(){
+  const frame=node("div",undefined,"adoption-folder-tree");
+  const root={row:frame,children:new Map()};
+  function add(paths){
+    for(const path of paths){
+      let parent=root;
+      for(const name of path.split("/").filter(Boolean)){
+        if(!parent.children.has(name)){
+          const row=node("li"), label=node("code",name);
+          label.dataset.bkPreserveLanguage="";
+          if(!parent.list){parent.list=node("ul");parent.row.append(parent.list);}
+          row.append(label);parent.list.append(row);
+          parent.children.set(name,{row,children:new Map()});
+        }
+        parent=parent.children.get(name);
+      }
+    }
+  }
+  return {frame,add};
 }
 async function draftStructure(events) {
   const result=await api(jobPath("/draft/structure"),"POST",{...draft,events});
   const card=node("div",undefined,"adoption-card");
   card.append(node("h4","Vorschau der Zielstruktur"));
-  const paths=node("ul");
-  for(const path of result.directories){
-    const row=node("li");const value=node("code",path);value.dataset.bkPreserveLanguage="";
-    row.append(value);paths.append(row);
-  }
-  card.append(paths);
+  const tree=folderTree();
+  tree.add(result.directories);card.append(tree.frame);
   if(result.truncated)card.append(line("Die Vorschau zeigt bis zu 200 Ordner. Der vollständige Verschiebeplan ist im nächsten Schritt verfügbar."));
   return card;
 }
@@ -924,7 +983,9 @@ function eventEditor(index, newKind="event") {
   const title=node("h3",index===undefined?(isEvent?"Neues Ereignis":"Sammelordner ohne Ereignis"):"Entwurf bearbeiten");
   title.id="event-editor-title";
   const message=node("p");message.id="editor-message";message.setAttribute("role","alert");
-  form.append(title,message);
+  form.append(title);
+  if(isEvent)form.append(node("p","Das Ereignis umfasst alle Aufnahmetage zwischen dem ersten und letzten Datum.","subtle adoption-interval"));
+  form.append(message);
   const [keepWrap,keep]=field("Tagesordner erhalten","checkbox");
   keep.checked=Boolean(item.preserve_day_folders);
   const [folders,folderLayout]=layoutEditor("Ordnerstruktur",item.folder_layout);
@@ -937,7 +998,6 @@ function eventEditor(index, newKind="event") {
     const dates=node("div",undefined,"inline");dates.append(startWrap,endWrap);
     form.append(nameWrap,dates);
     firstInput=name;
-    if(days.length>1)form.append(line("Das Ereignis umfasst alle Aufnahmetage zwischen dem ersten und letzten Datum. Prüfe die Datumsspanne vor dem Speichern."));
     const children=node("div");
     function addChild(child={}) {
       const row=node("div",undefined,"adoption-card stack");
@@ -947,7 +1007,12 @@ function eventEditor(index, newKind="event") {
       const [childFolders,childLayout]=layoutEditor("Ordnerstruktur für dieses Unterereignis",child.folder_layout,true);
       row.childValues=()=>({name:n.value,start_datetime:a.value,end_datetime:b.value,folder_layout:childLayout()});
       const pair=node("div",undefined,"inline");pair.append(aWrap,bWrap);
-      row.append(nWrap,pair,childFolders,action("Unterereignis entfernen",()=>{row.remove();edited();}));
+      const remove=action("Unterereignis entfernen",()=>{
+        if(!confirm(t("Dieses Unterereignis aus dem Entwurf entfernen?")))return;
+        row.remove();edited();
+      });
+      remove.classList.add("danger-button");
+      row.append(nWrap,pair,childFolders,remove);
       children.append(row);
       return n;
     }
@@ -1034,6 +1099,7 @@ function renderPlan(host) {
   const completed=plan.state==="completed";
   const scripted=plan.execution?.method==="script";
   if(!scripted || viewStep==="review")panel.append(line(label(phase || plan.state)));
+  if(!recoveryOnly && !phase && plan.documents_at && viewStep==="execution")renderConfirmation(panel,command);
   const locale=window.BibliothekarI18n.getLocale();
   const format=new Intl.NumberFormat(locale);
   const unit=["B","KiB","MiB","GiB","TiB"];
@@ -1076,11 +1142,14 @@ function renderPlan(host) {
     files.append(link("Frühere Ereignisdokumente",jobPath("/download/original-documents")));
   }
   panel.append(files);
-  const directoryPreview=node("details");
-  directoryPreview.append(node("summary","Vorschau der Zielordner"),slot("planned-directories"));
+  const directoryPreview=node("details",undefined,"adoption-target-preview");
+  const tree=folderTree(), directoryControls=node("div",undefined,"inline");
+  directoryPreview.append(node("summary","Vorschau der Zielordner"),tree.frame,directoryControls);
+  let loadedDirectories=false;
   directoryPreview.addEventListener("toggle",()=>{
-    if (directoryPreview.open && !$("planned-directories").childElementCount) {
-      showDirectories(true).catch(error=>report(error.message));
+    if (directoryPreview.open && !loadedDirectories) {
+      loadedDirectories=true;
+      showDirectories(tree,directoryControls).catch(error=>{loadedDirectories=false;report(error.message);});
     }
   });
   panel.append(directoryPreview);
@@ -1098,9 +1167,6 @@ function renderPlan(host) {
     controls.append(
       action(plan.documents_at?"Ereignisdokumente neu vorbereiten":"Ereignisdokumente vorbereiten",()=>mutate("/documents")),
       action("Plan zur Bearbeitung öffnen",()=>mutate("/reopen")));
-    if (plan.documents_at && viewStep==="execution") {
-      renderConfirmation(panel,command);
-    }
   }
   let scriptDetails=null;
   if (scripted && !completed && phase!=="rolled_back") {
@@ -1113,19 +1179,16 @@ function renderPlan(host) {
     }
     execution.append(slot("script-state"));
     panel.append(execution);
-    scriptDetails=node("details",undefined,"adoption-stage adoption-card");
+    scriptDetails=node("details",undefined,"adoption-stage adoption-card adoption-compact");
     scriptDetails.append(node("summary","Erweiterte Details zu Skript und Prüfung"),scriptLinks(true));
   }
   if (!recoveryOnly && viewStep==="verify" && !scripted && ["manual","verifying","repair"].includes(phase)) {
     controls.append(action("Archiv prüfen",()=>run("/verify"),true));
   }
   if (!recoveryOnly && phase==="repair" && !scripted) controls.append(action("Manuelle Schritte fortsetzen",()=>run("/resume")));
-  if (viewStep==="verify" && (phase==="registering" || (!recoveryOnly && phase==="registration_pending"))) {
-    controls.append(action("Übernahme registrieren",()=>run("/finalize"),true));
-  }
   let recovery=null;
   if (["manual","script_prepared","operations_done","verifying","repair","registration_pending"].includes(phase)) {
-    recovery=node("details",undefined,"adoption-card adoption-stage");
+    recovery=node("details",undefined,"adoption-card adoption-stage adoption-compact");
     const options=node("div",undefined,"stack");
     options.append(line("Verwende die kontrollierte Rücknahme, wenn du die Übernahme beenden und bereits ausgeführte Verschiebungen rückgängig machen möchtest."),action("Kontrollierte Wiederherstellung starten",async()=>{
       if (confirm("Möchtest du die Übernahme anhand des gespeicherten Plans rückgängig machen?")) {
@@ -1175,14 +1238,19 @@ function scriptLinks(confirmed=false) {
 }
 function renderConfirmation(panel,command) {
   const confirmation=node("div",undefined,"adoption-card");
-  const method=node("select");
-  for (const [value,title] of [["manual","Manuelle Durchführung über SMB"],["script","Skriptgestützte Durchführung auf TrueNAS"]]) {
-    const option=node("option",title);
-    option.value=value;
-    method.append(option);
+  const choice=node("div",undefined,"adoption-methods");
+  choice.setAttribute("role","radiogroup");
+  choice.setAttribute("aria-label",t("Durchführungsmethode"));
+  const methods=[
+    ["manual","Manuelle Durchführung über SMB","Verschiebe die Dateien selbst anhand des bestätigten Plans."],
+    ["script","Skriptgestützte Durchführung auf TrueNAS","Prüfe die Hostpfade und führe den freigegebenen Befehl in der TrueNAS-Shell aus."],
+  ];
+  for(const [value,title,description] of methods){
+    const option=node("label"), radio=node("input");
+    radio.type="radio";radio.name="adoption-execution";radio.value=value;radio.checked=value==="manual";
+    option.append(radio,node("strong",title),node("small",description));choice.append(option);
   }
-  const choice=node("label","Durchführungsmethode");
-  choice.append(method);
+  const method=()=>choice.querySelector("input:checked").value;
   const scripts=node("div",undefined,"stack");
   scripts.hidden=true;
   const proofState=node("div",undefined,"adoption-proof");
@@ -1193,18 +1261,26 @@ function renderConfirmation(panel,command) {
   const [wrap,ack]=field("Ich bestätige die Sicherheitsbedingungen und den angezeigten Plan.","checkbox");
   wrap.classList.add("adoption-ack");
   let probe=null;
+  function updateConfirmation(){
+    ack.disabled=method()==="script" && !probe?.verified;
+    confirmButton.disabled=ack.disabled || !ack.checked;
+  }
   function showProbe(result) {
     if (probe?.sha256!==result.sha256) ack.checked=false;
     probe=result;
-    confirmButton.disabled=method.value==="script" && !result.verified;
+    updateConfirmation();
+    readButton.disabled=!result.command && !result.verified;
+    proofState.dataset.verified=String(result.verified);
     proofState.replaceChildren();
     if (result.verified) {
       const paths=node("details");
       paths.append(node("summary","Bestätigte Hostpfade"),node("code",result.host.source+" → "+result.host.archive));
-      proofState.append(line("Hostpfade und gemeinsames ZFS-Dataset bestätigt."),line(result.dataset),paths);
+      proofState.append(line("Hostpfade und gemeinsames ZFS-Dataset bestätigt."),line(result.dataset),
+        line("Bestätige jetzt die Sicherheitsbedingungen, um die Durchführung freizugeben."),paths);
       return;
     }
-    if (result.diagnostic) proofState.append(line(result.diagnostic));
+    if (result.diagnostic) proofState.append(line(result.diagnostic),
+      line("Prüfe die Ausgabe in der TrueNAS-Shell. Bei einer nicht erkannten Einbindung kannst du die Hostpfadprüfung unter den erweiterten Details manuell vorbereiten."));
     if (!result.command) return;
     proofState.append(line("Führe den Prüfbefehl in der TrueNAS-Shell aus und lies den Nachweis anschließend ein. Die Prüfung verschiebt keine Dateien."),
       commandBox(result.command));
@@ -1229,23 +1305,28 @@ function renderConfirmation(panel,command) {
   advanced.append(node("summary","Erweiterte Details zu Skript und Prüfung"),
     scriptLinks(),fallback);
   const actions=node("div",undefined,"inline");
+  const readButton=action("Hostnachweis einlesen",readProbe);
+  readButton.disabled=true;
   actions.append(action("Skript vorbereiten",async()=>{
     showProbe(await api(jobPath("/script/probe"),"POST",command));
-  }), action("Hostnachweis einlesen",readProbe));
+  }),readButton);
   scripts.append(line("Führe die Prüfung in der TrueNAS-Host-Shell aus. Der automatische Befehl verwendet sudo für den Zugriff auf das geschützte AppData-Paket. TrueNAS kann nach deinem Passwort fragen."),
     actions,proofState,advanced);
-  method.addEventListener("change",()=>{
-    scripts.hidden=method.value!=="script";
+  choice.addEventListener("change",()=>{
+    scripts.hidden=method()!=="script";
     ack.checked=false;
-    confirmButton.disabled=method.value==="script" && !probe?.verified;
+    updateConfirmation();
     if (!scripts.hidden && !probe) api(jobPath("/script/probe")).then(showProbe).catch(error=>report(error.message));
   });
   const confirmButton=action("Durchführung verbindlich starten",()=>{
     if (!ack.checked) throw new Error("Bitte bestätige zuerst die Sicherheitsbedingungen.");
-    if (method.value==="script" && !probe?.verified) throw new Error("Führe zuerst die Host- und Dataset-Prüfung durch.");
-    return mutate("/confirm","POST",{...command,method:method.value,acknowledged:true,probe_sha256:probe?.sha256});
+    if (method()==="script" && !probe?.verified) throw new Error("Führe zuerst die Host- und Dataset-Prüfung durch.");
+    return mutate("/confirm","POST",{...command,method:method(),acknowledged:true,probe_sha256:probe?.sha256});
   },true);
-  confirmation.append(node("h3","Verbindliche Sicherheitsbestätigung"),choice,scripts,
+  ack.addEventListener("change",updateConfirmation);
+  updateConfirmation();
+  confirmation.append(node("h3","Durchführungsmethode"),choice,scripts,
+    node("h3","Verbindliche Sicherheitsbestätigung"),
     line("Nach dieser Bestätigung müssen die geplanten Verschiebungen abgeschlossen, überprüft oder kontrolliert rückgängig gemacht werden."),
     line("Quelle und Ziel müssen auf demselben ZFS-Dataset liegen. Führe währenddessen keine weiteren Änderungen am Archiv durch."),
     wrap,confirmButton);
@@ -1303,25 +1384,11 @@ async function pollScript() {
   }
   if (target===$("script-state")) scriptTimer=setTimeout(pollScript,3000);
 }
-async function showDirectories(reset=false) {
-  const target=$("planned-directories");
-  if (reset) {
-    directoryCursor="";
-    target.replaceChildren();
-  }
-  target.querySelector(".more")?.remove();
-  const rows=await api(jobPath("/directories?"+new URLSearchParams({after:directoryCursor})));
-  for (const path of rows) {
-    const item=node("div");
-    item.append(node("code",path));
-    target.append(item);
-  }
-  if (rows.length===100) {
-    directoryCursor=rows.at(-1);
-    const more=action("Weitere Zielordner",()=>showDirectories());
-    more.className="more";
-    target.append(more);
-  }
+async function showDirectories(tree,controls,after="") {
+  const rows=await api(jobPath("/directories?"+new URLSearchParams({after})));
+  tree.add(rows);
+  controls.replaceChildren();
+  if(rows.length===100)controls.append(action("Weitere Zielordner",()=>showDirectories(tree,controls,rows.at(-1))));
 }
 async function showMoves(reset=false) {
   const target=$("moves");
@@ -1347,8 +1414,20 @@ $("pick-source").addEventListener("click",()=>{
   selectedSource={root:browsedSource.root,relative:browsedSource.relative};
   $("pick-source").setAttribute("aria-pressed","true");
   $("pick-source").classList.remove("primary");
+  $("source-help").open=false;
+  $("source-help").hidden=true;
   $("start").hidden=false;
   $("start").focus();
+});
+document.addEventListener("click",event=>{
+  const help=$("source-help");
+  if(help.open && !help.contains(event.target))help.open=false;
+});
+document.addEventListener("keydown",event=>{
+  const help=$("source-help");
+  if(event.key==="Escape" && help.open){
+    help.open=false;help.querySelector("summary").focus();
+  }
 });
 $("start").addEventListener("click",async()=>{
   if (!selectedSource) return;

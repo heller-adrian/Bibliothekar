@@ -89,7 +89,7 @@ def history_html(library, entries, *, job_id, page, more):
           <details><summary>Prüfnachweis anzeigen</summary>
             <p>Die Dateien und Ereignisdokumente wurden vor der Registrierung unabhängig mit SHA-256 geprüft.</p>
             <p>SHA-256 des bestätigten Plans</p><code>{escape(entry['fingerprint'])}</code></details>
-          <nav class="adoption-history-actions"><a href="{history}">Übernahmehistorie</a><a href="{href('/events')}">Alle Ereignisse öffnen</a></nav>
+          <nav class="adoption-history-actions"><a class="primary" href="{href('/events')}">Alle Ereignisse öffnen</a><a href="{history}">Übernahmehistorie</a></nav>
           </section>'''
     elif job_id:
         body = f'<section class="card"><p>Für diesen Auftrag ist kein abgeschlossener Nachweis verfügbar.</p><a href="{history}">Übernahmehistorie</a></section>'
@@ -102,6 +102,7 @@ def history_html(library, entries, *, job_id, page, more):
         listing = f'<ul>{rows}</ul>' if rows else '<p>Keine abgeschlossenen Übernahmen in dieser Bibliothek.</p>'
         body = f'<section class="card adoption-history-card">{listing}<nav class="adoption-history-actions">{previous}{following}</nav></section>'
     complete_class = ' class="adoption-complete"' if job_id and entries else ""
+    library_label = "" if complete_class else f'<p data-bk-preserve-language>{escape(library.display_name)}</p>'
     return apply_shell(f'''<!doctype html><html lang="de"><head><meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1"><title>{title} · Bibliothekar</title>
       <style>
@@ -112,10 +113,12 @@ def history_html(library, entries, *, job_id, page, more):
         .adoption-history-card li+li{{margin-top:8px}}
         .adoption-history-actions,.adoption-history-facts{{display:flex;flex-wrap:wrap;gap:12px 24px}}
         .adoption-history-card a{{color:var(--bk-ink);text-underline-offset:.22em}}
-        .adoption-history-actions a{{padding:7px 12px;border:1px solid var(--bk-line);border-radius:8px;background:var(--bk-surface-2)}}
+        .adoption-history-actions a{{padding:9px 14px;border:1px solid var(--bk-line);border-radius:8px;background:var(--bk-surface-2);text-decoration:none;font-weight:650}}
+        .adoption-history-actions a.primary{{background:var(--bk-blue);color:var(--bk-on-blue);border-color:transparent}}
+        .adoption-history-actions a:focus-visible{{outline:2px solid var(--bk-blue);outline-offset:3px}}
         .adoption-history-actions:empty{{display:none}}
         .adoption-history-facts dd{{margin:4px 0 0;font-weight:650}}
-      </style></head><body><main{complete_class}><h1>{title}</h1><p data-bk-preserve-language>{escape(library.display_name)}</p>{body}</main>
+      </style></head><body><main{complete_class}><h1>{title}</h1>{library_label}{body}</main>
       <script>
         function formatAdoptionDates() {{
           const locale=window.BibliothekarI18n?.getLocale()||document.documentElement.lang;
