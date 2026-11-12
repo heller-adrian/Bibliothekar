@@ -24,6 +24,10 @@ TRANSLATIONS = {
     "Die Quelle ist nicht lesend erreichbar.": "The source folder cannot be opened for reading.",
     "Die Quell-Einbindung ist nicht schreibgeschützt.": "The source mount is not read-only.",
     "ZFS-Dataset": "ZFS dataset",
+    "‹ Übergeordneter Ordner": "‹ Parent folder",
+    "Fehlt dein Dataset?": "Can't see your dataset?",
+    "Bibliothekar zeigt Ordner auf dem ZFS-Dataset des Zielarchivs und die Wege dorthin. Lege deine Fotosammlung in einen getrennten Ordner auf diesem Dataset und binde ihn lesend ein.":
+        "Bibliothekar shows folders on the target archive’s ZFS dataset and the paths to reach them. Place your collection in a separate folder on that dataset and mount it for reading.",
 
     "Schließe laufende Vorgänge oder offene Wiederherstellungen ab.": "Finish active operations or resolve pending recovery.",
     "Schließe offene Archivänderungen ab.": "Finish open archive changes.",
@@ -46,6 +50,17 @@ TRANSLATIONS = {
     "Bestätigtes Skriptmanifest": "Confirmed script manifest",
     "TrueNAS-Shell-Befehl": "TrueNAS shell command",
     "Skript vorbereiten": "Prepare script",
+    "Skript auf TrueNAS ausführen": "Run the script on TrueNAS",
+    "Wiederherstellung auf TrueNAS": "Recovery on TrueNAS",
+    "Archiv prüfen und registrieren": "Verify and register the archive",
+    "Kopiere den freigegebenen Befehl in die TrueNAS-Host-Shell. TrueNAS kann wegen sudo nach deinem Passwort fragen.":
+        "Copy the approved command into the TrueNAS host shell. TrueNAS may ask for your password for sudo.",
+    "Wiederherstellungsoptionen": "Recovery options",
+    "Verwende die kontrollierte Rücknahme, wenn du die Übernahme beenden und bereits ausgeführte Verschiebungen rückgängig machen möchtest.":
+        "Use controlled rollback to end the adoption and undo moves that have already run.",
+    "Vorgänge": "operations",
+    "Dateioperationen": "File operations",
+    "Vorgänge umfassen Mediendateien und Ereignisdokumente.": "Operations include media files and event documents.",
     "Bestätigte Hostpfade": "Verified host paths",
     "Hostpfade und gemeinsames ZFS-Dataset bestätigt.": "Host paths and shared ZFS dataset verified.",
     "Code für die automatische Hostprüfung ansehen": "View automatic host check code",

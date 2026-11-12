@@ -15,7 +15,7 @@ from app.database import database_connection
 from app.event_layout import get_global_default
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps
 from app.legacy_adoption_catalogue import prepare_documents
-from app.legacy_adoption_dataset import DatasetError
+from app.legacy_adoption_dataset import DatasetError, browsable_folders
 from app.legacy_adoption_execution import change_phase, complete_rollback, confirm_plan, verify_execution
 from app.legacy_adoption_export import directory_scaffold, event_documents, manifest_file
 from app.legacy_adoption_host import ExecutionError
@@ -262,11 +262,13 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         with _errors():
             require_adoption(request, library)
             path = source_path(root, relative)
-            with bound_directory(path) as descriptor, os.scandir(descriptor) as entries:
-                folders = sorted(
+            with bound_directory(path) as descriptor, os.scandir(descriptor) as entries, \
+                    bound_directory(library.archive_root) as archive_fd:
+                names = sorted(
                     entry.name for entry in entries if not entry.name.startswith(".")
                     and entry.is_dir(follow_symlinks=False)
                 )
+                folders = browsable_folders(path, descriptor, library.archive_root, archive_fd, names)
             proof = source_evidence(library, path, managed_roots())
         rel = Path(relative)
         return {"path": str(path), "relative": "" if str(rel) == "." else str(rel),

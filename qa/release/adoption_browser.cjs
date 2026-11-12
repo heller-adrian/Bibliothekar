@@ -56,8 +56,19 @@ async function capture(page,name){
     await page.locator('#choice').click();
     await page.getByRole('link',{name:'Resume adoption'}).or(page.locator('.bk-setup-choice-actions a')).click();
     await page.locator('#pick-source:enabled').waitFor();
+    await page.getByText("Can't see your dataset?",{exact:true}).click();
+    await page.getByText(/shows folders on the target archive/).waitFor();
+    await page.getByText("Can't see your dataset?",{exact:true}).click();
+    await page.getByRole('button',{name:'camera-1',exact:true}).click();
+    const parent=page.getByRole('button',{name:'‹ Parent folder',exact:true});
+    await parent.waitFor();
+    assert.equal(await parent.locator('xpath=following-sibling::code').count(),1);
+    await parent.click();
+    await page.locator('#pick-source:enabled').waitFor();
     await capture(page,'source');
     await page.locator('#pick-source').click();
+    assert.equal(await page.locator('#pick-source').getAttribute('aria-pressed'),'true');
+    assert.equal(await page.locator('#source-actions > #start').count(),1);
     await page.locator('#start').click();
     if(process.env.BIBLIOTHEKAR_BROWSER_DELAYED_SCAN==='1'){
       await page.getByText('Reading photo collection…',{exact:true}).waitFor();
@@ -77,6 +88,7 @@ async function capture(page,name){
     await page.getByRole('button',{name:'+ Event',exact:true}).click();
     const name=editor.getByRole('textbox').first();
     await name.fill('Lan Test');
+    assert.equal(await page.locator('#dirty').textContent(),'');
     assert.equal(await editor.locator('input[type=date]').first().inputValue(),'2026-07-19');
     assert.equal(await editor.locator('input[type=date]').last().inputValue(),'2026-07-21');
     await editor.getByRole('button',{name:'Add subevent',exact:true}).click();

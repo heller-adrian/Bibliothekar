@@ -52,15 +52,60 @@ def mount_id(descriptor):
     raise DatasetError("Die aktive Einbindung des Übernahmeordners ist nicht nachweisbar.")
 
 
-def _mounted_directory(path, descriptor, mounts):
+def _mount_location(path, descriptor, mounts):
     path = PurePosixPath(path)
     mount = mounts[mount_id(descriptor)]
     info = os.fstat(descriptor)
     if not path.is_relative_to(mount.target) or mount.device != f"{os.major(info.st_dev)}:{os.minor(info.st_dev)}":
         raise DatasetError("Der Dateisystemnachweis passt nicht zum geöffneten Übernahmeordner.")
+    return mount, mount.root / path.relative_to(mount.target)
+
+
+def _mounted_directory(path, descriptor, mounts):
+    path = PurePosixPath(path)
+    location = _mount_location(path, descriptor, mounts)
     if any(item.target != path and item.target.is_relative_to(path) for item in mounts.values()):
         raise DatasetError("Im Übernahmeordner befindet sich eine weitere Einbindung.")
-    return mount, mount.root / path.relative_to(mount.target)
+    return location
+
+
+def browsable_folders(source, source_fd, archive, archive_fd, names):
+    """Include compatible folders and the paths needed to reach nested compatible mounts."""
+    source = PurePosixPath(source)
+    try:
+        mounts = mount_table()
+        current, current_root = _mount_location(source, source_fd, mounts)
+        target, archive_root = _mounted_directory(archive, archive_fd, mounts)
+    except (OSError, KeyError, ValueError, DatasetError):
+        return []
+    if target.filesystem != "zfs" or target.source in {"", "-", "none"}:
+        return []
+
+    def compatible(mount):
+        return (mount.filesystem, mount.source, mount.device) == (target.filesystem, target.source, target.device)
+
+    targets = {mount.target for mount in mounts.values()}
+    routes = {ancestor for mount in mounts.values() if compatible(mount) and mount.target.is_relative_to(source)
+              and not mount.root.is_relative_to(archive_root) for ancestor in mount.target.parents}
+    visible = []
+    for name in names:
+        child = source / name
+        mount, internal = current, current_root / name
+        if child in targets:
+            try:
+                fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=source_fd)
+                try:
+                    mount, internal = _mount_location(child, fd, mounts)
+                finally:
+                    os.close(fd)
+            except (OSError, KeyError, ValueError, DatasetError):
+                continue
+        same_dataset = compatible(mount)
+        if same_dataset and internal.is_relative_to(archive_root):
+            continue
+        if same_dataset or child in routes:
+            visible.append(name)
+    return visible
 
 
 def prove(source, archive, source_fd, archive_fd):

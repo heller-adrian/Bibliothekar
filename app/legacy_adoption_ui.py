@@ -76,6 +76,15 @@ _PAGE = r"""<!doctype html>
 .adoption-card .adoption-ack{align-items:start;gap:10px;margin:16px 0}
 .adoption-card .adoption-ack input{flex:none;margin-top:.25em}
 .adoption-proof{overflow-wrap:anywhere}
+.adoption-stage{display:grid;gap:16px;margin:24px 0}
+.adoption-stage :is(h3,p){margin:0}
+.adoption-stage details>div{padding:8px 0 4px}
+.adoption-stage .adoption-status{background:var(--bk-surface-2);border-radius:8px;padding:12px 14px}
+.adoption-command-box{display:grid;gap:12px;justify-items:start}
+#script-progress{margin:16px 0 0}
+#script-progress:empty{display:none}
+.adoption-stage .adoption-progress{display:grid;gap:8px}
+.adoption-stage .adoption-progress progress{width:min(100%,28rem);accent-color:var(--bk-blue)}
 .adoption-plan-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr));gap:12px;margin:18px 0}
 .adoption-plan-facts div{padding:10px 12px;background:var(--bk-surface-2);border-radius:10px;overflow-wrap:anywhere}
 .adoption-plan-facts dt{font-size:.875rem;color:var(--bk-muted)}
@@ -104,6 +113,13 @@ _PAGE = r"""<!doctype html>
 .adoption-back{display:inline-flex;align-items:center;min-height:36px;padding:6px 12px;border:1px solid var(--bk-line);border-radius:8px;background:var(--bk-surface-2);color:var(--bk-ink);font-weight:650;text-decoration:none}
 .adoption-back:hover{border-color:var(--bk-blue)}
 #source-notice:empty{display:none}
+.adoption-source-help{max-width:32rem;color:var(--bk-muted)}
+.adoption-source-help p{margin:8px 0 0}
+.adoption-folder-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,8.5rem),1fr));gap:10px}
+.legacy-adoption button.adoption-folder{display:grid;justify-items:center;align-content:start;gap:8px;padding:14px 10px;overflow-wrap:anywhere}
+.adoption-folder-icon{position:relative;width:26px;height:18px;border:2px solid currentColor;border-radius:4px;color:var(--bk-blue);margin-top:5px}
+.adoption-folder-icon::before{content:"";position:absolute;top:-6px;left:-2px;width:12px;height:6px;border:2px solid currentColor;border-bottom:0;border-radius:4px 4px 0 0}
+.legacy-adoption button.adoption-parent{min-height:32px;padding:4px 10px;font-size:.875rem}
 .adoption-stepper{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
 .legacy-adoption :is(button:not(.day-card),summary.adoption-control){min-height:40px;padding:8px 14px;font:inherit;font-weight:650}
 .legacy-adoption .adoption-toolbar{align-items:center}
@@ -120,8 +136,9 @@ _PAGE = r"""<!doctype html>
 .legacy-adoption .day-card{display:grid;grid-template-columns:auto minmax(0,1fr);text-align:left;padding:14px;gap:8px;border:1px solid var(--bk-line);border-radius:15px;background:var(--bk-surface);color:var(--bk-ink);user-select:none}
 .day-card .subtle{grid-column:2}
 .legacy-adoption .day-card.selected{border-color:var(--bk-blue);background:color-mix(in srgb,var(--bk-blue) 16%,var(--bk-surface))}
-.adoption-event-card{border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:14px;margin-bottom:12px}
-.adoption-event-card summary{display:grid;gap:6px}
+.adoption-event-card{max-width:24rem;border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:6px 12px;margin-bottom:8px}
+.adoption-event-card summary{display:grid;gap:3px;overflow-wrap:anywhere}
+.adoption-event-card[open]{padding-bottom:12px}
 .legacy-adoption dialog{width:min(760px,calc(100% - 24px));max-height:calc(100% - 24px);box-sizing:border-box;padding:clamp(16px,3vw,28px);border:1px solid var(--bk-line);border-radius:var(--bk-radius);background:var(--bk-surface);color:var(--bk-ink);box-shadow:var(--bk-shadow)}
 .legacy-adoption dialog::backdrop{background:rgb(5 12 18 / .65)}
 .legacy-adoption dialog .inline>label{flex:1 1 10rem}
@@ -149,14 +166,14 @@ _PAGE = r"""<!doctype html>
   <div class="inline" id="source-actions" hidden>
     <label id="source-root-label" hidden>Quellenbereich <select id="source-root"></select></label>
     <button type="button" id="browse">Ordner anzeigen</button>
-    <button type="button" id="pick-source" class="primary" disabled>Diesen Quellordner wählen</button>
+    <button type="button" id="pick-source" class="primary" aria-pressed="false" disabled>Diesen Quellordner wählen</button>
+    <button type="button" id="start" class="primary" hidden>Dataset prüfen und Inventur starten</button>
+    <details class="adoption-source-help"><summary>Fehlt dein Dataset?</summary>
+      <p>Bibliothekar zeigt Ordner auf dem ZFS-Dataset des Zielarchivs und die Wege dorthin. Lege deine Fotosammlung in einen getrennten Ordner auf diesem Dataset und binde ihn lesend ein.</p>
+    </details>
   </div>
   <p id="source-notice" role="status"></p>
   <div id="source" class="stack"></div>
-  <div id="selected-source" class="inline" hidden>
-    <p id="chosen-source"></p>
-    <button type="button" id="start" class="primary">Dataset prüfen und Inventur starten</button>
-  </div>
 </section>
 <div id="work"></div><nav id="wizard-navigation" class="inline" aria-label="Schrittnavigation"></nav>
 </main>
@@ -250,7 +267,7 @@ function watchDraft(editor) {
 }
 function markDirty(editor) {
   dirty.add(editor);
-  $("dirty").textContent = "Du hast ungespeicherte Eingaben.";
+  if(!editor.closest("dialog[open]"))$("dirty").textContent = "Du hast ungespeicherte Eingaben.";
 }
 function savedEditor(editor) {
   dirty.delete(editor);
@@ -350,6 +367,8 @@ async function setupSourceBrowser(){
     option.value=key;select.append(option);
   }
   if(!choices.preferred){
+    $("source-actions").hidden=false;
+    $("browse").hidden=true;
     $("source-notice").textContent="Binde einen NAS-Quellordner auf dem Dataset des Zielarchivs schreibgeschützt ein.";
     return;
   }
@@ -364,7 +383,9 @@ async function browse(relative) {
   const query=new URLSearchParams({root,relative});
   if(later)query.set("mode","library");
   browsedSource=null;selectedSource=null;
-  $("selected-source").hidden=true;
+  $("start").hidden=true;
+  $("pick-source").setAttribute("aria-pressed","false");
+  $("pick-source").classList.add("primary");
   $("pick-source").disabled=true;
   const data=await api(base+"/source?"+query);
   if(version!==browseVersion)return;
@@ -372,16 +393,19 @@ async function browse(relative) {
   $("pick-source").disabled=!data.dataset;
   $("source-notice").textContent=data.reason || (data.read_only?"":"Die Quell-Einbindung ist nicht schreibgeschützt.");
   const bar=node("div",undefined,"inline");
-  const path=node("code",data.path);path.dataset.bkPreserveLanguage="";bar.append(path);
-  if(data.dataset){
-    const dataset=node("span",data.dataset,"subtle");dataset.dataset.bkPreserveLanguage="";
-    bar.append(node("strong","ZFS-Dataset"),dataset);
+  if(data.parent!==null){
+    const parent=action("‹ Übergeordneter Ordner",()=>browse(data.parent));
+    parent.classList.add("adoption-parent");
+    bar.append(parent);
   }
-  if(data.parent!==null)bar.append(action("Übergeordneter Ordner",()=>browse(data.parent)));
-  const children=node("div",undefined,"inline");
+  const path=node("code",data.path);path.dataset.bkPreserveLanguage="";bar.append(path);
+  const children=node("div",undefined,"adoption-folder-grid");
   for(const name of data.folders){
-    const folder=action(name,()=>browse([data.relative,name].filter(Boolean).join("/")));
-    folder.dataset.bkPreserveLanguage="";
+    const folder=action(undefined,()=>browse([data.relative,name].filter(Boolean).join("/")));
+    folder.classList.add("adoption-folder");
+    const icon=node("span",undefined,"adoption-folder-icon");icon.setAttribute("aria-hidden","true");
+    const label=node("span",name);label.dataset.bkPreserveLanguage="";
+    folder.append(icon,label);
     children.append(folder);
   }
   $("source").replaceChildren(bar,children);
@@ -802,7 +826,7 @@ function showDraftEvents() {
     const summary=node("summary");const title=node("strong",item.name||kind);
     if(item.name)title.dataset.bkPreserveLanguage="";
     summary.append(title);
-    if(item.name)summary.append(node("span",kind,"subtle"));
+    if(item.name && item.existing_id)summary.append(node("span",kind,"subtle"));
     if(dates.length)summary.append(node("span",[...new Set(dates)].join(" → "),"subtle"));
     row.append(summary);
     const matches=dayRows.filter(day=>item.event_kind==="no_event"?dates.includes(day.period):day.period>=item.start_date && day.period<=item.end_date);
@@ -981,7 +1005,8 @@ function renderPlan(host) {
   const command={plan_id:plan.id};
   const run=path=>mutate(path,"POST",command);
   const completed=plan.state==="completed";
-  panel.append(line(label(phase || plan.state)));
+  const scripted=plan.execution?.method==="script";
+  if(!scripted || viewStep==="review")panel.append(line(label(phase || plan.state)));
   const locale=window.BibliothekarI18n.getLocale();
   const format=new Intl.NumberFormat(locale);
   const unit=["B","KiB","MiB","GiB","TiB"];
@@ -1050,12 +1075,19 @@ function renderPlan(host) {
       renderConfirmation(panel,command);
     }
   }
-  const scripted=plan.execution?.method==="script";
+  let scriptDetails=null;
   if (scripted && !completed && phase!=="rolled_back") {
-    panel.append(slot("script-state"));
-    const details=node("details");
-    details.append(node("summary","Erweiterte Details zu Skript und Prüfung"),scriptLinks(true));
-    panel.append(details);
+    const execution=node("div",undefined,"adoption-card adoption-stage");
+    const title=phase==="rolling_back"?"Wiederherstellung auf TrueNAS":viewStep==="verify"?"Archiv prüfen und registrieren":"Skript auf TrueNAS ausführen";
+    execution.append(node("h3",title));
+    if(viewStep==="execute" && phase!=="rolling_back")execution.append(line("Kopiere den freigegebenen Befehl in die TrueNAS-Host-Shell. TrueNAS kann wegen sudo nach deinem Passwort fragen."));
+    if(viewStep==="verify" && ["registration_pending","registering"].includes(phase)){
+      const status=node("p",label(phase),"adoption-status");status.setAttribute("role","status");execution.append(status);
+    }
+    execution.append(slot("script-state"));
+    panel.append(execution);
+    scriptDetails=node("details",undefined,"adoption-stage adoption-card");
+    scriptDetails.append(node("summary","Erweiterte Details zu Skript und Prüfung"),scriptLinks(true));
   }
   if (!recoveryOnly && viewStep==="verify" && !scripted && ["manual","verifying","repair"].includes(phase)) {
     controls.append(action("Archiv prüfen",()=>run("/verify"),true));
@@ -1064,12 +1096,16 @@ function renderPlan(host) {
   if (viewStep==="verify" && (phase==="registering" || (!recoveryOnly && phase==="registration_pending"))) {
     controls.append(action("Übernahme registrieren",()=>run("/finalize"),true));
   }
+  let recovery=null;
   if (["manual","script_prepared","operations_done","verifying","repair","registration_pending"].includes(phase)) {
-    controls.append(action("Kontrollierte Wiederherstellung starten",async()=>{
+    recovery=node("details",undefined,"adoption-card adoption-stage");
+    const options=node("div",undefined,"stack");
+    options.append(line("Verwende die kontrollierte Rücknahme, wenn du die Übernahme beenden und bereits ausgeführte Verschiebungen rückgängig machen möchtest."),action("Kontrollierte Wiederherstellung starten",async()=>{
       if (confirm("Möchtest du die Übernahme anhand des gespeicherten Plans rückgängig machen?")) {
         await run("/rollback/start");
       }
     }));
+    recovery.append(node("summary","Wiederherstellungsoptionen"),options);
   }
   if (phase==="rolling_back") {
     if (!scripted) panel.append(line("Bringe verschobene Dateien über SMB an ihre ursprünglichen Pfade zurück. Stelle frühere Ereignisdokumente wieder her und entferne ausschließlich die für diesen Auftrag neu bereitgestellten Ereignisdokumente."));
@@ -1081,7 +1117,10 @@ function renderPlan(host) {
     $("issues").replaceChildren(...issues.map(item=>line([item.relative_path,t(item.issue)].filter(Boolean).join(" · "))));
   }));
   const moves=node("details");moves.append(node("summary","Verschiebeplan anzeigen"),slot("moves"));
-  panel.append(controls,slot("issues"),moves);
+  if(controls.childElementCount)panel.append(controls);
+  if(scriptDetails)panel.append(scriptDetails);
+  if(recovery)panel.append(recovery);
+  panel.append(slot("issues"),moves);
   host.append(panel);
 }
 
@@ -1090,7 +1129,7 @@ function commandBox(command) {
   area.setAttribute("aria-label",t("TrueNAS-Shell-Befehl"));
   area.readOnly=true;
   area.value=command;
-  const host=node("div",undefined,"stack");
+  const host=node("div",undefined,"adoption-command-box");
   host.append(area,action("Befehl kopieren",async()=>{
     area.select();
     if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(command);
@@ -1198,12 +1237,27 @@ async function pollScript() {
     const state=result.running ? "script_running" :
       status?.state==="running" ? "script_interrupted" :
       status?.state==="completed" ? "operations_done" : status?.state || phase;
-    const nodes=[line(t(label(state))+(status?" · "+status.processed+" / "+status.total:""))];
+    const nodes=[];
+    if(status || result.running){
+      const progress=node("div",undefined,"adoption-status adoption-progress");
+      progress.append(node("strong",label(state)));
+      if(status){
+        const counts=node("span",status.processed+" / "+status.total+" "+t("Vorgänge"));
+        if(status.total>0){
+          const bar=node("progress");bar.max=status.total;bar.value=status.processed;
+          bar.setAttribute("aria-label",t("Dateioperationen"));progress.append(bar);
+        }
+        progress.append(counts,node("small","Vorgänge umfassen Mediendateien und Ereignisdokumente."));
+      }
+      nodes.push(progress);
+    }
     if (status?.error) nodes.push(line(status.error));
-    if (result.command && target.dataset.command!==result.command) {
-      target.dataset.command=result.command;
-      target.replaceChildren(commandBox(result.command),slot("script-progress"));
-    } else if (!result.command && target.dataset.command) {
+    const readyCommand=(["script_prepared","repair","rolling_back"].includes(phase) &&
+      !(status?.state==="completed" && phase!=="repair"))?result.command:null;
+    if (readyCommand && target.dataset.command!==readyCommand) {
+      target.dataset.command=readyCommand;
+      target.replaceChildren(commandBox(readyCommand),slot("script-progress"));
+    } else if (!readyCommand && target.dataset.command) {
       delete target.dataset.command;
       target.replaceChildren();
     }
@@ -1215,6 +1269,7 @@ async function pollScript() {
       nodes.push(action("Archiv unabhängig prüfen",()=>run("/verify"),true));
     }
     if (!$("script-progress")) target.append(slot("script-progress"));
+    $("script-progress").classList.add("adoption-stage");
     $("script-progress").replaceChildren(...nodes);
   } catch (error) {
     report(error.message);
@@ -1263,9 +1318,9 @@ $("source-root").addEventListener("change",()=>browse("").catch(error=>report(er
 $("pick-source").addEventListener("click",()=>{
   if(!browsedSource?.dataset)return;
   selectedSource={root:browsedSource.root,relative:browsedSource.relative};
-  $("chosen-source").textContent=browsedSource.path;
-  $("chosen-source").dataset.bkPreserveLanguage="";
-  $("selected-source").hidden=false;
+  $("pick-source").setAttribute("aria-pressed","true");
+  $("pick-source").classList.remove("primary");
+  $("start").hidden=false;
   $("start").focus();
 });
 $("start").addEventListener("click",async()=>{

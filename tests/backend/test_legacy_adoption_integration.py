@@ -29,6 +29,8 @@ def _json(client, method, path, *, library="main", status=200, **kwargs):
 
 @pytest.fixture
 def fresh_main(tmp_path, monkeypatch):
+    from app import legacy_adoption_api
+
     case = tmp_path.resolve() / "first-install"
     workspace, private, archive = (case / name for name in ("workspace", "database", "archive"))
     for path in (workspace, private, archive):
@@ -45,6 +47,7 @@ def fresh_main(tmp_path, monkeypatch):
                       "LOG_PATH": case / "logs"}.items():
         monkeypatch.setattr(main, key, path)
     monkeypatch.setattr(main, "_mount_read_only", lambda path: True)
+    monkeypatch.setattr(legacy_adoption_api, "browsable_folders", lambda *args: args[-1])
     monkeypatch.setattr(main, "MAIN_LIBRARY_CONTEXT", main.build_main_library_context())
     # Exercise real storage startup and HTTP registration without asynchronous claims.
     monkeypatch.setattr(main, "_start_runtime_workers", lambda **kwargs: None)
@@ -72,7 +75,7 @@ def _adopt(client):
 
 
 def test_adoption_source_browser_recommends_nas_and_rechecks_selected_folder(fresh_main, tmp_path, monkeypatch):
-    from app import legacy_adoption_dataset
+    from app import legacy_adoption_api, legacy_adoption_dataset
 
     client = _onboard(fresh_main)
     _adopt(client)
@@ -90,11 +93,12 @@ def test_adoption_source_browser_recommends_nas_and_rechecks_selected_folder(fre
         return {"dataset": "pool/photos", "device": str(os.fstat(source_fd).st_dev)}
 
     monkeypatch.setattr(legacy_adoption_dataset, "prove", prove)
+    monkeypatch.setattr(legacy_adoption_api, "browsable_folders", lambda *args: [])
     roots = _json(client, "GET", "/api/legacy-adoption/sources")
     assert roots["preferred"] == "nas"
     assert [item["key"] for item in roots["roots"]] == ["nas"]
     browse = _json(client, "GET", "/api/legacy-adoption/source?root=nas")
-    assert browse["dataset"] == "pool/photos" and browse["folders"] == ["different-dataset"]
+    assert browse["dataset"] == "pool/photos" and browse["folders"] == []
     incompatible = _json(client, "GET", "/api/legacy-adoption/source?root=nas&relative=different-dataset")
     assert incompatible["dataset"] is None and incompatible["reason"] == legacy_adoption_dataset.DATASET_REQUIRED
 

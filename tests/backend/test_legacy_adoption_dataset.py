@@ -74,3 +74,24 @@ def test_kernel_mount_parser_preserves_escaped_paths(tmp_path, monkeypatch):
     assert observed.root == PurePosixPath("/Archiv Alt")
     assert observed.target == PurePosixPath("/sources/Photos Here")
     assert observed.source == "pool/photos"
+
+
+def test_source_browser_only_lists_the_archive_dataset_and_paths_to_it(zfs_views, monkeypatch):
+    mounts, (source, archive, source_fd, archive_fd) = zfs_views
+    matching = source / "container route" / "existing photos"
+    different = source / "unrelated"
+    for path in (matching, matching / "incoming", matching / "archive", different):
+        path.mkdir(parents=True, exist_ok=True)
+    mounts[41] = replace(mounts[41], root=PurePosixPath("/"), source="pool/parent")
+    mounts[43] = replace(mounts[42], root=PurePosixPath("/"), target=PurePosixPath(matching))
+    mounts[44] = replace(mounts[41], target=PurePosixPath(different), source="pool/parent/unrelated")
+    identities = {path.stat().st_ino: mount for path, mount in ((source, 41), (archive, 42),
+                   (matching.parent, 41), (matching, 43), (different, 44))}
+    monkeypatch.setattr(dataset, "mount_id", lambda fd: identities[os.fstat(fd).st_ino])
+
+    assert dataset.browsable_folders(source, source_fd, archive, archive_fd, ["container route", "unrelated"]) == ["container route"]
+    with bound_directory(matching.parent) as parent_fd, bound_directory(matching) as matching_fd:
+        assert dataset.browsable_folders(matching.parent, parent_fd, archive, archive_fd, ["existing photos"]) == ["existing photos"]
+        assert dataset.browsable_folders(matching, matching_fd, archive, archive_fd, ["archive", "incoming"]) == ["incoming"]
+        with pytest.raises(dataset.DatasetError, match="überschneiden"):
+            dataset.prove(matching, archive, matching_fd, archive_fd)
