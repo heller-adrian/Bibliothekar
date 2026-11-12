@@ -4406,7 +4406,8 @@ BIBLIOTHEKAR_JS = r"""
       +'<div class="bk-library-actions">'
       +'<button type="button" data-bk-library-save>Speichern</button>'
       +'<button type="button" data-bk-library-check>Prüfen</button>'
-      +(!inactive?'<button type="button" data-bk-library-adopt>Bestehende Sammlung übernehmen</button>':'')
+      +(!inactive?'<button type="button" data-bk-library-adopt>Bestehende Sammlung übernehmen</button>'
+        +'<a href="/legacy-adoption/history?library='+encodeURIComponent(id)+'">Übernahmehistorie</a>':'')
       +(row.is_main?'':(
         inactive
           ? '<button type="button" data-bk-library-activate class="bk-positive-action">Aktivieren</button>'

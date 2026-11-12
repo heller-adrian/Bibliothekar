@@ -481,7 +481,7 @@ async function mutate(path, method="POST", body) {
   try {
     const result=await api(jobPath(path),method,body);
     if(path==="/finalize" && result.state==="completed") {
-      location.replace("/?"+new URLSearchParams({library}));
+      location.replace("/legacy-adoption/history?"+new URLSearchParams({library,job:jobId}));
       return result;
     }
     if(path==="/rollback/check" && result.execution?.phase==="rolled_back") {

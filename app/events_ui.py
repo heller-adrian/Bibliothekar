@@ -2224,7 +2224,7 @@ EVENTS_HTML = r"""<!doctype html>
 
     function renderSummary(events) {
       const familyCount = events.reduce((sum,event)=>sum+Number(event.assigned_family_count||0),0);
-      const deletableCount = events.filter(isDeletable).length;
+      const deletableCount = events.filter(event=>event.status!=="archived" && isDeletable(event)).length;
       const cards = [
         ["Angezeigte Ereignisse", events.length],
         ["Zugeordnete Familien", familyCount],
@@ -2253,6 +2253,17 @@ EVENTS_HTML = r"""<!doctype html>
         && !event.mutation_id;
     }
 
+    function eventDateRange(start, end) {
+      const first = formatDateTime(start), last = formatDateTime(end);
+      return first && last && first !== last ? `${first} – ${last}` : first || last;
+    }
+
+    window.addEventListener("bk-language-changed",()=>{
+      eventList.querySelectorAll("[data-event-start]").forEach(node=>{
+        node.textContent = eventDateRange(node.dataset.eventStart,node.dataset.eventEnd);
+      });
+    });
+
 
     function renderEvents(events) {
       currentEvents = events;
@@ -2273,7 +2284,7 @@ EVENTS_HTML = r"""<!doctype html>
         const reconcileTargetNotice = isReconcileTarget ? `
           <div class="reassignment-resume"><span><strong>↳ Ziel einer offenen Nachsortierung</strong><br><span class="muted">Dieses geplante Ereignis wird nicht separat angewendet. Es wird zusammen mit dem bearbeiteten Ursprungsereignis im gemeinsamen Nachsortierplan geprüft und angewendet.</span></span></div>` : "";
         card.innerHTML = `
-          <div class="event-card-header"><div><strong class="event-name" data-bk-preserve-language>${escapeHtml(event.display_title || event.name)}</strong><div class="event-folder" data-bk-preserve-language>${escapeHtml(event.folder_name||"")}</div><div class="muted">${escapeHtml(String(event.start_datetime||"").slice(0,16))} bis ${escapeHtml(String(event.end_datetime||"").slice(0,16))} · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
+          <div class="event-card-header"><div><strong class="event-name" data-bk-preserve-language>${escapeHtml(event.display_title || event.name)}</strong><div class="event-folder" data-bk-preserve-language>${escapeHtml(event.folder_name||"")}</div><div class="muted"><span data-event-start="${escapeHtml(event.start_datetime||"")}" data-event-end="${escapeHtml(event.end_datetime||"")}" data-bk-preserve-language>${escapeHtml(eventDateRange(event.start_datetime,event.end_datetime))}</span> · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
           ${reconcileTargetNotice}
           <div class="event-card-actions" hidden>
             <button type="button" data-view-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Öffnen</button>

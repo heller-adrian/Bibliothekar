@@ -404,6 +404,7 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
     event_id = plan["events"][0]["id"]
     with database_connection(database) as connection:
         assert event_file_rows(connection, event_id) == []
+    assert client.get(f"/legacy-adoption/history?library=main&job={job_id}").status_code == 303
 
     monkeypatch.setattr(registration, "source_registry_transaction", original)
     assert domain_recovery.replay(workspace, registry, database=database)
@@ -412,6 +413,20 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
     assert _json(client, "GET", job, status=409)["code"] == "legacy_adoption_inactive"
     assert client.get("/workspace").status_code == 200
     assert _json(client, "POST", job + "/finalize", json={"plan_id": plan["id"]})["state"] == "completed"
+    history_path = "/legacy-adoption/history?library=main"
+    completion_path = f"{history_path}&job={job_id}"
+    recovered_wizard = client.get(f"/legacy-adoption?library=main&job={job_id}")
+    assert recovered_wizard.status_code == 303 and recovered_wizard.headers["location"] == completion_path
+    completion = client.get(completion_path)
+    assert completion.status_code == 200
+    assert "Bestandsübernahme abgeschlossen" in completion.text
+    assert "Prüfnachweis anzeigen" in completion.text
+    assert f"/events?library=main&amp;job={catalogue_job_id(plan)}&amp;event={event_id}" in completion.text
+    assert f"{history_path}&amp;job={job_id}" in client.get(history_path).text
+    assert client.get(f"{history_path}&job={'f' * 32}").status_code == 404
+    from dataclasses import replace
+    from app.legacy_adoption_history import completed_adoptions
+    assert completed_adoptions(replace(library, library_id="another"), registry) == ([], False)
 
     inventory = scan_event_inventory(
         database, library.archive_root, catalogue_job_id(plan), event_id,
@@ -467,6 +482,10 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
     assert _json(client, "POST", second_job + "/finalize", json=second_command)["state"] == "completed"
     assert _json(client, "POST", second_job + "/finalize", json=second_command)["state"] == "completed"
     assert pending_initial_setup(registry) is None and client.get("/").status_code == 200
+    extension_receipt = client.get(f"{history_path}&job={second_id}")
+    assert extension_receipt.status_code == 200
+    assert f"/events?library=main&amp;job={catalogue_job_id(plan)}&amp;event={event_id}" in extension_receipt.text
+    assert f"{history_path}&amp;job={second_id}" in client.get(history_path).text
     assert Path(move["target"]).read_bytes() == b"synthetic RAW bytes"
     assert (source / "same-photo.raf").read_bytes() == b"synthetic RAW bytes"
     assert (source / "outside.raf").read_bytes() == b"outside the saved period"
@@ -535,6 +554,9 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
         assert connection.execute("SELECT 1 FROM events WHERE id = ?", (event_id,)).fetchone() is None
         assert connection.execute("SELECT current_root_kind FROM files WHERE id = ?",
                                   (media_row["id"],)).fetchone()[0] == "shared_workspace"
+    old_receipt = client.get(completion_path)
+    assert old_receipt.status_code == 200 and "Nicht mehr im Archiv" in old_receipt.text
+    assert f"&amp;event={event_id}" not in old_receipt.text
 
 
 def test_exclusive_mode_holds_until_explicit_skip(

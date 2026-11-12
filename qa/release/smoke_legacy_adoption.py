@@ -131,7 +131,8 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
     assert folder["read_only"] and folder["dataset"] == nas["dataset"]
     assert folder["folders"] == ["old-folders"]
     day = "21" if method == "manual" else "22"
-    def adopt(execution, relative, existing_event=None):
+    def adopt(execution, relative, existing_event=None, *, rollback=False):
+        nonlocal base
         host_source = source / relative
         originals = {str(path.relative_to(host_source)): hashlib.sha256(path.read_bytes()).hexdigest()
                      for path in host_source.rglob("*") if path.is_file()}
@@ -162,7 +163,6 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             definition = {"name": "Smoke " + execution, "start_date": date, "end_date": date, "preserve_day_folders": True}
         draft = api(job + "/draft", method="PUT", payload={"revision": 0, "events": [definition]})
         if execution == "script":
-            nonlocal base
             subprocess.run(["docker", "restart", container], check=True)
             base = address()
             wait_ready()
@@ -206,21 +206,44 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
                 original.rename(target)
         else:
             shell = api(job + "/script/release", method="POST", payload=command)["command"]
+            if rollback:
+                subprocess.run(["docker", "restart", container], check=True)
+                base = address()
+                wait_ready()
+                login()
+                assert api(job + "/script")["command"] == shell
             subprocess.run(["/bin/bash", "-c", shell], check=True)
             assert api(job + "/script")["status"]["state"] == "completed"
         for move in moves:
             target = archive / Path(move["target"]).relative_to("/main-library")
             assert hashlib.sha256(target.read_bytes()).hexdigest() == move["sha256"]
         assert api(job + "/verify", method="POST", payload=command)["state"] == "verified"
+        if rollback:
+            assert api(job + "/rollback/start", method="POST", payload=command)["execution"]["phase"] == "rolling_back"
+            shell = api(job + "/script")["command"]
+            subprocess.run(["/bin/bash", "-c", shell], check=True)
+            assert api(job + "/rollback/check", method="POST", payload=command)["execution"]["phase"] == "rolled_back"
+            for relative, digest in originals.items():
+                assert hashlib.sha256((host_source / relative).read_bytes()).hexdigest() == digest
+            assert not list(archive.rglob("event.json"))
+            assert all(not (archive / Path(move["target"]).relative_to("/main-library")).exists() for move in moves)
+            print("Released script resumed after a container restart and controlled rollback restored the source on native ZFS.")
+            return event, moves
         assert api(job + "/finalize", method="POST", payload=command)["state"] == "completed"
         assert api(job + "/finalize", method="POST", payload=command,
                    repeat_finalize=True)["state"] == "completed"
         assert b'id="bk-settings-dialog"' in request("/workspace")
+        receipt = request(f"/legacy-adoption/history?library=main&job={job_id}")
+        assert b"Bestands" in receipt and b"SHA-256" in receipt
+        assert f"&amp;event={event['id']}".encode() in receipt
         assert api("/api/legacy-adoption/jobs", method="POST", expected=409, payload={"root": "nas"})[
             "code"
         ] == "legacy_adoption_inactive"
         return event, moves
 
+    if method == "rollback":
+        adopt("script", "first", rollback=True)
+        return
     event, moves = adopt(method, "first")
     if method == "manual":
         previous = {item["target_path"]: item["sha256"] for item in moves}

@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import Event, Lock
 from typing import Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
@@ -19,6 +19,7 @@ from app.legacy_adoption_dataset import DatasetError, browsable_folders
 from app.legacy_adoption_execution import change_phase, complete_rollback, confirm_plan, verify_execution
 from app.legacy_adoption_export import directory_scaffold, event_documents, manifest_file
 from app.legacy_adoption_host import ExecutionError
+from app.legacy_adoption_history import completed_adoptions, history_html
 from app.legacy_adoption_inventory import (
     _job, create_job, discard_job, inventory_chronology, inventory_errors, inventory_families,
     inventory_status, qualify_source, scan_inventory,
@@ -217,6 +218,16 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                         recovery_only=getattr(request.state, "legacy_adoption_recovery", False)),
             headers={"Cache-Control": "no-store"},
         )
+
+    @app.get("/legacy-adoption/history", response_class=HTMLResponse, include_in_schema=False)
+    def adoption_history(job: str | None = Query(None, pattern=r"^[a-f0-9]{32}$"),
+                         page: int = Query(1, ge=1, le=100000)):
+        library = context()
+        with _errors():
+            entries, more = completed_adoptions(library, registry_path(), job_id=job, page=page)
+        return HTMLResponse(history_html(library, entries, job_id=job, page=page, more=more),
+                            status_code=404 if job and not entries else 200,
+                            headers={"Cache-Control": "no-store"})
 
     def managed_roots():
         return tuple(

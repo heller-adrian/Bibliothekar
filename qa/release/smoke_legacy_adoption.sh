@@ -18,7 +18,7 @@ trap cleanup EXIT
 docker pull "$image"
 test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$revision"
 export ADOPTION_SMOKE_PASSWORD=synthetic-legacy-adoption-smoke-password
-for method in manual script skip; do
+for method in manual script rollback skip; do
   install_root="$scratch/$method"
   archive="$media/archive-$method"
   source="$media/source-$method"

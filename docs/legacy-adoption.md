@@ -37,7 +37,7 @@ Lasse Quelle und Archiv während der Planung unverändert. Der Assistent öffnet
 
 ## Abschließen oder kontrolliert zurücknehmen
 
-Wähle nach erfolgreicher Archivprüfung **Übernahme registrieren**. Bibliothekar prüft Zielpfade, ursprüngliche Dateiidentitäten, SHA-256, den vorhandenen Archivbestand und die Ereignisdokumente erneut. Danach gelten die normalen Funktionen für Archivänderungen.
+Wähle nach erfolgreicher Archivprüfung **Übernahme registrieren**. Bibliothekar prüft Zielpfade, ursprüngliche Dateiidentitäten, SHA-256, den vorhandenen Archivbestand und die Ereignisdokumente erneut. Die Abschlussseite zeigt die übernommenen Dateien und Dateifamilien, verlinkt die archivierten Ereignisse und enthält den Prüfnachweis. Öffne die Seite später unter **Einstellungen → Bibliotheken → Übernahmehistorie**. Danach gelten die normalen Funktionen für Archivänderungen.
 
 Vor der Registrierung kannst du **Kontrollierte Wiederherstellung starten**. Im manuellen Modus bringst du die Dateien anhand des Rückwegs an ihre ursprünglichen Pfade und stellst frühere Ereignisdokumente wieder her. Entferne nur Ereignisdokumente, die dieser Auftrag neu bereitgestellt hat. Im Skriptmodus startet der angezeigte Rücknahmebefehl die protokollierte Umkehrung. Der Assistent beendet den Auftrag erst, wenn er die ursprüngliche Anordnung und die Dateiintegrität unabhängig nachgewiesen hat. Bewahre das AppData-Paket und sein Journal für die Wiederaufnahme auf. Wenn Pfade, Rechte oder das Paket selbst verändert wurden, stelle die nachgewiesenen Einbindungen und den ursprünglichen Paketstand wieder her, bevor du die Rücknahme fortsetzt.
 

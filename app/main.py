@@ -14426,6 +14426,15 @@ async def adoption_access_middleware(request: Request, call_next):
                     return await call_next(request)
                 code = "initial_setup_required"
             elif adoption_path or decision_path:
+                if method == "GET" and path == "/legacy-adoption" and request.query_params.get("job"):
+                    from app.legacy_adoption_mode import adoption_reservation
+                    completed = adoption_reservation(REGISTRY_DATABASE_FILE)
+                    if (completed and completed["plan_state"] == "completed"
+                            and completed["job_id"] == request.query_params["job"]
+                            and completed["library_id"] == _requested_library_id(request)):
+                        return RedirectResponse("/legacy-adoption/history?" + urlencode({
+                            "library": completed["library_id"], "job": completed["job_id"],
+                        }), status_code=303)
                 if later_entry or eligibility:
                     request.state.legacy_adoption_later = True
                     if path == "/legacy-adoption" and request.query_params.get("job"):

@@ -36,6 +36,7 @@ UI_TRANSLATIONS = {
   "Sprache": "Language",
   "Sitzung": "Session",
     "Bestehende Sammlung übernehmen": "Adopt an existing collection",
+    "Übernahmehistorie": "Adoption history",
     "Schließe laufende Vorgänge oder offene Wiederherstellungen ab.": "Finish active operations or resolve pending recovery.",
     "Schließe offene Archivänderungen ab.": "Finish open archive changes.",
     "Schließe offene Import- und Hintergrundaufträge ab.": "Finish pending imports and background jobs.",

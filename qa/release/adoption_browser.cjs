@@ -2,6 +2,8 @@
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const fs = require('node:fs/promises');
+const {execFileSync} = require('node:child_process');
 const {BIBLIOTHEKAR_BROWSER_URL:url, BIBLIOTHEKAR_BROWSER_ARCHIVE:archive,
   BIBLIOTHEKAR_BROWSER_PASSWORD:password, BIBLIOTHEKAR_BROWSER_SCREENSHOTS:screenshots,
   CHROMIUM_EXECUTABLE:executablePath} = process.env;
@@ -10,6 +12,51 @@ const origin = new URL(url);
 const expectedSecure=origin.protocol==='https:' || ['localhost','127.0.0.1','[::1]'].includes(origin.hostname);
 async function capture(page,name){
   if(screenshots)await page.screenshot({path:path.join(screenshots,`${origin.port}-${name}.png`)});
+}
+async function finishManualAdoption(page){
+  const archivePath=await fs.realpath(archive);
+  const fixture=path.dirname(path.dirname(archivePath));
+  const sourcePath=path.join(fixture,'synthetic-source');
+  assert.equal(archivePath,path.join(fixture,'first-install','archive'));
+  assert.ok(path.basename(fixture).startsWith('bibliothekar-rc3-browser-'));
+  assert.equal(await fs.realpath(sourcePath),sourcePath);
+  await page.getByRole('button',{name:/Next: Choose execution|Weiter: Methode wählen/}).click();
+  await page.getByLabel(/I confirm the safety conditions|Ich bestätige die Sicherheitsbedingungen/).check();
+  await page.getByRole('button',{name:/Confirm and start|Durchführung verbindlich starten/}).click();
+  for (const [name,file] of [[/Empty folder structure|Leeres Ordnergerüst/,'folders.zip'],
+                            [/^Event documents$|^Ereignisdokumente$/,'documents.zip']]) {
+    const [download]=await Promise.all([page.waitForEvent('download'),page.getByRole('link',{name}).click()]);
+    const zip=path.join(fixture,file);
+    await download.saveAs(zip);
+    execFileSync('unzip',['-oq',zip,'-d',archivePath]);
+  }
+  const moves=await page.evaluate(async()=>{
+    const job=new URL(location.href).searchParams.get('job');
+    const response=await fetch(`/api/legacy-adoption/jobs/${job}/moves`);
+    if(!response.ok)throw new Error(await response.text());
+    return response.json();
+  });
+  assert.equal(moves.length,6);
+  for (const {source,target} of moves) {
+    assert.ok((await fs.realpath(source)).startsWith(sourcePath+path.sep));
+    assert.ok((await fs.realpath(path.dirname(target))).startsWith(archivePath+path.sep));
+    await fs.rename(source,target);
+  }
+  await page.getByRole('button',{name:/Next: Verify archive|Weiter: Archiv prüfen/}).click();
+  await page.getByRole('button',{name:/^Verify archive$|^Archiv prüfen$/}).click();
+  await page.getByRole('button',{name:/Register adoption|Übernahme registrieren/}).click();
+  await page.getByRole('heading',{name:/Collection adoption complete|Bestandsübernahme abgeschlossen/}).waitFor();
+  assert.ok(await page.locator('main.adoption-complete h1').evaluate(heading=>heading.scrollWidth<=heading.clientWidth));
+  await page.getByText(/Show verification record|Prüfnachweis anzeigen/,{exact:true}).click();
+  await page.getByText(/SHA-256 of the confirmed plan|SHA-256 des bestätigten Plans/).waitFor();
+  await capture(page,'completion');
+  await page.getByRole('link',{name:/Adoption history|Übernahmehistorie/}).click();
+  await page.getByRole('link',{name:/View completed adoption|Abschluss anzeigen/}).click();
+  await page.getByRole('link',{name:'Reopened Test',exact:true}).click();
+  await page.locator('#event-edit-dialog[open]').waitFor();
+  await page.locator('.event-card .status-chip.archived').first().waitFor();
+  const plans=page.locator('#summary .card').filter({hasText:/Plans eligible for deletion|Deletable plans|Löschbare Planungen/i});
+  assert.equal(await plans.locator('strong').textContent(),'0');
 }
 (async()=>{
   const browser=await chromium.launch({
@@ -127,6 +174,7 @@ async function capture(page,name){
     await capture(page,'plan');
     await page.getByRole('button',{name:/Next: Review plan|Weiter: Plan prüfen/}).click();
     await page.getByText(/Plan prepared|Plan vorbereitet/,{exact:true}).waitFor();
+    if(process.env.BIBLIOTHEKAR_BROWSER_FINISH==='1')await finishManualAdoption(page);
     assert.equal(errors.length,0,JSON.stringify(errors));
     console.log(url,features,'saved, reopened, edited and prepared plan with subevent and collection');
   } finally { await browser.close(); }
