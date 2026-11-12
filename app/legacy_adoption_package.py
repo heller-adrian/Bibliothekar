@@ -7,10 +7,12 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shlex
+from secrets import token_hex
 
-from app import legacy_adoption_host as host
+from app import legacy_adoption_discover as discovery, legacy_adoption_host as host
 from app.appdata import root as appdata_root
 from app.database import database_connection
+from app.legacy_adoption_dataset import DatasetError, mount_id, mount_table
 from app.legacy_adoption_inventory import _job
 from app.legacy_adoption_paths import AdoptionError, bound_file, bound_sha256, relative_parent
 from app.legacy_adoption_plan import _roots
@@ -20,6 +22,7 @@ from app.private_storage_security import qualified
 
 PACKAGE_ROOT = "legacy-adoption"
 RUNNER_FILES = ("legacy_adoption_host.py", "legacy_adoption_dataset.py")
+DISCOVERY_FILE = "legacy_adoption_discover.py"
 
 
 def _sha(data):
@@ -92,6 +95,9 @@ def _host_paths(plan_id, host_appdata, host_source, host_archive):
 
 
 def _command(mode, descriptor, paths, digest):
+    if host.info_at(descriptor, DISCOVERY_FILE) is not None:
+        return _launch(descriptor, paths["package"], mode, digest, paths["source"], paths["archive"])
+    # Keep the command available for previously prepared packages and journals.
     device, inode = host.inode(os.fstat(descriptor))
     checks = [_sha(Path(__file__).with_name(name).read_bytes()) + "  " + name for name in RUNNER_FILES]
     command = ["python3", "-E", "-s", "-B", "./" + RUNNER_FILES[0], mode,
@@ -110,6 +116,8 @@ def _probe_package(job_id, plan_id):
 
 
 def _host_proof(descriptor, probe, digest):
+    if _probe_error(descriptor, digest):
+        return None
     proof = _read_json(descriptor, "host-proof.json")
     if not isinstance(proof, dict) or set(proof) != {"probe", "package", "source", "archive"} or proof["probe"] != digest:
         return None
@@ -123,20 +131,47 @@ def _host_proof(descriptor, probe, digest):
     return paths if paths == checked else None
 
 
+def _probe_error(descriptor, digest):
+    failure = _read_json(descriptor, "host-check-error.json")
+    if isinstance(failure, dict) and failure.get("probe") == digest and isinstance(failure.get("detail"), str):
+        return failure["detail"]
+    return None
+
+
+def _discovery_script():
+    checksums = {name: _sha(Path(__file__).with_name(name).read_bytes()) for name in reversed(RUNNER_FILES)}
+    return f"RUNNER_CHECKSUMS = {checksums!r}\n".encode() + Path(__file__).with_name(DISCOVERY_FILE).read_bytes()
+
+
+def _launch(descriptor, path, *args, automatic=False):
+    device, inode = host.inode(os.fstat(descriptor))
+    return shlex.join(["sudo", "python3", "-I", "-B", "-c", discovery.bootstrap(automatic=automatic),
+                       path, f"{os.major(device)}:{os.minor(device)}", str(inode), _sha(_discovery_script()), *args])
+
+
+def _package_mount(path, descriptor):
+    try:
+        mount = mount_table()[mount_id(descriptor)]
+        device = os.fstat(descriptor).st_dev
+        if mount.device == f"{os.major(device)}:{os.minor(device)}":
+            return {"directory": str(mount.root / PurePosixPath(path).relative_to(mount.target)), "device": mount.device}
+    except (OSError, KeyError, ValueError, DatasetError):
+        pass
+    return None
+
+
 def _probe_result(descriptor, probe, digest):
     paths = _host_proof(descriptor, probe, digest)
+    diagnostic = _probe_error(descriptor, digest)
+    command = None
     if probe["host"] is not None:
         command = _command("probe", descriptor, probe["host"], digest)
+    elif mount := probe.get("package_mount"):
+        command = _launch(descriptor, mount["directory"], digest, automatic=True)
     else:
-        config = {
-            "probe": digest, "container": probe["container"], "identity": host.inode(os.fstat(descriptor)),
-            # The discovery command loads both modules from the verified bytes.
-            "scripts": {name: _sha(Path(__file__).with_name(name).read_bytes()) for name in reversed(RUNNER_FILES)},
-        }
-        source = Path(__file__).with_name("legacy_adoption_discover.py").read_text()
-        command = shlex.join(["python3", "-I", "-B", "-c", source, json.dumps(config)])
+        diagnostic = "Bereite die automatische Hostprüfung erneut vor. Falls kein Befehl verfügbar ist, verwende die manuelle Hostpfadprüfung."
     return {"command": command, "host": paths or probe["host"], "sha256": digest,
-            "verified": paths is not None, "dataset": probe["dataset"]["dataset"]}
+            "verified": paths is not None, "dataset": probe["dataset"]["dataset"], "diagnostic": diagnostic}
 
 
 def prepare_probe(library, job_id, plan_id, host_appdata=None, host_source=None, host_archive=None):
@@ -157,12 +192,16 @@ def prepare_probe(library, job_id, plan_id, host_appdata=None, host_source=None,
             stack.enter_context(host.package_lock(descriptor))
             for name in RUNNER_FILES:
                 host.write_atomic(descriptor, name, Path(__file__).with_name(name).read_bytes())
+            package_path = appdata_root() / PACKAGE_ROOT / job_id
+            host.write_atomic(descriptor, DISCOVERY_FILE, _discovery_script())
             probe = {
                 "job_id": job_id, "plan_id": plan_id, "library_id": library.library_id, "host": paths,
                 "container": {
-                    "package": str(appdata_root() / PACKAGE_ROOT / job_id),
+                    "package": str(package_path),
                     "source": job["source_root"], "archive": job["archive_root"],
                 },
+                "package_mount": _package_mount(package_path, descriptor) if paths is None else None,
+                "nonce": token_hex(16),
                 "dataset": json.loads(job["dataset_json"]),
                 "source_inode": [job["source_device"], job["source_inode"]],
                 "archive_inode": [job["archive_device"], job["archive_inode"]],
@@ -340,6 +379,6 @@ def read_manifest(library, job_id, plan_id):
 
 
 def inspect_runner(name):
-    if name not in RUNNER_FILES:
+    if name not in (*RUNNER_FILES, DISCOVERY_FILE):
         raise AdoptionError("Unbekannte Skriptdatei.")
     return Path(__file__).with_name(name).read_text()

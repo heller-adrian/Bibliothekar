@@ -1,61 +1,48 @@
-"""Read Docker mount metadata on the NAS and record a qualified host proof."""
+"""Resolve one prepared adoption from native Linux mounts and write its host proof."""
 from contextlib import ExitStack
 import hashlib
 import json
 import os
 from pathlib import PurePosixPath
-import re
 import stat
-import subprocess
 import sys
 from types import ModuleType
 
 
-def host_path(path, mounts):
-    path = PurePosixPath(path)
-    candidates = []
-    for mount in mounts:
-        destination = PurePosixPath(mount["Destination"])
-        if path.is_relative_to(destination):
-            source = mount.get("Source")
-            native = None
-            if mount["Type"] in {"bind", "volume"} and source and source.startswith("/"):
-                native = str(PurePosixPath(source) / path.relative_to(destination))
-            candidates.append((len(destination.parts), native))
-    if not candidates:
-        return None
-    depth = max(length for length, _ in candidates)
-    matches = {native for length, native in candidates if length == depth}
-    return matches.pop() if len(matches) == 1 else None
+# The privileged launcher runs only the helper bytes pinned by Bibliothekar.
+_LOADER = '''import hashlib,os,stat,sys
+from pathlib import Path
+def run(p,dev,ino,checksum,mode,args):
+ try:
+  s=p.lstat()
+  if str(s.st_ino)!=ino or f"{os.major(s.st_dev)}:{os.minor(s.st_dev)}"!=dev or not stat.S_ISDIR(s.st_mode):return
+  with os.fdopen(os.open(p/"legacy_adoption_discover.py",os.O_NOFOLLOW|os.O_NONBLOCK),"rb") as f:
+   if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):return
+   code=f.read(16384)
+ except OSError:return
+ if hashlib.sha256(code).hexdigest()==checksum:
+  scope={"__name__":"legacy_adoption_discover"}
+  exec(code,scope)
+  sys.exit(scope[mode](str(p),[s.st_dev,s.st_ino],*args))
+'''
+_DISCOVER = '''import json,subprocess
+root,dev,ino,checksum,probe=sys.argv[1:]
+try:mounts=json.loads(subprocess.check_output(["findmnt","-Jlo","TARGET,FSROOT,MAJ:MIN"],timeout=15))["filesystems"]
+except (OSError,ValueError,subprocess.SubprocessError):sys.exit("Host check failed: run this command in the TrueNAS host shell with findmnt available.")
+mounts=[m for m in mounts if m["maj:min"]==dev and m["fsroot"] and m["target"]]
+for m in sorted(mounts,key=lambda m:len(Path(m["fsroot"]).parts)):
+ if Path(root).is_relative_to(m["fsroot"]):
+  run(Path(m["target"])/Path(root).relative_to(m["fsroot"]),dev,ino,checksum,"check",[probe])
+'''
+_DIRECT = '''path,dev,ino,checksum,*args=sys.argv[1:]
+run(Path(path),dev,ino,checksum,"execute",args)
+'''
+_NO_PACKAGE = 'sys.exit("Approved AppData package not found or changed. Check the command in Bibliothekar and run it on the TrueNAS host.")'
 
 
-def mount_groups():
-    ids = subprocess.check_output(["docker", "ps", "--quiet", "--no-trunc"], text=True, timeout=15).split()
-    if not ids or not all(re.fullmatch(r"[a-f0-9]{64}", value) for value in ids):
-        raise ValueError("No running Docker container was found.")
-    lines = subprocess.check_output(
-        ["docker", "inspect", "--type", "container", "--format", "{{json .Mounts}}", *ids],
-        text=True, timeout=15,
-    ).splitlines()
-    return [json.loads(line) or [] for line in lines]
-
-
-def discover(container, identity, groups):
-    candidates = set()
-    for mounts in groups:
-        package = host_path(container["package"], mounts)
-        if package is None:
-            continue
-        try:
-            info = os.stat(package, follow_symlinks=False)
-        except FileNotFoundError:
-            continue
-        if [info.st_dev, info.st_ino] != identity or not stat.S_ISDIR(info.st_mode):
-            continue
-        candidates.add((package, host_path(container["source"], mounts), host_path(container["archive"], mounts)))
-    if len(candidates) != 1 or None in next(iter(candidates)):
-        raise ValueError("The Docker mounts do not identify one complete host mapping for this package.")
-    return dict(zip(("package", "source", "archive"), candidates.pop()))
+def bootstrap(*, automatic=True):
+    program = _LOADER + (_DISCOVER if automatic else _DIRECT) + _NO_PACKAGE
+    return f"exec({program!r})"
 
 
 def open_package(stack, path, identity):
@@ -88,28 +75,84 @@ def load_runner(package, checksums):
     return sys.modules["legacy_adoption_host"]
 
 
-def main(config, groups=None):
-    expected = config["identity"]
-    paths = discover(config["container"], expected, mount_groups() if groups is None else groups)
+def resolve_media(host, binding, mounts):
+    proof = binding["dataset"]
+    source = PurePosixPath(proof["source_directory"])
+    archive = PurePosixPath(proof["archive_directory"])
+    last_error = None
+    for mount in sorted(mounts, key=lambda item: (len(item.root.parts), len(item.target.parts), item.target)):
+        if (mount.filesystem, mount.source, mount.device) != ("zfs", proof["dataset"], proof["device"]):
+            continue
+        if not (source.is_relative_to(mount.root) and archive.is_relative_to(mount.root)):
+            continue
+        source_path = str(mount.target / source.relative_to(mount.root))
+        archive_path = str(mount.target / archive.relative_to(mount.root))
+        try:
+            with host.directory(source_path, binding["source_inode"]) as src, \
+                    host.directory(archive_path, binding["archive_inode"]) as dst:
+                host.probe_roots(source_path, archive_path, binding, src, dst)
+                return source_path, archive_path
+        except (OSError, host.DatasetError, host.ExecutionError) as error:
+            last_error = error
+    if last_error is not None:
+        raise last_error
+    raise ValueError("No native ZFS mount contains both approved folders. Check the archive and source mounts.")
+
+
+def verify(package_path, identity, digest, checksums):
     with ExitStack() as stack:
-        package = open_package(stack, paths["package"], expected)
-        host = load_runner(package, config["scripts"])
+        package = open_package(stack, package_path, identity)
+        host = load_runner(package, checksums)
+        dataset = sys.modules["legacy_adoption_dataset"]
         with host.package_lock(package):
             content = host.read_bytes(package, "probe.json")
-            if hashlib.sha256(content).hexdigest() != config["probe"]:
+            if hashlib.sha256(content).hexdigest() != digest:
                 raise ValueError("This check command belongs to an older plan.")
             binding = json.loads(content)
-            if binding["container"] != config["container"] or binding["host"] is not None:
-                raise ValueError("The prepared package does not match the selected paths.")
-            source = stack.enter_context(host.directory(paths["source"], binding["source_inode"]))
-            archive = stack.enter_context(host.directory(paths["archive"], binding["archive_inode"]))
-            host.probe_roots(paths["source"], paths["archive"], binding, source, archive)
-            host.write_atomic(package, "host-proof.json", host.json_bytes({"probe": config["probe"], **paths}))
+            if binding["host"] is not None or not binding.get("package_mount"):
+                raise ValueError("This package was not prepared for automatic host discovery.")
+            try:
+                source, archive = resolve_media(host, binding, dataset.mount_table().values())
+            except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+                host.write_atomic(package, "host-check-error.json", host.json_bytes({
+                    "probe": digest, "detail": str(error),
+                }))
+                raise
+            host.write_atomic(package, "host-proof.json", host.json_bytes({
+                "probe": digest, "package": package_path, "source": source, "archive": archive,
+            }))
+            try:
+                os.unlink("host-check-error.json", dir_fd=package)
+            except FileNotFoundError:
+                pass
+            else:
+                os.fsync(package)
 
 
-if __name__ == "__main__":
+def check(package_path, identity, digest):
     try:
-        main(json.loads(sys.argv[1]))
-    except (OSError, RuntimeError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
-        sys.exit(f"Host check failed: {error}\nCheck the Docker mounts and shell access, or use the manual host mapping in Bibliothekar.")
+        verify(package_path, identity, digest, RUNNER_CHECKSUMS)
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+        print(f"Host check failed: {error}", file=sys.stderr)
+        return 1
     print("Host paths and ZFS dataset verified. Return to Bibliothekar and read the proof.")
+    return 0
+
+
+def execute(package_path, identity, mode, digest, source, archive):
+    try:
+        with ExitStack() as stack:
+            package = open_package(stack, package_path, identity)
+            host = load_runner(package, RUNNER_CHECKSUMS)
+        result = host.main([
+            mode, "--package", package_path, "--source", source, "--archive", archive, "--sha256", digest,
+            "--package-device", str(identity[0]), "--package-inode", str(identity[1]),
+        ])
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+        print(f"Adoption command failed: {error}", file=sys.stderr)
+        return 1
+    if result == 0:
+        print({"probe": "Host paths and ZFS dataset verified. Return to Bibliothekar and read the proof.",
+               "apply": "File operations complete. Return to Bibliothekar to verify the archive.",
+               "rollback": "Rollback operations complete. Return to Bibliothekar to verify the rollback."}[mode])
+    return result

@@ -582,6 +582,8 @@ def test_script_host_proof_release_and_independent_archive_verification(
     import shlex
     import subprocess
 
+    from pathlib import PurePosixPath
+    from app import legacy_adoption_dataset as dataset, legacy_adoption_discover as discovery
     from app import legacy_adoption_host as host, legacy_adoption_package as package
     from tests.backend.test_legacy_adoption_host import _macos_rename
 
@@ -593,6 +595,9 @@ def test_script_host_proof_release_and_independent_archive_verification(
     appdata.mkdir()
     original = source / "proof.raf"
     original.write_bytes(b"synthetic script photo")
+    evidence = {"dataset": "synthetic/test", "device": "0:42",
+                "source_directory": "/source with space", "archive_directory": "/first-install/archive"}
+    monkeypatch.setattr(dataset, "prove", lambda *args: evidence)
     monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
     monkeypatch.setattr(main, "DATABASE_INITIALIZATION_ERROR", None)
     monkeypatch.setattr(package, "appdata_root", lambda: appdata)
@@ -619,27 +624,35 @@ def test_script_host_proof_release_and_independent_archive_verification(
     _json(client, "POST", job + "/documents")
     command = {"plan_id": plan["id"]}
     library = resolve_library_context(registry, "main")
-    # Test automatic discovery against synthetic Docker metadata. The real
+    # Exercise the host mapping with a synthetic mount table. The real
     # Linux/ZFS container run executes the returned shell command itself.
-    from app import legacy_adoption_discover as discovery
+    monkeypatch.setattr(package, "_package_mount", lambda path, fd: {"directory": str(path), "device": "0:42"})
 
     auto = _json(client, "POST", job + "/script/probe", json=command)
     assert auto["host"] is None and not auto["verified"]
     package_root = appdata / "legacy-adoption" / job_id
-    assert {path.name for path in package_root.iterdir()} >= {"probe.json", "execution.lock", "journal.jsonl"}
-    config = json.loads(shlex.split(auto["command"])[-1])
-    mounts = [{"Destination": str(path), "Source": str(path), "Type": "bind"}
-              for path in (appdata, source, library.archive_root)]
-    monkeypatch.setattr(discovery, "load_runner", lambda *_: host)
-    if sys.platform == "darwin":
-        monkeypatch.setattr(host, "probe_roots", lambda *args: None)
-    with pytest.raises(ValueError, match="complete host mapping"):
-        discovery.main(config, [mounts[:-1]])
-    assert not _json(client, "GET", job + "/script/probe")["verified"]
-    discovery.main(config, [mounts])
+    assert {path.name for path in package_root.iterdir()} >= {
+        "probe.json", "execution.lock", "journal.jsonl", "legacy_adoption_discover.py",
+    }
+    assert "\n" not in auto["command"] and shlex.split(auto["command"])[:3] == ["sudo", "python3", "-I"]
+    with monkeypatch.context() as simulated_host:
+        simulated_host.setitem(sys.modules, "legacy_adoption_dataset", dataset)
+        simulated_host.setattr(discovery, "load_runner", lambda *_: host)
+        simulated_host.setattr(dataset, "mount_table", lambda: {})
+        if sys.platform == "darwin":
+            simulated_host.setattr(host, "probe_roots", lambda *args: None)
+        args = (str(package_root), host.inode(package_root.stat()), auto["sha256"], {})
+        with pytest.raises(ValueError, match="No native ZFS mount"):
+            discovery.verify(*args)
+        failure = _json(client, "GET", job + "/script/probe")
+        assert not failure["verified"] and "No native ZFS mount" in failure["diagnostic"]
+        mount = dataset.Mount("0:42", PurePosixPath("/"), PurePosixPath(root), "zfs", "synthetic/test")
+        simulated_host.setattr(dataset, "mount_table", lambda: {1: mount})
+        discovery.verify(*args)
     proved = _json(client, "GET", job + "/script/probe")
     assert proved["verified"] and proved["host"]["package"] == str(package_root)
     assert proved["dataset"] == "synthetic/test"
+    assert proved["diagnostic"] is None
     assert original.read_bytes() == b"synthetic script photo"
     probe = _json(client, "POST", job + "/script/probe", json={
         **command, "appdata": str(appdata), "source": str(source), "archive": str(library.archive_root),
@@ -650,9 +663,13 @@ def test_script_host_proof_release_and_independent_archive_verification(
     def external(shell_command):
         subprocess.run(["/bin/sh", "-n", "-c", shell_command], check=True)
         args = shlex.split(shell_command)
-        assert args[:2] == ["cd", probe["host"]["package"]]
-        start = args.index("./legacy_adoption_host.py")
-        return host.main(args[start + 1:])
+        assert args[:5] == ["sudo", "python3", "-I", "-B", "-c"]
+        path, device, inode, _, mode, digest, source_path, archive_path = args[6:]
+        assert path == probe["host"]["package"]
+        major, minor = map(int, device.split(":"))
+        return host.main([mode, "--package", path, "--source", source_path, "--archive", archive_path,
+                          "--sha256", digest, "--package-device", str(os.makedev(major, minor)),
+                          "--package-inode", inode])
 
     assert external(probe["command"]) == 0
     assert _json(client, "GET", job + "/script/probe")["verified"]

@@ -183,7 +183,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
         if execution == "script":
             probe = api(job + "/script/probe", method="POST", payload=command)
             assert not probe["verified"] and probe["host"] is None
-            subprocess.run(["sudo", "-n", "/bin/bash", "-c", probe["command"]], check=True)
+            subprocess.run(["/bin/bash", "-c", probe["command"]], check=True)
             proved = api(job + "/script/probe")
             assert proved["verified"] and proved["sha256"] == probe["sha256"]
             assert proved["host"] == {
@@ -206,7 +206,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
                 original.rename(target)
         else:
             shell = api(job + "/script/release", method="POST", payload=command)["command"]
-            subprocess.run(["sudo", "-n", "/bin/bash", "-c", shell], check=True)
+            subprocess.run(["/bin/bash", "-c", shell], check=True)
             assert api(job + "/script")["status"]["state"] == "completed"
         for move in moves:
             target = archive / Path(move["target"]).relative_to("/main-library")

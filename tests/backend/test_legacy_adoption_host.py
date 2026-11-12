@@ -208,3 +208,43 @@ def test_refuses_symlink_parent_and_unreleased_command(package, tmp_path):
     assert host.main(_command(package, "apply")) == 1
     assert not list(outside.iterdir())
     assert (source / "photo.raf").exists()
+
+
+def test_discovery_bootstrap_uses_bound_package_and_executes_only_verified_bytes(tmp_path, monkeypatch):
+    import subprocess
+    from app import legacy_adoption_discover as discovery
+
+    root = tmp_path.resolve()
+    package = root / "AppData's nested bind" / "legacy-adoption" / "one-job"
+    package.mkdir(parents=True)
+    info = package.stat()
+    device = f"{os.major(info.st_dev)}:{os.minor(info.st_dev)}"
+    bootstrap = root / "findmnt"
+    mounts = [
+        {"target": str(root), "fsroot": "/shadow", "maj:min": "0:0"},
+        {"target": str(root), "fsroot": "/", "maj:min": device},
+        {"target": str(package.parent.parent), "fsroot": "/bindings/app data", "maj:min": device},
+    ]
+    (root / "mounts.json").write_text(json.dumps({"filesystems": mounts}))
+    bootstrap.write_text('#!/bin/sh\n/bin/cat "$MOUNTS_FIXTURE"\n')
+    bootstrap.chmod(0o700)
+    monkeypatch.setenv("MOUNTS_FIXTURE", str(root / "mounts.json"))
+    monkeypatch.setenv("PATH", str(root))
+    helper = package / "legacy_adoption_discover.py"
+    code = (b'def check(path, identity, digest):\n    print(path, digest)\n    return 0\n'
+            b'def execute(path, identity, mode, digest, source, archive):\n    print(mode, path, digest)\n    return 0\n')
+    helper.write_bytes(code)
+    arguments = [sys.executable, "-I", "-B", "-c", discovery.bootstrap(), "/bindings/app data/legacy-adoption/one-job",
+                 device, str(info.st_ino), hashlib.sha256(code).hexdigest(), "approved-probe-digest"]
+    accepted = subprocess.run(arguments, text=True, capture_output=True, check=True)
+    assert accepted.stdout == f"{package} approved-probe-digest\n"
+    direct = [sys.executable, "-I", "-B", "-c", discovery.bootstrap(automatic=False), str(package),
+              device, str(info.st_ino), _sha(code), "apply", "approved-manifest-digest", "/source", "/archive"]
+    accepted = subprocess.run(direct, text=True, capture_output=True, check=True)
+    assert accepted.stdout == f"apply {package} approved-manifest-digest\n"
+
+    helper.write_bytes(code + b'raise AssertionError("tampered helper was executed")\n')
+    for command in (arguments, direct):
+        rejected = subprocess.run(command, text=True, capture_output=True)
+        assert rejected.returncode == 1 and "Approved AppData package not found" in rejected.stderr
+        assert "tampered helper was executed" not in rejected.stderr

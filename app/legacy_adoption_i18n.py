@@ -48,6 +48,16 @@ TRANSLATIONS = {
     "Skript vorbereiten": "Prepare script",
     "Bestätigte Hostpfade": "Verified host paths",
     "Hostpfade und gemeinsames ZFS-Dataset bestätigt.": "Host paths and shared ZFS dataset verified.",
+    "Code für die automatische Hostprüfung ansehen": "View automatic host check code",
+    "Bereite zuerst die Hostprüfung vor.": "Prepare the host check first.",
+    "Bereite die automatische Hostprüfung erneut vor. Falls kein Befehl verfügbar ist, verwende die manuelle Hostpfadprüfung.":
+        "Prepare the automatic host check again. If no command is available, use the manual host path check.",
+    "Noch kein Nachweis. Führe den Befehl auf dem TrueNAS-Host aus und prüfe die Ausgabe der Shell.":
+        "No proof yet. Run the command on the TrueNAS host and check the shell output.",
+    "Verwende diesen Weg, wenn die automatische Prüfung keine passende Einbindung findet.":
+        "Use this option if the automatic check cannot find a matching mount.",
+    "Führe die Prüfung in der TrueNAS-Host-Shell aus. Der automatische Befehl verwendet sudo für den Zugriff auf das geschützte AppData-Paket. TrueNAS kann nach deinem Passwort fragen.":
+        "Run the check in the TrueNAS host shell. The automatic command uses sudo to access the protected AppData package. TrueNAS may ask for your password.",
     "Führe den Prüfbefehl in der TrueNAS-Shell aus und lies den Nachweis anschließend ein. Die Prüfung verschiebt keine Dateien.":
         "Run the check command in the TrueNAS shell, then read the proof. The check moves no files.",
     "Der Hostnachweis fehlt. Prüfe die Ausgabe in der TrueNAS-Shell oder verwende die technische Pfadzuordnung.":

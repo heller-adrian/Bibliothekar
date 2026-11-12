@@ -1102,6 +1102,7 @@ function scriptLinks(confirmed=false) {
   const links=node("div",undefined,"stack");
   links.append(link("Python-Skript ansehen",jobPath("/script/source/legacy_adoption_host.py")),
     link("Code für die Dataset-Prüfung ansehen",jobPath("/script/source/legacy_adoption_dataset.py")),
+    link("Code für die automatische Hostprüfung ansehen",jobPath("/script/source/legacy_adoption_discover.py")),
     confirmed ? link("Bestätigtes Skriptmanifest",jobPath("/script/manifest")) :
       link("Verschiebeplan mit Rückwegen",jobPath("/download/manifest")));
   return links;
@@ -1129,25 +1130,29 @@ function renderConfirmation(panel,command) {
   function showProbe(result) {
     if (probe?.sha256!==result.sha256) ack.checked=false;
     probe=result;
+    confirmButton.disabled=method.value==="script" && !result.verified;
     proofState.replaceChildren();
-    if (!result.command) return;
     if (result.verified) {
       const paths=node("details");
       paths.append(node("summary","Bestätigte Hostpfade"),node("code",result.host.source+" → "+result.host.archive));
       proofState.append(line("Hostpfade und gemeinsames ZFS-Dataset bestätigt."),line(result.dataset),paths);
       return;
     }
+    if (result.diagnostic) proofState.append(line(result.diagnostic));
+    if (!result.command) return;
     proofState.append(line("Führe den Prüfbefehl in der TrueNAS-Shell aus und lies den Nachweis anschließend ein. Die Prüfung verschiebt keine Dateien."),
       commandBox(result.command));
   }
   async function readProbe() {
     const result=await api(jobPath("/script/probe"));
     showProbe(result);
-    if (!result.verified) report("Der Hostnachweis fehlt. Prüfe die Ausgabe in der TrueNAS-Shell oder verwende die technische Pfadzuordnung.");
+    if (!result.verified && !result.diagnostic) proofState.append(line(result.command ?
+      "Noch kein Nachweis. Führe den Befehl auf dem TrueNAS-Host aus und prüfe die Ausgabe der Shell." :
+      "Bereite zuerst die Hostprüfung vor."));
   }
   const fallback=node("details",undefined,"adoption-card");
   fallback.append(node("summary","Technischer Ausnahmeweg: Hostpfade manuell zuordnen"),
-    line("Verwende diesen Weg, wenn Docker die Hostpfade nicht eindeutig ermitteln kann."),
+    line("Verwende diesen Weg, wenn die automatische Prüfung keine passende Einbindung findet."),
     appWrap,sourceWrap,archiveWrap,
     action("Manuelle Hostpfadprüfung vorbereiten",async()=>{
       showProbe(await api(jobPath("/script/probe"),"POST",{
@@ -1161,21 +1166,23 @@ function renderConfirmation(panel,command) {
   actions.append(action("Skript vorbereiten",async()=>{
     showProbe(await api(jobPath("/script/probe"),"POST",command));
   }), action("Hostnachweis einlesen",readProbe));
-  scripts.append(line("Starte den Prüfbefehl selbst in der TrueNAS-Shell. Bibliothekar verwendet die bereits ausgewählte Quelle und das Zielarchiv."),
+  scripts.append(line("Führe die Prüfung in der TrueNAS-Host-Shell aus. Der automatische Befehl verwendet sudo für den Zugriff auf das geschützte AppData-Paket. TrueNAS kann nach deinem Passwort fragen."),
     actions,proofState,advanced);
   method.addEventListener("change",()=>{
     scripts.hidden=method.value!=="script";
     ack.checked=false;
+    confirmButton.disabled=method.value==="script" && !probe?.verified;
     if (!scripts.hidden && !probe) api(jobPath("/script/probe")).then(showProbe).catch(error=>report(error.message));
   });
+  const confirmButton=action("Durchführung verbindlich starten",()=>{
+    if (!ack.checked) throw new Error("Bitte bestätige zuerst die Sicherheitsbedingungen.");
+    if (method.value==="script" && !probe?.verified) throw new Error("Führe zuerst die Host- und Dataset-Prüfung durch.");
+    return mutate("/confirm","POST",{...command,method:method.value,acknowledged:true,probe_sha256:probe?.sha256});
+  },true);
   confirmation.append(node("h3","Verbindliche Sicherheitsbestätigung"),choice,scripts,
     line("Nach dieser Bestätigung müssen die geplanten Verschiebungen abgeschlossen, überprüft oder kontrolliert rückgängig gemacht werden."),
     line("Quelle und Ziel müssen auf demselben ZFS-Dataset liegen. Führe währenddessen keine weiteren Änderungen am Archiv durch."),
-    wrap,action("Durchführung verbindlich starten",()=>{
-      if (!ack.checked) throw new Error("Bitte bestätige zuerst die Sicherheitsbedingungen.");
-      if (method.value==="script" && !probe?.verified) throw new Error("Führe zuerst die Host- und Dataset-Prüfung durch.");
-      return mutate("/confirm","POST",{...command,method:method.value,acknowledged:true,probe_sha256:probe?.sha256});
-    },true));
+    wrap,confirmButton);
   panel.append(confirmation);
 }
 async function pollScript() {
