@@ -340,3 +340,30 @@ Nach ausdrücklicher Fortsetzung den Vorabtest, alle acht Backend-Partitionen un
 Run 43311337657 ist abgeschlossen. Alle 80 Vorabtests einschließlich des schreibgeschützten Archivmounts bestanden. In acht Partitionen liefen 2.718 Tests, davon sieben mit Fehlern. Neun Artefakte wurden per SHA-256 geprüft. Der Coverage-Gate hat wegen dieser Fehler erwartungsgemäß keine Freigabe erteilt.
 
 Die Korrektur hält das eingefrorene Haupt-CSS unverändert und legt die neue Kontrastvariable in den gemeinsamen Header-Stil. Die Archivplanung behandelt fehlende optionale Unterereignisdaten weiterhin korrekt. Die UI-Regressionstests prüfen den neuen Einrichtungsheader und die serverseitige Workspace-Reihenfolge. Die Tests für die Login-Oberfläche bleiben erhalten. Lokal bestanden 39 gezielte Tests. Ein Linux-spezifischer Test wurde auf macOS übersprungen.
+
+Die korrigierte Linux-Freigabe-QA [43327497427](https://github.com/heller-adrian/Bibliothekar/actions/runs/43327497427) läuft für `3dab3bfd622931696631f58731fa8a44c1dafd08` auf dem Entwicklungsbranch von Draft-PR #41. Diese Laufnotiz bleibt lokal. Nach Fortsetzung die Vorabtests, acht Partitionen und den vollständigen Coverage-Nachweis prüfen. Bei Erfolg den Containerworkflow mit `adoption_qa_run=43327497427` für denselben Commit starten.
+
+Die Linux-QA [43327497427](https://github.com/heller-adrian/Bibliothekar/actions/runs/43327497427) ist für `3dab3bfd622931696631f58731fa8a44c1dafd08` vollständig bestanden. Zehn Artefakte wurden per SHA-256 verifiziert. Die unabhängige Coverage-Prüfung bestätigt 2.718 von 2.718 genau einmal erfolgreich ausgeführte Tests in acht Partitionen sowie 80 bestandene Vorabtests einschließlich des schreibgeschützten Archivmounts. Der erneute Browserdurchlauf war an allen drei lokalen Ursprüngen erfolgreich.
+
+Die [Containerprüfung 43340259863](https://github.com/heller-adrian/Bibliothekar/actions/runs/43340259863) läuft mit nativem ZFS für denselben Commit und QA-Nachweis. Git- und GHCR-Referenzen wurden vor dem Start gesichert. Nach Fortsetzung den erfolgreichen Workflow, das Artefakt `rc5-qualified-image`, das ZFS-Protokoll und den GHCR-Digest prüfen. Danach `v1.0.1-rc.5` als Vorabversion mit Nachweisen veröffentlichen und Tag, Digest und geschützte Referenzen erneut vergleichen. Die reale TrueNAS-Nachprüfung folgt nach der Veröffentlichung.
+
+
+### RC5 veröffentlicht
+
+[GitHub-Vorabversion v1.0.1-rc.5](https://github.com/heller-adrian/Bibliothekar/releases/tag/v1.0.1-rc.5) ist für Commit `3dab3bfd622931696631f58731fa8a44c1dafd08` veröffentlicht. Der Tag, das Linux/amd64-Image samt Revisionslabel und die Prüfsummen der beiden Release-Anhänge wurden bestätigt. Die Git- und GHCR-Referenzen für Stable, frühere Vorabversionen und `latest` wurden vor dem Containerlauf und nach der Veröffentlichung verglichen. Draft-PR #41 blieb offen.
+
+```text
+ghcr.io/heller-adrian/bibliothekar@sha256:addbc760d7fe049e9c00f60e7c29fda146a1df1c2a02d5c4366aafe4cd4e398f
+```
+
+Die Containerprüfung auf nativem ZFS bestätigt beide Übernahmewege, die spätere Skripterweiterung, die leere Ersteinrichtung, Wiederanlauf nach Skriptfreigabe und kontrollierte Rücknahme. Für die reale TrueNAS-Nachprüfung steht noch die Bestätigung durch den Betreiber aus. In einer isolierten Testbibliothek mit eigenem AppData ein Ereignis ohne Exportordner übernehmen, anschließend umbenennen und die Archivänderung vollständig abschließen. Das Ereignis löschen, die freigegebenen Familien bei leerem Sicherungsfilter in Workspace → Media erneut einplanen und archivieren. Dateizahl, Familien und SHA-256 vor und nach dem Zyklus vergleichen. Dieselbe Sichtbarkeit auch mit einem regulären Import prüfen und den Image-Digest im Abnahmeprotokoll erfassen.
+
+### RC6 · Letzter UI-Feinschliff nach TrueNAS-Abnahme
+
+Der Betreiber bestätigt die praktische RC5-Abnahme einschließlich automatischer Hostpfaderkennung, Bestandsübernahme und anschließender Archivfunktionen. Ausgangspunkt ist der veröffentlichte Commit `3dab3bfd622931696631f58731fa8a44c1dafd08` auf `patch/1.0.1-legacy-adoption` und Draft-PR #41. Alle drei Seiten des RC5-Berichts einschließlich des älteren Referenzbilds wurden visuell geprüft.
+
+- Die Dataset-Hilfe öffnet unmittelbar unter ihrem Auslöser. Am rechten Bildschirmrand rückt die Blase nach links, ohne die Ordneransicht zu verschieben. Zum Elternordner trennt ein zusätzlicher Abstand die Auswahlleiste von der Ordnernavigation.
+- „Choose execution“ zeigt die acht Kennzahlen, technische Details, den optionalen Sicherungshinweis und die Zielordnervorschau vor der abschließenden Sicherheitsbestätigung. Die Skriptaktionen bilden eine Folge mit zwei dekorativen Pfeilen. Die grüne Hostbestätigung und die Pflicht-Checkbox bleiben verbunden. Ein neuer oder fehlgeschlagener Nachweis setzt die Skriptfreigabe zurück. Bei der manuellen Freigabe wird kein Skriptnachweis mitgesendet.
+- Lokal bestanden 30 gezielte Backend-Tests zu beiden Übernahmewegen, Archivänderung und Wiederarchivierung, Host- und Dataset-Prüfung sowie den unveränderten Shell-Verträgen. Ein Linux-spezifischer Test wurde auf macOS übersprungen.
+- Der Publisher qualifiziert ausschließlich `v1.0.1-rc.6` auf diesem Entwicklungszweig. Die vollständige Linux-QA und der Container mit nativem ZFS müssen denselben Freigabecommit bestätigen. Die praktische RC6-Nachprüfung folgt nach der Vorabveröffentlichung.
+- Chromium hat Desktop und Tablet auf Englisch im Light Mode und die schmale Ansicht auf Deutsch im Dark Mode geprüft. Der Browser simuliert für die UI den Hostnachweis und prüft Reihenfolge, unverrückte Ordner, fehlenden und gültigen Nachweis, Pflicht-Checkbox, neuen Nachweis und den exakten Freigabeaufruf. Anschließend läuft die manuelle Übernahme bis zur unabhängigen Verifikation und Registrierung.

@@ -11,7 +11,7 @@ on:
         default: false
         required: true
       adoption_qa_run:
-        description: Successful full Backend QA run ID for this exact RC5 commit
+        description: Successful full Backend QA run ID for this exact RC6 commit
         type: string
         default: ''
   workflow_call:
@@ -70,7 +70,7 @@ jobs:
               test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
               test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
               [[ "$ADOPTION_QA_INPUT" =~ ^[0-9]+$ ]]
-              if git ls-remote --exit-code --tags origin 'refs/tags/v1.0.1-rc.5' >/dev/null; then
+              if git ls-remote --exit-code --tags origin 'refs/tags/v1.0.1-rc.6' >/dev/null; then
                 echo 'Release candidate tag already exists.' >&2
                 exit 1
               else
@@ -147,7 +147,7 @@ jobs:
           print('APPROVED: 2634/2634 exact-case backend QA, container, frontend, preflight and coverage.')
           PY
           echo 'Verified source identity and successful GitHub qualification #42002573062.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Verify full backend qualification for the exact RC5 commit
+      - name: Verify full backend qualification for the exact RC6 commit
         if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption'
         shell: bash
         env:
@@ -279,7 +279,7 @@ jobs:
       - name: Record published digest
         run: echo '${{ steps.publish.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify the immutable RC5 image with native ZFS
+      - name: Verify the immutable RC6 image with native ZFS
         if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption'
         shell: bash
         env:
@@ -297,10 +297,10 @@ jobs:
             tee "$evidence/container-smoke.log"
           jq -n --arg source "$GITHUB_SHA" --arg image "$image" --arg digest "$IMAGE_DIGEST" \
             --arg qa_run "$ADOPTION_QA_RUN" --arg image_run "$GITHUB_RUN_ID" \
-            '{tag:"v1.0.1-rc.5", source:$source, image:$image, digest:$digest, qa_run:$qa_run, image_run:$image_run}' \
+            '{tag:"v1.0.1-rc.6", source:$source, image:$image, digest:$digest, qa_run:$qa_run, image_run:$image_run}' \
             > "$evidence/qualified-image.json"
           cat > "$evidence/release-notes.md" <<EOF
-          Bibliothekar 1.0.1 RC5 respects saved folder layouts during archive changes and makes released archive files available for planning again. The adoption wizard also has updated folder previews, navigation, and execution controls.
+          Bibliothekar 1.0.1 RC6 aligns dataset help with its trigger, adds space before folder navigation, and restores the plan overview above the execution controls. The TrueNAS script actions now follow a single visible sequence.
 
           Source commit: \`$GITHUB_SHA\`
           Test image: \`$image:patch-$VERSION-$GITHUB_SHA\`
@@ -316,7 +316,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption'
         with:
-          name: rc5-qualified-image
+          name: rc6-qualified-image
           path: |
             ${{ runner.temp }}/adoption-qualification/qualified-image.json
             ${{ runner.temp }}/adoption-qualification/verified.json

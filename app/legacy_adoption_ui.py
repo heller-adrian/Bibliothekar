@@ -113,9 +113,11 @@ _PAGE = r"""<!doctype html>
 .adoption-back{display:inline-flex;align-items:center;min-height:36px;padding:6px 12px;border:1px solid var(--bk-line);border-radius:8px;background:var(--bk-surface-2);color:var(--bk-ink);font-weight:650;text-decoration:none}
 .adoption-back:hover{border-color:var(--bk-blue)}
 #source-notice:empty{display:none}
-#source-actions{position:relative;align-items:center}
-.adoption-source-help>p{position:absolute;z-index:2;inset-inline-end:0;top:calc(100% + 6px);
-width:min(30rem,100%);box-sizing:border-box;margin:0;padding:14px 16px;border:1px solid var(--bk-line);
+#source-actions{align-items:center}
+#source-actions + #source-notice:empty + #source:not(:empty){margin-block-start:12px}
+.adoption-source-help{position:relative}
+.adoption-source-help>p{position:absolute;z-index:2;inset-inline-start:var(--adoption-help-offset,0px);top:calc(100% + 6px);
+width:min(26rem,calc(100vw - 32px));box-sizing:border-box;margin:0;padding:14px 16px;border:1px solid var(--bk-line);
 border-radius:10px;background:var(--bk-surface);color:var(--bk-ink);box-shadow:var(--bk-shadow)}
 #source .adoption-source-path{align-items:center;padding-bottom:4px}
 #source-notice{margin-block:14px}
@@ -162,6 +164,12 @@ border:1px solid var(--bk-line);border-radius:10px;padding:14px;background:var(-
 .adoption-proof[data-verified=true]{border-inline-start:4px solid var(--bk-green);padding:10px 14px;
 background:color-mix(in srgb,var(--bk-green) 13%,var(--bk-surface));border-radius:8px}
 .adoption-proof[data-verified=true] p:first-child{margin:0;font-weight:700}
+.adoption-confirm-actions{display:flex;align-items:center;gap:8px}
+.adoption-confirm-actions span{color:var(--bk-muted);flex:none}
+@media(max-width:640px){
+  .adoption-confirm-actions{flex-direction:column;align-items:start}
+  .adoption-confirm-actions span{transform:rotate(90deg);margin-inline-start:12px}
+}
 #event-editor .bk-folder-input-root{display:flex;flex-direction:row;align-items:center;flex-wrap:wrap;
 min-height:38px;margin-block:5px 8px;gap:8px}
 #event-editor .adoption-interval{margin:-6px 0 4px}
@@ -369,14 +377,14 @@ async function api(path, method="GET", body) {
   return value;
 }
 function jobPath(path="") { return base+"/jobs/"+encodeURIComponent(jobId)+path; }
-function action(text, handler, primary=false) {
+function action(text, handler, primary=false, settled) {
   const button = node("button", text, primary ? "primary" : "");
   button.type = "button";
   button.addEventListener("click", async () => {
     button.disabled = true;
     report();
     try { await handler(); } catch (error) { report(error.message); }
-    finally { button.disabled = false; }
+    finally { button.disabled = false; settled?.(); }
   });
   return button;
 }
@@ -1099,7 +1107,6 @@ function renderPlan(host) {
   const completed=plan.state==="completed";
   const scripted=plan.execution?.method==="script";
   if(!scripted || viewStep==="review")panel.append(line(label(phase || plan.state)));
-  if(!recoveryOnly && !phase && plan.documents_at && viewStep==="execution")renderConfirmation(panel,command);
   const locale=window.BibliothekarI18n.getLocale();
   const format=new Intl.NumberFormat(locale);
   const unit=["B","KiB","MiB","GiB","TiB"];
@@ -1153,6 +1160,7 @@ function renderPlan(host) {
     }
   });
   panel.append(directoryPreview);
+  if(!recoveryOnly && !phase && plan.documents_at && viewStep==="execution")renderConfirmation(panel,command);
   if (plan.folder_moves.length && phase==="manual") {
     const groups=node("details");
     groups.append(node("summary","Tagesordner im Ganzen verschieben"));
@@ -1260,18 +1268,37 @@ function renderConfirmation(panel,command) {
   const [archiveWrap,archive]=field("Archivordner auf dem TrueNAS-Host","text");
   const [wrap,ack]=field("Ich bestätige die Sicherheitsbedingungen und den angezeigten Plan.","checkbox");
   wrap.classList.add("adoption-ack");
-  let probe=null;
+  let probe=null, checking=false, confirming=false;
   function updateConfirmation(){
-    ack.disabled=method()==="script" && !probe?.verified;
+    const scripted=method()==="script";
+    const busy=checking || confirming;
+    ack.disabled=busy || (scripted && !probe?.verified);
     confirmButton.disabled=ack.disabled || !ack.checked;
+    prepareButton.disabled=busy;
+    readButton.disabled=busy || (!probe?.command && !probe?.verified);
+    fallbackButton.disabled=busy;
+  }
+  async function checkProbe(method="GET", payload){
+    checking=true;
+    updateConfirmation();
+    try {
+      const result=await api(jobPath("/script/probe"),method,payload);
+      showProbe(result);
+      return result;
+    } catch (error) {
+      showProbe(null);
+      throw error;
+    } finally {
+      checking=false;
+      updateConfirmation();
+    }
   }
   function showProbe(result) {
-    if (probe?.sha256!==result.sha256) ack.checked=false;
+    if (method()==="script" && (!result?.verified || probe?.sha256!==result.sha256)) ack.checked=false;
     probe=result;
-    updateConfirmation();
-    readButton.disabled=!result.command && !result.verified;
-    proofState.dataset.verified=String(result.verified);
+    proofState.dataset.verified=String(Boolean(result?.verified));
     proofState.replaceChildren();
+    if (!result) return;
     if (result.verified) {
       const paths=node("details");
       paths.append(node("summary","Bestätigte Hostpfade"),node("code",result.host.source+" → "+result.host.archive));
@@ -1286,50 +1313,62 @@ function renderConfirmation(panel,command) {
       commandBox(result.command));
   }
   async function readProbe() {
-    const result=await api(jobPath("/script/probe"));
-    showProbe(result);
+    const result=await checkProbe();
     if (!result.verified && !result.diagnostic) proofState.append(line(result.command ?
       "Noch kein Nachweis. Führe den Befehl auf dem TrueNAS-Host aus und prüfe die Ausgabe der Shell." :
       "Bereite zuerst die Hostprüfung vor."));
   }
+  const fallbackButton=action("Manuelle Hostpfadprüfung vorbereiten",()=>checkProbe("POST",{
+    ...command,appdata:appdata.value,source:source.value,archive:archive.value
+  }),false,updateConfirmation);
   const fallback=node("details",undefined,"adoption-card");
   fallback.append(node("summary","Technischer Ausnahmeweg: Hostpfade manuell zuordnen"),
     line("Verwende diesen Weg, wenn die automatische Prüfung keine passende Einbindung findet."),
-    appWrap,sourceWrap,archiveWrap,
-    action("Manuelle Hostpfadprüfung vorbereiten",async()=>{
-      showProbe(await api(jobPath("/script/probe"),"POST",{
-        ...command,appdata:appdata.value,source:source.value,archive:archive.value
-      }));
-    }));
+    appWrap,sourceWrap,archiveWrap,fallbackButton);
   const advanced=node("details");
-  advanced.append(node("summary","Erweiterte Details zu Skript und Prüfung"),
-    scriptLinks(),fallback);
-  const actions=node("div",undefined,"inline");
-  const readButton=action("Hostnachweis einlesen",readProbe);
-  readButton.disabled=true;
-  actions.append(action("Skript vorbereiten",async()=>{
-    showProbe(await api(jobPath("/script/probe"),"POST",command));
-  }),readButton);
+  advanced.append(node("summary","Erweiterte Details zu Skript und Prüfung"),scriptLinks(),fallback);
+  const actions=node("div",undefined,"adoption-confirm-actions");
+  const prepareButton=action("Skript vorbereiten",()=>checkProbe("POST",command),false,updateConfirmation);
+  const readButton=action("Hostnachweis einlesen",readProbe,false,updateConfirmation);
+  function arrow(){
+    const separator=node("span","→");
+    separator.setAttribute("aria-hidden","true");
+    return separator;
+  }
+  const confirmButton=action("Durchführung verbindlich starten",()=>{
+    const selected=method();
+    if (!ack.checked) throw new Error("Bitte bestätige zuerst die Sicherheitsbedingungen.");
+    if (selected==="script" && !probe?.verified) throw new Error("Führe zuerst die Host- und Dataset-Prüfung durch.");
+    const payload={...command,method:selected,acknowledged:true};
+    if (selected==="script") payload.probe_sha256=probe.sha256;
+    confirming=true;
+    updateConfirmation();
+    return mutate("/confirm","POST",payload);
+  },true,()=>{
+    confirming=false;
+    updateConfirmation();
+  });
+  actions.append(prepareButton,arrow(),readButton,arrow());
   scripts.append(line("Führe die Prüfung in der TrueNAS-Host-Shell aus. Der automatische Befehl verwendet sudo für den Zugriff auf das geschützte AppData-Paket. TrueNAS kann nach deinem Passwort fragen."),
-    actions,proofState,advanced);
-  choice.addEventListener("change",()=>{
-    scripts.hidden=method()!=="script";
+    actions,proofState);
+  const manualConfirm=node("div");
+  manualConfirm.hidden=true;
+  function selectMethod(){
+    scripts.hidden=advanced.hidden=method()!=="script";
+    manualConfirm.hidden=!scripts.hidden;
+    const placement=scripts.hidden ? manualConfirm : actions;
+    placement.append(confirmButton);
     ack.checked=false;
     updateConfirmation();
-    if (!scripts.hidden && !probe) api(jobPath("/script/probe")).then(showProbe).catch(error=>report(error.message));
-  });
-  const confirmButton=action("Durchführung verbindlich starten",()=>{
-    if (!ack.checked) throw new Error("Bitte bestätige zuerst die Sicherheitsbedingungen.");
-    if (method()==="script" && !probe?.verified) throw new Error("Führe zuerst die Host- und Dataset-Prüfung durch.");
-    return mutate("/confirm","POST",{...command,method:method(),acknowledged:true,probe_sha256:probe?.sha256});
-  },true);
+    if (!scripts.hidden && !probe && !checking) checkProbe().catch(error=>report(error.message));
+  }
+  choice.addEventListener("change",selectMethod);
   ack.addEventListener("change",updateConfirmation);
-  updateConfirmation();
-  confirmation.append(node("h3","Durchführungsmethode"),choice,scripts,
-    node("h3","Verbindliche Sicherheitsbestätigung"),
+  confirmation.append(node("h3","Verbindliche Sicherheitsbestätigung"),choice,
     line("Nach dieser Bestätigung müssen die geplanten Verschiebungen abgeschlossen, überprüft oder kontrolliert rückgängig gemacht werden."),
     line("Quelle und Ziel müssen auf demselben ZFS-Dataset liegen. Führe währenddessen keine weiteren Änderungen am Archiv durch."),
-    wrap,confirmButton);
+    scripts,wrap,manualConfirm,advanced);
+  selectMethod();
   panel.append(confirmation);
 }
 async function pollScript() {
@@ -1419,14 +1458,23 @@ $("pick-source").addEventListener("click",()=>{
   $("start").hidden=false;
   $("start").focus();
 });
+const sourceHelp=$("source-help");
+function positionSourceHelp(){
+  if (!sourceHelp.open) return;
+  const bubble=sourceHelp.querySelector("p");
+  const left=sourceHelp.getBoundingClientRect().left;
+  const maxLeft=document.documentElement.clientWidth-16-bubble.offsetWidth;
+  sourceHelp.style.setProperty("--adoption-help-offset",Math.min(0,maxLeft-left)+"px");
+}
+sourceHelp.addEventListener("toggle",positionSourceHelp);
+window.addEventListener("resize",positionSourceHelp);
+window.addEventListener("bk-language-changed",()=>requestAnimationFrame(positionSourceHelp));
 document.addEventListener("click",event=>{
-  const help=$("source-help");
-  if(help.open && !help.contains(event.target))help.open=false;
+  if(sourceHelp.open && !sourceHelp.contains(event.target))sourceHelp.open=false;
 });
 document.addEventListener("keydown",event=>{
-  const help=$("source-help");
-  if(event.key==="Escape" && help.open){
-    help.open=false;help.querySelector("summary").focus();
+  if(event.key==="Escape" && sourceHelp.open){
+    sourceHelp.open=false;sourceHelp.querySelector("summary").focus();
   }
 });
 $("start").addEventListener("click",async()=>{

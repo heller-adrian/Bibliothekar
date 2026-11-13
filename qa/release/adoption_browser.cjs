@@ -24,13 +24,98 @@ async function finishManualAdoption(page){
   await page.locator('.adoption-target-preview summary').click();
   await page.locator('.adoption-target-preview ul ul code').filter({hasText:'Reopened Test'}).first().waitFor();
   await page.getByRole('button',{name:/Next: Choose execution|Weiter: Methode wählen/}).click();
+  const panel=page.locator('#work section');
+  await panel.getByRole('heading',{name:/Final safety confirmation|Verbindliche Sicherheitsbestätigung/}).waitFor();
+  const order=await panel.evaluate(panel=>{
+    const selectors=['h2','h2 + p','.adoption-plan-facts','details.adoption-proof',
+      'details.adoption-proof + p','.adoption-target-preview','.adoption-card h3'];
+    const elements=selectors.map(selector=>panel.querySelector(selector));
+    if(elements.some(element=>!element))return selectors.filter((_,i)=>!elements[i]);
+    return {
+      inOrder:elements.every((item,i)=>i===0 || Boolean(elements[i-1].compareDocumentPosition(item)&Node.DOCUMENT_POSITION_FOLLOWING)),
+      facts:elements[2].children.length,
+    };
+  });
+  assert.deepEqual(order,{inOrder:true,facts:8});
   const methods=page.getByRole('radiogroup');
   const scriptMethod=methods.locator('[value=script]');
+  const ack=page.getByLabel(/I confirm the safety conditions|Ich bestätige die Sicherheitsbedingungen/);
+  const confirm=page.getByRole('button',{name:/Confirm and start|Durchführung verbindlich starten/});
+  const actions=page.locator('.adoption-confirm-actions');
+  const [prepare,read]=[actions.locator('button').nth(0),actions.locator('button').nth(1)];
+  const preparedPlanId=await page.evaluate(async()=>{
+    const job=new URL(location.href).searchParams.get('job');
+    const response=await fetch(`/api/legacy-adoption/jobs/${job}`);
+    if(!response.ok)throw new Error(await response.text());
+    return (await response.json()).plan.id;
+  });
+  const probeRoute='**/api/legacy-adoption/jobs/*/script/probe';
+  const confirmRoute='**/api/legacy-adoption/jobs/*/confirm';
+  const prepared={verified:false,sha256:'a'.repeat(64),command:'python3 synthetic-host-check.py'};
+  const verified={...prepared,verified:true,dataset:'synthetic/photos',
+    host:{source:'/pool/photos/source',archive:'/pool/photos/archive'}};
+  let probe={verified:false};
+  await page.route(probeRoute,async route=>{
+    if(route.request().method()==='POST')probe=prepared;
+    await route.fulfill({json:probe});
+  });
+  const emptyProof=page.waitForResponse(response=>response.url().endsWith('/script/probe'));
   await scriptMethod.focus();
   await page.keyboard.press('Space');
+  await emptyProof;
+  await prepare.waitFor({state:'visible'});
   assert.equal(await scriptMethod.isChecked(),true);
-  assert.equal(await page.getByLabel(/I confirm the safety conditions|Ich bestätige die Sicherheitsbedingungen/).isDisabled(),true);
+  assert.equal(await read.isDisabled(),true);
+  assert.equal(await ack.isDisabled(),true);
+  assert.equal(await confirm.isDisabled(),true);
+  const sequence=await actions.evaluate(group=>Array.from(group.children,element=>({
+    name:element.tagName,hidden:element.getAttribute('aria-hidden'),left:element.offsetLeft,top:element.offsetTop,
+  })));
+  assert.deepEqual(sequence.map(element=>element.name),['BUTTON','SPAN','BUTTON','SPAN','BUTTON']);
+  assert.ok(sequence.filter(element=>element.name==='SPAN').every(element=>element.hidden==='true'));
+  if(page.viewportSize().width>640){
+    assert.ok(sequence.every((element,i)=>i===0 || element.left>sequence[i-1].left));
+  }else{
+    assert.ok(sequence.every((element,i)=>i===0 || element.top>sequence[i-1].top));
+  }
+  await prepare.click();
+  await page.locator('.adoption-command').waitFor();
+  await read.click();
+  await page.getByText(/No proof yet|Noch kein Nachweis/).waitFor();
+  assert.equal(await ack.isDisabled(),true);
+  assert.equal(await confirm.isDisabled(),true);
+  probe=verified;
+  await read.click();
+  const proof=page.locator('.adoption-proof[data-verified=true]');
+  await proof.waitFor();
+  assert.ok(await proof.getByText(/Host paths and shared ZFS dataset verified|Hostpfade und gemeinsames ZFS-Dataset bestätigt/).isVisible());
+  assert.ok(await proof.evaluate(element=>parseFloat(getComputedStyle(element).borderInlineStartWidth)>0));
+  assert.equal(await ack.isDisabled(),false);
+  assert.equal(await confirm.isDisabled(),true);
+  assert.ok((await ack.boundingBox()).y>(await proof.boundingBox()).y);
+  await capture(page,'verified-execution');
+  await ack.check();
+  assert.equal(await confirm.isEnabled(),true);
+  probe={...verified,sha256:'b'.repeat(64)};
+  await read.click();
+  await page.locator('.adoption-confirm-actions button').nth(1).and(page.locator('button:enabled')).waitFor();
+  assert.equal(await ack.isChecked(),false);
+  assert.equal(await confirm.isDisabled(),true);
+  await ack.check();
+  let confirmPayload;
+  await page.route(confirmRoute,async route=>{
+    confirmPayload=route.request().postDataJSON();
+    await route.fulfill({status:409,json:{detail:'Synthetic stop before file operations'}});
+  });
+  await confirm.click();
+  await page.getByText('Synthetic stop before file operations',{exact:true}).waitFor();
+  assert.deepEqual(confirmPayload,{plan_id:preparedPlanId,method:'script',acknowledged:true,probe_sha256:probe.sha256});
+  await page.unroute(confirmRoute);
+  await page.unroute(probeRoute);
   await methods.locator('[value=manual]').check();
+  assert.equal(await ack.isChecked(),false);
+  assert.equal(await ack.isDisabled(),false);
+  assert.equal(await confirm.isDisabled(),true);
   await capture(page,'execution');
   await page.getByLabel(/I confirm the safety conditions|Ich bestätige die Sicherheitsbedingungen/).check();
   await page.getByRole('button',{name:/Confirm and start|Durchführung verbindlich starten/}).click();
@@ -122,17 +207,47 @@ async function finishManualAdoption(page){
     await page.locator('#choice').click();
     await page.getByRole('link',{name:'Resume adoption'}).or(page.locator('.bk-setup-choice-actions a')).click();
     await page.locator('#pick-source:enabled').waitFor();
-    await page.getByText("Can't see your dataset?",{exact:true}).click();
-    await page.getByText(/shows folders on the target archive/).waitFor();
+    if(narrow){
+      await page.locator('[data-bk-language-choice=de]').click();
+      await page.locator('#bk-setup-theme').selectOption('dark');
+    }
+    const help=page.locator('#source-help > summary');
+    assert.equal(await help.textContent(),narrow?'Fehlt dein Dataset?':"Can't see your dataset?");
+    const bubble=page.locator('#source-help > p');
+    const folders=page.locator('.adoption-folder-grid');
+    await help.scrollIntoViewIfNeeded();
+    const before=await folders.boundingBox();
+    await help.click();
+    await bubble.waitFor();
+    await page.waitForFunction(()=>document.querySelector('#source-help').style.getPropertyValue('--adoption-help-offset'));
+    const trigger=await help.boundingBox();
+    const overlay=await bubble.boundingBox();
+    assert.ok(overlay.y>=trigger.y+trigger.height && overlay.y-trigger.y-trigger.height<=8);
+    assert.ok(overlay.x>=0 && overlay.x+overlay.width<=page.viewportSize().width);
+    assert.ok(overlay.x<trigger.x+trigger.width && overlay.x+overlay.width>trigger.x);
+    const left=await bubble.evaluate(element=>Math.min(element.parentElement.getBoundingClientRect().left,
+      document.documentElement.clientWidth-16-element.offsetWidth));
+    assert.ok(Math.abs(left-overlay.x)<=1);
+    assert.deepEqual(await folders.boundingBox(),before);
+    await capture(page,'source-help');
+    await help.click();
+    await bubble.waitFor({state:'hidden'});
+    await help.click();
     await page.keyboard.press('Escape');
-    assert.equal(await page.getByText(/shows folders on the target archive/).isVisible(),false);
+    assert.equal(await bubble.isVisible(),false);
     await page.getByRole('button',{name:'camera-1',exact:true}).click();
-    const parent=page.getByRole('button',{name:'‹ Parent folder',exact:true});
+    const parent=page.getByRole('button',{name:/^‹ (Parent folder|Übergeordneter Ordner)$/});
     await parent.waitFor();
     assert.equal(await parent.locator('xpath=following-sibling::code').count(),1);
+    const sourceActions=await page.locator('#source-actions').boundingBox();
+    assert.ok((await parent.boundingBox()).y-sourceActions.y-sourceActions.height>=10);
     await parent.click();
     await page.locator('#pick-source:enabled').waitFor();
     await capture(page,'source');
+    if(narrow){
+      await page.locator('[data-bk-language-choice=en]').click();
+      await page.locator('#bk-setup-theme').selectOption('light');
+    }
     await page.locator('#pick-source').click();
     assert.equal(await page.locator('#pick-source').getAttribute('aria-pressed'),'true');
     assert.equal(await page.locator('#source-actions > #start').count(),1);
