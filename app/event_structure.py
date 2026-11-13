@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from datetime import date
+from datetime import date, time
 
 from app.event_naming import (
     DEFAULT_EVENT_NAMING,
@@ -126,7 +126,24 @@ def _validate_time(
             f"{field_name} ist ungültig."
         )
 
+    try:
+        time.fromisoformat(time_value)
+    except ValueError as error:
+        raise EventPreviewError(f"{field_name} ist ungültig.") from error
+
     return time_value
+
+
+def continuous_event_bounds(start_date, end_date, start_time=None, end_time=None):
+    """Resolve the inclusive bounds of one continuous event."""
+    start_day = _validate_date(start_date, "Beginn")
+    end_day = _validate_date(end_date, "Ende")
+    first = _validate_time(start_time, "Startzeit") if start_time is not None else "00:00"
+    last = _validate_time(end_time, "Endzeit") if end_time is not None else "23:59"
+    start, end = f"{start_day}T{first}:00", f"{end_day}T{last}:59"
+    if end < start:
+        raise EventPreviewError("Das Ende muss nach dem Beginn liegen.")
+    return start, end
 
 
 def _folder_triplet(
@@ -373,29 +390,10 @@ def build_event_preview(
         if str(payload.get("child_event_name") or "").strip():
             child_name = _clean_name(payload["child_event_name"], "Unterereignisname")
 
-        start_time = _validate_time(
-            payload.get("start_time"),
-            "Startzeit",
+        start_second, end_second = continuous_event_bounds(
+            start_date, end_date, payload.get("start_time") or "", payload.get("end_time") or "",
         )
-
-        end_time = _validate_time(
-            payload.get("end_time"),
-            "Endzeit",
-        )
-
-        start_second = (
-            f"{start_date}T{start_time}:00"
-        )
-        end_second = (
-            f"{end_date}T{end_time}:59"
-        )
-
-        if end_second < start_second or (
-            start_date == end_date and end_time < start_time
-        ):
-            raise EventPreviewError(
-                "Das Ende muss nach dem Beginn liegen."
-            )
+        start_time, end_time = start_second[11:16], end_second[11:16]
 
         candidate_families = [
             family

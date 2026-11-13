@@ -28,10 +28,12 @@ def _json(client, method, path, *, library="main", status=200, **kwargs):
 
 
 @pytest.fixture
-def fresh_main(tmp_path, monkeypatch):
+def fresh_main(tmp_path, monkeypatch, request):
     from app import legacy_adoption_api
 
-    case = tmp_path.resolve() / "first-install"
+    native = os.environ.get("ADOPTION_ZFS_ROOT")
+    base = Path(native) / tmp_path.name if native and getattr(request, "param", False) else tmp_path.resolve()
+    case = base / "first-install"
     workspace, private, archive = (case / name for name in ("workspace", "database", "archive"))
     for path in (workspace, private, archive):
         path.mkdir(parents=True)
@@ -305,13 +307,16 @@ def test_rc1_registry_upgrade_keeps_active_job_for_recovery_only(
     assert original.read_bytes() == b"existing original"
 
 
-def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypatch, synthetic_dataset):
+@pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["lifecycle"])
+def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthetic_dataset):
     from io import BytesIO
     from app import legacy_adoption_registration as registration
     from app.legacy_adoption_paths import AdoptionError
 
     workspace, database, registry, _ = fresh_main
-    source = tmp_path.resolve() / "legacy-source"
+    source = workspace.parent / "legacy-source"
+    if os.environ.get("ADOPTION_ZFS_ROOT"):
+        monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
     day = source / "2026" / "07" / "2026-07-21"
     day.mkdir(parents=True)
     media = day / "adopted.raf"
@@ -461,6 +466,9 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
     matches = _json(client, "GET", second_job + "/events?day=2026-07-21")
     assert [item["id"] for item in matches] == [event_id]
     assert _json(client, "GET", second_job + "/events?day=2026-07-22") == []
+    availability = _json(client, "POST", second_job + "/draft/check", json={"events": []})
+    assert [item["day_key"] for item in availability["free_segments"]] == ["2026-07-25"]
+    assert [(item["event_name"], item["families"]) for item in availability["archive_segments"]] == [("Synthetisch", 2)]
     extension = {"events": [{"existing_id": event_id}]}
     assert _json(client, "POST", second_job + "/draft/check", json=extension)["events"][0]["families"] == 2
     saved = _json(client, "PUT", second_job + "/draft", json={**extension, "revision": 0})
@@ -621,6 +629,157 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, tmp_path, monkeypat
     old_receipt = client.get(completion_path)
     assert old_receipt.status_code == 200 and "Nicht mehr im Archiv" in old_receipt.text
     assert f"&amp;event={event_id}" not in old_receipt.text
+
+
+@pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["segments"])
+def test_adopted_time_segments_survive_verified_archive_deletion_and_restart(
+    fresh_main, monkeypatch, synthetic_dataset,
+):
+    import hashlib
+    from io import BytesIO
+    import json
+    import shutil
+
+    from app import archive_staging
+    from app.archive_release_stock import verify_archive_release_copies, verify_archive_release_removal
+    from app.event_change_apply import confirm_event_change, verify_event_change
+    from app.event_change_request import get_event_change_files, propose_archived_event_deletion
+    from app.event_inventory import event_root_relative
+    from app.workspace_layout import backup_root
+
+    workspace, database, registry, archive = fresh_main
+    source = workspace.parent / "legacy-source"
+    source.mkdir()
+    if os.environ.get("ADOPTION_ZFS_ROOT"):
+        monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
+    captures = {b"raw": "12:59:59", b"jpg": "12:59:59", b"first": "13:00:00",
+                b"last": "15:00:59", b"after": "15:01:00", b"other-day": "10:30:00"}
+    originals = {"pair.raf": b"raw", "pair.jpg": b"jpg", "first.jpg": b"first", "last.jpg": b"last",
+                 "after.jpg": b"after", "other-day.jpg": b"other-day"}
+    for name, content in originals.items():
+        (source / name).write_bytes(content)
+
+    def metadata(descriptors, _cancel):
+        results = {}
+        for fd in descriptors:
+            content = os.pread(fd, 32, 0)
+            day = "22" if content == b"other-day" else "21"
+            results[fd] = {"EXIF:ExifIFD:DateTimeOriginal": f"2026:07:{day} {captures[content]}"}
+        return results
+
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+    monkeypatch.setattr(main, "DATABASE_INITIALIZATION_ERROR", None)
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    client = _onboard(fresh_main)
+    _adopt(client)
+    api = "/api/legacy-adoption"
+    job = api + "/jobs/" + _json(client, "POST", api + "/jobs", status=201, json={"root": "nas"})["id"]
+    _json(client, "POST", job + "/scan", status=202)
+    day = "2026-07-21"
+    event = {"name": "Afternoon", "start_date": day, "end_date": day,
+             "start_time": "13:00", "end_time": "15:00", "children": [
+                 {"name": "First", "start_datetime": day + "T13:00", "end_datetime": day + "T13:00"},
+                 {"name": "Last", "start_datetime": day + "T13:01", "end_datetime": day + "T15:00"},
+             ]}
+    preview = _json(client, "POST", job + "/draft/check", json={"events": [event]})
+    slots = preview["free_segments"]
+    assert [(item["day_key"], item["start_time"], item["end_time"], item["families"], item["files"])
+            for item in slots] == [(day, "00:00", "12:59", 1, 2), (day, "15:01", "23:59", 1, 1),
+                                   ("2026-07-22", "00:00", "23:59", 1, 1)]
+    assert preview["events"][0]["files"] == 2
+    collection = {"event_kind": "no_event", "preserve_day_folders": True,
+                  "folder_layout": {"structure_enabled": False, "input_path": ""},
+                  "segments": [{key: segment[key] for key in ("day_key", "start_time", "end_time")}
+                               for segment in slots[:2]]}
+    another = {"name": "Another day", "start_date": "2026-07-22", "end_date": "2026-07-22"}
+    draft = {"events": [event, collection, another]}
+    assert _json(client, "POST", job + "/draft/check", json=draft)["free_segments"] == []
+    revision = _json(client, "PUT", job + "/draft", json={**draft, "revision": 0})["revision"]
+    plan = _json(client, "POST", job + "/plan", json={"revision": revision})
+    command = {"plan_id": plan["id"]}
+    _json(client, "POST", job + "/documents")
+    _json(client, "POST", job + "/confirm", json={**command, "method": "manual", "acknowledged": True})
+    for item in ("folders", "documents"):
+        response = client.get(job + "/download/" + item)
+        assert response.status_code == 200, response.text
+        with ZipFile(BytesIO(response.content)) as package:
+            package.extractall(archive)
+    for item in _json(client, "GET", job + "/moves"):
+        Path(item["source"]).rename(item["target"])
+    assert _json(client, "POST", job + "/verify", json=command)["state"] == "verified"
+    assert _json(client, "POST", job + "/finalize", json=command)["state"] == "completed"
+
+    parent, collection, another = plan["events"]
+    collection_id = collection["id"]
+    anchor = catalogue_job_id(plan)
+    collection_root = archive / event_root_relative(collection)
+    document = json.loads((collection_root / "event.json").read_text())
+    assert document["event"]["id"] == collection_id
+    retained = {path: hashlib.sha256(path.read_bytes()).hexdigest()
+                for item in (parent, another)
+                for path in (archive / event_root_relative(item)).rglob("*") if path.is_file()}
+    assert len(retained) >= 5
+    with database_connection(database) as connection:
+        assert tuple(connection.execute("SELECT start_datetime,end_datetime,uses_time_range FROM events WHERE id=?",
+                                        (parent["id"],)).fetchone()) == (day + "T13:00:00", day + "T15:00:59", 0)
+        members = event_file_rows(connection, collection_id)
+        assert {row["original_filename"] for row in members} == {"pair.raf", "pair.jpg", "after.jpg"}
+        assert document["event"]["occupied_intervals"] == [
+            {key: item[key] for key in ("start_datetime", "end_datetime")} for item in collection["segments"]
+        ]
+        assert connection.execute("SELECT count(*) FROM event_time_segments WHERE event_id=?",
+                                  (collection_id,)).fetchone()[0] == 2
+        for child, name in zip(parent["children"], ("first.jpg", "last.jpg"), strict=True):
+            assert [row[0] for row in connection.execute(
+                "SELECT files.original_filename FROM event_assignments JOIN files USING(family_id) WHERE event_id=?",
+                (child["id"],),
+            )] == [name]
+
+    request = propose_archived_event_deletion(database, anchor, collection_id, archive_root=archive)
+    change = request["change_request_id"]
+    confirm_event_change(database, change, archive, workspace)
+    copies = {}
+    for row in get_event_change_files(database, change):
+        if not row.get("workspace_release_path"):
+            continue
+        dest = backup_root(workspace) / row["workspace_release_path"]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(archive / row["old_path"], dest)
+        copies[dest] = hashlib.sha256(dest.read_bytes()).hexdigest()
+    assert len(copies) == 3 and verify_archive_release_copies(database, archive, workspace, change)["complete"]
+    shutil.rmtree(collection_root)
+    assert verify_archive_release_removal(database, archive, workspace, change)["complete"]
+    assert verify_event_change(database, change, archive, workspace)["verified_file_count"] == 3
+
+    def interrupt_completion(*_args, **_kwargs):
+        raise RuntimeError("synthetic outage after verification")
+
+    finish = f"/api/change-requests/{change}/archive"
+    with monkeypatch.context() as interruption:
+        interruption.setattr(archive_staging, "cleanup_archive_change_staging", interrupt_completion)
+        assert "synthetic outage after verification" in _json(client, "POST", finish, status=500)["detail"]
+    assert not operation_health.inspect(workspace)["writes_allowed"]
+    main.startup_database()
+    reopened = TestClient(main.app, follow_redirects=False)
+    result = _json(reopened, "POST", finish)
+    assert result["event_deleted"] and result["verified_file_count"] == 3
+    assert _json(reopened, "POST", finish) == result
+    assert operation_health.inspect(workspace)["writes_allowed"]
+    assert all(hashlib.sha256(path.read_bytes()).hexdigest() == checksum for path, checksum in (retained | copies).items())
+    with database_connection(database) as connection:
+        assert connection.execute("SELECT 1 FROM events WHERE id=?", (collection_id,)).fetchone() is None
+        assert not connection.execute("PRAGMA foreign_key_check").fetchall()
+    summary = _json(reopened, "GET", "/api/workspace/summary?jobs=&physical_refresh=false")
+    groups = summary["released_archive_groups"]
+    assert len(groups) == 2
+    released_ids = {family_id for group in groups for family_id in group["family_ids"]}
+    assert released_ids == {row["family_id"] for row in members}
+    refiled = _json(reopened, "POST", f"/api/jobs/{anchor}/events", json={
+        "event_kind": "no_event", "no_event_segments": collection["segments"],
+        "selected_family_ids": sorted(released_ids),
+    })
+    assert refiled["parent_event"]["id"] != collection_id
+    assert _json(reopened, "GET", "/api/workspace/summary?jobs=&physical_refresh=false")["released_archive_groups"] == []
 
 
 def test_exclusive_mode_holds_until_explicit_skip(

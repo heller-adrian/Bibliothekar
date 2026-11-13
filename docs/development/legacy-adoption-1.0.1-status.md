@@ -371,3 +371,31 @@ Der Betreiber bestätigt die praktische RC5-Abnahme einschließlich automatische
 Die vollständige Backend-QA [43347104577](https://github.com/heller-adrian/Bibliothekar/actions/runs/43347104577) für `4396956233387ef30e6be6c2fd7fcd20d652110b` bestand mit 2.718 von 2.718 Tests und 80 Vorabtests. Der Publisher [#2145](https://github.com/heller-adrian/Bibliothekar/actions/runs/43401178643) baute das Image, scheiterte aber nach der erfolgreichen Skriptübernahme und Registrierung eines erweiterten Archivereignisses. Beim wiederholten Abschluss meldete die Anwendung die vorübergehende Schreibsperre für die Wiederherstellung als strukturiertes HTTP 409. Der Containertest erkannte bisher nur das Textformat.
 
 Der Containertest wiederholt ausschließlich den idempotenten Abschluss bei nachgewiesener vorübergehender Wiederherstellung. Er prüft den strukturierten Fehler und anschließend den aktuellen Zustand der Anwendung. Fehlende Speicherbereitschaft, Startfehler, verwaiste Reservierungen, andere Sperrgründe und Zeitüberschreitung führen weiterhin zum Fehlschlag. Anwendung und Sperrlogik wurden nicht geändert. Lokal sind 24 gezielte Prüffälle grün. Nächster Schritt ist die vollständige Backend-QA für den korrigierten Commit und danach ein neuer Containertest auf demselben Stand.
+
+
+RC6 für `5e00ec5d3d5356a589bdedfa0978569d5687c982` · Die vollständige [Backend-QA](https://github.com/heller-adrian/Bibliothekar/actions/runs/43402544297) ist bestanden. Alle 2.728 Fälle liefen genau einmal erfolgreich in acht Partitionen. Die SHA-256-Prüfung der zehn Artefakte und alle 90 Vorabtests sind bestanden.
+
+Die [Containerprüfung](https://github.com/heller-adrian/Bibliothekar/actions/runs/43435153309) wurde für denselben Commit und QA-Lauf gestartet. Git- und GHCR-Referenzen wurden vorher erfasst. Nach Abschluss das Artefakt `rc6-qualified-image`, den nativen ZFS-Nachweis, OCI-Digest und Revisionslabel überprüfen. Danach `v1.0.1-rc.6` mit Nachweis veröffentlichen und die geschützten Referenzen erneut vergleichen.
+
+
+### RC6 veröffentlicht
+
+[GitHub-Vorabversion v1.0.1-rc.6](https://github.com/heller-adrian/Bibliothekar/releases/tag/v1.0.1-rc.6) ist für Commit `5e00ec5d3d5356a589bdedfa0978569d5687c982` veröffentlicht. Die vollständige Backend-QA mit 2.728 Tests und 90 Vorabtests sowie die Containerprüfung mit nativem ZFS sind bestanden. Der Release-Tag, das Linux/amd64-Image, das Revisionslabel, die beiden Anhänge und die geschützten Git- und GHCR-Referenzen wurden nach der Veröffentlichung geprüft.
+
+```text
+ghcr.io/heller-adrian/bibliothekar@sha256:ff98c7e273d4817704bd7ffdd18780e1c474a02a9926d2b883c17daac917e3a7
+```
+
+Nächster Schritt ist die praktische TrueNAS-Abnahme von RC6 durch den Betreiber. Über einen abschließenden Audit und eine stabile Veröffentlichung wird danach separat entschieden.
+
+## RC7 · Ereignisplanung und Wiederanlauf der Archivlöschung
+
+Grundlage ist RC6 (`5e00ec5d3d5356a589bdedfa0978569d5687c982`) und der fünfseitige TrueNAS-Bericht mit vier Befunden. Entwicklung in Draft-PR #41.
+
+- Die bisherige Übernahmeansicht zeigte die Inventur nach ganzen Tagen. Die Planungsansicht verwendet jetzt die reguläre Intervallsubtraktion aus Workspace → Media, dieselben Regeln für Sammelordner und Unterereignisse und die gemeinsame Vorbelegung des nächsten Unterereignisses. Familien mit zuverlässiger Aufnahmezeit erscheinen nur in dem freien, bereits archivierten oder im Entwurf belegten Zeitraum, dem sie zugeordnet sind. Die linke Übersicht enthält die geplanten Ereignisse mit Bearbeitungs- und Löschaktionen. Auswahl zeigt Zeiten, Familien und Dateien und bei geplanten Ereignissen die Ordnerstruktur. Neue Ereignisse können ohne vorausgewählte Tage angelegt werden.
+- Anfangs- und Endminuten sind inklusive. 13:00–15:00 belegt 13:00:00 bis 15:00:59. Die übrigen Aufnahmen bleiben bis 12:59 und ab 15:01 sichtbar. Verbindliche Elternzeiten stehen in den kanonischen Datumsspalten und Ereignisdokumenten. Die bestehenden Kindkennzeichen und die Datenbankregeln bleiben gültig. Archiveinträge werden beim späteren Übernehmen als belegt angezeigt, ihre passende Ergänzung bleibt möglich.
+- RC6 scheiterte nach der Dateiverifikation, weil der Löschauftrag eines Sammelordners eine leere Ersatzzeitliste enthält und der Abschluss sie als neue Planung behandelte. Nur Änderungsaufträge prüfen eine Ersatzzeitliste. Ein Löschauftrag verwendet weiterhin die archivierten Zuweisungen und den geprüften Rückgabebeleg. Derselbe Auftrag kann die bereits verifizierte Löschung abschließen. Die Meldungen zur Archivdiagnose und zum Laden weiterer Tage oder Segmente sind auf Deutsch und Englisch verfügbar.
+- Die native ZFS-Vorabprüfung führt beide Archivlebenszyklen auf dem synthetischen Dataset aus. Der erste übernimmt, erweitert, benennt um, löscht und archiviert die freigegebenen Dateien erneut. Der zweite verwendet zwei Ereignisse, berührende Unterereignisse, eine RAW/JPEG-Familie und einen Sammelordner mit zwei getrennten Segmenten. Er kontrolliert das Ereignisdokument, die Datenbank, verifizierte Rückkopien, einen provozierten Abbruch kurz vor dem Commit, Neustart und idempotenten Abschluss sowie die erneute Planung der freigegebenen Familien im Workspace. Ein separater Test kontrolliert die tatsächlichen schreibgeschützten Bind-Mounts. Der Container qualifiziert zusätzlich Zeitgrenzen in der manuellen und Skriptübernahme sowie die spätere Skripterweiterung.
+- Lokal bestanden 106 gezielte Workspace-, Zeitplanungs- und Archivwiederanlauftests. Chromium spielte die manuelle Übernahme bis zur Registrierung über LAN-HTTP und HTTPS auf Deutsch und Englisch durch. Der Hostnachweis wurde für die Browserprüfung simuliert. Die echte Host- und Dataset-Prüfung erfolgt auf Linux und im Container.
+
+Nächster Schritt ist die vollständige Linux-Freigabeprüfung des RC7-Commits. Bei Erfolg alle Artefakte und den vollständigen Coverage-Nachweis prüfen, anschließend den Containerworkflow für denselben Commit starten. Das qualifizierte Image, der feste Digest, die Vorabveröffentlichung und die reale TrueNAS-Abnahme stehen aus.

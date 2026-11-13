@@ -71,6 +71,8 @@ class EventDefinition(BaseModel):
     name: str = Field(default="", max_length=180)
     start_date: str | None = None
     end_date: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
     preserve_day_folders: bool = False
     segments: list[dict[str, str]] = Field(default_factory=list, max_length=200)
     children: list[ChildDefinition] = Field(default_factory=list, max_length=200)

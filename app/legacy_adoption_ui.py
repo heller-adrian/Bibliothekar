@@ -5,6 +5,7 @@ import re
 from app.legacy_adoption_i18n import TRANSLATIONS, PATTERNS
 from app.ui_i18n import i18n_ui_js
 from app.ui_shell import apply_setup_shell
+from app.ui_event_time import EVENT_TIME_JS
 
 _I18N_JS = i18n_ui_js(TRANSLATIONS, PATTERNS)
 
@@ -19,7 +20,7 @@ def setup_choice_html(decision: str) -> str:
 
 
 def wizard_html(library_id: str, *, later: bool = False, recovery_only: bool = False) -> str:
-    html = apply_setup_shell(_PAGE, localization_js=_I18N_JS)
+    html = apply_setup_shell(_PAGE.replace("/* SHARED_EVENT_TIME_JS */", EVENT_TIME_JS), localization_js=_I18N_JS)
     return re.sub(r'(<body\b[^>]*)(>)',
                   lambda match: (match[1] + ' data-library="' + escape(library_id, quote=True) + '"'
                                  + (' data-recovery-only="true"' if recovery_only else '')
@@ -142,9 +143,14 @@ border-radius:10px;background:var(--bk-surface);color:var(--bk-ink);box-shadow:v
 .adoption-day-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;max-height:clamp(280px,62vh,640px);overflow:auto;padding:3px}
 .legacy-adoption .day-card{display:grid;grid-template-columns:auto minmax(0,1fr);text-align:left;padding:14px;gap:8px;border:1px solid var(--bk-line);border-radius:15px;background:var(--bk-surface);color:var(--bk-ink);user-select:none}
 .day-card .subtle{grid-column:2}
+#archive-segments{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+#archive-segments:empty{display:none}
+#archive-segments .day-card{grid-template-columns:minmax(0,1fr)}
+#archive-segments .subtle{grid-column:1}
 .legacy-adoption .day-card.selected{border-color:var(--bk-blue);background:color-mix(in srgb,var(--bk-blue) 16%,var(--bk-surface))}
 .adoption-event-card{max-width:24rem;border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:6px 12px;margin-bottom:8px}
-.adoption-event-card summary{display:grid;gap:3px;overflow-wrap:anywhere}
+.adoption-event-card summary{cursor:pointer;overflow-wrap:anywhere}
+.adoption-event-card summary .subtle{display:block;margin-inline-start:1.1em}
 .adoption-event-card[open]{padding-bottom:12px}
 .adoption-folder-tree{max-height:20rem;overflow:auto;margin:8px 0 0;padding:8px 12px;background:var(--bk-surface-2);border-radius:8px}
 .adoption-folder-tree :is(ul,li){list-style:none;margin:0;padding:0}
@@ -235,6 +241,8 @@ let draftPage = 40;
 let layoutGroup = 0;
 let inventoryStarting = false;
 let viewStep=currentUrl.searchParams.get("step") || "";
+/* SHARED_EVENT_TIME_JS */
+let freeSegments=[], archiveSegments=[], selectedEvent=null, selectedArchive=null;
 let selectedDays=new Set(), dayRows=[], selectionAnchor="", dayPage=60, selectedDaysJob="", draftStats=[], draftCoverage=null, previewRevision=-1;
 const steps=[["setup","Einrichten"],["inventory","Inventur"],["plan","Ereignisse planen"],["review","Plan prüfen"],["execution","Methode wählen"],["execute","Durchführen"],["verify","Prüfen und abschließen"]];
 function allowedSteps(){
@@ -476,6 +484,7 @@ function inventoryProgress(){
 async function startInventory(){
   if(inventoryStarting)return;
   inventoryStarting=true;
+  previewRevision=-1;
   rememberView("inventory");
   if(job)render();
   else{
@@ -497,15 +506,16 @@ async function refresh() {
   job=state;
   if(selectedDaysJob!==jobId){
     selectedDaysJob=jobId;
-    try{selectedDays=new Set(JSON.parse(sessionStorage.getItem("bk-adoption-days:"+jobId)||"[]").filter(day=>/^\d{4}-\d{2}-\d{2}$/.test(day)).slice(0,10000));}catch{selectedDays=new Set();}
-    draftCoverage=null;previewRevision=-1;
+    try{selectedDays=new Set(JSON.parse(sessionStorage.getItem("bk-adoption-days:"+jobId)||"[]").filter(key=>typeof key==="string" && key.length<=40).slice(0,10000));}catch{selectedDays=new Set();}
+    freeSegments=[];archiveSegments=[];draftStats=[];draftCoverage=null;previewRevision=-1;
+    selectedEvent=null;selectedArchive=null;selectionAnchor="";day=null;
   }
   draftRevision=state.draft_revision;
   draft={events:[],capture_overrides:{},exclude_families:[],target_stems:{},...state.draft};
   let checked=null;
   if(!recoveryOnly && job.state==="inventoried" && !job.plan.id && previewRevision!==draftRevision){
     checked=await api(jobPath("/draft/check"),"POST",draft);
-    draftStats=checked.events;draftCoverage=checked.coverage;previewRevision=draftRevision;
+    applyDraftPreview(checked);previewRevision=draftRevision;
   }
   render();
   if(checked && !checked.valid && $("event-editor"))showConflicts(checked,draft);
@@ -617,70 +627,118 @@ function render() {
   else if(job.plan.id)renderPlan(host);
   else if(viewStep==="plan" && !job.scan_running && job.state==="inventoried")renderDraft(host);
 }
+function segmentKey(segment){return segment.start_datetime+"/"+segment.end_datetime;}
+function applyDraftPreview(checked){
+  draftStats=checked.events;
+  draftCoverage=checked.coverage;
+  freeSegments=checked.free_segments || [];
+  archiveSegments=checked.archive_segments || [];
+  const previousDays=selectedDays;
+  selectedDays=new Set(freeSegments.filter(segment=>previousDays.has(segment.day_key) ||
+    previousDays.has(segmentKey(segment))).map(segmentKey));
+}
 function renderDraft(host) {
   const panel=section("Ereignisse planen");
-  panel.append(line("Wähle Aufnahmetage wie im Arbeitsbereich. Klick und Strg/Cmd wählen einzelne Tage, Umschalt wählt einen Bereich. Du kannst auch ohne ausgewählte Tage planen."));
+  panel.append(line("Wähle freie Aufnahmetage oder Zeitabschnitte. Mit Umschalt wählst du einen Bereich. Du kannst auch ohne Auswahl planen."));
   const toolbar=node("div",undefined,"inline adoption-toolbar");
   toolbar.append(
     action("+ Ereignis",()=>eventEditor(undefined,"event"),true),
     action("+ Sammelordner ohne Ereignis",()=>eventEditor(undefined,"no_event")),
-    action("Alle auswählen",()=>{for(const row of dayRows)selectedDays.add(row.period);renderDays();}),
-    action("Auswahl aufheben",()=>{selectedDays.clear();renderDays();}),
+    action("Alle auswählen",()=>{for(const row of dayRows)selectedDays.add(segmentKey(row));renderDays();}),
+    action("Auswahl aufheben",()=>{
+      requireSaved($("families"));
+      selectedDays.clear();day=null;selectedEvent=null;selectedArchive=null;renderDays();renderPlanSelection();return showDay();
+    }),
     slot("selection-count","span"));
   panel.append(toolbar,slot("periods"));
   const grid=node("div",undefined,"grid adoption-planning");
-  const chronologyPane=node("div");chronologyPane.append(slot("days"),slot("matches"));
+  const chronologyPane=node("div");chronologyPane.append(slot("draft-events"),slot("archive-segments"),slot("days"));
   const diagnostic=node("details");diagnostic.id="family-diagnostics";
   diagnostic.append(node("summary","Dateifamilien und Aufnahmezeiten prüfen"),slot("families"));
   diagnostic.addEventListener("toggle",()=>{if(diagnostic.open && !$("families").childElementCount)showFamilies().catch(error=>report(error.message));});
   chronologyPane.append(diagnostic);
   const formPane=node("div");
-  formPane.append(node("h3","Gespeicherte Planobjekte"),slot("draft-coverage"),slot("draft-events"));
+  formPane.append(node("h3","Vorschau"),slot("draft-coverage"),slot("planning-preview"),slot("matches"));
   const editor=slot("event-editor","dialog");
   editor.setAttribute("aria-labelledby","event-editor-title");
   grid.append(chronologyPane,formPane);panel.append(grid,editor);host.append(panel);
   showDraftEvents();
+  renderPlanSelection();
 }
 async function chronology() {
-  requireSaved($("families"));
-  const periods=await api(jobPath("/chronology"));
-  if(!periods.some(period=>period.period===year))year=periods.find(period=>period.period)?.period || "";
-  const buttons=node("div",undefined,"inline");
-  for(const period of periods){
-    const button=action((period.period||t("Ohne gesichertes Datum"))+" ("+period.families+")",async()=>{
-      year=period.period||"";day=period.period?null:"";dayPage=60;await chronology();
-    });
-    button.setAttribute("aria-pressed",String(period.period===year));buttons.append(button);
+  const periodCounts=new Map();
+  for(const segment of [...freeSegments,...archiveSegments]){
+    const period=segment.day_key.slice(0,4);
+    periodCounts.set(period,(periodCounts.get(period)||0)+segment.families);
   }
-  $("periods").replaceChildren(buttons);$("matches").replaceChildren();$("families").replaceChildren();
-  dayRows=year ? await api(jobPath("/chronology?"+new URLSearchParams({year}))) : [];
+  for(const stats of draftStats){
+    if(!stats.start || !stats.end)continue;
+    for(let y=Number(stats.start.slice(0,4));y<=Number(stats.end.slice(0,4));y++){
+      const period=String(y).padStart(4,"0");
+      if(!periodCounts.has(period))periodCounts.set(period,0);
+    }
+  }
+  if(draftCoverage?.review)periodCounts.set("",draftCoverage.review);
+  const periods=[...periodCounts].sort(([a],[b])=>a.localeCompare(b));
+  if(!periodCounts.has(year))year=periods.find(([period])=>period)?.[0] || "";
+  const buttons=node("div",undefined,"inline");
+  for(const [period,count] of periods){
+    const button=action(period ? period+(count?" ("+count+")":"") : t("Ohne gesichertes Datum")+" ("+count+")",async()=>{
+      requireSaved($("families"));
+      year=period;day=period?null:"";selectedEvent=null;selectedArchive=null;dayPage=60;await chronology();
+    });
+    button.setAttribute("aria-pressed",String(period===year));buttons.append(button);
+  }
+  $("periods").replaceChildren(buttons);
+  dayRows=freeSegments.filter(segment=>segment.day_key.startsWith(year+"-"));
+  showDraftEvents();
+  const archive=$('archive-segments');
+  archive.replaceChildren();
+  const archiveRows=archiveSegments.filter(segment=>segment.day_key.startsWith(year+"-"));
+  for(const part of archiveRows.slice(0,dayPage)){
+    const button=action(undefined,async()=>{
+      requireSaved($('families'));
+      day=part.day_key;selectedEvent=null;selectedArchive=part;selectionAnchor="";
+      renderPlanSelection();
+      await showDay();
+    });
+    button.classList.add('day-card');
+    const name=node('strong',part.event_name);name.dataset.bkPreserveLanguage="";
+    button.append(name,node('span',part.day_key),node('span','Archiviertes Ereignis','subtle'));
+    archive.append(button);
+  }
+  if(archiveRows.length>dayPage){
+    archive.append(action('Weitere Tage',()=>{dayPage+=60;return chronology();}));
+  }
   renderDays();
-  if(day!==null)await showDay();
+  renderPlanSelection();
+  if(day!==null && ![...dirty].some(editor=>$("families").contains(editor)))await showDay();
 }
 function renderDays(){
   const host=$("days");if(!host)return;
   host.replaceChildren();
   const months=new Map();
   for(const item of dayRows.slice(0,dayPage)){
-    const month=item.period.slice(0,7);
+    const month=item.day_key.slice(0,7);
     if(!months.has(month)){
       const group=node("section",undefined,"adoption-month");group.append(node("h3",month));
       const cards=node("div",undefined,"adoption-day-grid");group.append(cards);months.set(month,cards);host.append(group);
     }
-    const card=node("button",undefined,"day-card"+(selectedDays.has(item.period)?" selected":""));
-    card.type="button";card.dataset.day=item.period;card.setAttribute("role","checkbox");
-    card.setAttribute("aria-checked",String(selectedDays.has(item.period)));
-    card.append(node("span",selectedDays.has(item.period)?"☑":"□"),node("strong",item.period),node("span",item.families+" "+t(item.families===1?"Dateifamilie":"Familien"),"subtle"));
+    const key=segmentKey(item);
+    const card=node("button",undefined,"day-card"+(selectedDays.has(key)?" selected":""));
+    card.type="button";card.dataset.day=key;card.setAttribute("role","checkbox");
+    card.setAttribute("aria-checked",String(selectedDays.has(key)));
+    card.append(node("span",selectedDays.has(key)?"☑":"□"),node("strong",item.day_key+(item.start_time==="00:00" && item.end_time==="23:59"?"":" · "+item.start_time+"–"+item.end_time)),node("span",item.families+" "+t(item.families===1?"Dateifamilie":"Familien"),"subtle"));
     function choose(event){
       requireSaved($("families"));
       if(event.shiftKey && selectionAnchor){
-        const keys=dayRows.map(row=>row.period),a=keys.indexOf(selectionAnchor),b=keys.indexOf(item.period);
+        const keys=dayRows.map(segmentKey),a=keys.indexOf(selectionAnchor),b=keys.indexOf(key);
         if(a>=0 && b>=0)for(const key of keys.slice(Math.min(a,b),Math.max(a,b)+1))selectedDays.add(key);
-      }else if(selectedDays.has(item.period))selectedDays.delete(item.period);
-      else selectedDays.add(item.period);
-      selectionAnchor=item.period;day=item.period;
-      renderDays();showDay().catch(error=>report(error.message));
-      $("days").querySelector('[data-day="'+item.period+'"]')?.focus();
+      }else if(selectedDays.has(key))selectedDays.delete(key);
+      else selectedDays.add(key);
+      selectionAnchor=key;day=selectedDays.has(key)?item.day_key:null;selectedEvent=null;selectedArchive=null;
+      renderDays();renderPlanSelection();showDay().catch(error=>report(error.message));
+      $("days").querySelector('[data-day="'+key+'"]')?.focus();
     }
     card.addEventListener("mousedown",event=>{if(event.shiftKey)event.preventDefault();});
     card.addEventListener("click",event=>{try{choose(event);}catch(error){report(error.message);}});
@@ -694,7 +752,7 @@ function renderDays(){
   }
   if(dayRows.length>dayPage)host.append(action("Weitere Tage",()=>{dayPage+=60;renderDays();}));
   sessionStorage.setItem("bk-adoption-days:"+jobId,JSON.stringify([...selectedDays]));
-  $("selection-count").textContent=selectedDays.size+" "+t(selectedDays.size===1?"Tag ausgewählt":"Tage ausgewählt");
+  $("selection-count").textContent=selectedDays.size+" "+t(selectedDays.size===1?"Abschnitt ausgewählt":"Abschnitte ausgewählt");
 }
 async function showDay() {
   requireSaved($("families"));
@@ -819,11 +877,13 @@ async function setDraft(value, editor) {
   const checked=await api(jobPath("/draft/check"),"POST",value);
   if(!checked.valid){showConflicts(checked,value,editor);throw new Error("Zeitkonflikt: Korrigiere die markierte Planung. Gespeicherte Entwürfe bleiben erhalten.");}
   const result=await api(jobPath("/draft"),"PUT",{...value,revision:draftRevision});
-  draftStats=checked.events;draftCoverage=checked.coverage;previewRevision=result.revision;
+  applyDraftPreview(checked);previewRevision=result.revision;
   draft=value;
   draftRevision=result.revision;
   savedEditor(editor);
-  showDraftEvents();
+  selectedEvent=null;
+  selectedArchive=null;
+  await chronology();
 }
 async function addExisting(item, candidate=draft, replaceAt=null, editor=null) {
   const events=candidate.events.filter((event,index)=>event.existing_id!==item.id && index!==replaceAt);
@@ -854,46 +914,77 @@ function showConflicts(checked,candidate,editor){
   else if($("event-editor")) $("event-editor").before(panel);
   else $("work").prepend(panel);
 }
-function showDraftEvents() {
-  const el=$("draft-events");if(!el)return;
-  el.replaceChildren();
+function renderPlanSelection() {
+  const target=$("planning-preview");
   const coverage=$("draft-coverage");
+  if(!target || !coverage)return;
+  target.replaceChildren();
   coverage.replaceChildren();
-  if(draft.events.length)coverage.append(line("Alle gespeicherten Planobjekte fließen in den Verschiebeplan ein."));
   if(draftCoverage?.unassigned){
     const message=draftCoverage.unassigned===1?"Eine Dateifamilie ist noch nicht zugeordnet.":
       draftCoverage.unassigned+" Dateifamilien sind noch nicht zugeordnet.";
-    const hint=node("p",message,"subtle");
-    coverage.append(hint,line("Ordne diese Aufnahmen zu oder prüfe sie im nächsten Schritt. Ohne Zuordnung bleiben sie an der Quelle."));
-    if(draftCoverage.unassigned_days.length)coverage.append(node("p",draftCoverage.unassigned_days.join(" · "),"subtle"));
+    coverage.append(node("p",message,"subtle"));
   }
-  if(!draft.events.length)el.append(line("Lege mindestens ein Ereignis oder einen Sammelordner an."));
-  draft.events.slice(0,draftPage).forEach((item,index)=>{
+  const stats=draftStats[selectedEvent];
+  if(stats){
+    const title=node("strong",stats.name);title.dataset.bkPreserveLanguage="";
+    target.append(title,line(formatPlanRange(stats.start,stats.end)),
+      line(planCounts(stats)));
+    if(stats.children?.length || stats.segments?.length){
+      const parts=node("ul");
+      for(const child of stats.children || []){
+        const name=node("strong",child.name);name.dataset.bkPreserveLanguage="";
+        const item=node("li");item.append(name,line(formatPlanRange(child.start,child.end)));parts.append(item);
+      }
+      for(const segment of stats.segments || [])parts.append(node("li",formatPlanRange(segment.start_datetime,segment.end_datetime)));
+      target.append(parts);
+    }
+    const structure=node("div",undefined,"adoption-structure-preview");target.append(structure);
+    draftStructure([draft.events[selectedEvent]]).then(preview=>structure.replaceChildren(preview))
+      .catch(error=>{if(structure.isConnected)report(error.message);});
+    return;
+  }
+  const segment=selectedArchive || freeSegments.find(item=>segmentKey(item)===selectionAnchor && selectedDays.has(selectionAnchor));
+  if(segment)target.append(line(formatPlanRange(segment.start_datetime,segment.end_datetime)),line(planCounts(segment)));
+}
+function planCounts(item){return item.families+" "+t(item.families===1?"Dateifamilie":"Familien")+" · "+item.files+" "+t(item.files===1?"Datei":"Dateien");}
+function formatPlanRange(start,end){
+  return start.slice(0,16).replace("T"," ")+" → "+end.slice(0,16).replace("T"," ");
+}
+function showDraftEvents() {
+  const el=$("draft-events");if(!el)return;
+  el.replaceChildren();
+  const visible=draft.events.map((item,index)=>({item,index,stats:draftStats[index]}))
+    .filter(({stats})=>!year || !stats || (stats.start.slice(0,4)<=year && year<=stats.end.slice(0,4)))
+    .sort((a,b)=>(a.stats?.start||"").localeCompare(b.stats?.start||""));
+  for(const {item,index,stats} of visible.slice(0,draftPage)){
     const row=node("details",undefined,"adoption-event-card");
     const kind=item.existing_id?"Archivereignis ergänzen":item.event_kind==="no_event"?"Sammelordner ohne Ereignis":"Neues Ereignis";
-    const dates=item.event_kind==="no_event"?(item.segments||[]).map(segment=>segment.day_key):[item.start_date,item.end_date].filter(Boolean);
     const summary=node("summary");const title=node("strong",item.name||kind);
     if(item.name)title.dataset.bkPreserveLanguage="";
     summary.append(title);
     if(item.name && item.existing_id)summary.append(node("span",kind,"subtle"));
-    if(dates.length)summary.append(node("span",[...new Set(dates)].join(" → "),"subtle"));
-    row.append(summary);
-    const matches=dayRows.filter(day=>item.event_kind==="no_event"?dates.includes(day.period):day.period>=item.start_date && day.period<=item.end_date);
-    const stats=draftStats[index];
-    row.append(line((stats?.days??matches.length)+" "+t("Tage")+" · "+(stats?.families??matches.reduce((sum,day)=>sum+day.families,0))+" "+t("Familien")));
-    if(stats && !dates.length)row.append(line(stats.start.slice(0,10)+" → "+stats.end.slice(0,10)));
+    if(stats)summary.append(node("span",formatPlanRange(stats.start,stats.end),"subtle"));
+    summary.addEventListener("click",()=>{
+      if(!row.open){
+        for(const other of el.querySelectorAll("details[open]"))other.open=false;
+        selectedEvent=index;selectedArchive=null;day=null;
+        $("matches").replaceChildren();
+        renderPlanSelection();
+      }
+    });
+    row.open=selectedEvent===index;row.append(summary);
+    if(stats)row.append(line(planCounts(stats)));
     const controls=node("div",undefined,"inline");
-    const structure=node("div",undefined,"adoption-structure-preview");
-    controls.append(action("Vorschau",async()=>structure.replaceChildren(await draftStructure([item]))));
     if(!item.existing_id)controls.append(action("Bearbeiten",()=>eventEditor(index)));
     const remove=action("Entfernen",async()=>{
       if(!confirm(t("Dieses Planobjekt entfernen?")))return;
       await setDraft({...draft,events:draft.events.filter((_,at)=>at!==index)});report("Entwurf entfernt.");
     });
     remove.classList.add("danger-button");controls.append(remove);
-    row.append(controls,structure);el.append(row);
-  });
-  if(draftPage<draft.events.length)el.append(action("Weitere Planobjekte",()=>{draftPage+=40;showDraftEvents();}));
+    row.append(controls);el.append(row);
+  }
+  if(draftPage<visible.length)el.append(action("Weitere Planobjekte",()=>{draftPage+=40;showDraftEvents();}));
 }
 function folderTree(){
   const frame=node("div",undefined,"adoption-folder-tree");
@@ -984,7 +1075,7 @@ function eventEditor(index, newKind="event") {
   const item=draft.events[index] || {};
   const kind=item.event_kind || newKind;
   const isEvent=kind==="event";
-  const days=index===undefined?[...selectedDays].sort():[];
+  const selected=freeSegments.filter(segment=>selectedDays.has(segmentKey(segment)));
   const form=node("div",undefined,"stack");
   watchDraft(form);
   const edited=()=>form.dispatchEvent(new Event("input"));
@@ -992,7 +1083,7 @@ function eventEditor(index, newKind="event") {
   title.id="event-editor-title";
   const message=node("p");message.id="editor-message";message.setAttribute("role","alert");
   form.append(title);
-  if(isEvent)form.append(node("p","Das Ereignis umfasst alle Aufnahmetage zwischen dem ersten und letzten Datum.","subtle adoption-interval"));
+  if(isEvent)form.append(node("p","Das Ereignis belegt einen durchgehenden Zeitraum.","subtle adoption-interval"));
   form.append(message);
   const [keepWrap,keep]=field("Tagesordner erhalten","checkbox");
   keep.checked=Boolean(item.preserve_day_folders);
@@ -1001,9 +1092,11 @@ function eventEditor(index, newKind="event") {
 
   if(isEvent){
     const [nameWrap,name]=field("Ereignisname","text",item.name);
-    const [startWrap,start]=field("Erster Tag","date",item.start_date || days[0]);
-    const [endWrap,end]=field("Letzter Tag","date",item.end_date || days.at(-1));
-    const dates=node("div",undefined,"inline");dates.append(startWrap,endWrap);
+    const [startWrap,start]=field("Erster Tag","date",item.start_date || selected[0]?.day_key);
+    const [fromWrap,from]=field("Von","time",item.start_time ?? selected[0]?.start_time ?? "00:00");
+    const [endWrap,end]=field("Letzter Tag","date",item.end_date || selected.at(-1)?.day_key);
+    const [toWrap,to]=field("Bis","time",item.end_time ?? selected.at(-1)?.end_time ?? "23:59");
+    const dates=node("div",undefined,"inline");dates.append(startWrap,fromWrap,endWrap,toWrap);
     form.append(nameWrap,dates);
     firstInput=name;
     const children=node("div");
@@ -1025,10 +1118,20 @@ function eventEditor(index, newKind="event") {
       return n;
     }
     for(const child of item.children || [])addChild(child);
-    form.append(children,action("Unterereignis hinzufügen",()=>{addChild().focus();edited();}));
+    form.append(children,action("Unterereignis hinzufügen",()=>{
+      const previousEnd=children.lastElementChild?.childValues().end_datetime;
+      const next=nextChildInterval(
+        {minDate:start.value,maxDate:end.value,minTime:from.value,maxTime:to.value},
+        previousEnd ? {day:previousEnd.slice(0,10),time:previousEnd.slice(11,16)} : null,
+      );
+      if(!next || next.error)throw new Error(next?.error || "Name, Beginn und Ende fehlen.");
+      addChild({start_datetime:next.start_date+"T"+next.start_time,end_datetime:next.end_date+"T"+next.end_time}).focus();
+      edited();
+    }));
     fields=()=>{
-      if(!name.value.trim() || !start.value || !end.value)throw new Error("Name, Beginn und Ende fehlen.");
+      if(!name.value.trim() || !start.value || !end.value || !from.value || !to.value)throw new Error("Name, Beginn und Ende fehlen.");
       return {name:name.value.trim(),start_date:start.value,end_date:end.value,
+        start_time:from.value,end_time:to.value,
         children:[...children.children].map(row=>row.childValues())};
     };
   }else{
@@ -1046,14 +1149,25 @@ function eventEditor(index, newKind="event") {
       segments.append(row);
       return day;
     }
-    const initial=item.segments || days.map(day_key=>({day_key}));
+    const initial=item.segments || selected;
     for(const segment of initial.length?initial:[{}]){
       const input=addSegment(segment);
       firstInput ??= input;
     }
     form.append(line("Lasse beide Uhrzeiten leer, um den ganzen Tag zu übernehmen."));
     if(index===undefined)form.append(line("Für jeden Monat mit ausgewählten Tagen wird ein Sammelordner angelegt."));
-    form.append(segments,action("Tag oder Zeitabschnitt hinzufügen",()=>{addSegment().focus();edited();}));
+    const segmentActions=node("div",undefined,"inline");
+    segmentActions.append(action("Tag oder Zeitabschnitt hinzufügen",()=>{addSegment().focus();edited();}));
+    const sameMonth=index===undefined?[]:selected.filter(part=>part.day_key.slice(0,7)===initial[0]?.day_key.slice(0,7));
+    if(sameMonth.length){
+      const appendSelection=action("Ausgewählte freie Abschnitte hinzufügen",()=>{
+        for(const part of sameMonth)addSegment(part);
+        appendSelection.disabled=true;
+        edited();
+      });
+      segmentActions.append(appendSelection);
+    }
+    form.append(segments,segmentActions);
     fields=()=>{
       if(!segments.children.length)throw new Error("Mindestens ein Zeitabschnitt fehlt.");
       return {segments:[...segments.children].map(row=>row.segmentValue())};

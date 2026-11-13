@@ -4,7 +4,15 @@ import re
 
 
 TRANSLATIONS = {
+    "Das Ereignis belegt einen durchgehenden Zeitraum.": "The event occupies one continuous time range.",
+    "Das Ende muss nach dem Beginn liegen.": "The end must follow the start.",
+    "Startzeit ist ungültig.": "The start time is invalid.",
+    "Endzeit ist ungültig.": "The end time is invalid.",
+    "Der bisherige Unterereigniszeitraum reicht bereits bis zum Ende des Oberereignisses. Ändere zuerst die letzte Endzeit.": "The last subevent already reaches the end of the parent event. Change its end time first.",
+    "Im Oberereignis ist hinter dem letzten Unterereignis kein weiterer Zeitraum frei.": "There is no free time after the last subevent in the parent event.",
+
     "Vorschau": "Preview",
+    "Archiviertes Ereignis": "Archived event",
     "Dieses Planobjekt entfernen?": "Remove this item from the plan?",
     "Dieses Unterereignis aus dem Entwurf entfernen?": "Remove this subevent from the draft?",
     "Das Ereignis umfasst alle Aufnahmetage zwischen dem ersten und letzten Datum.":
@@ -19,6 +27,10 @@ TRANSLATIONS = {
         "Check the TrueNAS shell output. If a mount was not found, prepare the manual host path check under advanced details.",
     "Dateifamilie": "Family",
     "Tag ausgewählt": "day selected",
+    "Abschnitt ausgewählt": "time slot selected",
+    "Abschnitte ausgewählt": "time slots selected",
+    "Ausgewählte freie Abschnitte hinzufügen": "Add selected available time slots",
+    "Wähle freie Aufnahmetage oder Zeitabschnitte. Mit Umschalt wählst du einen Bereich. Du kannst auch ohne Auswahl planen.": "Select available capture days or time slots. Hold Shift to select a range. You can also plan without a selection.",
     "Der Arbeitsbereich muss ein absoluter Containerpfad sein.": "The workspace must be an absolute container path.",
     "Das Archiv muss ein absoluter Containerpfad sein.": "The archive must be an absolute container path.",
     "Der verwaltete Stamm für Bibliotheks-Arbeitsbereiche ist nicht vollständig zugreifbar.":

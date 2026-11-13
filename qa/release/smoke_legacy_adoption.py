@@ -180,7 +180,8 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             definition = {"existing_id": existing_event["id"]}
         else:
             assert not list(archive.iterdir())
-            definition = {"name": "Smoke " + execution, "start_date": date, "end_date": date, "preserve_day_folders": True}
+            definition = {"name": "Smoke " + execution, "start_date": date, "end_date": date,
+                          "start_time": "12:00", "end_time": "15:00", "preserve_day_folders": True}
         draft = api(job + "/draft", method="PUT", payload={"revision": 0, "events": [definition]})
         if execution == "script":
             subprocess.run(["docker", "restart", container], check=True)
@@ -193,6 +194,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             assert resumed["id"] == job_id
         plan = api(job + "/plan", method="POST", payload={"revision": draft["revision"]})
         [event] = plan["events"]
+        assert (event["start_datetime"], event["end_datetime"]) == (date + "T12:00:00", date + "T15:00:59")
         if existing_event:
             for field in ("id", "start_datetime", "end_datetime", "folder_name"):
                 assert event[field] == existing_event[field]

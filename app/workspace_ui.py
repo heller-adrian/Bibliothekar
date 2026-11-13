@@ -4219,53 +4219,21 @@ WORKSPACE_HTML = r"""<!doctype html>
       const current=days.includes(selected) ? selected : (days[0]||selected||"");
       return `<label><span>${escapeHtml(label)}</span><input ${attribute} type="date" min="${escapeHtml(bounds.minDate||"")}" max="${escapeHtml(bounds.maxDate||"")}" value="${escapeHtml(current)}"></label>`;
     }
-    function minuteAfter(value){
-      const match=/^(\d{2}):(\d{2})$/.exec(String(value||""));
-      if(!match)return null;
-      const total=Number(match[1])*60+Number(match[2])+1;
-      if(total>=24*60)return null;
-      return `${String(Math.floor(total/60)).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`;
-    }
-
+    /* SHARED_EVENT_TIME_JS */
     function nextSubeventDefaults(){
-      const bounds=subeventBounds();
-      if(!bounds.minDate||!bounds.maxDate)return null;
       const rows=[...createSubeventList.querySelectorAll("[data-create-subevent]")];
-      if(!rows.length){
-        return {
-          start_date:bounds.minDate,
-          start_time:bounds.minTime||"00:00",
-          end_date:bounds.minDate,
-          end_time:bounds.minDate===bounds.maxDate ? (bounds.maxTime||"23:59") : "23:59",
-        };
-      }
-
-      const previous=rows[rows.length-1];
-      const previousDay=previous.querySelector("[data-create-child-end-date]")?.value||bounds.minDate;
-      const previousTime=previous.querySelector("[data-create-child-end-time]")?.value||"23:59";
-      let startDate=previousDay;
-      let startTime=minuteAfter(previousTime);
-      if(!startTime){
-        startDate=shiftIsoDay(previousDay,1);
-        startTime="00:00";
-      }
-      if(!startDate || startDate>bounds.maxDate){
+      const previous=rows.at(-1);
+      const bounds=subeventBounds();
+      const defaults=nextChildInterval(bounds, previous ? {
+        day:previous.querySelector("[data-create-child-end-date]")?.value||bounds.minDate,
+        time:previous.querySelector("[data-create-child-end-time]")?.value||"23:59",
+      } : null);
+      if(defaults?.error){
         dialogError.hidden=false;
-        dialogError.textContent="Der bisherige Unterereigniszeitraum reicht bereits bis zum Ende des Oberereignisses. Ändere zuerst die letzte Endzeit.";
+        dialogError.textContent=defaults.error;
         return null;
       }
-      const endTime=startDate===bounds.maxDate ? (bounds.maxTime||"23:59") : "23:59";
-      if(startDate===bounds.maxDate && startTime>endTime){
-        dialogError.hidden=false;
-        dialogError.textContent="Im Oberereignis ist hinter dem letzten Unterereignis kein weiterer Zeitraum frei.";
-        return null;
-      }
-      return {
-        start_date:startDate,
-        start_time:startTime,
-        end_date:startDate,
-        end_time:endTime,
-      };
+      return defaults;
     }
 
     function refreshCreateSubeventDayControls(){
@@ -5115,3 +5083,6 @@ WORKSPACE_HTML = _workspace_words(WORKSPACE_HTML)
 
 from app.ui_workspace_cache import WORKSPACE_CACHE_JS
 WORKSPACE_HTML = WORKSPACE_HTML.replace("/* PRE_WORKSPACE_CACHE */",WORKSPACE_CACHE_JS)
+
+from app.ui_event_time import EVENT_TIME_JS
+WORKSPACE_HTML = WORKSPACE_HTML.replace("/* SHARED_EVENT_TIME_JS */", EVENT_TIME_JS)

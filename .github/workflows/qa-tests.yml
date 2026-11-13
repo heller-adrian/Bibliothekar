@@ -157,8 +157,13 @@ jobs:
           from xml.etree import ElementTree
           junit = Path(os.environ["RUNNER_TEMP"]) / "f14-qa/targets/results/result.xml"
           cases = list(ElementTree.parse(junit).iter("testcase"))
-          mount = [case for case in cases if case.get("name") == "test_adoption_reads_actual_read_only_archive"]
-          assert len(mount) == 1 and len(mount[0]) == 0, "Missing successful read-only mount test"
+          for name in (
+              "test_adoption_reads_actual_read_only_archive",
+              "test_wizard_and_f14_recovery_in_main_library[lifecycle]",
+              "test_adopted_time_segments_survive_verified_archive_deletion_and_restart[segments]",
+          ):
+              matches = [case for case in cases if case.get("name") == name]
+              assert len(matches) == 1 and len(matches[0]) == 0, f"Missing successful native ZFS test: {name}"
           PY
       - name: Save adoption preflight evidence
         if: always() && steps.scope.outputs.request-only != 'true'

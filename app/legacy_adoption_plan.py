@@ -1,8 +1,8 @@
 """Build and persist manual legacy moves without changing the archive catalogue."""
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections import Counter
 from contextlib import closing, ExitStack
-from datetime import date, datetime
+from datetime import datetime
 from functools import lru_cache
 from itertools import groupby
 import json
@@ -21,6 +21,8 @@ from app.event_naming import (
     naming_from_library_settings, naming_snapshot_for_new_event,
     render_event_folder_name, render_no_event_folder_name,
 )
+from app.event_structure import continuous_event_bounds
+from app.free_time import free_ranges_for_day
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps, normalize_no_event_segments, normal_event_ranges
 from app.legacy_adoption_inventory import _job
 from app.legacy_adoption_mode import require_no_managed_data
@@ -49,14 +51,6 @@ def _local_capture(value):
     if result.tzinfo is None:
         result = result.replace(tzinfo=LOCAL_TIMEZONE)
     return result.isoformat()
-
-
-def _range(start, end):
-    if not isinstance(start, str) or not isinstance(end, str):
-        raise AdoptionError("Das Ereignis benötigt ein Anfangs- und Enddatum.")
-    if date.fromisoformat(start).isoformat() != start or date.fromisoformat(end).isoformat() != end or end < start:
-        raise AdoptionError("Der Ereigniszeitraum ist ungültig.")
-    return (start + "T00:00:00", end + "T23:59:59")
 
 
 def _layout(definition, defaults, inherited=None):
@@ -114,13 +108,20 @@ def _draft_event(connection, definition, naming, defaults, *, allow_existing=Fal
     kind = definition.get("event_kind", "event")
     parent_layout = _layout(definition, defaults)
     if kind == "event":
-        start, end = _range(definition.get("start_date"), definition.get("end_date"))
+        start_time, end_time = definition.get("start_time"), definition.get("end_time")
+        explicit_time = start_time is not None or end_time is not None
+        start, end = continuous_event_bounds(
+            definition.get("start_date"), definition.get("end_date"),
+            (start_time or "") if explicit_time else None,
+            (end_time or "") if explicit_time else None,
+        )
+        uses_time_range = start[11:] != "00:00:00" or end[11:] != "23:59:59"
         segments = []
         ranges = [(start, end)]
         name = str(definition.get("name") or "").strip()
         folder = render_event_folder_name(
             event_name=name, start_date=start[:10], end_date=end[:10],
-            start_time=None, end_time=None, uses_time_range=False, naming=naming,
+            start_time=start_time, end_time=end_time, uses_time_range=uses_time_range, naming=naming,
         )
         definitions = definition.get("children") or []
         normalized = normalize_subevents(
@@ -243,16 +244,25 @@ def preview_draft(library, job_id, draft, *, allow_existing=False):
         if len(set(prefixes)) != len(prefixes):
             raise AdoptionError('Mehrere Ereignisse beanspruchen denselben Zielordner.')
         starts = [item[0] for item in intervals]
-        counts = [{'families': 0, 'days': set()} for _ in events]
+        counts = [{'families': 0, 'files': 0, 'days': set()} for _ in events]
         overrides = {key: _local_capture(value) for key, value in draft.get('capture_overrides', {}).items()}
         exclusions = set(draft.get('exclude_families') or [])
         coverage = {'unassigned': 0, 'review': 0, 'excluded': 0}
-        unassigned_days = set()
+        occupied = merge_intervals((start, end) for start, end, _ in intervals)
+        occupied_ends = [end for _, end in occupied]
+        free_by_day = {}
+        archive_by_day = {}
+        archive = _archive_occupations(connection, job_id) if allow_existing else []
+        archive_ends = []
+        for _, end, _ in archive:
+            archive_ends.append(max(end, archive_ends[-1]) if archive_ends else end)
         for row in connection.execute(
-            '''SELECT families.family_key,families.capture_time,families.review_required,copy.state AS review_copy
+            """SELECT families.family_key, families.capture_time, families.review_required, copy.state AS review_copy,
+                      (SELECT count(*) FROM legacy_adoption_inventory AS member
+                       WHERE member.job_id=families.job_id AND member.family_key=families.family_key) AS files
                FROM legacy_adoption_families families
                LEFT JOIN legacy_adoption_review_copies copy USING(job_id,family_key)
-               WHERE families.job_id=?''', (job_id,),
+               WHERE families.job_id=?""", (job_id,),
         ):
             key = row['family_key']
             capture = overrides.get(key, row['capture_time'])
@@ -262,16 +272,72 @@ def preview_draft(library, job_id, draft, *, allow_existing=False):
                 coverage['review'] += 1
             elif (index := _assigned_index(intervals, starts, capture)) is None:
                 coverage['unassigned'] += 1
-                unassigned_days.add(capture[:10])
+                day = capture[:10]
+                if day not in free_by_day:
+                    first = bisect_left(occupied_ends, day + 'T00:00:00')
+                    blocked = list(_day_occupations(occupied, first, day))
+                    if archive:
+                        archive_by_day[day] = _archive_segments(archive, archive_ends, day)
+                        blocked.extend((part['start_datetime'], part['end_datetime']) for part in archive_by_day[day])
+                    free_by_day[day] = [
+                        {**part, 'families': 0, 'files': 0}
+                        for part in free_ranges_for_day(day, blocked)
+                    ]
+                for part in (*free_by_day[day], *archive_by_day.get(day, ())):
+                    if part['start_datetime'] <= capture[:19] <= part['end_datetime']:
+                        part['families'] += 1
+                        part['files'] += row['files']
+                        break
             else:
                 counts[index]['families'] += 1
+                counts[index]['files'] += row['files']
                 counts[index]['days'].add(capture[:10])
-        return {'valid': True, 'conflicts': [], 'coverage': {**coverage, 'unassigned_days': sorted(unassigned_days)[:12]},
-                'events': [
-            {'name': event['name'], 'start': event['start_datetime'], 'end': event['end_datetime'],
-             'families': count['families'], 'days': len(count['days'])}
-            for event, count in zip(events, counts)
-        ]}
+        return {
+            'valid': True, 'conflicts': [],
+            'coverage': {**coverage, 'unassigned_days': sorted(free_by_day)[:12]},
+            'free_segments': [part for day in sorted(free_by_day) for part in free_by_day[day] if part['families']],
+            'archive_segments': [part for day in sorted(archive_by_day) for part in archive_by_day[day] if part['families']],
+            'events': [
+                {'name': event['name'], 'start': event['start_datetime'], 'end': event['end_datetime'],
+                 'children': [{'name': child['name'], 'start': child['start_datetime'], 'end': child['end_datetime']}
+                              for child in event['children']],
+                 'segments': event['segments'],
+                 'families': count['families'], 'files': count['files'], 'days': len(count['days'])}
+                for event, count in zip(events, counts)
+            ],
+        }
+
+
+def _day_occupations(occupied, first, day):
+    for index in range(first, len(occupied)):
+        start, end = occupied[index]
+        if start[:10] > day:
+            break
+        yield start, end
+
+
+def _archive_occupations(connection, job_id):
+    first, last = '0001-01-01T00:00:00', '9999-12-31T23:59:59'
+    normal = continuous_event_overlaps(connection, job_id, first, last)
+    collections = no_event_segment_overlaps(connection, job_id, first, last)
+    return sorted(
+        (row.get('effective_start', row['start_datetime']), row.get('effective_end', row['end_datetime']), row['name'])
+        for row in normal + collections
+    )
+
+
+def _archive_segments(archive, ends, day):
+    first, last = day + 'T00:00:00', day + 'T23:59:59'
+    result = []
+    for index in range(bisect_left(ends, first), len(archive)):
+        start, end, name = archive[index]
+        if start > last:
+            break
+        if end >= first:
+            start, end = max(first, start), min(last, end)
+            result.append({'day_key': day, 'start_datetime': start, 'end_datetime': end,
+                           'event_name': name, 'families': 0, 'files': 0})
+    return result
 
 
 def _target_leaf(event, capture):
