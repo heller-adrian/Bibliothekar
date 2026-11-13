@@ -399,3 +399,11 @@ Grundlage ist RC6 (`5e00ec5d3d5356a589bdedfa0978569d5687c982`) und der fünfseit
 - Lokal bestanden 106 gezielte Workspace-, Zeitplanungs- und Archivwiederanlauftests. Chromium spielte die manuelle Übernahme bis zur Registrierung über LAN-HTTP und HTTPS auf Deutsch und Englisch durch. Der Hostnachweis wurde für die Browserprüfung simuliert. Die echte Host- und Dataset-Prüfung erfolgt auf Linux und im Container.
 
 Nächster Schritt ist die vollständige Linux-Freigabeprüfung des RC7-Commits. Bei Erfolg alle Artefakte und den vollständigen Coverage-Nachweis prüfen, anschließend den Containerworkflow für denselben Commit starten. Das qualifizierte Image, der feste Digest, die Vorabveröffentlichung und die reale TrueNAS-Abnahme stehen aus.
+
+Die vollständige Linux-Freigabe-QA [43456331350](https://github.com/heller-adrian/Bibliothekar/actions/runs/43456331350) wurde mit `full_backend=true` für `86947051863f2fda44068a4a819abe53d715b8d6` auf dem Entwicklungsbranch gestartet. Der letzte lokale Adoption-, Dataset-, Host- und Löschtestlauf hatte 91 erfolgreiche Fälle. Ein Linux-Mounttest wurde auf macOS übersprungen. Diese Laufnotiz bleibt lokal, damit der Prüfcommit unverändert bleibt. Nach Fortsetzung den nativen Vorabtest, alle acht Partitionen und die vollständige Coverage prüfen. Bei Erfolg den Containerworkflow für exakt denselben Commit mit `adoption_qa_run=43456331350` starten.
+
+### RC7 · Korrektur des Linux-Vorabtests
+
+[QA 43456331350](https://github.com/heller-adrian/Bibliothekar/actions/runs/43456331350/job/131991342705) endete im ZFS-Vorabtest. 92 Fälle bestanden. Zwei Lebenszyklustests scheiterten beim Start mit `acl_backend_unavailable`, da ihre privaten Verwaltungsordner auf dem ZFS-Mediendataset des GitHub-Runners lagen. Dadurch starteten weder die acht Backend-Partitionen noch die Coverage-Prüfung.
+
+Die Testbibliotheken legen Konfiguration, Arbeitsbereich und private Datenbank wieder auf dem Runner-Dateisystem an. Quelle und Archiv verbleiben für die native Dataset-Prüfung auf demselben synthetischen ZFS-Dataset. Der Test bildet die reguläre Übertragung vom Workspace ins Archiv dateisystemübergreifend ab und prüft anschließend weiter Dateiintegrität und Abschluss. Die Anwendung einschließlich ihrer ACL- und ZFS-Prüfungen bleibt unverändert.

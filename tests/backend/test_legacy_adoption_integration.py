@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import os
+import shutil
 import sys
 from pathlib import Path
 from zipfile import ZipFile
@@ -32,11 +33,17 @@ def fresh_main(tmp_path, monkeypatch, request):
     from app import legacy_adoption_api
 
     native = os.environ.get("ADOPTION_ZFS_ROOT")
-    base = Path(native) / tmp_path.name if native and getattr(request, "param", False) else tmp_path.resolve()
-    case = base / "first-install"
-    workspace, private, archive = (case / name for name in ("workspace", "database", "archive"))
+    case = tmp_path.resolve() / "first-install"
+    workspace, private = case / "workspace", case / "database"
+    # Only the media pair belongs on synthetic ZFS. The legacy private
+    # catalogue and operation records require a supported native ACL backend.
+    native_media = native and getattr(request, "param", False)
+    media_root = Path(native) / tmp_path.name if native_media else case
+    archive = media_root / "archive"
     for path in (workspace, private, archive):
         path.mkdir(parents=True)
+    if native_media:
+        assert archive.stat().st_dev != private.stat().st_dev
     config = case / "settings.json"
     config.write_text("{}")
     database, registry = private / "main.sqlite3", private / "registry.sqlite3"
@@ -313,8 +320,8 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
     from app import legacy_adoption_registration as registration
     from app.legacy_adoption_paths import AdoptionError
 
-    workspace, database, registry, _ = fresh_main
-    source = workspace.parent / "legacy-source"
+    workspace, database, registry, archive = fresh_main
+    source = archive.parent / "legacy-source"
     if os.environ.get("ADOPTION_ZFS_ROOT"):
         monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
     day = source / "2026" / "07" / "2026-07-21"
@@ -509,7 +516,6 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
         assert tuple(period) == ("2026-07-21T00:00:00", "2026-07-21T23:59:59")
 
     # Open, edit and delete through the same tools used by standard events.
-    import shutil
     from app.archive_change_assistant import build_archive_change_assistant
     from app.archive_release_stock import verify_archive_release_copies, verify_archive_release_removal
     from app.event_change_apply import confirm_event_change, verify_event_change
@@ -612,7 +618,9 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
     execute_sort_run(database, sort_run["id"], compat)
     work_root = shared_work_root(compat)
     relative_root = Path(refiled["start_datetime"][:4], refiled["folder_name"])
-    (work_root / relative_root).rename(library.archive_root / relative_root)
+    moved = work_root / relative_root
+    shutil.copytree(moved, library.archive_root / relative_root)
+    shutil.rmtree(moved)
     verification = verify_event_archive(database, library.archive_root, new_job, new_event_id,
                                         workspace_path=compat)
     assert verification["verified"], verification
@@ -638,7 +646,6 @@ def test_adopted_time_segments_survive_verified_archive_deletion_and_restart(
     import hashlib
     from io import BytesIO
     import json
-    import shutil
 
     from app import archive_staging
     from app.archive_release_stock import verify_archive_release_copies, verify_archive_release_removal
@@ -648,7 +655,7 @@ def test_adopted_time_segments_survive_verified_archive_deletion_and_restart(
     from app.workspace_layout import backup_root
 
     workspace, database, registry, archive = fresh_main
-    source = workspace.parent / "legacy-source"
+    source = archive.parent / "legacy-source"
     source.mkdir()
     if os.environ.get("ADOPTION_ZFS_ROOT"):
         monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
