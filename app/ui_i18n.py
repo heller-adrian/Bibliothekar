@@ -935,6 +935,8 @@ UI_TRANSLATIONS.update({
   "Neuladen": "Reload",
   "Alle aktiven Sicherungen": "All active backups",
   "Day folder": "Day folder",
+  "Die gespeicherten „Ohne Ereignis“-Zeitsegmente sind ungültig.": "The saved No Event time segments are invalid.",
+  "Für „Ohne Ereignis“ fehlt mindestens ein Zeitsegment.": "At least one time segment is required for No Event.",
   "Weitere Aufnahmen aus ausgeblendeten Sicherungen": "More photos from hidden backups",
   "Neue Aufnahmen passen zu bestehenden Ereignissen": "New photos match existing events",
   "Keine aktiven Sicherungen.": "No active backups.",

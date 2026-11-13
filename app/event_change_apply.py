@@ -863,29 +863,32 @@ def finish_event_change(
     end_date = str(cr["end_date"])
     event_kind = str(cr.get("event_kind") or "event")
     no_event_segments = []
-    if event_kind == "no_event":
+    # A deletion has no replacement timeline. Its release intervals come
+    # from the existing archived assignments and its verified return manifest.
+    if not delete_event:
+        if event_kind == "no_event":
+            try:
+                no_event_segments = normalize_no_event_segments(json.loads(cr.get("no_event_segments") or "[]"))
+            except Exception as exc:
+                raise EventChangeApplyError("Die gespeicherten „Ohne Ereignis“-Zeitsegmente sind ungültig.") from exc
+            if not no_event_segments:
+                raise EventChangeApplyError("Für „Ohne Ereignis“ fehlt mindestens ein Zeitsegment.")
+            parent_start = no_event_segments[0]["start_datetime"]
+            parent_end = no_event_segments[-1]["end_datetime"]
+        else:
+            parent_start = f"{start_date}T00:00:00"
+            parent_end = f"{end_date}T23:59:59"
+        uses_time_range = bool(cr["uses_time_range"]) if event_kind != "no_event" else False
         try:
-            no_event_segments = normalize_no_event_segments(json.loads(cr.get("no_event_segments") or "[]"))
+            child_segments = json.loads(cr.get("child_segments_json") or "[]") if event_kind == "event" else []
         except Exception as exc:
-            raise EventChangeApplyError("Die gespeicherten „Ohne Ereignis“-Zeitsegmente sind ungültig.") from exc
-        if not no_event_segments:
-            raise EventChangeApplyError("Für „Ohne Ereignis“ fehlt mindestens ein Zeitsegment.")
-        parent_start = no_event_segments[0]["start_datetime"]
-        parent_end = no_event_segments[-1]["end_datetime"]
-    else:
-        parent_start = f"{start_date}T00:00:00"
-        parent_end = f"{end_date}T23:59:59"
-    uses_time_range = bool(cr["uses_time_range"]) if event_kind != "no_event" else False
-    try:
-        child_segments = json.loads(cr.get("child_segments_json") or "[]") if event_kind == "event" else []
-    except Exception as exc:
-        raise EventChangeApplyError("Die gespeicherten Unterereignisse sind ungültig.") from exc
-    start_time = str(cr["start_time"] or "00:00")
-    end_time = str(cr["end_time"] or "23:59")
-    child_start = f"{start_date}T{start_time}:00"
-    child_end = f"{end_date}T{end_time}:59"
-    if event_kind == 'event' and uses_time_range:
-        parent_start, parent_end = child_start, child_end
+            raise EventChangeApplyError("Die gespeicherten Unterereignisse sind ungültig.") from exc
+        start_time = str(cr["start_time"] or "00:00")
+        end_time = str(cr["end_time"] or "23:59")
+        child_start = f"{start_date}T{start_time}:00"
+        child_end = f"{end_date}T{end_time}:59"
+        if event_kind == 'event' and uses_time_range:
+            parent_start, parent_end = child_start, child_end
     now = _now()
 
     from app.archive_release_stock import describe_archive_release_stock

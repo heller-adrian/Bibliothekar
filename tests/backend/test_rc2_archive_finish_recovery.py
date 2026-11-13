@@ -15,7 +15,7 @@ from tests.backend.test_0271_archive_assistant import _seed
 
 
 @pytest.fixture
-def deletion(tmp_path, monkeypatch):
+def deletion(tmp_path, monkeypatch, request):
     config = tmp_path / 'settings.json'
     config.write_text('{}')
     registry = tmp_path / 'registry.sqlite3'
@@ -80,6 +80,15 @@ def deletion(tmp_path, monkeypatch):
     from types import SimpleNamespace
     # macOS's /var temporary alias must not be mistaken for an admitted root.
     monkeypatch.setattr(main, '_COMPATIBILITY_DIRECTORY', SimpleNamespace(name=str(tmp_path.resolve() / 'views')))
+    if getattr(request, 'param', None) == 'no_event':
+        from app.event_timeline import normalize_no_event_segments, replace_event_segments
+        with database_connection(db) as connection:
+            connection.execute("UPDATE events SET event_kind='no_event',timeline_model='segments' WHERE id='archive'")
+            replace_event_segments(
+                connection, event_id='archive', job_id='old',
+                segments=normalize_no_event_segments([{'day_key': '2026-07-22'}]),
+                now=event['created_at'],
+            )
     proposed = propose_archived_event_deletion(db, 'old', 'archive')
     cr_id = proposed['change_request_id']
     confirm_event_change(db, cr_id, archive, workspace)
@@ -101,6 +110,7 @@ def manual_delete(case):
     shutil.rmtree(archive / '2026' / folder)
 
 
+@pytest.mark.parametrize('deletion', ['event', 'no_event'], indirect=True)
 def test_registered_sixteen_file_deletion_finishes(deletion):
     db, workspace, archive, cr_id, _, other = deletion
     manual_delete(deletion)
@@ -164,6 +174,7 @@ def test_verified_delete_resumes_original_finish_reservation(deletion, monkeypat
     assert other.exists()
 
 
+@pytest.mark.parametrize('deletion', ['event', 'no_event'], indirect=True)
 @pytest.mark.parametrize('phase', ['before_commit', 'after_commit'])
 def test_sigkill_restart_repeats_exact_archive_completion(deletion, tmp_path, phase):
     import json

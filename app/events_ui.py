@@ -3410,12 +3410,12 @@ EVENTS_HTML = r"""<!doctype html>
           <div class="inspect-field"><span>Zugeordnet</span><strong>${assigned.length} Familien</strong></div>
         </div>
         ${event.notes?`<div class="inspect-section"><strong>Notizen</strong><p class="muted">${escapeHtml(event.notes)}</p></div>`:""}
-        ${noEvent?`<div class="inspect-section"><strong>Gespeicherte Tages-/Zeitsegmente</strong><div id="inspect-segment-host"></div><button type="button" id="inspect-more-segments" class="inspect-more" hidden>Weitere</button></div>`:""}
+        ${noEvent?`<div class="inspect-section"><strong>Gespeicherte Tages-/Zeitsegmente</strong><div id="inspect-segment-host"></div><button type="button" id="inspect-more-segments" class="inspect-more" hidden>${bk0511EventLabel("Weitere Zeitsegmente","More time segments")}</button></div>`:""}
         ${childEvents.length?`<div class="inspect-section"><strong>Unterereignisse</strong>${childCards}</div>`:""}
         <details class="inspect-section inspect-card collapse-card" id="inspect-family-days">
           <summary><strong>Dateifamilien nach Aufnahmetag</strong><span class="muted">${dayEntries.length} Tage</span></summary>
           <div id="inspect-family-day-host"></div>
-          <button type="button" id="inspect-more-family-days" class="inspect-more" hidden>Weitere</button>
+          <button type="button" id="inspect-more-family-days" class="inspect-more" hidden>${bk0511EventLabel("Weitere Tage","More days")}</button>
         </details>
         <div class="inspect-section"><strong>Zielstruktur</strong><pre class="inspect-structure">${escapeHtml(structureData?.structure_text||"Keine Struktur vorhanden.")}</pre></div>`;
 
