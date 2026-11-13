@@ -14,6 +14,23 @@ import urllib.request
 from zipfile import ZipFile
 
 
+def startup_recovery_only(health):
+    if not isinstance(health, dict):
+        return False
+    issues = health.get("issues")
+    reservations = health.get("reservations")
+    return (
+        isinstance(issues, list)
+        and isinstance(reservations, list)
+        and all(isinstance(issue, dict)
+                and issue.get("phase") == "recovery_in_progress"
+                and issue.get("scope") == "workspace" for issue in issues)
+        and all(isinstance(record, dict) and record.get("live") is True
+                for record in reservations)
+        and bool(health.get("writes_allowed") is True or issues)
+    )
+
+
 def open_request(client, request, *, expected, recovery_status=None):
     # These POSTs acquire the exclusive adoption lock before calling the endpoint.
     retry_busy = request.method == "POST" and urllib.parse.urlsplit(request.full_url).path in {
@@ -36,23 +53,26 @@ def open_request(client, request, *, expected, recovery_status=None):
                          and detail.get("code") == "legacy_adoption_busy")
             if error.code == expected and not (retry_busy and transient):
                 return content.encode("utf-8")
-            recovery = (error.code == 409 and isinstance(detail, dict)
-                        and isinstance(detail.get("detail"), str)
-                        and detail["detail"].startswith("operation_recovery_required:")
-                        and "'phase': 'recovery_in_progress', 'scope': 'workspace'" in detail["detail"])
-            if not ((retry_busy and transient) or (recovery_status and recovery)) or attempt == attempts - 1:
+            recovery = False
+            if recovery_status and error.code == 409 and isinstance(detail, dict):
+                message = detail.get("detail")
+                if message == "operation_recovery_required":
+                    operations = detail.get("operations")
+                    recovery = (detail.get("storage_state") == "READY"
+                                and startup_recovery_only(operations)
+                                and operations.get("writes_allowed") is False
+                                and bool(operations["issues"]))
+                elif isinstance(message, str):
+                    recovery = (message.startswith("operation_recovery_required:")
+                                and "'phase': 'recovery_in_progress', 'scope': 'workspace'" in message)
+            if not ((retry_busy and transient) or recovery) or attempt == attempts - 1:
                 raise AssertionError(
                     f"{request.method} {request.full_url}: HTTP {error.code}: {content}"
                 ) from error
-            if recovery_status and recovery:
+            if recovery:
                 status = recovery_status()
-                health = status["operation_health"]
-                issues = health["issues"]
                 assert (status["ready"] is True and not status.get("startup_error")
-                        and all(issue.get("phase") == "recovery_in_progress"
-                                and issue.get("scope") == "workspace" for issue in issues)
-                        and all(record.get("live") is True for record in health["reservations"])
-                        and (health["writes_allowed"] is True or issues)), status
+                        and startup_recovery_only(status["operation_health"])), status
                 print("Repeated finalization is waiting for startup write admission.", flush=True)
             else:
                 print(f"{request.method} {request.selector} is waiting for the adoption lock.", flush=True)

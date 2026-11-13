@@ -1059,8 +1059,11 @@ def test_container_probe_creates_main_library_once_after_lock_release(fresh_main
     assert client.get("/").status_code == 200
 
 
-@pytest.mark.parametrize("failure", [None, "startup_error", "storage", "orphan", "domain", "unknown", "timeout"])
-def test_container_repeat_finalize_preserves_recovery_fences(monkeypatch, failure):
+@pytest.mark.parametrize(("response_format", "failure"), [
+    (fmt, failure) for fmt in ("text", "json")
+    for failure in (None, "startup_error", "storage", "orphan", "domain", "unknown", "timeout")
+] + [("json", failure) for failure in ("response_orphan", "response_domain", "response_storage")])
+def test_container_repeat_finalize_preserves_recovery_fences(monkeypatch, failure, response_format):
     from io import BytesIO
     import json
     import urllib.error
@@ -1091,8 +1094,19 @@ def test_container_repeat_finalize_preserves_recovery_fences(monkeypatch, failur
                 detail = "other_conflict" if failure == "unknown" else (
                     "operation_recovery_required: workspace writes paused; storage may remain READY; " + str(recovery)
                 )
+                body = {"detail": detail}
+                if response_format == "json" and failure != "unknown":
+                    body = {"detail": "operation_recovery_required", "storage_state": "READY",
+                            "operations": {"writes_allowed": False, "issues": [recovery],
+                                           "reservations": []}}
+                    if failure == "response_orphan":
+                        body["operations"]["reservations"] = [{"live": False}]
+                    elif failure == "response_domain":
+                        body["operations"]["issues"].append({"phase": "startup-recovery", "scope": "workspace"})
+                    elif failure == "response_storage":
+                        body["storage_state"] = "UNAVAILABLE"
                 raise urllib.error.HTTPError(request.full_url, 409, "Conflict", {},
-                                             BytesIO(json.dumps({"detail": detail}).encode()))
+                                             BytesIO(json.dumps(body).encode()))
             return Response(b'{"state":"completed"}')
 
     def inspect():
@@ -1111,4 +1125,5 @@ def test_container_repeat_finalize_preserves_recovery_fences(monkeypatch, failur
             probe.open_request(Client(), request, expected=200, recovery_status=inspect)
         assert len(calls) == (121 if failure == "timeout" else 1)
         assert waits == ([0.25] * 120 if failure == "timeout" else [])
-        assert len(diagnostics) == (120 if failure == "timeout" else int(failure != "unknown"))
+        expected_inspections = 0 if failure == "unknown" or failure.startswith("response_") else 1
+        assert len(diagnostics) == (120 if failure == "timeout" else expected_inspections)
