@@ -62,6 +62,7 @@ class ChildDefinition(BaseModel):
     start_datetime: str
     end_datetime: str
     folder_layout: FolderLayout | None = None
+    create_subfolder: StrictBool = True
 
 
 class EventDefinition(BaseModel):

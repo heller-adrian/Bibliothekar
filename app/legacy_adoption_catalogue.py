@@ -102,6 +102,10 @@ def _store_event(connection, job_id, event, now):
                   child["end_datetime"], child["folder_name"], now, now,
                   int(event["preserve_day_folders"]), now, now) for child in event["children"]),
             )
+            from app.subevents import store_subevent_layout
+            for child in event['children']:
+                if child['folder_name'] and child.get('folder_layout') != layout:
+                    store_subevent_layout(connection, event_id, child, now)
         save_leaf_layouts(connection, event_id, list(event["leaf_layouts"].values()), now=now)
         if event["segments"]:
             replace_event_segments(connection, event_id=event_id, job_id=job_id, segments=event["segments"], now=now)

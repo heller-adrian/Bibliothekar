@@ -1110,6 +1110,13 @@ def finish_event_change(
                 source="cascade",
             )
         elif child_segments:
+            # Stable child IDs retain their independent layouts across the
+            # rebuild of assignments and timeline rows.
+            child_layout_rows = [dict(row) for row in connection.execute(
+                "SELECT layouts.* FROM event_folder_layouts AS layouts JOIN events ON events.id=layouts.event_id "
+                "WHERE events.parent_event_id=?", (cr['event_id'],),
+            )]
+            layouts_by_child = {row['event_id']: row for row in child_layout_rows}
             connection.execute("DELETE FROM event_assignments WHERE event_id IN (SELECT id FROM events WHERE parent_event_id=?)",(cr["event_id"],))
             connection.execute("DELETE FROM events WHERE parent_event_id=?",(cr["event_id"],))
             created_children=[]
@@ -1118,13 +1125,28 @@ def finish_event_change(
                 child_id=str(segment.get("id") or ("EVENT_"+uuid.uuid4().hex.upper()))
                 seg_start=segment.get('start_datetime') or f"{start_date}T{segment['start_time']}:00"; seg_end=segment.get('end_datetime') or f"{end_date}T{segment['end_time']}:59"
                 validate_active_roots()
-                folder=str(segment.get("folder_name") or segment.get("folder") or f"{segment['start_time'].replace(':','-')} - {segment['end_time'].replace(':','-')} - {segment['name']}")
+                folder = '' if segment.get('create_subfolder') is False else str(
+                    segment.get("folder_name") or segment.get("folder") or
+                    f"{segment['start_time'].replace(':','-')} - {segment['end_time'].replace(':','-')} - {segment['name']}"
+                )
                 connection.execute(
                     """INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,applied_at,archived_at,notes,edited_at,timeline_model)
                        VALUES (?,?,?,'child',?,?,?,1,?,'archived',?,?,'event',?,1,?,?,'',?,'continuous')""",
                     (child_id,cr["job_id"],cr["event_id"],segment["name"],seg_start,seg_end,folder,now,now,
                      int(bool(cr["preserve_day_folders"])),event["applied_at"],event["archived_at"],now),
                 )
+                if folder:
+                    from app.subevents import store_subevent_layout
+                    previous_layout = layouts_by_child.get(child_id)
+                    if segment.get('folder_layout') is None and previous_layout:
+                        connection.execute(
+                            "INSERT INTO event_folder_layouts VALUES (?,?,?,?,?,?,?)",
+                            tuple(previous_layout[key] for key in (
+                                'event_id', 'structure_enabled', 'input_path', 'layout_json', 'revision', 'created_at', 'updated_at',
+                            )),
+                        )
+                    elif segment.get('folder_layout') is not None:
+                        store_subevent_layout(connection, str(cr['event_id']), {**segment, 'id': child_id, 'folder_name': folder}, now)
                 created_children.append((child_id,seg_start,seg_end))
             assignment_event_id=None
         elif uses_time_range and cr.get('child_folder'):

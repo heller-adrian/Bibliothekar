@@ -428,6 +428,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     #create-event-layout .bk-event-layout-editor{padding:8px 12px;border:1px solid var(--bk-line);border-radius:8px}
     #create-event-layout summary{cursor:pointer;list-style:none}
     #create-event-layout summary::-webkit-details-marker{display:none}
+    .create-subevent-card > summary:has([data-remove-create-subevent]){display:flex;align-items:center;justify-content:space-between;gap:8px}
     .event-boundaries{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
     .event-boundary{display:grid;grid-template-columns:minmax(150px,1.18fr) minmax(140px,.82fr);gap:10px;align-items:end}
     .create-subevents{display:grid;gap:10px;margin-top:4px}
@@ -4291,7 +4292,18 @@ WORKSPACE_HTML = r"""<!doctype html>
       const defaultEnd=String(defaults.end_time||(
         ed===bounds.maxDate ? bounds.maxTime : "23:59"
       )||"23:59");
-      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Tag 1"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Remove subevent</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary">${subeventDayControl("data-create-child-start-date","data-create-child-start-month-year",sd,"Beginn")}<label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary">${subeventDayControl("data-create-child-end-date","data-create-child-end-month-year",ed,"Ende")}<label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
+      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Tag 1"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Remove subevent</button></div><label class="check-row"><input type="checkbox" data-create-child-folder><span>Unterordner erstellen</span></label><div class="create-subevent-boundaries"><div class="create-subevent-boundary">${subeventDayControl("data-create-child-start-date","data-create-child-start-month-year",sd,"Beginn")}<label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary">${subeventDayControl("data-create-child-end-date","data-create-child-end-month-year",ed,"Ende")}<label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
+      const createFolder=row.querySelector("[data-create-child-folder]");
+      createFolder.checked=defaults.create_subfolder!==false;
+      const remove=row.querySelector("[data-remove-create-subevent]");
+      row.querySelector("summary").append(remove);
+      const childLayout=window.BibliothekarFolderLayout.eventEditor({saved:defaults.folder_layout,defaults:globalFolderLayout,inherit:true});
+      childLayout.panel.hidden=!createFolder.checked;
+      createFolder.addEventListener("change",()=>{childLayout.panel.hidden=!createFolder.checked;});
+      childLayout.panel.addEventListener("input",scheduleDialogPreview);
+      row.querySelector(".create-subevent-grid").append(childLayout.panel);
+      row.folderOptions=()=>({create_subfolder:createFolder.checked,
+        folder_layout:createFolder.checked?childLayout.value():undefined});
       const name=row.querySelector("[data-create-child-name]"),summary=row.querySelector("[data-create-child-summary]");
       const syncDayDisplays=()=>{
         for(const [selector,displaySelector] of [
@@ -4304,7 +4316,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         }
       };
       name?.addEventListener("input",()=>{summary.textContent=String(name.value||"").trim()||"Unterereignis";scheduleDialogPreview();});
-      row.querySelector("[data-remove-create-subevent]")?.addEventListener("click",()=>{row.remove();updateSubeventPrefixToggle();scheduleDialogPreview();});
+      remove.addEventListener("click",event=>{event.preventDefault();row.remove();updateSubeventPrefixToggle();scheduleDialogPreview();});
       row.querySelectorAll("input,select").forEach(input=>input.addEventListener("change",()=>{syncDayDisplays();scheduleDialogPreview();}));
       createSubeventList.appendChild(row);
       syncDayDisplays();
@@ -4313,7 +4325,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       dialogError.hidden=true;
       dialogError.textContent="";
     }
-    function collectCreateSubevents(){return [...createSubeventList.querySelectorAll("[data-create-subevent]")].map(row=>{const name=row.querySelector("[data-create-child-name]")?.value?.trim()||"",sd=row.querySelector("[data-create-child-start-date]")?.value||"",st=row.querySelector("[data-create-child-start-time]")?.value||"00:00",ed=row.querySelector("[data-create-child-end-date]")?.value||"",et=row.querySelector("[data-create-child-end-time]")?.value||"23:59";return{name,start_datetime:`${sd}T${st}:00`,end_datetime:`${ed}T${et}:59`};});}
+    function collectCreateSubevents(){return [...createSubeventList.querySelectorAll("[data-create-subevent]")].map(row=>{const name=row.querySelector("[data-create-child-name]")?.value?.trim()||"",sd=row.querySelector("[data-create-child-start-date]")?.value||"",st=row.querySelector("[data-create-child-start-time]")?.value||"00:00",ed=row.querySelector("[data-create-child-end-date]")?.value||"",et=row.querySelector("[data-create-child-end-time]")?.value||"23:59";return{name,start_datetime:`${sd}T${st}:00`,end_datetime:`${ed}T${et}:59`,...row.folderOptions()};});}
 
     function syncCreateEventLayout(){
       const noEvent=["no_event","existing_no_event"].includes(dialogMode);

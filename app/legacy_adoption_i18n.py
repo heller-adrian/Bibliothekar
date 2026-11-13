@@ -15,6 +15,8 @@ TRANSLATIONS = {
     "Weitere Ordner anzeigen": "Show more folders",
     "Unterordnerstruktur": "Subfolder Layout",
     "Unterordner des Hauptereignisses erstellen": "Create parent event subfolder",
+    "Unterordner erstellen": "Create subfolder",
+    "Ein Unterereignis ohne eigenen Ordner verwendet die Struktur des Hauptereignisses.": "A subevent without its own folder uses the parent event layout.",
     "Präfix: an": "Prefix: on",
     "Präfix: aus": "Prefix: off",
     "Archiviertes Ereignis": "Archived event",

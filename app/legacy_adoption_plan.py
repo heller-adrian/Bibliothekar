@@ -15,8 +15,8 @@ from uuid import uuid4
 from app import legacy_adoption_dataset as dataset
 from app.database import database_connection
 from app.event_inventory import event_root_relative
-from app.event_layout import ensure_event_layout_snapshot, get_global_default, layout_paths, normalize_layout, validate_input_path
-from app.event_leaf_layouts import stored_leaf_layouts
+from app.event_layout import ensure_event_layout_snapshot, get_global_default, layout_paths, resolve_layout_choice
+from app.event_leaf_layouts import effective_leaf_layouts
 from app.event_naming import (
     naming_from_library_settings, naming_snapshot_for_new_event,
     render_event_folder_name, render_no_event_folder_name,
@@ -54,18 +54,10 @@ def _local_capture(value):
 
 
 def _layout(definition, defaults, inherited=None):
-    values = definition.get("folder_layout")
-    if values is None:
-        return inherited or defaults
-    if values.get("mode") == "default":
-        return defaults
-    layout = normalize_layout(values.get("layout") or defaults["layout"])
-    for path in layout_paths(layout):
+    layout = resolve_layout_choice(definition.get("folder_layout"), inherited or defaults, defaults)
+    for path in layout_paths(layout["layout"]):
         validate_target(path)
-    enabled = bool(values.get("structure_enabled", defaults["structure_enabled"]))
-    return {"structure_enabled": enabled, "layout": layout,
-            "input_path": validate_input_path(layout, values.get("input_path", defaults["input_path"]),
-                                              structure_enabled=enabled)}
+    return layout
 
 
 def _existing_event(connection, event_id):
@@ -96,7 +88,7 @@ def _existing_event(connection, event_id):
     return {
         **event, "existing": True, "children": children, "segments": segments, "ranges": ranges,
         "folder_layout": layout,
-        "leaf_layouts": stored_leaf_layouts(connection, event_id),
+        "leaf_layouts": effective_leaf_layouts(connection, event_id),
     }
 
 
@@ -131,11 +123,13 @@ def _draft_event(connection, definition, naming, defaults, *, allow_existing=Fal
         )
         children = [
             {**child, "id": _event_id(),
-             "folder_layout": _layout(definitions[int(child["id"])], defaults, inherited=parent_layout)}
+             "folder_layout": _layout(definitions[int(child["id"])], defaults, inherited=parent_layout)
+             if child["folder_name"] else parent_layout}
             for child in normalized
         ]
-        child_names = {target_key(child["folder_name"]) for child in children}
-        if len(child_names) != len(children):
+        child_folders = [child["folder_name"] for child in children if child["folder_name"]]
+        child_names = {target_key(folder) for folder in child_folders}
+        if len(child_names) != len(child_folders):
             raise AdoptionError("Mehrere Unterereignisse beanspruchen denselben Zielordner.")
         if parent_layout["structure_enabled"] and not definition.get("preserve_day_folders"):
             if child_names.intersection(target_key(node["name"]) for node in parent_layout["layout"]["nodes"]):
@@ -347,15 +341,17 @@ def _target_leaf(event, capture):
     prefix = event_root_relative(event)
     assigned = assignment_target(event["id"], event["children"], capture[:19])
     child = next((item for item in event["children"] if item["id"] == assigned), None)
-    if child is not None:
+    separate = child is not None and bool(child["folder_name"])
+    if separate:
         prefix /= child["folder_name"]
-    leaf_key = assigned
+    owner = assigned if separate else event["id"]
+    leaf_key = owner
     if event["preserve_day_folders"]:
         prefix /= capture[:10]
         leaf_key += "@" + capture[:10]
     layouts = event["leaf_layouts"]
-    layout = layouts.get(leaf_key) or layouts.get(assigned) or (
-        child.get("folder_layout") if child is not None else None
+    layout = layouts.get(leaf_key) or layouts.get(owner) or (
+        child.get("folder_layout") if separate else None
     ) or event["folder_layout"]
     return assigned, prefix, leaf_key, layout
 
@@ -372,7 +368,7 @@ def _unpopulated_child_leaves(event, planned_keys):
         return
     populated = {key.split("@", 1)[0] for key in planned_keys}
     for child in event["children"]:
-        if child["id"] not in populated:
+        if child["folder_name"] and child["id"] not in populated:
             yield child["id"], event_root_relative(event) / child["folder_name"], child["folder_layout"]
 
 

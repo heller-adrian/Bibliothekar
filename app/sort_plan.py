@@ -1220,14 +1220,18 @@ def build_event_sort_plan(
             layout_state = ensure_event_layout_snapshot(
                 connection, event_id, now=datetime.now(timezone.utc).isoformat()
             )
+            from app.event_leaf_layouts import effective_leaf_layouts
+            saved_leaves = effective_leaf_layouts(connection, event_id)
         except Exception as error:
             raise SortPlanError("Ereignis-Unterordnerstruktur ist ungültig: " + str(error)) from error
-    layout_input_path = PurePosixPath(str(layout_state.get("input_path") or ""))
-    layout_export_paths = (
-        layout_role_paths(layout_state["layout"], "export")
-        if bool(layout_state.get("structure_enabled"))
-        else []
-    )
+    def layout_for(owner, day=""):
+        return (saved_leaves.get(owner + "@" + day) if day else None) or saved_leaves.get(owner) or layout_state
+
+    def layout_destination(state, asset_kind=""):
+        exports = layout_role_paths(state["layout"], "export") if asset_kind == "export" else []
+        return PurePosixPath(exports[0] if exports else state.get("input_path") or "")
+
+    target_layouts = {}
     child_folder_names = {
         str(child.get("folder_name") or "") for child in child_definitions
         if str(child.get("folder_name") or "")
@@ -1256,6 +1260,8 @@ def build_event_sort_plan(
         # subevent. An entirely empty subevent keeps the configured event
         # folder structure directly below its folder.
         for child in child_definitions:
+            if not child.get("folder_name"):
+                continue
             child_folder_name = _safe_component(
                 child.get("folder_name"),
                 "Unterereignisordner",
@@ -1268,7 +1274,7 @@ def build_event_sort_plan(
             if preserve_day_folders and assigned_days:
                 for day_key in assigned_days:
                     leaf = child_root / day_key
-                    layout_dirs = _layout_directories_at_leaf(leaf, layout_state)
+                    layout_dirs = _layout_directories_at_leaf(leaf, layout_for(str(child["id"]), day_key))
                     planned_directories.update(layout_dirs or {str(leaf)})
 
                 start_day = datetime.fromisoformat(
@@ -1301,7 +1307,7 @@ def build_event_sort_plan(
                         "days": missing_days,
                     })
             else:
-                layout_dirs = _layout_directories_at_leaf(child_root, layout_state)
+                layout_dirs = _layout_directories_at_leaf(child_root, layout_for(str(child["id"])))
                 planned_directories.update(layout_dirs or {str(child_root)})
 
         assigned_child_ids = {
@@ -1442,7 +1448,7 @@ def build_event_sort_plan(
 
         child_folder: str | None = None
 
-        if assignment and assignment.get("parent_event_id") is not None:
+        if assignment and assignment.get("parent_event_id") is not None and assignment.get("assigned_folder_name"):
             child_folder = _safe_component(
                 assignment.get("assigned_folder_name"),
                 "Unterereignisordner",
@@ -1568,20 +1574,25 @@ def build_event_sort_plan(
         if is_free_stock:
             destination_parts.append(filename)
         else:
+            owner = str(assignment["assigned_event_id"]) if child_folder and assignment else event_id
+            leaf_layout = layout_for(owner, day_key if file_preserve_day_folders else "")
+            target_layouts[str(structural_leaf)] = leaf_layout
             organization = PurePosixPath()
-            if bool(layout_state.get("structure_enabled")):
+            if bool(leaf_layout.get("structure_enabled")):
                 if allow_reapply and inventory_file is not None:
                     organization = _observed_organization_path(
                         inventory_file,
                         child_folder_names=child_folder_names,
                     )
-                    if not organization.parts:
+                    if not organization.parts or (
+                        leaf_layout is not layout_state and organization.as_posix() not in leaf_layout_directories(leaf_layout)
+                    ):
                         # 0.28.3: Nach einem flachen Zustand gibt es keine
                         # historische Platzierung mehr. Beim Wiedereinschalten
                         # der Struktur landen alle Dateien im aktuellen Input.
-                        organization = layout_input_path
+                        organization = layout_destination(leaf_layout)
                 else:
-                    organization = layout_input_path
+                    organization = layout_destination(leaf_layout)
             if organization.parts:
                 destination_parts.extend(organization.parts)
             destination_parts.append(filename)
@@ -1773,7 +1784,7 @@ def build_event_sort_plan(
             # absoluten Zielpfad erzeugt und gehören nicht zur Ereignisstruktur.
             pass
         else:
-            layout_dirs = _layout_directories_at_leaf(structural_leaf, layout_state)
+            layout_dirs = _layout_directories_at_leaf(structural_leaf, leaf_layout)
             planned_directories.update(layout_dirs or {str(structural_leaf)})
             planned_directories.add(str(destination_relative.parent))
 
@@ -1947,10 +1958,9 @@ def build_event_sort_plan(
             filename = _safe_component(source_relative.name, "Zusatzdateiname")
             released_asset_kind = str(asset.get("asset_kind") or "other")
             destination_container = structural_leaf
-            if bool(layout_state.get("structure_enabled")):
-                organization = layout_input_path
-                if released_asset_kind == "export" and layout_export_paths:
-                    organization = PurePosixPath(layout_export_paths[0])
+            asset_layout = target_layouts.get(str(structural_leaf), layout_state)
+            if bool(asset_layout.get("structure_enabled")):
+                organization = layout_destination(asset_layout, released_asset_kind)
                 if organization.parts:
                     destination_container = destination_container / organization
             destination_relative = reserve_asset_destination(
@@ -2221,13 +2231,12 @@ def build_event_sort_plan(
                 target_is_free_stock = all(
                     bool(candidate.get("free_stock")) for candidate in candidates
                 )
+                asset_layout = target_layouts.get(str(structural_leaf), layout_state)
                 if (
                     not target_is_free_stock
-                    and bool(layout_state.get("structure_enabled"))
+                    and bool(asset_layout.get("structure_enabled"))
                 ):
-                    organization = layout_input_path
-                    if asset_kind == "export" and layout_export_paths:
-                        organization = PurePosixPath(layout_export_paths[0])
+                    organization = layout_destination(asset_layout, asset_kind)
                     if organization.parts:
                         destination_container = destination_container / organization
                 destination_relative = reserve_asset_destination(
@@ -2405,9 +2414,10 @@ def build_event_sort_plan(
             target_is_free_stock = all(
                 bool(candidate.get("free_stock")) for candidate in candidates
             )
+            asset_layout = target_layouts.get(str(destination_parent), layout_state)
             if (
                 not target_is_free_stock
-                and bool(layout_state.get("structure_enabled"))
+                and bool(asset_layout.get("structure_enabled"))
             ):
                 observed_organization = _observed_organization_path(
                     asset,
@@ -2415,8 +2425,9 @@ def build_event_sort_plan(
                 )
                 organization = (
                     observed_organization
-                    if observed_organization.parts
-                    else layout_input_path
+                    if observed_organization.parts and (asset_layout is layout_state or
+                        observed_organization.as_posix() in leaf_layout_directories(asset_layout))
+                    else layout_destination(asset_layout)
                 )
                 if organization.parts:
                     destination_parent = destination_parent / organization

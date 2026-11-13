@@ -2,6 +2,8 @@
 from datetime import datetime
 import uuid
 
+from app.event_layout import ensure_event_layout_snapshot, get_global_default, resolve_layout_choice, update_event_layout
+from app.event_leaf_layouts import clear_child_leaf_overrides
 from app.event_naming import normalize_event_naming, render_subevent_folder_name
 
 
@@ -28,6 +30,11 @@ def normalize_subevents(values, start, end, naming=None):
         datetime.fromisoformat(a);datetime.fromisoformat(b)
         if not start<=a<=b<=end:
             raise ValueError('Unterereignisse müssen innerhalb des durchgehenden Elternzeitraums liegen.')
+        create_subfolder = value.get('create_subfolder', value.get('folder_name') != '')
+        if not isinstance(create_subfolder, bool):
+            raise ValueError('Die Unterordnerauswahl für das Unterereignis ist ungültig.')
+        if not create_subfolder and value.get('folder_layout') is not None:
+            raise ValueError('Ein Unterereignis ohne eigenen Ordner verwendet die Struktur des Hauptereignisses.')
         result.append({
             'id':value.get('id'),
             'name':name,
@@ -42,12 +49,31 @@ def normalize_subevents(values, start, end, naming=None):
                 naming=effective_naming,
                 parent_start_datetime=start,
                 parent_end_datetime=end,
-            ),
+            ) if create_subfolder else '',
+            'create_subfolder':create_subfolder,
+            **({'folder_layout': value['folder_layout']} if value.get('folder_layout') is not None else {}),
         })
     result.sort(key=lambda x:(x['start_datetime'],x['end_datetime']))
     if any(a['end_datetime']>=b['start_datetime'] for a,b in zip(result,result[1:])):
         raise ValueError('Organisatorische Unterereignisse dürfen sich nicht überschneiden.')
     return result
+
+
+def store_subevent_layout(connection, parent_id, child, now):
+    choice = child.get('folder_layout')
+    if not child['folder_name'] or choice is not None:
+        clear_child_leaf_overrides(connection, parent_id, child['id'])
+    if not child['folder_name'] or (isinstance(choice, dict) and choice.get('mode') == 'inherit'):
+        connection.execute('DELETE FROM event_folder_layouts WHERE event_id=?', (child['id'],))
+        return
+    if choice is None:
+        return
+    inherited = ensure_event_layout_snapshot(connection, parent_id, now=now)
+    default = get_global_default(connection)
+    layout = resolve_layout_choice(choice, inherited, default)
+    ensure_event_layout_snapshot(connection, child['id'], now=now)
+    update_event_layout(connection, child['id'], structure_enabled=layout['structure_enabled'],
+                        input_path=layout['input_path'], layout=layout['layout'], updated_at=now)
 
 
 def store_subevents(connection,event_id,segments,now):
@@ -59,6 +85,7 @@ def store_subevents(connection,event_id,segments,now):
         raise ValueError('Unterereignisse wurden zwischenzeitlich geändert. Bitte neu laden.')
     keep=set(supplied)
     for cid in set(current)-keep:
+        clear_child_leaf_overrides(connection, event_id, cid)
         connection.execute('DELETE FROM events WHERE id=?',(cid,))
     result=[]
     for segment in segments:
@@ -79,7 +106,9 @@ def store_subevents(connection,event_id,segments,now):
             connection.execute("""INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,applied_at,archived_at,time_model_version)
                 VALUES (?,?,?,'child',?,?,?,1,?,?,?,?, 'event',?,1,?,?,2)""",
                 (cid,parent['job_id'],event_id,segment['name'],segment['start_datetime'],segment['end_datetime'],segment['folder_name'],parent['status'],now,now,parent['preserve_day_folders'],parent['applied_at'],parent['archived_at']))
-        result.append({**segment,'id':cid})
+        child = {**segment,'id':cid}
+        store_subevent_layout(connection, event_id, child, now)
+        result.append(child)
     return result
 
 
@@ -109,7 +138,8 @@ def append_extension_subevents(connection,event_id,segments,extension_start,exte
     normalize_subevents([
         *[{
             'id':row['id'],'name':row['name'],
-            'start_datetime':row['start_datetime'],'end_datetime':row['end_datetime']
+            'start_datetime':row['start_datetime'],'end_datetime':row['end_datetime'],
+            'folder_name':row['folder_name'],
         } for row in existing],
         *new_segments,
     ],str(parent['start_datetime'])[:19],str(parent['end_datetime'])[:19],naming=naming)
@@ -119,7 +149,9 @@ def append_extension_subevents(connection,event_id,segments,extension_start,exte
         connection.execute("""INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,applied_at,archived_at,time_model_version)
             VALUES (?,?,?,'child',?,?,?,1,?,?,?,?, 'event',?,1,?,?,2)""",
             (cid,parent['job_id'],event_id,segment['name'],segment['start_datetime'],segment['end_datetime'],segment['folder_name'],parent['status'],now,now,parent['preserve_day_folders'],parent['applied_at'],parent['archived_at']))
-        result.append({**segment,'id':cid})
+        child = {**segment,'id':cid}
+        store_subevent_layout(connection, event_id, child, now)
+        result.append(child)
     return result
 
 

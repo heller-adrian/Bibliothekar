@@ -596,6 +596,13 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
         "event_kind": "event", "event_name": "Wieder eingeordnet", "start_date": "2026-07-21",
         "end_date": "2026-07-21", "selected_day_keys": ["2026-07-21"],
         "selected_family_ids": released_family_ids,
+        "subevents": [{"name": "Neu sortiert", "start_datetime": "2026-07-21T11:30",
+                       "end_datetime": "2026-07-21T12:30", "folder_layout": {
+                           "input_path": "Aufnahmen", "layout": {"version": 2, "nodes": [
+                               {"id": "aufnahme", "name": "Aufnahmen"},
+                               {"id": "abzug", "name": "Abzüge", "role": "export"},
+                           ]},
+                       }}],
     })
     assert new_event.status_code == 200, new_event.text
     summary = client.get(summary_path).json()
@@ -634,6 +641,43 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
             (row["id"], row["family_id"], row["sha256_current"]) for row in extended_rows
         }
         assert all(row["current_root_kind"] == "camera_archive" for row in registered)
+        assert all(Path(row["current_relative_path"]).parent.name == "Aufnahmen" for row in registered)
+    from app.database import get_event_edit_context
+    [child] = get_event_edit_context(database, new_job, new_event_id)["child_events"]
+    assert child["folder_layout"]["input_path"] == "Aufnahmen"
+    edited = dict(preview, event_name="Neu organisiert", parent_folder="07-21 - Neu organisiert",
+                  selected_family_ids=released_family_ids,
+                  subevents=[{"id": child["id"], "name": child["name"],
+                              "start_datetime": child["start_datetime"], "end_datetime": child["end_datetime"],
+                              "create_subfolder": False}])
+    change = propose_event_change(database, new_job, new_event_id, edited, event_name="Neu organisiert",
+                                  archive_root=library.archive_root, workspace_path=workspace)
+    change_id = change["change_request_id"]
+    changed_rows = [row for row in get_event_change_files(database, change_id) if row["new_path"]]
+    changed_targets = [row["new_path"] for row in changed_rows]
+    assert changed_targets and all(child["folder_name"] not in Path(target).parts for target in changed_targets)
+    confirm_event_change(database, change_id, library.archive_root, workspace)
+    assistant = build_archive_change_assistant(database, library.archive_root, workspace, change_id, scan_live=True)
+    preparation = assistant['preparation']
+    document_path = preparation['event_document']['target_relative_path']
+    staged_document = shared_work_root(workspace) / preparation['staging_root'].split('/', 1)[1] / document_path
+    for row in changed_rows:
+        old_path = library.archive_root / row['old_path']
+        new_path = library.archive_root / row['new_path']
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        if old_path != new_path:
+            old_path.rename(new_path)
+    target_root = library.archive_root / '2026' / edited['parent_folder']
+    for item in verify_event_change(database, change_id, library.archive_root, workspace)['directories']:
+        if item['status'] == 'missing':
+            (library.archive_root / item['path']).mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(staged_document, target_root / 'event.json')
+    shutil.rmtree(library.archive_root / relative_root)
+    verified = verify_event_change(database, change_id, library.archive_root, workspace)
+    assert verified['complete'], verified
+    _json(client, 'POST', f'/api/change-requests/{change_id}/archive')
+    [child] = get_event_edit_context(database, new_job, new_event_id)['child_events']
+    assert child['folder_name'] == '' and child['folder_layout'] is None
     old_receipt = client.get(completion_path)
     assert old_receipt.status_code == 200 and "Nicht mehr im Archiv" in old_receipt.text
     assert f"&amp;event={event_id}" not in old_receipt.text
@@ -683,10 +727,15 @@ def test_adopted_time_segments_survive_verified_archive_deletion_and_restart(
     job = api + "/jobs/" + _json(client, "POST", api + "/jobs", status=201, json={"root": "nas"})["id"]
     _json(client, "POST", job + "/scan", status=202)
     day = "2026-07-21"
+    child_layout = {"input_path": "Originals", "layout": {"version": 2, "nodes": [
+        {"id": "originals", "name": "Originals"}, {"id": "prints", "name": "Prints", "role": "export"},
+    ]}}
     event = {"name": "Afternoon", "start_date": day, "end_date": day,
              "start_time": "13:00", "end_time": "15:00", "children": [
-                 {"name": "First", "start_datetime": day + "T13:00", "end_datetime": day + "T13:00"},
-                 {"name": "Last", "start_datetime": day + "T13:01", "end_datetime": day + "T15:00"},
+                 {"name": "First", "start_datetime": day + "T13:00", "end_datetime": day + "T13:00",
+                  "folder_layout": child_layout},
+                 {"name": "Last", "start_datetime": day + "T13:01", "end_datetime": day + "T15:00",
+                  "create_subfolder": False},
              ]}
     preview = _json(client, "POST", job + "/draft/check", json={"events": [event]})
     slots = preview["free_segments"]
@@ -717,6 +766,11 @@ def test_adopted_time_segments_survive_verified_archive_deletion_and_restart(
     assert _json(client, "POST", job + "/finalize", json=command)["state"] == "completed"
 
     parent, collection, another = plan["events"]
+    parent_root = archive / event_root_relative(parent)
+    assert (parent_root / parent["children"][0]["folder_name"] / "Originals" / "first.jpg").is_file()
+    assert (parent_root / parent["children"][0]["folder_name"] / "Prints").is_dir()
+    [flat] = list(parent_root.rglob("last.jpg"))
+    assert len(flat.relative_to(parent_root).parts) <= 2
     collection_id = collection["id"]
     anchor = catalogue_job_id(plan)
     collection_root = archive / event_root_relative(collection)

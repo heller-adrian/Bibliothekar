@@ -66,7 +66,7 @@ def _normalise_children(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
             end += ":59"
         name = str(item.get("name") or "Unterereignis")
         folder = str(item.get("folder_name") or item.get("folder") or "").strip()
-        if not folder:
+        if not folder and item.get('create_subfolder') is not False:
             folder = (
                 f"{start[5:16].replace('T',' ').replace(':','-')} - "
                 f"{end[5:16].replace('T',' ').replace(':','-')} - {name}"

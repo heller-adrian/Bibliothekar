@@ -423,6 +423,7 @@ def build_event_preview(
         naming = dict(naming)
         naming["subevent_prefix_enabled"] = bool(payload.get("subevent_prefix_enabled"))
 
+    from app.event_layout import resolve_layout_choice
     from app.subevents import normalize_subevents
     try:
         subevents = normalize_subevents(
@@ -431,6 +432,14 @@ def build_event_preview(
             f"{end_date}T{end_time or '23:59'}:59",
             naming=naming,
         )
+        for child in subevents:
+            if child.get('folder_layout') is not None:
+                shape = resolve_layout_choice(child['folder_layout'], folder_layout, payload.get('default_folder_layout'))
+                if child['folder_layout'].get('mode') != 'inherit':
+                    child['folder_layout'] = shape
+        folders = [child['folder_name'].casefold() for child in subevents if child['folder_name']]
+        if len(set(folders)) != len(folders):
+            raise EventPreviewError('Mehrere Unterereignisse beanspruchen denselben Zielordner.')
     except ValueError as error:
         raise EventPreviewError(str(error)) from error
     requested_family_ids = {
@@ -509,8 +518,10 @@ def build_event_preview(
         child_family_ids.update(
             int(family["family_id"]) for family in matching
         )
+        child_layout = resolve_layout_choice(subevent.get("folder_layout"), folder_layout)
         structure_subevents.append({
             **subevent,
+            "folder_layout": child_layout,
             "day_keys": matching_day_keys,
         })
 

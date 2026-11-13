@@ -67,8 +67,10 @@ def _compute_event_plan(
             raise EventChangeRequestError(
                 "Nur archivierte Ereignisse koennen ueber einen manuellen Aenderungsauftrag geaendert werden."
             )
-        from app.event_leaf_layouts import stored_leaf_layouts
-        old_leaves = stored_leaf_layouts(connection, event_id)
+        from app.event_leaf_layouts import effective_leaf_layouts
+        old_leaves = effective_leaf_layouts(connection, event_id)
+        from app.event_layout import get_global_default
+        default_layout = get_global_default(connection)
         saved_layout = connection.execute(
             "SELECT 1 FROM event_folder_layouts WHERE event_id=?", (event_id,)
         ).fetchone()
@@ -169,7 +171,7 @@ def _compute_event_plan(
         else:
             rows = []
 
-    from app.event_layout import layout_paths, layout_role_paths, normalize_layout, validate_input_path
+    from app.event_layout import layout_paths, layout_role_paths, normalize_layout, resolve_layout_choice, validate_input_path
     from app.physical_state import organization_path_for_event_relative
 
     layout_explicit = bool(preview.get("_folder_layout_explicit"))
@@ -231,22 +233,33 @@ def _compute_event_plan(
         raise EventChangeRequestError("Der neue Ereignisordner fehlt.")
 
     target_leaves = {}
+    parent_layout = requested_layout_state or current_layout_state
     child_folders = {
         str(segment["id"]): segment["folder"]
-        for segment in normalized_child_segments if segment.get("id")
+        for segment in normalized_child_segments if segment.get("id") and segment["folder"]
     }
+    child_overrides = {str(segment['id']): segment for segment in normalized_child_segments
+                       if segment.get('id') and segment['folder'] and segment.get('folder_layout') is not None}
     for key, leaf in old_leaves.items():
         owner, _, day = key.partition("@")
         if owner != event_id and owner not in child_folders:
             continue
-        if bool(day) != preserve_day_folders or (day and not start_date <= day <= str(preview.get("end_date") or start_date)):
+        if owner in child_overrides:
             continue
-        if requested_layout_state is not None and all(
-            leaf[field] == current_layout_state[field] for field in requested_layout_state
+        if day and (not preserve_day_folders or not start_date <= day <= str(preview.get("end_date") or start_date)):
+            continue
+        if owner == event_id and requested_layout_state is not None and any(
+            requested_layout_state[field] != current_layout_state[field] for field in requested_layout_state
         ):
             leaf = {**leaf, **requested_layout_state}
         prefix = "/".join(part for part in (child_folders.get(owner, ""), day) if part)
         target_leaves[key] = {**leaf, "leaf_prefix": prefix}
+    for owner, segment in child_overrides.items():
+        choice = segment['folder_layout']
+        layout = resolve_layout_choice(choice, parent_layout, default_layout)
+        target_leaves[owner] = {**layout, 'leaf_key': owner, 'leaf_prefix': child_folders[owner]}
+        if choice.get('mode') != 'inherit':
+            segment['folder_layout'] = layout
     old_leaves_by_prefix = sorted(
         old_leaves.values(), key=lambda leaf: -len(leaf["leaf_prefix"])
     )
@@ -405,8 +418,10 @@ def _compute_event_plan(
                 if len(matching) > 1:
                     return None
                 if matching:
-                    parts.append(str(matching[0]["folder"]))
-                    owner = str(matching[0].get("id") or owner)
+                    folder = matching[0]["folder"]
+                    if folder:
+                        parts.append(folder)
+                        owner = str(matching[0].get("id") or owner)
             elif child_folder:
                 parts.append(child_folder)
 
@@ -417,7 +432,11 @@ def _compute_event_plan(
                 parts.append(day_key)
 
             key = owner + ("@" + value[:10] if preserve_day_folders else "")
-            organization = organization_path(target_leaves.get(key))
+            leaf = target_leaves.get(key) or target_leaves.get(owner)
+            if leaf is not None and key not in target_leaves:
+                prefix = "/".join(parts[2:])
+                target_leaves[key] = {**leaf, 'leaf_key': key, 'leaf_prefix': prefix}
+            organization = organization_path(leaf)
             if organization:
                 parts.extend(PurePosixPath(organization).parts)
             parts.append(filename)
@@ -827,7 +846,7 @@ def _compute_event_plan(
         "assets_with_plans": asset_plans,
         "selected_family_ids": sorted(requested_set),
         "folder_layout_state": requested_layout_state,
-        "target_leaf_layouts": list(target_leaves.values()) if old_leaves else None,
+        "target_leaf_layouts": list(target_leaves.values()) if old_leaves or target_leaves else None,
         "normalized_subevents": normalized_child_segments if preview.get("subevents") else None,
         "structure_lines": lines,
         "structure_text": "\n".join(lines),

@@ -1083,7 +1083,12 @@ function eventEditor(index, newKind="event") {
       const [aWrap,a]=field("Beginn","datetime-local",child.start_datetime?.slice(0,16));
       const [bWrap,b]=field("Ende","datetime-local",child.end_datetime?.slice(0,16));
       const [childFolders,childLayout]=layoutEditor(child.folder_layout,{inherit:true});
-      row.childValues=()=>({name:n.value,start_datetime:a.value,end_datetime:b.value,folder_layout:childLayout()});
+      const [createWrap,create]=field("Unterordner erstellen","checkbox");
+      create.checked=child.create_subfolder!==false;
+      childFolders.hidden=!create.checked;
+      create.addEventListener("change",()=>{childFolders.hidden=!create.checked;});
+      row.childValues=()=>({name:n.value,start_datetime:a.value,end_datetime:b.value,
+        create_subfolder:create.checked,folder_layout:create.checked?childLayout():undefined});
       const pair=node("div",undefined,"inline");pair.append(aWrap,bWrap);
       const remove=action("Unterereignis entfernen",()=>{
         if(!confirm(t("Dieses Unterereignis aus dem Entwurf entfernen?")))return;
@@ -1093,7 +1098,7 @@ function eventEditor(index, newKind="event") {
       const header=node("div",undefined,"adoption-child-header");
       header.append(details,remove);
       n.addEventListener("input",()=>{summary.textContent=n.value || t("Unterereignis");});
-      const body=node("div",undefined,"stack");body.append(nWrap,pair,childFolders);
+      const body=node("div",undefined,"stack");body.append(createWrap,nWrap,pair,childFolders);
       body.id=window.BibliothekarFolderLayout.nodeId();
       summary.setAttribute("aria-controls",body.id);
       details.append(summary);

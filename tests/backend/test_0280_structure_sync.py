@@ -235,7 +235,8 @@ def test_0280_event_edit_ui_has_one_subfolder_control_per_event_kind():
     source = Path("app/events_ui.py").read_text(encoding="utf-8")
     assert source.count('id="edit-subfolders"') == 1
     assert 'document.getElementById("edit-subfolders").checked' in source
-    assert source.count('window.BibliothekarFolderLayout.eventEditor(') == 1
+    assert 'id="edit-event-layout"' in source
+    assert 'window.BibliothekarFolderLayout.eventEditor(' in source
 
 
 def test_0280_structure_task_auto_opens_once_per_page():

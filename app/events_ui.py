@@ -1158,6 +1158,8 @@ EVENTS_HTML = r"""<!doctype html>
     #normal-event-segments { display:grid; gap:10px; }
     .child-segment-card { padding:12px 14px !important; margin:0 !important; }
     .child-segment-card > summary { padding:2px 0 8px; }
+    .child-segment-card > summary:has([data-remove-child-segment]){display:flex;align-items:center;gap:8px}
+    .child-segment-card > summary [data-remove-child-segment]{margin-inline-start:auto}
     .child-segment-fields { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; padding-top:4px; }
     .child-segment-top { display:flex; align-items:end; justify-content:space-between; gap:12px; }
     .child-segment-name { flex:0 1 55%; min-width:220px; }
@@ -3608,7 +3610,7 @@ EVENTS_HTML = r"""<!doctype html>
         const startDate=isoDate(segment.start_datetime);
         const endDate=isoDate(segment.end_datetime);
         const title=segment.name || "Unterereignis";
-        return `<details class="card child-segment-card" data-child-segment data-child-id="${escapeHtml(segment.id)}" open>
+        return `<details class="card child-segment-card" data-child-segment data-child-id="${escapeHtml(segment.id)}">
           <summary><strong data-child-summary>${escapeHtml(title)}</strong> <span class="muted">· ${escapeHtml(start)}–${escapeHtml(end)}</span></summary>
           <div class="child-segment-fields">
             <div class="child-segment-top">
@@ -3674,8 +3676,26 @@ EVENTS_HTML = r"""<!doctype html>
         const normalContainer=document.getElementById('normal-event-segments');
         const bind=()=>{
           normalContainer.querySelectorAll("[data-child-segment]").forEach(row=>{
+            if(structural && !row.folderOptions){
+              const original=(context.child_events || []).find(child=>child.id===row.dataset.childId);
+              const editor=window.BibliothekarFolderLayout.eventEditor({saved:original?.folder_layout,
+                defaults:context.folder_layout,inherit:true});
+              const label=document.createElement("label");label.className="check-row";
+              const checkbox=document.createElement("input");checkbox.type="checkbox";
+              checkbox.checked=original?.folder_name!=="";
+              label.append(checkbox,document.createTextNode("Unterordner erstellen"));
+              const fields=row.querySelector(".child-segment-fields");
+              fields.prepend(label);fields.append(editor.panel);
+              function sync(){editor.panel.hidden=!checkbox.checked;}
+              checkbox.addEventListener("change",sync);sync();
+              row.folderOptions=()=>({create_subfolder:checkbox.checked,
+                folder_layout:checkbox.checked ? (editor.value() || {mode:"inherit"}) : undefined});
+            }
             const remove=row.querySelector("[data-remove-child-segment]");
-            if(remove)remove.onclick=()=>row.remove();
+            if(remove){
+              row.querySelector("summary").append(remove);
+              remove.onclick=event=>{event.preventDefault();row.remove();};
+            }
             const nameInput=row.querySelector("[data-child-name]");
             const summary=row.querySelector("[data-child-summary]");
             if(nameInput&&summary){
@@ -3856,7 +3876,8 @@ EVENTS_HTML = r"""<!doctype html>
                 : `${row.querySelector('[data-child-start-date]').value}T${row.querySelector('[data-child-start-time]').value}:00`,
               end_datetime:row.querySelector('[data-child-end]')
                 ? row.querySelector('[data-child-end]').value
-                : `${row.querySelector('[data-child-end-date]').value}T${row.querySelector('[data-child-end-time]').value}:59`
+                : `${row.querySelector('[data-child-end-date]').value}T${row.querySelector('[data-child-end-time]').value}:59`,
+              ...row.folderOptions?.()
             }))
           });
         }

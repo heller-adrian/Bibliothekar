@@ -289,6 +289,8 @@ def _suffix_after_event_root(value: Any) -> tuple[str, ...]:
 def _preview_child_folders(preview: dict[str, Any]) -> list[str]:
     result: list[str] = []
     for segment in list(preview.get("subevents") or preview.get("child_segments") or []):
+        if segment.get('create_subfolder') is False:
+            continue
         folder = str(segment.get("folder_name") or segment.get("folder") or "").strip()
         if not folder:
             start = str(segment.get("start_datetime") or segment.get("start_time") or "")
@@ -342,6 +344,16 @@ def _desired_directory_plan(
         root / leaf["leaf_prefix"]: paths(leaf)
         for leaf in preview.get("target_leaf_layouts") or []
     }
+    if not moves_only:
+        used_child_prefixes = {str(child) for child in _preview_child_folders(preview)}
+        for leaf, layout_paths_at_leaf in leaves.items():
+            suffix = leaf.relative_to(root).parts
+            if len(suffix) != 1 or suffix[0] not in used_child_prefixes:
+                continue
+            if any(leaf in other.parents for other in leaves):
+                continue
+            directories.add(leaf)
+            directories.update(leaf / path for path in layout_paths_at_leaf)
     items = [
         *(plan.get("families_with_plans") or []),
         *(plan.get("assets_with_plans") or []),

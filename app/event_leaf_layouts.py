@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 from datetime import datetime, timezone
-from app.event_layout import normalize_layout, layout_paths, validate_input_path
+from app.event_layout import event_layout_from_row, normalize_layout, layout_paths, validate_input_path
 
 
 def leaf_descriptors(connection: Any, parent: dict[str, Any], prefixes: list[str]) -> list[dict[str, str]]:
@@ -67,6 +67,28 @@ def stored_leaf_layouts(connection: Any, parent_id: str) -> dict[str, dict[str, 
             "layout": layout,
         }
     return result
+
+
+def effective_leaf_layouts(connection: Any, parent_id: str) -> dict[str, dict[str, Any]]:
+    """Combine structural snapshots with configured child-wide defaults."""
+    result = stored_leaf_layouts(connection, parent_id)
+    if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_folder_layouts'").fetchone():
+        return result
+    for row in connection.execute(
+        """SELECT layout.*, child.folder_name FROM event_folder_layouts AS layout
+           JOIN events AS child ON child.id=layout.event_id
+           WHERE child.parent_event_id=? AND child.folder_name<>''""", (parent_id,),
+    ):
+        key = str(row['event_id'])
+        result.setdefault(key, {**event_layout_from_row(row), 'leaf_key': key, 'leaf_prefix': row['folder_name']})
+    return result
+
+
+def clear_child_leaf_overrides(connection: Any, parent_id: str, child_id: str) -> None:
+    connection.execute(
+        "DELETE FROM event_leaf_folder_layouts WHERE parent_event_id=? AND (leaf_key=? OR substr(leaf_key,1,?)=?)",
+        (parent_id, child_id, len(child_id) + 1, child_id + '@'),
+    )
 
 
 def validate_leaf_choices(

@@ -26,7 +26,7 @@ import os
 from app.database import database_connection
 from app.event_access import event_family_rows, event_file_rows, event_source_jobs
 from app.event_layout import ensure_event_layout_snapshot
-from app.event_leaf_layouts import stored_leaf_layouts
+from app.event_leaf_layouts import effective_leaf_layouts
 
 from app.workspace_layout import shared_work_root
 
@@ -145,7 +145,7 @@ def build_event_document_from_db(
         layout_state = ensure_event_layout_snapshot(
             connection, event_id, now=datetime.now(timezone.utc).isoformat()
         )
-        leaf_layouts = list(stored_leaf_layouts(connection, event_id).values())
+        leaf_layouts = list(effective_leaf_layouts(connection, event_id).values())
 
         assignment_day_rows = connection.execute(
             """
@@ -230,7 +230,8 @@ def build_event_document_from_db(
         f"└── {event['folder_name']}",
     ]
     for child in children:
-        structure_lines.append(f"    └── {child['folder_name']}")
+        if child['folder_name']:
+            structure_lines.append(f"    └── {child['folder_name']}")
     days_by_event: dict[str, set[str]] = {}
     for row in assignment_day_rows:
         capture = str(row["selected_capture_time"] or "")

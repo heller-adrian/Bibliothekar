@@ -11,7 +11,7 @@ on:
         default: false
         required: true
       adoption_qa_run:
-        description: Successful full Backend QA run ID for this exact RC7 commit
+        description: Successful full Backend QA run ID for this exact RC8 commit
         type: string
         default: ''
   workflow_call:
@@ -70,7 +70,7 @@ jobs:
               test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
               test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
               [[ "$ADOPTION_QA_INPUT" =~ ^[0-9]+$ ]]
-              if git ls-remote --exit-code --tags origin 'refs/tags/v1.0.1-rc.7' >/dev/null; then
+              if git ls-remote --exit-code --tags origin 'refs/tags/v1.0.1-rc.8' >/dev/null; then
                 echo 'Release candidate tag already exists.' >&2
                 exit 1
               else
@@ -147,7 +147,7 @@ jobs:
           print('APPROVED: 2634/2634 exact-case backend QA, container, frontend, preflight and coverage.')
           PY
           echo 'Verified source identity and successful GitHub qualification #42002573062.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Verify full backend qualification for the exact RC7 commit
+      - name: Verify full backend qualification for the exact RC8 commit
         if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption'
         shell: bash
         env:
@@ -279,7 +279,7 @@ jobs:
       - name: Record published digest
         run: echo '${{ steps.publish.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify the immutable RC7 image with native ZFS
+      - name: Verify the immutable RC8 image with native ZFS
         if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption'
         shell: bash
         env:
@@ -297,10 +297,10 @@ jobs:
             tee "$evidence/container-smoke.log"
           jq -n --arg source "$GITHUB_SHA" --arg image "$image" --arg digest "$IMAGE_DIGEST" \
             --arg qa_run "$ADOPTION_QA_RUN" --arg image_run "$GITHUB_RUN_ID" \
-            '{tag:"v1.0.1-rc.7", source:$source, image:$image, digest:$digest, qa_run:$qa_run, image_run:$image_run}' \
+            '{tag:"v1.0.1-rc.8", source:$source, image:$image, digest:$digest, qa_run:$qa_run, image_run:$image_run}' \
             > "$evidence/qualified-image.json"
           cat > "$evidence/release-notes.md" <<EOF
-          Bibliothekar 1.0.1 RC7 brings time slots, subevent defaults and contextual previews from Workspace planning to collection adoption. It fixes database completion and recovery when deleting an archived collection folder and localizes the affected archive messages.
+          Bibliothekar 1.0.1 RC8 shares folder layout controls between Workspace and collection adoption. Subevents can use their own layout or share their parent’s directory. Adoption previews show configured subevents and the execution page shows the required safety confirmation after host verification.
 
           Source commit: \`$GITHUB_SHA\`
           Test image: \`$image:patch-$VERSION-$GITHUB_SHA\`
@@ -316,7 +316,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption'
         with:
-          name: rc7-qualified-image
+          name: rc8-qualified-image
           path: |
             ${{ runner.temp }}/adoption-qualification/qualified-image.json
             ${{ runner.temp }}/adoption-qualification/verified.json

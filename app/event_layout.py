@@ -324,3 +324,23 @@ def leaf_layout_directories(layout_state: dict[str, Any]) -> list[str]:
     if not bool(layout_state.get("structure_enabled")):
         return []
     return layout_paths(layout_state["layout"])
+
+
+def resolve_layout_choice(choice, inherited, default=None):
+    """Validate an optional event override against the chosen baseline."""
+    if choice is None:
+        return inherited
+    if not isinstance(choice, dict):
+        raise EventLayoutError("Die Ordnerstruktur ist ungültig.")
+    if choice.get("mode") == "inherit":
+        return inherited
+    if choice.get("mode") == "default":
+        return default if default is not None else inherited
+    layout = normalize_layout(choice.get("layout") or inherited["layout"])
+    enabled = bool(choice.get("structure_enabled", inherited["structure_enabled"]))
+    return {
+        "structure_enabled": enabled,
+        "layout": layout,
+        "input_path": validate_input_path(layout, choice.get("input_path", inherited["input_path"]),
+                                          structure_enabled=enabled),
+    }

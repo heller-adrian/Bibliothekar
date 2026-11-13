@@ -3188,6 +3188,7 @@ def _event_payload_with_folder_layout(
     result = dict(payload)
     naming: dict[str, Any]
     with database_connection(current_database_file()) as connection:
+        result["default_folder_layout"] = get_global_event_folder_layout(connection)
         if event_id:
             state = ensure_event_layout_snapshot(
                 connection,
@@ -7560,6 +7561,7 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
                             "name": child.get("name"),
                             "start_datetime": child.get("start_datetime"),
                             "end_datetime": child.get("end_datetime"),
+                            "folder_name": child.get("folder_name"),
                         }
                         for child in (context.get("child_events") or [])
                     ],
@@ -7751,6 +7753,8 @@ def api_create_event(
                 "end_time": extension["new_end"][11:16],
                 "uses_time_range": True,
                 "preserve_day_folders": bool(archived_target["preserve_day_folders"]),
+                "folder_layout": context["folder_layout"],
+                "default_folder_layout": payload.get("default_folder_layout"),
                 "folder_naming": archived_naming,
                 "subevents": [
                     *[
@@ -7759,6 +7763,7 @@ def api_create_event(
                             "name": child.get("name"),
                             "start_datetime": child.get("start_datetime"),
                             "end_datetime": child.get("end_datetime"),
+                            "folder_name": child.get("folder_name"),
                         }
                         for child in (context.get("child_events") or [])
                     ],
@@ -8254,6 +8259,14 @@ def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, A
         )
         if current is None:
             return False
+        if segment.get('create_subfolder', bool(current.get('folder_name'))) != bool(current.get('folder_name')):
+            return False
+        if choice := segment.get('folder_layout'):
+            from app.event_layout import resolve_layout_choice
+            child_layout = current.get('folder_layout') or current_layout
+            selected = resolve_layout_choice(choice, current_layout, payload.get('default_folder_layout'))
+            if any(selected.get(key) != child_layout.get(key) for key in ('layout', 'input_path', 'structure_enabled')):
+                return False
         requested_start = str(
             segment.get("start_datetime")
             or f"{start_date}T{str(segment.get('start_time') or '00:00')}:00"

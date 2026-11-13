@@ -473,6 +473,7 @@ def scan_event_inventory(
     event, known_files = _event_and_known_files(database_path, job_id, event_id)
 
     layout_state: dict[str, Any] | None = None
+    leaf_layouts = []
     previous_kind_by_content: dict[tuple[int, str], str] = {}
     with database_connection(database_path) as connection:
         try:
@@ -483,6 +484,9 @@ def scan_event_inventory(
             )
         except Exception:
             layout_state = None
+        from app.event_leaf_layouts import effective_leaf_layouts
+        leaf_layouts = sorted(effective_leaf_layouts(connection, event_id).values(),
+                              key=lambda leaf: -len(leaf['leaf_prefix']))
         try:
             previous_rows = connection.execute(
                 """SELECT size_bytes,sha256,asset_kind
@@ -501,22 +505,24 @@ def scan_event_inventory(
         except Exception:
             previous_kind_by_content = {}
 
-    export_role_paths = set(
-        layout_role_paths(layout_state["layout"], "export")
-        if layout_state is not None and bool(layout_state.get("structure_enabled"))
-        else []
-    )
-
     def declared_export_for(relative_path: str) -> bool:
-        if not export_role_paths or layout_state is None:
+        state = layout_state
+        for leaf in leaf_layouts:
+            prefix = leaf['leaf_prefix']
+            if not prefix or relative_path.startswith(prefix + '/'):
+                state = leaf
+                if prefix:
+                    relative_path = relative_path.removeprefix(prefix + '/')
+                break
+        if not state or not state['structure_enabled']:
             return False
         organization = organization_path_for_event_relative(
             relative_path,
-            layout_state,
+            state,
         )
         return any(
             organization == role_path or organization.startswith(role_path + "/")
-            for role_path in export_role_paths
+            for role_path in layout_role_paths(state['layout'], 'export')
         )
 
     root = storage_root.expanduser().resolve(strict=False)
