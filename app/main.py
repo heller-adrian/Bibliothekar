@@ -3252,13 +3252,19 @@ def _event_payload_with_folder_layout(
             naming = naming_from_library_settings(
                 current_library_context().settings
             )
+        requested_layout = result.get("folder_layout")
+        if isinstance(requested_layout, dict) and requested_layout.get("mode") == "default":
+            state = get_global_event_folder_layout(connection)
+            result.pop("folder_layout")
     result.setdefault("folder_layout", {
         "structure_enabled": bool(state["structure_enabled"]),
         "input_path": str(state["input_path"]),
         "layout": state["layout"],
     })
     result.setdefault("folder_naming", naming)
-    result.setdefault("create_subfolders", bool(state["structure_enabled"]))
+    selected_layout = result.get("folder_layout")
+    enabled = selected_layout.get("structure_enabled", state["structure_enabled"]) if isinstance(selected_layout, dict) else state["structure_enabled"]
+    result.setdefault("create_subfolders", bool(enabled))
     return result
 
 def _naming_snapshot_from_event_context(context: dict[str, Any]) -> dict[str, Any]:
@@ -8186,6 +8192,17 @@ def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, A
     if str(event.get("status") or "") != "applied" or not event.get("applied_at"):
         return False
 
+    current_layout = context.get("folder_layout") or {}
+    requested_layout = payload.get("folder_layout") or current_layout
+    if not isinstance(requested_layout, dict):
+        return False
+    if any(requested_layout.get(key) != current_layout.get(key) for key in ("layout", "input_path")):
+        return False
+    if bool(payload.get("create_subfolders", current_layout.get("structure_enabled", True))) != bool(
+        current_layout.get("structure_enabled", True)
+    ):
+        return False
+
     if str(event.get("event_kind") or "event") == "no_event":
         try:
             from app.event_timeline import normalize_no_event_segments
@@ -8211,11 +8228,6 @@ def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, A
         )
 
     if str(payload.get("event_kind") or "event") != "event":
-        return False
-    current_layout = context.get("folder_layout") or {}
-    if bool(payload.get("create_subfolders", current_layout.get("structure_enabled", True))) != bool(
-        current_layout.get("structure_enabled", True)
-    ):
         return False
     if bool(payload.get("preserve_day_folders")) != bool(event.get("preserve_day_folders")):
         return False

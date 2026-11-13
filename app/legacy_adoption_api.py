@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from app.database import database_connection
 from app.event_layout import get_global_default
+from app.event_naming import naming_from_library_settings
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps
 from app.legacy_adoption_catalogue import prepare_documents
 from app.legacy_adoption_dataset import DatasetError, browsable_folders
@@ -74,6 +75,7 @@ class EventDefinition(BaseModel):
     start_time: str | None = None
     end_time: str | None = None
     preserve_day_folders: bool = False
+    subevent_prefix_enabled: StrictBool | None = None
     segments: list[dict[str, str]] = Field(default_factory=list, max_length=200)
     children: list[ChildDefinition] = Field(default_factory=list, max_length=200)
     folder_layout: FolderLayout | None = None
@@ -310,6 +312,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 result["draft"] = json.loads(item["draft_json"])
                 result["draft_revision"] = item["draft_revision"]
                 result["layout_default"] = get_global_default(connection)
+                result["subevent_prefix_enabled"] = naming_from_library_settings(library.settings)["subevent_prefix_enabled"]
                 result["review_count"] = review_count(connection, job_id, result["plan"].get("id"))
             with running_lock:
                 result["scan_running"] = key(library, job_id) in running

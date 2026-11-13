@@ -66,6 +66,7 @@ async function finishManualAdoption(page){
   await prepare.waitFor({state:'visible'});
   assert.equal(await scriptMethod.isChecked(),true);
   assert.equal(await read.isDisabled(),true);
+  assert.equal(await ack.isVisible(),false);
   assert.equal(await ack.isDisabled(),true);
   assert.equal(await confirm.isDisabled(),true);
   const sequence=await actions.evaluate(group=>Array.from(group.children,element=>({
@@ -82,6 +83,7 @@ async function finishManualAdoption(page){
   await page.locator('.adoption-command').waitFor();
   await read.click();
   await page.getByText(/No proof yet|Noch kein Nachweis/).waitFor();
+  assert.equal(await ack.isVisible(),false);
   assert.equal(await ack.isDisabled(),true);
   assert.equal(await confirm.isDisabled(),true);
   probe=verified;
@@ -91,6 +93,7 @@ async function finishManualAdoption(page){
   assert.ok(await proof.getByText(/Host paths and shared ZFS dataset verified|Hostpfade und gemeinsames ZFS-Dataset bestätigt/).isVisible());
   assert.ok(await proof.evaluate(element=>parseFloat(getComputedStyle(element).borderInlineStartWidth)>0));
   assert.equal(await ack.isDisabled(),false);
+  assert.equal(await ack.isVisible(),true);
   assert.equal(await confirm.isDisabled(),true);
   assert.ok((await ack.boundingBox()).y>(await proof.boundingBox()).y);
   await capture(page,'verified-execution');
@@ -115,6 +118,7 @@ async function finishManualAdoption(page){
   await methods.locator('[value=manual]').check();
   assert.equal(await ack.isChecked(),false);
   assert.equal(await ack.isDisabled(),false);
+  assert.equal(await ack.isVisible(),true);
   assert.equal(await confirm.isDisabled(),true);
   await capture(page,'execution');
   await page.getByLabel(/I confirm the safety conditions|Ich bestätige die Sicherheitsbedingungen/).check();
@@ -271,6 +275,7 @@ async function finishManualAdoption(page){
     await cards.nth(1).click({modifiers:['Shift']});
     await page.getByRole('button',{name:'+ Event',exact:true}).click();
     const name=editor.getByRole('textbox').first();
+    assert.equal(await editor.locator('details.bk-event-layout-editor[open]').count(),0);
     await name.fill('Lan Test');
     assert.equal(await page.locator('#dirty').textContent(),'');
     assert.equal(await editor.locator('input[type=date]').first().inputValue(),'2026-07-19');
@@ -293,10 +298,13 @@ async function finishManualAdoption(page){
     assert.equal(await cards.count(),1);
     await page.reload();
     await page.locator('#draft-events summary').click();
+    assert.equal(await page.locator('#draft-events .adoption-event-card[open]').count(),1);
     await page.locator('#planning-preview .adoption-structure-preview code').filter({hasText:'Child Test'}).first().waitFor();
     await capture(page,'selected-event');
     await page.locator('#draft-events').getByRole('button',{name:'Edit',exact:true}).click();
     assert.equal(await editor.getByRole('textbox').first().inputValue(),'Lan Test');
+    assert.equal(await editor.locator('.adoption-child-header details[open]').count(),0);
+    await editor.locator('.adoption-child-header summary').click();
     assert.equal(await editor.locator('input[type=text]').nth(1).inputValue(),'Child Test');
     await editor.getByRole('textbox').first().fill('Reopened Test');
     await editor.getByRole('button',{name:'Save in draft'}).click();

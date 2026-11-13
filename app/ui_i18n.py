@@ -8,6 +8,12 @@ from __future__ import annotations
 import json
 
 UI_TRANSLATIONS = {
+  "Unterordnerstruktur": "Subfolder Layout",
+  "Unterordner des Hauptereignisses erstellen": "Create parent event subfolder",
+  "Bibliotheksstandard": "Library default",
+  "Eigene Ordnerstruktur": "Custom folder layout",
+  "Ohne zusätzliche Ordner": "No additional folders",
+  "Struktur des Ereignisses übernehmen": "Use the parent event layout",
   "Ordnername": "Folder name",
   "Bestehende Fotosammlung übernehmen": "Adopt existing photo collection",
   "Ordner hinzufügen": "Add folder",

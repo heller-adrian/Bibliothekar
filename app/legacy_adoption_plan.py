@@ -108,6 +108,8 @@ def _draft_event(connection, definition, naming, defaults, *, allow_existing=Fal
     kind = definition.get("event_kind", "event")
     parent_layout = _layout(definition, defaults)
     if kind == "event":
+        if definition.get("subevent_prefix_enabled") is not None:
+            naming = {**naming, "subevent_prefix_enabled": definition["subevent_prefix_enabled"]}
         start_time, end_time = definition.get("start_time"), definition.get("end_time")
         explicit_time = start_time is not None or end_time is not None
         start, end = continuous_event_bounds(
@@ -298,7 +300,8 @@ def preview_draft(library, job_id, draft, *, allow_existing=False):
             'free_segments': [part for day in sorted(free_by_day) for part in free_by_day[day] if part['families']],
             'archive_segments': [part for day in sorted(archive_by_day) for part in archive_by_day[day] if part['families']],
             'events': [
-                {'name': event['name'], 'start': event['start_datetime'], 'end': event['end_datetime'],
+                {'name': event['name'], 'folder_name': event['folder_name'],
+                 'start': event['start_datetime'], 'end': event['end_datetime'],
                  'children': [{'name': child['name'], 'start': child['start_datetime'], 'end': child['end_datetime']}
                               for child in event['children']],
                  'segments': event['segments'],
@@ -358,14 +361,23 @@ def _target_leaf(event, capture):
 
 
 def _leaf_directories(leaf, layout):
-    yield leaf
+    directories = [leaf]
     if layout["structure_enabled"]:
-        yield from (leaf / part for part in layout_paths(layout["layout"]))
+        directories.extend(leaf / part for part in layout_paths(layout["layout"]))
+    return {str(parent) for path in directories for parent in (path, *path.parents) if parent.parts}
+
+
+def _unpopulated_child_leaves(event, planned_keys):
+    if event["existing"]:
+        return
+    populated = {key.split("@", 1)[0] for key in planned_keys}
+    for child in event["children"]:
+        if child["id"] not in populated:
+            yield child["id"], event_root_relative(event) / child["folder_name"], child["folder_layout"]
 
 
 def preview_event_directories(library, job_id, draft, *, allow_existing=False):
     """Show planned folders without creating a plan or inspecting archive contents."""
-    limit = 200
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN")
         if _job(connection, library.library_id, job_id)["state"] != "inventoried":
@@ -374,12 +386,12 @@ def preview_event_directories(library, job_id, draft, *, allow_existing=False):
         defaults = get_global_default(connection)
         events = [_draft_event(connection, definition, naming, defaults, allow_existing=allow_existing)
                   for definition in draft["events"]]
-        directories = {str(event_root_relative(event)) for event in events}
+        directories = set()
         intervals = _draft_intervals(events)
         starts = [item[0] for item in intervals]
         overrides = {key: _local_capture(value) for key, value in draft["capture_overrides"].items()}
         exclusions = set(draft["exclude_families"])
-        seen_leaves = set()
+        seen_leaves = [set() for _ in events]
         rows = connection.execute(
             """SELECT family_key, capture_time, review_required FROM legacy_adoption_families AS family
                WHERE job_id = ? AND NOT EXISTS (
@@ -388,8 +400,6 @@ def preview_event_directories(library, job_id, draft, *, allow_existing=False):
                ) ORDER BY capture_time, family_key""", (job_id,),
         )
         for row in rows:
-            if len(directories) > limit:
-                break
             key = row["family_key"]
             capture = overrides.get(key, row["capture_time"])
             if key in exclusions or not capture or (row["review_required"] and key not in overrides):
@@ -397,25 +407,25 @@ def preview_event_directories(library, job_id, draft, *, allow_existing=False):
             index = _assigned_index(intervals, starts, capture)
             if index is not None:
                 _, leaf, leaf_key, layout = _target_leaf(events[index], capture)
-                if leaf_key not in seen_leaves:
-                    seen_leaves.add(leaf_key)
-                    directories.update(map(str, _leaf_directories(leaf, layout)))
-    return {"directories": sorted(directories)[:limit], "truncated": len(directories) > limit}
+                if leaf_key not in seen_leaves[index]:
+                    seen_leaves[index].add(leaf_key)
+                    directories.update(_leaf_directories(leaf, layout))
+        for event, keys in zip(events, seen_leaves, strict=True):
+            directories.update(_leaf_directories(event_root_relative(event), {"structure_enabled": False}))
+            for _, leaf, layout in _unpopulated_child_leaves(event, keys):
+                directories.update(_leaf_directories(leaf, layout))
+    return {"directories": sorted(directories)}
 
 
 def _plan_directories(connection, plan_id, leaf, layout, archive_entry):
-    for directory in _leaf_directories(leaf, layout):
-        for parent in (directory, *directory.parents):
-            if not parent.parts:
-                continue
-            value = str(parent)
-            validate_target(value)
-            info = archive_entry(value)
-            if info is not None and not stat.S_ISDIR(info.st_mode):
-                raise AdoptionError("Ein benötigter Ordnerpfad ist belegt: " + value)
-            connection.execute(
-                "INSERT OR IGNORE INTO legacy_adoption_directories VALUES (?, ?)", (plan_id, value),
-            )
+    for value in sorted(_leaf_directories(leaf, layout)):
+        validate_target(value)
+        info = archive_entry(value)
+        if info is not None and not stat.S_ISDIR(info.st_mode):
+            raise AdoptionError("Ein benötigter Ordnerpfad ist belegt: " + value)
+        connection.execute(
+            "INSERT OR IGNORE INTO legacy_adoption_directories VALUES (?, ?)", (plan_id, value),
+        )
 
 
 def _store_leaf(event, key, path, layout):
@@ -633,14 +643,9 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             _plan_directories(connection, plan_id, leaf, layout, archive_entry)
             planned_directories.add((event["id"], leaf_key))
     for event in events:
-        if event["existing"]:
-            continue
-        planned_leaves = {key.split("@", 1)[0] for key in event["leaf_layouts"]}
-        for child in event["children"]:
-            if child["id"] not in planned_leaves:
-                path = event_root_relative(event) / child["folder_name"]
-                _store_leaf(event, child["id"], path, child["folder_layout"])
-                _plan_directories(connection, plan_id, path, child["folder_layout"], archive_entry)
+        for key, path, layout in _unpopulated_child_leaves(event, event["leaf_layouts"]):
+            _store_leaf(event, key, path, layout)
+            _plan_directories(connection, plan_id, path, layout, archive_entry)
     _check_planned_collisions(connection, plan_id)
     if (overrides.keys() | exclusions | target_stems.keys()) - seen_draft_keys:
         raise AdoptionError("Mindestens eine Dateifamilie aus dem Entwurf fehlt in der Inventur.")

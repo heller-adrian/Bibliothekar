@@ -7921,7 +7921,53 @@ FOLDER_LAYOUT_JS = r"""
     };
     changed();
   }
-  window.BibliothekarFolderLayout={render,nodeId:bkNodeId,flatten:bkFlattenLayout};
+  function eventEditor({saved,defaults,inherit=false,allowDisabled=true,translate=value=>value}) {
+    const el=(tag,text)=>{
+      const node=document.createElement(tag);
+      if(text)node.textContent=translate(text);
+      return node;
+    };
+    const panel=el("details");
+    panel.className="bk-event-layout-editor";
+    const type=el("select");
+    const defaultMode=inherit?"inherit":"default";
+    const modes=[["default","Bibliotheksstandard"],["custom","Eigene Ordnerstruktur"]];
+    if(allowDisabled)modes.push(["disabled","Ohne zusätzliche Ordner"]);
+    if(inherit)modes.unshift(["inherit","Struktur des Ereignisses übernehmen"]);
+    for(const [value,label] of modes){
+      const option=el("option",label);option.value=value;type.append(option);
+    }
+    type.value=saved?.mode==="default" ? "default" : allowDisabled && saved?.structure_enabled===false ? "disabled" :
+      saved?.layout ? "custom" : defaultMode;
+    const select=el("label","Struktur");select.append(type);
+    const custom=el("div"),tree=el("div"),exportSelect=el("select");
+    const exportLabel=el("label","Exportordner");exportLabel.append(exportSelect);
+    const state=structuredClone(saved?.layout?saved:defaults||{structure_enabled:true,input_path:"",layout:{version:2,nodes:[]}});
+    const radioName="event-folder-layout-"+bkNodeId();
+    let initializing=true;
+    function notify(){if(!initializing)panel.dispatchEvent(new Event("input",{bubbles:true}));}
+    function update(){
+      custom.hidden=type.value!=="custom";
+      if(!custom.hidden)render({state,host:tree,exportSelect,radioName,onChange:notify});
+    }
+    const add=el("button","Ordner hinzufügen");add.type="button";
+    add.addEventListener("click",()=>{
+      state.layout.nodes.push({id:bkNodeId(),name:translate("Neuer Ordner"),children:[]});
+      update();
+    });
+    type.addEventListener("change",()=>{update();notify();});
+    custom.append(tree,add,exportLabel);
+    panel.append(el("summary","Unterordnerstruktur"),select,custom);
+    update();initializing=false;
+    function value(){
+      if(type.value==="inherit")return undefined;
+      if(type.value==="default")return {mode:"default"};
+      if(type.value==="disabled")return {...structuredClone(state),structure_enabled:false};
+      return {...structuredClone(state),structure_enabled:true};
+    }
+    return {panel,value};
+  }
+  window.BibliothekarFolderLayout={render,nodeId:bkNodeId,flatten:bkFlattenLayout,eventEditor};
 
 })();
 """

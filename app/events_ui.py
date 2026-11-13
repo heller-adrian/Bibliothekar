@@ -3640,7 +3640,7 @@ EVENTS_HTML = r"""<!doctype html>
               <p class="muted">Jeder Tag bzw. Teil eines Tages wird separat gespeichert. Zwischenräume gehören ausdrücklich nicht zu „Ohne Ereignis“.</p>
             </div>
             <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
-            <label class="edit-field"><span>Unterordner</span><select id="edit-subfolders" ${structural ? "" : "disabled"}><option value="1" ${context.folder_layout?.structure_enabled ? "selected" : ""}>Erstellen</option><option value="0" ${context.folder_layout?.structure_enabled ? "" : "selected"}>Nicht erstellen</option></select></label>` : `
+            ` : `
           <div class="edit-boundaries">
             <div class="edit-boundary">
               <label class="edit-field"><span>Beginn</span><input id="edit-start-date" type="date" value="${escapeHtml(isoDate(event.start_datetime))}" ${structural ? "" : "disabled"}></label>
@@ -3652,10 +3652,11 @@ EVENTS_HTML = r"""<!doctype html>
             </div>
           </div>
           <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
-          <label class="edit-field"><span>Unterordner</span><select id="edit-subfolders" ${structural ? "" : "disabled"}><option value="1" ${context.folder_layout?.structure_enabled ? "selected" : ""}>Erstellen</option><option value="0" ${context.folder_layout?.structure_enabled ? "" : "selected"}>Nicht erstellen</option></select></label>
+          <label class="edit-field check-row"><input id="edit-subfolders" type="checkbox" ${context.folder_layout?.structure_enabled ? "checked" : ""} ${structural ? "" : "disabled"}><span>Unterordner des Hauptereignisses erstellen</span></label>
           <input id="edit-time-enabled" type="hidden" value="1">
           <div class="edit-field full"><span>Optionale Unterereignisse</span><div id="normal-event-segments">${normalSegmentHtml}</div><button id="add-normal-segment" type="button">Unterereignis hinzufügen</button></div>`}
 
+          ${structural ? '<div class="edit-field full" id="edit-event-layout"></div>' : ''}
           <label class="edit-field full"><span>Notizen</span><textarea id="edit-notes" maxlength="4000">${escapeHtml(event.notes || "")}</textarea></label>
         </div>
         <div class="edit-actions">
@@ -3663,6 +3664,12 @@ EVENTS_HTML = r"""<!doctype html>
           <button type="submit" class="plan-button bk-positive-action">${event.status === "applied" ? "Änderungen anwenden" : "Änderungen speichern"}</button>
         </div>`;
 
+      if (structural) {
+        const host=document.getElementById("edit-event-layout");
+        const editor=window.BibliothekarFolderLayout.eventEditor({saved:context.folder_layout,defaults:context.folder_layout,allowDisabled:noEvent});
+        host.layoutValue=editor.value;
+        host.append(editor.panel);
+      }
       if (!noEvent) {
         const normalContainer=document.getElementById('normal-event-segments');
         const bind=()=>{
@@ -3820,7 +3827,9 @@ EVENTS_HTML = r"""<!doctype html>
         notes: document.getElementById("edit-notes").value,
       };
       if (structural) {
-        payload.create_subfolders = document.getElementById("edit-subfolders").value === "1";
+        const layout=document.getElementById("edit-event-layout")?.layoutValue();
+        if(layout)payload.folder_layout=layout;
+        if(!noEvent)payload.create_subfolders=document.getElementById("edit-subfolders").checked && layout?.structure_enabled!==false;
         if (noEvent) {
           payload.event_kind = "no_event";
           payload.preserve_day_folders = document.getElementById("edit-preserve").value === "1";

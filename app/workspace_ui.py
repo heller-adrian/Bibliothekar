@@ -425,6 +425,9 @@ WORKSPACE_HTML = r"""<!doctype html>
       min-width: 0;
     }
     #event-dialog{inline-size:min(700px,calc(100dvw - 32px))}
+    #create-event-layout .bk-event-layout-editor{padding:8px 12px;border:1px solid var(--bk-line);border-radius:8px}
+    #create-event-layout summary{cursor:pointer;list-style:none}
+    #create-event-layout summary::-webkit-details-marker{display:none}
     .event-boundaries{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
     .event-boundary{display:grid;grid-template-columns:minmax(150px,1.18fr) minmax(140px,.82fr);gap:10px;align-items:end}
     .create-subevents{display:grid;gap:10px;margin-top:4px}
@@ -1709,8 +1712,9 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         <label id="create-subfolders-row" class="full-width check-row">
           <input id="create-subfolders" type="checkbox">
-          <span>Unterordner erstellen</span>
+          <span>Unterordner des Hauptereignisses erstellen</span>
         </label>
+        <div id="create-event-layout" class="full-width"></div>
 
         <label id="preserve-day-folders-row" class="full-width check-row">
           <input
@@ -2083,6 +2087,8 @@ WORKSPACE_HTML = r"""<!doctype html>
       document.getElementById("preserve-day-folders-row");
     const createSubfolders = document.getElementById("create-subfolders");
     const createSubfoldersRow = document.getElementById("create-subfolders-row");
+    const createEventLayout = document.getElementById("create-event-layout");
+    let parentLayoutEditor = null;
     let globalFolderLayout = null;
 
     const dialogPreview =
@@ -4309,6 +4315,12 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
     function collectCreateSubevents(){return [...createSubeventList.querySelectorAll("[data-create-subevent]")].map(row=>{const name=row.querySelector("[data-create-child-name]")?.value?.trim()||"",sd=row.querySelector("[data-create-child-start-date]")?.value||"",st=row.querySelector("[data-create-child-start-time]")?.value||"00:00",ed=row.querySelector("[data-create-child-end-date]")?.value||"",et=row.querySelector("[data-create-child-end-time]")?.value||"23:59";return{name,start_datetime:`${sd}T${st}:00`,end_datetime:`${ed}T${et}:59`};});}
 
+    function syncCreateEventLayout(){
+      const noEvent=["no_event","existing_no_event"].includes(dialogMode);
+      createEventLayout.hidden=Boolean(existingParentEvent?.value || activeNoEventTarget);
+      createSubfoldersRow.hidden=noEvent;
+    }
+
     async function openEventDialog(mode){
       dialogMode=mode;const dated=selectedDatedGroups(),noEvent=mode==="no_event"||mode==="existing_no_event",existingNoEvent=mode==="existing_no_event";activeNoEventTarget=null;
       const parentCandidates=noEvent?[]:plannedParentCandidates(dated);existingParentRow.hidden=noEvent||parentCandidates.length===0;
@@ -4321,9 +4333,13 @@ WORKSPACE_HTML = r"""<!doctype html>
       dialogSubeventPrefixEnabled=globalSubeventPrefixEnabled;
       createSubeventList.innerHTML="";createSubevents.hidden=noEvent;createSubeventHeading.textContent="Unterereignisse (optional)";eventBoundaries.hidden=noEvent;preserveDayFolders.checked=false;preserveDayFolders.disabled=false;preserveDayFoldersRow.hidden=false;createSubfolders.checked=Boolean(globalFolderLayout?.structure_enabled ?? true);createSubfolders.disabled=false;createSubfoldersRow.hidden=false;dialogError.hidden=true;dialogError.textContent="";updateSubeventPrefixToggle();
       noEventSegmentEditor.hidden=!noEvent;existingNoEventTargetRow.hidden=!existingNoEvent;
+      parentLayoutEditor=window.BibliothekarFolderLayout.eventEditor({defaults:globalFolderLayout,allowDisabled:noEvent});
+      createEventLayout.replaceChildren(parentLayoutEditor.panel);
+      parentLayoutEditor.panel.addEventListener("input",scheduleDialogPreview);
       if(existingNoEvent){const months=[...new Set(dated.map(group=>String(group.day_key||"").slice(0,7)).filter(Boolean))];noEventTargetCache=[];if(months.length){try{const d=await getJson(`/api/jobs/${encodeURIComponent(anchorJobIdForSelection())}/no-event/targets?months=${encodeURIComponent(months[0])}`);noEventTargetCache=d.targets||[];}catch(_){}}const target=noEventTargetCache[0]||null;if(target){existingNoEventTargetRow.hidden=false;existingNoEventTarget.innerHTML=`<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(target.status))}</option>`;existingNoEventTarget.value=target.id;existingNoEventTarget.disabled=true;activateNoEventTarget(target);}else renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));}
       else if(noEvent){renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));await autoAttachExistingNoEventCollection();}
       else{applyAutomaticFreeTimeSuggestion(dated);if(parentCandidates.length)applyExistingParentChoice();}
+      syncCreateEventLayout();
       dialogPreview.textContent="Vorschau wird vorbereitet …";dialogPreview.hidden=true;calculatePreviewButton.textContent="Vorschau einblenden";saveResult.hidden=true;saveResult.textContent="";eventDialog.showModal();syncCreateEventCompactPairs();scheduleDialogPreview();
     }
 
@@ -4348,6 +4364,14 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
       const parentId = base.existing_parent_event_id;
       const parent = parentId ? (workspace?.events||[]).find(event=>event.id===parentId) : null;
+      if(!parent && !activeNoEventTarget){
+        const layout=parentLayoutEditor?.value();
+        if(layout && layout.mode!=="default"){
+          base.folder_layout={...globalFolderLayout,...layout};
+          if(base.event_kind==="no_event")base.create_subfolders=layout.structure_enabled;
+          else base.create_subfolders=base.create_subfolders && layout.structure_enabled;
+        }
+      }
       if (parent) {
         if(!activeExtension) throw new Error("Der Erweiterungsbereich ist nicht mehr aktuell.");
         if(activeExtension.direction==="after"){
@@ -4701,7 +4725,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       scheduleDialogPreview();
     });
 
-    existingParentEvent?.addEventListener("change", applyExistingParentChoice);
+    existingParentEvent?.addEventListener("change",()=>{applyExistingParentChoice();syncCreateEventLayout();});
 
     existingNoEventTarget?.addEventListener("change", () => {
       const target=noEventTargetCache.find(item=>String(item.id)===String(existingNoEventTarget.value));

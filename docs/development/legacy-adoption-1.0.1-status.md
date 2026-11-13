@@ -407,3 +407,29 @@ Die vollständige Linux-Freigabe-QA [43456331350](https://github.com/heller-adri
 [QA 43456331350](https://github.com/heller-adrian/Bibliothekar/actions/runs/43456331350/job/131991342705) endete im ZFS-Vorabtest. 92 Fälle bestanden. Zwei Lebenszyklustests scheiterten beim Start mit `acl_backend_unavailable`, da ihre privaten Verwaltungsordner auf dem ZFS-Mediendataset des GitHub-Runners lagen. Dadurch starteten weder die acht Backend-Partitionen noch die Coverage-Prüfung.
 
 Die Testbibliotheken legen Konfiguration, Arbeitsbereich und private Datenbank wieder auf dem Runner-Dateisystem an. Quelle und Archiv verbleiben für die native Dataset-Prüfung auf demselben synthetischen ZFS-Dataset. Der Test bildet die reguläre Übertragung vom Workspace ins Archiv dateisystemübergreifend ab und prüft anschließend weiter Dateiintegrität und Abschluss. Die Anwendung einschließlich ihrer ACL- und ZFS-Prüfungen bleibt unverändert.
+
+Die beiden betroffenen Lebenszyklustests bestanden lokal. Die erneute vollständige Linux-Freigabe-QA [43457873219](https://github.com/heller-adrian/Bibliothekar/actions/runs/43457873219) wurde für `740724cd9911f1a33a6029e3f39760cbd6f0745c` gestartet. Nächster Schritt ist die Prüfung der nativen ZFS-Vorabtests, aller acht Partitionen und des Coverage-Artefakts. Bei Erfolg die Containerprüfung auf demselben Commit starten. Die Laufnotiz ist lokal und als Kopie im Codex-Arbeitsordner gesichert.
+
+### RC7 · Backend qualifiziert, Containerprüfung gestartet
+
+Die vollständige [Backend-QA 43457873219](https://github.com/heller-adrian/Bibliothekar/actions/runs/43457873219) für `740724cd9911f1a33a6029e3f39760cbd6f0745c` hat 2.732 von 2.732 Backend-Fällen in acht Partitionen genau einmal bestanden. Alle 94 Vorabfälle bestanden einschließlich beider nativer ZFS-Lebenszyklen und des schreibgeschützten Bind-Mounts. Zehn Artefakte wurden anhand ihrer SHA-256-Werte geprüft. Die unabhängig neu berechnete Coverage stimmt mit dem GitHub-Artefakt überein.
+
+[Publish container image 43474498469](https://github.com/heller-adrian/Bibliothekar/actions/runs/43474498469) baut und prüft das Image für denselben Commit. Danach das Artefakt `rc7-qualified-image`, den ZFS-Nachweis, den GHCR-Digest und das OCI-Revisionslabel prüfen. Anschließend `v1.0.1-rc.7` als GitHub-Pre-Release veröffentlichen und gegen die gesicherten Git- und Registry-Referenzen prüfen.
+
+### RC7 veröffentlicht
+
+[GitHub-Vorabversion v1.0.1-rc.7](https://github.com/heller-adrian/Bibliothekar/releases/tag/v1.0.1-rc.7) ist für `740724cd9911f1a33a6029e3f39760cbd6f0745c` veröffentlicht. [Backend-QA 43457873219](https://github.com/heller-adrian/Bibliothekar/actions/runs/43457873219) und [Containerprüfung 43474498469](https://github.com/heller-adrian/Bibliothekar/actions/runs/43474498469) sind vollständig bestanden. Release-Tag, Image-Digest, Linux/amd64-Revisionslabel, Nachweisdateien und geschützte Git- und GHCR-Referenzen wurden nach der Veröffentlichung verifiziert.
+
+`ghcr.io/heller-adrian/bibliothekar@sha256:06c241f87bbaa171174bbbfd13db65f8f2c00692dcd3be2e1595df8074e54b26`
+
+Nächster Schritt ist die praktische TrueNAS-Abnahme von RC7, einschließlich erneuter Fertigstellung eines in RC6 hängen gebliebenen Löschauftrags. Der veröffentlichte und qualifizierte Commit bleibt unverändert.
+
+## RC8 · Vorschau und Bedienung
+
+Die praktische RC7-Abnahme war erfolgreich. Alle elf Seiten des Berichts wurden gelesen und visuell geprüft, einschließlich der beiden Workspace-Referenzen. Die Vorschau berücksichtigte bisher nur Unterereignisse mit zugeordneten Inventurdateien. Der verbindliche Plan ergänzte leere konfigurierte Unterereignisse bereits. Beide Wege verwenden jetzt dieselbe Logik für diese Ordner und ihre Pfade. Die Vorschau bietet mehr als 200 Ordner bei Bedarf schrittweise an.
+
+Die Bestandsübernahme zeigt das ausgewählte Ereignis blau, bei Sammelordnern den konfigurierten Zielnamen und in der Skriptausführung die Pflichtbestätigung erst mit grünem Hostnachweis. Der Fortschrittsbalken nutzt die Breite der Karte mit den tatsächlichen Zählerwerten. Ausführungsdetails und Wiederherstellungsoptionen sind im geschlossenen Zustand kompakter. Unterereignisse lassen sich einzeln aufklappen. Der gespeicherte Präfixschalter verwendet die gleichen Namensregeln wie Workspace.
+
+Beide Oberflächen verwenden dieselbe Komponente für die Ordnerkonfiguration. Workspace- und Archivdialoge können das Layout des Hauptereignisses oder Sammelordners bearbeiten. Für reguläre Unterereignisse fehlen noch die durchgängige Speicherung, die Auswahl beim Anlegen und Bearbeiten, die Option ohne eigenen Unterordner und die Berücksichtigung bei Sortierung und Archivänderung. Nächster Schritt ist die gemeinsame Abbildung der logischen Unterereignisse auf physische Ordner unter der bestehenden Ereigniswurzel einschließlich stabiler Layout-Zuordnung und Kollisionsprüfung. Danach folgen native ZFS-Lebenszyklen für beide Wege und die volle RC8-Freigabeprüfung.
+
+Lokale Nachweise für diesen Zwischenstand umfassen den Vorschauvergleich mit dem erzeugten Ordnerplan und gezielte Backend-Tests für die vorhandene Ereignisplanung. Zwei Chromium-Durchläufe prüften die Bestandsübernahme über HTTP und HTTPS einschließlich der neuen Sichtbarkeit der Pflichtbestätigung. Der Hostnachweis wurde für diese Browserprüfung simuliert.

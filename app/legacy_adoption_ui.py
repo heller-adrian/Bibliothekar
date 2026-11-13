@@ -74,6 +74,10 @@ _PAGE = r"""<!doctype html>
 .legacy-adoption .adoption-card{min-width:0;border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:clamp(12px,2vw,22px);margin:12px 0}
 .legacy-adoption .adoption-card>:first-child{margin-top:0}
 .adoption-card h4{font-size:1rem;margin:0 0 12px}
+.legacy-adoption .bk-event-layout-editor:not([open]){padding-block:4px}
+.legacy-adoption .bk-event-layout-editor > summary{list-style:none}
+.legacy-adoption .bk-event-layout-editor > summary::-webkit-details-marker{display:none}
+.adoption-child-header{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .adoption-card .adoption-ack{align-items:start;gap:10px;margin:16px 0}
 .adoption-card .adoption-ack input{flex:none;margin-top:.25em}
 .adoption-proof{overflow-wrap:anywhere}
@@ -85,7 +89,7 @@ _PAGE = r"""<!doctype html>
 #script-progress{margin:16px 0 0}
 #script-progress:empty{display:none}
 .adoption-stage .adoption-progress{display:grid;gap:8px}
-.adoption-stage .adoption-progress progress{width:min(100%,28rem);accent-color:var(--bk-blue)}
+.adoption-stage .adoption-progress progress{width:100%;accent-color:var(--bk-blue)}
 .adoption-plan-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr));gap:12px;margin:18px 0}
 .adoption-plan-facts div{padding:10px 12px;background:var(--bk-surface-2);border-radius:10px;overflow-wrap:anywhere}
 .adoption-plan-facts dt{font-size:.875rem;color:var(--bk-muted)}
@@ -149,8 +153,13 @@ border-radius:10px;background:var(--bk-surface);color:var(--bk-ink);box-shadow:v
 #archive-segments .subtle{grid-column:1}
 .legacy-adoption .day-card.selected{border-color:var(--bk-blue);background:color-mix(in srgb,var(--bk-blue) 16%,var(--bk-surface))}
 .adoption-event-card{max-width:24rem;border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:6px 12px;margin-bottom:8px}
-.adoption-event-card summary{cursor:pointer;overflow-wrap:anywhere}
-.adoption-event-card summary .subtle{display:block;margin-inline-start:1.1em}
+.adoption-event-card summary{display:block;list-style:none;cursor:pointer;overflow-wrap:anywhere}
+.adoption-event-card summary::-webkit-details-marker{display:none}
+.adoption-event-card summary .subtle{display:block;margin-top:6px}
+.adoption-event-card summary:focus-visible{outline:2px solid var(--bk-blue);outline-offset:3px}
+.adoption-event-card:hover{border-color:var(--bk-blue)}
+.adoption-event-card[open]{border-color:var(--bk-blue);background:color-mix(in srgb,var(--bk-blue) 16%,var(--bk-surface))}
+.adoption-event-card > p{margin-block:6px 10px}
 .adoption-event-card[open]{padding-bottom:12px}
 .adoption-folder-tree{max-height:20rem;overflow:auto;margin:8px 0 0;padding:8px 12px;background:var(--bk-surface-2);border-radius:8px}
 .adoption-folder-tree :is(ul,li){list-style:none;margin:0;padding:0}
@@ -158,7 +167,8 @@ border-radius:10px;background:var(--bk-surface);color:var(--bk-ink);box-shadow:v
 .adoption-folder-tree code{display:inline-block;padding:3px 0;overflow-wrap:anywhere}
 .adoption-stepper [aria-current=step]:disabled{border-color:var(--bk-blue);color:var(--bk-ink);opacity:1;cursor:default;
 background:color-mix(in srgb,var(--bk-blue) 17%,var(--bk-surface))}
-.adoption-compact:not([open]){width:fit-content;padding-block:4px}
+.adoption-card.adoption-compact:not([open]){padding-block:8px}
+.adoption-compact:not([open]) > summary{margin:0}
 .adoption-target-preview{margin-block:12px 20px}
 .legacy-adoption .adoption-methods{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:12px;margin-block:12px}
 .legacy-adoption .adoption-methods label{display:grid;grid-template-columns:auto minmax(0,1fr);align-content:start;align-items:start;
@@ -238,7 +248,6 @@ let job = null, draft = {}, draftRevision = 0, year = "", day = null;
 let familyCursor = "", moveCursor = "", reviewCursor = "", timer = 0, scriptTimer = 0;
 let selectedSource = null, browsedSource = null, browseVersion = 0;
 let draftPage = 40;
-let layoutGroup = 0;
 let inventoryStarting = false;
 let viewStep=currentUrl.searchParams.get("step") || "";
 /* SHARED_EVENT_TIME_JS */
@@ -960,8 +969,10 @@ function showDraftEvents() {
   for(const {item,index,stats} of visible.slice(0,draftPage)){
     const row=node("details",undefined,"adoption-event-card");
     const kind=item.existing_id?"Archivereignis ergänzen":item.event_kind==="no_event"?"Sammelordner ohne Ereignis":"Neues Ereignis";
-    const summary=node("summary");const title=node("strong",item.name||kind);
-    if(item.name)title.dataset.bkPreserveLanguage="";
+    const summary=node("summary");
+    const name=item.event_kind==="no_event" ? stats?.folder_name : item.name;
+    const title=node("strong",name||kind);
+    if(name)title.dataset.bkPreserveLanguage="";
     summary.append(title);
     if(item.name && item.existing_id)summary.append(node("span",kind,"subtle"));
     if(stats)summary.append(node("span",formatPlanRange(stats.start,stats.end),"subtle"));
@@ -1011,62 +1022,22 @@ async function draftStructure(events) {
   const card=node("div",undefined,"adoption-card");
   card.append(node("h4","Vorschau der Zielstruktur"));
   const tree=folderTree();
-  tree.add(result.directories);card.append(tree.frame);
-  if(result.truncated)card.append(line("Die Vorschau zeigt bis zu 200 Ordner. Der vollständige Verschiebeplan ist im nächsten Schritt verfügbar."));
+  card.append(tree.frame);
+  let offset=0;
+  const more=action("Weitere Ordner anzeigen",showMore);
+  function showMore(){
+    tree.add(result.directories.slice(offset,offset+200));
+    offset+=200;
+    more.hidden=offset>=result.directories.length;
+  }
+  showMore();card.append(more);
   return card;
 }
-function layoutRows(layout) {
-  const result=[];
-  function collect(nodes,prefix="") {
-    for (const node of nodes || []) {
-      const path=prefix+node.name;
-      result.push({path,role:node.role});
-      collect(node.children,path+"/");
-    }
-  }
-  collect(layout?.nodes);
-  return result;
-}
-function layoutEditor(title,saved,inherit=false) {
-  const panel=node("div",undefined,"adoption-card");
-  panel.append(node("h4",title));
-  const type=node("select");
-  const modes=[["default","Bibliotheksstandard"],["custom","Eigene Ordnerstruktur"],["disabled","Ohne zusätzliche Ordner"]];
-  if (inherit) modes.unshift(["inherit","Struktur des Ereignisses übernehmen"]);
-  for (const [value,text] of modes) {
-    const option=node("option",text);
-    option.value=value;
-    type.append(option);
-  }
-  type.value=saved?.mode==="default" ? "default" : saved?.structure_enabled===false ? "disabled" :
-    saved?.layout ? "custom" : inherit ? "inherit" : "default";
-  const select=node("label","Struktur");
-  select.append(type);
-  const custom=node("div",undefined,"stack");
-  const state=structuredClone(saved?.layout ? saved : job.layout_default || {structure_enabled:true,input_path:"",layout:{version:2,nodes:[]}});
-  state.layout=state.layout || {version:2,nodes:[]};
-  const tree=node("div",undefined,"stack");
-  const exported=node("select");
-  const exportWrap=node("label","Exportordner");exportWrap.append(exported);
-  // Radio groups only need to be unique within this page, including over LAN HTTP.
-  const radioName="adoption-folder-"+(++layoutGroup);
-  function renderFolders(){
-    window.BibliothekarFolderLayout.render({state,host:tree,exportSelect:exported,radioName,
-      onChange:()=>{if(panel.isConnected)panel.dispatchEvent(new Event("input",{bubbles:true}));}});
-  }
-  custom.append(tree,action("Ordner hinzufügen",()=>{
-    state.layout.nodes.push({id:window.BibliothekarFolderLayout.nodeId(),name:t("Neuer Ordner"),children:[]});
-    renderFolders();
-  }),exportWrap);
-  function update(){custom.hidden=type.value!=="custom";if(!custom.hidden)renderFolders();}
-  type.addEventListener("change",update);update();
-  panel.append(select,custom);
-  function value(){
-    if(type.value==="inherit")return undefined;
-    if(type.value==="default")return {mode:"default"};
-    if(type.value==="disabled")return {structure_enabled:false,input_path:""};
-    return {...structuredClone(state),structure_enabled:true};
-  }
+function layoutEditor(saved,{inherit=false,allowDisabled=true}={}) {
+  const {panel,value}=window.BibliothekarFolderLayout.eventEditor({
+    saved,inherit,allowDisabled,defaults:job.layout_default,translate:t,
+  });
+  panel.classList.add("adoption-card");
   return [panel,value];
 }
 function eventEditor(index, newKind="event") {
@@ -1087,7 +1058,10 @@ function eventEditor(index, newKind="event") {
   form.append(message);
   const [keepWrap,keep]=field("Tagesordner erhalten","checkbox");
   keep.checked=Boolean(item.preserve_day_folders);
-  const [folders,folderLayout]=layoutEditor("Ordnerstruktur",item.folder_layout);
+  const [folders,folderLayout]=layoutEditor(item.folder_layout,{allowDisabled:!isEvent});
+  const [parentWrap,parentFolders]=field("Unterordner des Hauptereignisses erstellen","checkbox");
+  parentFolders.checked=item.folder_layout?.structure_enabled ?? job.layout_default?.structure_enabled ?? true;
+  parentWrap.hidden=!isEvent;
   let firstInput, fields;
 
   if(isEvent){
@@ -1100,12 +1074,15 @@ function eventEditor(index, newKind="event") {
     form.append(nameWrap,dates);
     firstInput=name;
     const children=node("div");
-    function addChild(child={}) {
-      const row=node("div",undefined,"adoption-card stack");
+    function addChild(child={},open=false) {
+      const row=node("div",undefined,"adoption-card");
+      const details=node("details");details.open=open;
+      const summary=node("summary",child.name || t("Unterereignis"));
+      summary.dataset.bkPreserveLanguage="";
       const [nWrap,n]=field("Name des Unterereignisses","text",child.name);
       const [aWrap,a]=field("Beginn","datetime-local",child.start_datetime?.slice(0,16));
       const [bWrap,b]=field("Ende","datetime-local",child.end_datetime?.slice(0,16));
-      const [childFolders,childLayout]=layoutEditor("Ordnerstruktur für dieses Unterereignis",child.folder_layout,true);
+      const [childFolders,childLayout]=layoutEditor(child.folder_layout,{inherit:true});
       row.childValues=()=>({name:n.value,start_datetime:a.value,end_datetime:b.value,folder_layout:childLayout()});
       const pair=node("div",undefined,"inline");pair.append(aWrap,bWrap);
       const remove=action("Unterereignis entfernen",()=>{
@@ -1113,25 +1090,43 @@ function eventEditor(index, newKind="event") {
         row.remove();edited();
       });
       remove.classList.add("danger-button");
-      row.append(nWrap,pair,childFolders,remove);
+      const header=node("div",undefined,"adoption-child-header");
+      header.append(details,remove);
+      n.addEventListener("input",()=>{summary.textContent=n.value || t("Unterereignis");});
+      const body=node("div",undefined,"stack");body.append(nWrap,pair,childFolders);
+      body.id=window.BibliothekarFolderLayout.nodeId();
+      summary.setAttribute("aria-controls",body.id);
+      details.append(summary);
+      body.hidden=!open;
+      details.addEventListener("toggle",()=>{body.hidden=!details.open;});
+      row.append(header,body);
       children.append(row);
       return n;
     }
     for(const child of item.children || [])addChild(child);
-    form.append(children,action("Unterereignis hinzufügen",()=>{
+    let prefixEnabled=item.subevent_prefix_enabled ?? job.subevent_prefix_enabled ?? true;
+    function showPrefix(){
+      prefix.textContent=t(prefixEnabled ? "Präfix: an" : "Präfix: aus");
+      prefix.setAttribute("aria-pressed",String(prefixEnabled));
+    }
+    const prefix=action(undefined,()=>{prefixEnabled=!prefixEnabled;showPrefix();edited();});
+    showPrefix();
+    const childActions=node("div",undefined,"inline");
+    childActions.append(prefix,action("Unterereignis hinzufügen",()=>{
       const previousEnd=children.lastElementChild?.childValues().end_datetime;
       const next=nextChildInterval(
         {minDate:start.value,maxDate:end.value,minTime:from.value,maxTime:to.value},
         previousEnd ? {day:previousEnd.slice(0,10),time:previousEnd.slice(11,16)} : null,
       );
       if(!next || next.error)throw new Error(next?.error || "Name, Beginn und Ende fehlen.");
-      addChild({start_datetime:next.start_date+"T"+next.start_time,end_datetime:next.end_date+"T"+next.end_time}).focus();
+      addChild({start_datetime:next.start_date+"T"+next.start_time,end_datetime:next.end_date+"T"+next.end_time},true).focus();
       edited();
     }));
+    form.append(childActions,children);
     fields=()=>{
       if(!name.value.trim() || !start.value || !end.value || !from.value || !to.value)throw new Error("Name, Beginn und Ende fehlen.");
       return {name:name.value.trim(),start_date:start.value,end_date:end.value,
-        start_time:from.value,end_time:to.value,
+        start_time:from.value,end_time:to.value,subevent_prefix_enabled:prefixEnabled,
         children:[...children.children].map(row=>row.childValues())};
     };
   }else{
@@ -1178,7 +1173,11 @@ function eventEditor(index, newKind="event") {
   let previewVersion=0;
   form.addEventListener("input",()=>{previewVersion++;structure.replaceChildren();});
   function definitions(){
-    const value={event_kind:kind,preserve_day_folders:keep.checked,folder_layout:folderLayout(),...fields()};
+    let layout=folderLayout();
+    if(isEvent && (layout.mode!=="default" || !parentFolders.checked || !job.layout_default?.structure_enabled)){
+      layout={...job.layout_default,...layout,mode:"custom",structure_enabled:parentFolders.checked};
+    }
+    const value={event_kind:kind,preserve_day_folders:keep.checked,folder_layout:layout,...fields()};
     if(isEvent || index!==undefined)return [value];
     const months=new Map();
     for(const segment of value.segments){
@@ -1207,7 +1206,7 @@ function eventEditor(index, newKind="event") {
     dialog.close();
     report("Entwurf gespeichert.");
   },true));
-  form.append(keepWrap,folders,controls,structure);
+  form.append(parentWrap,keepWrap,folders,controls,structure);
   dialog.replaceChildren(form);
   dialog.showModal();
   firstInput?.focus();
@@ -1386,7 +1385,8 @@ function renderConfirmation(panel,command) {
   function updateConfirmation(){
     const scripted=method()==="script";
     const busy=checking || confirming;
-    ack.disabled=busy || (scripted && !probe?.verified);
+    wrap.hidden=scripted && !probe?.verified;
+    ack.disabled=busy || wrap.hidden;
     confirmButton.disabled=ack.disabled || !ack.checked;
     prepareButton.disabled=busy;
     readButton.disabled=busy || (!probe?.command && !probe?.verified);

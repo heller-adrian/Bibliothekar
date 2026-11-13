@@ -12,6 +12,11 @@ TRANSLATIONS = {
     "Im Oberereignis ist hinter dem letzten Unterereignis kein weiterer Zeitraum frei.": "There is no free time after the last subevent in the parent event.",
 
     "Vorschau": "Preview",
+    "Weitere Ordner anzeigen": "Show more folders",
+    "Unterordnerstruktur": "Subfolder Layout",
+    "Unterordner des Hauptereignisses erstellen": "Create parent event subfolder",
+    "Präfix: an": "Prefix: on",
+    "Präfix: aus": "Prefix: off",
     "Archiviertes Ereignis": "Archived event",
     "Dieses Planobjekt entfernen?": "Remove this item from the plan?",
     "Dieses Unterereignis aus dem Entwurf entfernen?": "Remove this subevent from the draft?",

@@ -477,6 +477,31 @@ def test_individual_parent_subevent_and_collection_layouts_survive_registration(
                for item in json.loads(document.read_bytes())["leaf_folder_layouts"])
 
 
+def test_preview_lists_populated_and_empty_subevent_directories_as_planned(inventory):
+    from app.legacy_adoption_plan import plan_directories, preview_event_directories
+
+    context, source, registry = inventory
+    (source / "afternoon.jpg").write_bytes(b"afternoon capture")
+    job = _scan(context, source)
+    day = "2026-07-21"
+    draft = {"capture_overrides": {}, "exclude_families": [], "events": [{
+        "name": "Test", "start_date": day, "end_date": day, "preserve_day_folders": True,
+        "children": [
+            {"name": "Part A", "start_datetime": day + "T08:00", "end_datetime": day + "T10:00",
+             "folder_layout": {"layout": {"version": 2, "nodes": [{"id": "a", "name": "Input A"}]},
+                               "input_path": "Input A"}},
+            {"name": "Part B", "start_datetime": day + "T10:01", "end_datetime": day + "T15:00",
+             "folder_layout": {"layout": {"version": 2, "nodes": [{"id": "b", "name": "Input B"}]},
+                               "input_path": "Input B"}},
+        ],
+    }]}
+    preview = preview_event_directories(context, job, draft)["directories"]
+    create_plan(context, registry, job, draft)
+    assert any(path.endswith("/Input A") for path in preview)
+    assert any(path.endswith(f"/{day}/Input B") for path in preview)
+    assert preview == plan_directories(context, job)
+
+
 def test_registration_replays_after_registry_commit(inventory, monkeypatch):
     import sqlite3
 
