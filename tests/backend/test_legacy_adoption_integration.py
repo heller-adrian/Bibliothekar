@@ -601,6 +601,11 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
                            "input_path": "Aufnahmen", "layout": {"version": 2, "nodes": [
                                {"id": "aufnahme", "name": "Aufnahmen"},
                                {"id": "abzug", "name": "Abzüge", "role": "export"},
+                               {"id": "sort", "name": "Sortierung", "children": [
+                                   {"id": "selection", "name": "Auswahl", "children": [
+                                       {"id": "detail", "name": "Details"},
+                                   ]},
+                               ]},
                            ]},
                        }}],
     })
@@ -615,6 +620,27 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
 
     refiled = new_event.json()["parent_event"]
     new_event_id, new_job = refiled["id"], refiled["job_id"]
+    from app.database import get_event_edit_context, update_event_definition
+    from app.event_structure import build_event_preview
+
+    for boundary in ("12:15", "12:30"):
+        context = get_event_edit_context(database, new_job, new_event_id)
+        child = context["child_events"][0]
+        edited_child = {"id": child["id"], "name": child["name"], "start_datetime": child["start_datetime"],
+                        "end_datetime": f"2026-07-21T{boundary}"}
+        empty_child = {"name": "Später", "start_datetime": "2026-07-21T16:00",
+                       "end_datetime": "2026-07-21T17:00", "folder_layout": {
+                           "structure_enabled": False, "input_path": "",
+                       }}
+        subevents = [edited_child, empty_child]
+        if len(context["child_events"]) > 1:
+            empty_child["id"] = context["child_events"][1]["id"]
+        edit = build_event_preview({
+            "event_kind": "event", "event_name": refiled["name"], "start_date": "2026-07-21", "end_date": "2026-07-21",
+            "folder_layout": context["folder_layout"], "subevents": subevents,
+        }, context["families"])
+        update_event_definition(database, new_job, new_event_id, edit,
+                                event_name=refiled["name"], notes="", expected_revision=context["event"]["revision"])
     compat = main.compatibility_workspace_root(library)
     sorting = build_event_sort_plan(database, new_job, new_event_id, compat, verify_sha256=True)
     assert sorting["summary"]["ready"], sorting["blockers"]
@@ -642,9 +668,27 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
         }
         assert all(row["current_root_kind"] == "camera_archive" for row in registered)
         assert all(Path(row["current_relative_path"]).parent.name == "Aufnahmen" for row in registered)
-    from app.database import get_event_edit_context
-    [child] = get_event_edit_context(database, new_job, new_event_id)["child_events"]
+    import json
+    from app.event_document import build_event_document_from_db
+    from app.event_structure_changes import detect_event_structure_change
+    child, empty = get_event_edit_context(database, new_job, new_event_id)["child_events"]
     assert child["folder_layout"]["input_path"] == "Aufnahmen"
+    archived_tree = library.archive_root / relative_root
+    assert list((archived_tree / empty["folder_name"]).iterdir()) == []
+    archived_document = json.loads((archived_tree / "event.json").read_text())
+    saved_document = build_event_document_from_db(database, compat, new_job, new_event_id, include_archived=True)
+    for key in ("structure", "leaf_folder_layouts", "folder_layout"):
+        assert archived_document[key] == saved_document[key]
+    scan_event_inventory(database, library.archive_root, new_job, new_event_id, root_kind="camera_archive")
+    assert detect_event_structure_change(database, new_event_id) is None
+    published_directory = library.archive_root / relative_root / child["folder_name"] / "Sortierung" / "Auswahl" / "Details"
+    published_directory.rename(published_directory.with_name("Extern"))
+    scan_event_inventory(database, library.archive_root, new_job, new_event_id, root_kind="camera_archive")
+    detected = detect_event_structure_change(database, new_event_id)
+    assert detected is not None
+    published_directory.with_name("Extern").rename(published_directory)
+    scan_event_inventory(database, library.archive_root, new_job, new_event_id, root_kind="camera_archive")
+    assert detect_event_structure_change(database, new_event_id) is None
     edited = dict(preview, event_name="Neu organisiert", parent_folder="07-21 - Neu organisiert",
                   selected_family_ids=released_family_ids,
                   subevents=[{"id": child["id"], "name": child["name"],

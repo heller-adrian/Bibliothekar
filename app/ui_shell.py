@@ -6522,7 +6522,8 @@ BIBLIOTHEKAR_0444_JS = r"""
       renderPageActivity(ops);
       window.dispatchEvent(new CustomEvent("bk-activity-updated", {detail: ops}));
       const active = ops.filter(item => item.active);
-      const finished = ops.filter(item => !item.active);
+      const finished = ops.filter(item => !item.active && !["completed","applied"].includes(item.status))
+        .concat(ops.filter(item => !item.active && ["completed","applied"].includes(item.status)));
       lastSeen = active.concat(finished).slice(0,5);
       box.hidden = lastSeen.length === 0;
       if (!box.hidden) {
@@ -7930,6 +7931,7 @@ FOLDER_LAYOUT_JS = r"""
     const panel=el("details");
     panel.className="bk-event-layout-editor";
     const type=el("select");
+    type.setAttribute("aria-label",translate("Unterordnerstruktur"));
     const defaultMode=inherit?"inherit":"default";
     const modes=[["default","Bibliotheksstandard"],["custom","Eigene Ordnerstruktur"]];
     if(allowDisabled)modes.push(["disabled","Ohne zusätzliche Ordner"]);
@@ -7939,8 +7941,8 @@ FOLDER_LAYOUT_JS = r"""
     }
     type.value=saved?.mode==="default" ? "default" : allowDisabled && saved?.structure_enabled===false ? "disabled" :
       saved?.layout ? "custom" : defaultMode;
-    const select=el("label","Struktur");select.append(type);
     const custom=el("div"),tree=el("div"),exportSelect=el("select");
+    custom.className="bk-event-layout-fields";
     const exportLabel=el("label","Exportordner");exportLabel.append(exportSelect);
     const state=structuredClone(saved?.layout?saved:defaults||{structure_enabled:true,input_path:"",layout:{version:2,nodes:[]}});
     const radioName="event-folder-layout-"+bkNodeId();
@@ -7957,7 +7959,7 @@ FOLDER_LAYOUT_JS = r"""
     });
     type.addEventListener("change",()=>{update();notify();});
     custom.append(tree,add,exportLabel);
-    panel.append(el("summary","Unterordnerstruktur"),select,custom);
+    panel.append(el("summary","Unterordnerstruktur"),type,custom);
     update();initializing=false;
     function value(){
       if(type.value==="inherit")return undefined;
@@ -7965,9 +7967,34 @@ FOLDER_LAYOUT_JS = r"""
       if(type.value==="disabled")return {...structuredClone(state),structure_enabled:false};
       return {...structuredClone(state),structure_enabled:true};
     }
-    return {panel,value};
+    return {panel,value,draft:()=>structuredClone(state)};
   }
-  window.BibliothekarFolderLayout={render,nodeId:bkNodeId,flatten:bkFlattenLayout,eventEditor};
+  function subeventEditor({checkbox,saved,defaults,translate}){
+    // RC8's folderless children keep their physical placement on edit.
+    const hasEventFolder=(saved?.folder_name ?? (saved?.create_subfolder===false ? "" : null))!=="";
+    const editor=eventEditor({saved:saved?.folder_layout,defaults,inherit:true,allowDisabled:false,translate});
+    checkbox.checked=saved?.folder_layout?.structure_enabled!==false && hasEventFolder;
+    checkbox.disabled=!hasEventFolder;
+    if(!hasEventFolder)checkbox.title=(translate || (text=>text))("Bestehendes Unterereignis ohne eigenen Ereignisordner");
+    let changed=false;
+    const sync=()=>{editor.panel.hidden=!checkbox.checked;};
+    checkbox.addEventListener("change",()=>{changed=true;sync();});sync();
+    editor.panel.addEventListener("input",()=>{changed=true;});
+    return {panel:editor.panel, value:({preserveSaved=false}={})=>{
+      if(!hasEventFolder || (preserveSaved && saved?.id && !changed))return {create_subfolder:hasEventFolder};
+      return {
+        create_subfolder:true,
+        folder_layout:checkbox.checked ? (editor.value() || (preserveSaved ? {mode:"inherit"} : undefined)) :
+          {...editor.draft(), structure_enabled:false},
+      };
+    }};
+  }
+  function expandCard(details, surface=details){
+    surface.addEventListener("click",event=>{
+      if(!details.open && !event.target.closest("summary,button,input,label,select"))details.open=true;
+    });
+  }
+  window.BibliothekarFolderLayout={render,nodeId:bkNodeId,flatten:bkFlattenLayout,eventEditor,subeventEditor,expandCard};
 
 })();
 """
@@ -7977,6 +8004,25 @@ _BRAND_HEADER_CSS = """
 :root{--bk-brand-header:#15222c;--bk-brand-header-ink:#f8f4e9;--bk-on-blue:#fff}
 html[data-bk-theme="dark"]{--bk-on-blue:#07141d}
 .bk-shell,.bk-setup-banner{background:var(--bk-brand-header);color:var(--bk-brand-header-ink)}
+"""
+
+_EVENT_LAYOUT_CSS = """
+.bk-event-layout-editor{min-width:0}
+.bk-event-layout-editor > summary{cursor:pointer;padding-block:5px}
+.bk-event-layout-editor > select,.bk-event-layout-fields select{width:100%;min-width:0}
+.bk-event-layout-editor > select{margin-top:6px}
+.bk-event-layout-fields{display:grid;gap:10px;margin-top:10px}
+.bk-event-layout-fields[hidden]{display:none}
+.bk-event-layout-fields > button{justify-self:start}
+.bk-event-layout-fields .bk-folder-input-root{padding-block:5px;margin-block-end:6px}
+.bk-subevent-name-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center}
+.bk-subevent-name-row > label:last-child{display:flex;align-items:center;gap:6px;margin:0}
+.bk-subevent-name-row > label:last-child input{width:auto}
+.adoption-child-header > details{flex:1;min-width:0}
+.adoption-child-header summary{padding-block:5px}
+.create-subevent-card:not([open]),.child-segment-card:not([open]){padding-block:5px}
+.create-subevent-card > summary,.child-segment-card > summary{min-height:32px;cursor:pointer}
+@media(max-width:420px){.bk-subevent-name-row{grid-template-columns:1fr}}
 """
 
 
@@ -7995,7 +8041,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None,
         '<link rel="icon" type="image/svg+xml" href="/assets/bibliothekar-logo-symbol-background.svg?v=0.56.2">\n'
         '<link rel="apple-touch-icon" sizes="192x192" href="/assets/bibliothekar-icon-192.png?v=0.56.2">\n'
         '<meta name="apple-mobile-web-app-capable" content="yes">\n'
-        f"<style>{BIBLIOTHEKAR_CSS}\n{_BRAND_HEADER_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_CSS}\n{_BRAND_HEADER_CSS}\n{_EVENT_LAYOUT_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0310_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0311_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0350_CSS}</style>\n"
@@ -8142,6 +8188,7 @@ def apply_setup_shell(html: str, *, localization_js: str = I18N_UI_JS) -> str:
     html = html.replace("</head>",
         '<link rel="icon" type="image/svg+xml" href="/assets/bibliothekar-logo-symbol-background.svg">\n'
         f"<style>{BIBLIOTHEKAR_CSS}\n{BIBLIOTHEKAR_0451_CSS}\n{BIBLIOTHEKAR_0505_LANGUAGE_CSS}\n{_BRAND_HEADER_CSS}\n{SETUP_CSS}\n{SETUP_CONTROL_CSS}</style>\n"
+        f"<style>{_EVENT_LAYOUT_CSS}</style>\n"
         "</head>", 1)
     return html.replace("<body>",
         '<body class="bibliothekar-redesign" data-bk-setup="true">\n'

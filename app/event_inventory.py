@@ -473,7 +473,6 @@ def scan_event_inventory(
     event, known_files = _event_and_known_files(database_path, job_id, event_id)
 
     layout_state: dict[str, Any] | None = None
-    leaf_layouts = []
     previous_kind_by_content: dict[tuple[int, str], str] = {}
     with database_connection(database_path) as connection:
         try:

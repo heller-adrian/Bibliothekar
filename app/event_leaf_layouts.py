@@ -84,6 +84,10 @@ def effective_leaf_layouts(connection: Any, parent_id: str) -> dict[str, dict[st
     return result
 
 
+def layout_for_leaf(layouts, key, default):
+    return layouts.get(key) or layouts.get(key.partition("@")[0]) or default
+
+
 def clear_child_leaf_overrides(connection: Any, parent_id: str, child_id: str) -> None:
     connection.execute(
         "DELETE FROM event_leaf_folder_layouts WHERE parent_event_id=? AND (leaf_key=? OR substr(leaf_key,1,?)=?)",

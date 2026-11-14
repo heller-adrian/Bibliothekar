@@ -163,6 +163,21 @@ async function finishManualAdoption(page){
   });
   await page.goto(new URL('/workspace',page.url()).href);
   assert.equal((await emptyFilter).status(),200);
+  await page.locator('#new-event-button').click();
+  const workspaceEditor=page.locator('#event-dialog[open]');
+  await workspaceEditor.locator('#event-start-date').fill('2026-07-25');
+  await workspaceEditor.locator('#event-end-date').fill('2026-07-25');
+  await workspaceEditor.locator('#add-create-subevent').click();
+  const workspaceChild=workspaceEditor.locator('[data-create-subevent]');
+  const createFolders=workspaceChild.locator('[data-create-child-folder]');
+  assert.equal(await createFolders.isChecked(),true);
+  await createFolders.uncheck();
+  assert.equal(await workspaceChild.locator('.bk-event-layout-editor').isVisible(),false);
+  assert.deepEqual(await workspaceChild.evaluate(node=>node.folderOptions().create_subfolder),true);
+  await workspaceChild.locator(':scope > summary').click({position:{x:10,y:8}});
+  await workspaceChild.click({position:{x:6,y:4}});
+  assert.equal(await workspaceChild.evaluate(node=>node.open),true);
+  await page.keyboard.press('Escape');
 }
 (async()=>{
   const browser=await chromium.launch({
@@ -289,8 +304,12 @@ async function finishManualAdoption(page){
     assert.equal(await editor.locator('input[type=datetime-local]').nth(2).inputValue(),'2026-07-21T13:01');
     page.once('dialog',dialog=>dialog.accept());
     await editor.getByRole('button',{name:'Remove subevent',exact:true}).last().click();
+    const childCard=editor.locator('.adoption-child-card');
+    await childCard.getByRole('checkbox',{name:'Create subfolder',exact:true}).uncheck();
     await editor.getByRole('button',{name:'Target structure preview'}).click();
-    await editor.locator('.adoption-folder-tree ul ul ul code').filter({hasText:'Child Test'}).first().waitFor();
+    const childNode=editor.locator('.adoption-folder-tree code').filter({hasText:'Child Test'});
+    await childNode.waitFor();
+    assert.equal(await childNode.evaluate(node=>node.parentElement.querySelector('ul')),null);
     await capture(page,'editor');
     await editor.getByRole('button',{name:'Save in draft'}).click();
     await page.getByText('Lan Test',{exact:true}).waitFor();
@@ -304,7 +323,9 @@ async function finishManualAdoption(page){
     await page.locator('#draft-events').getByRole('button',{name:'Edit',exact:true}).click();
     assert.equal(await editor.getByRole('textbox').first().inputValue(),'Lan Test');
     assert.equal(await editor.locator('.adoption-child-header details[open]').count(),0);
-    await editor.locator('.adoption-child-header summary').click();
+    await editor.locator('.adoption-child-card').click({position:{x:6,y:8}});
+    await editor.getByRole('checkbox',{name:'Create subfolder',exact:true}).waitFor();
+    assert.equal(await editor.getByRole('checkbox',{name:'Create subfolder',exact:true}).isChecked(),false);
     assert.equal(await editor.locator('input[type=text]').nth(1).inputValue(),'Child Test');
     await editor.getByRole('textbox').first().fill('Reopened Test');
     await editor.getByRole('button',{name:'Save in draft'}).click();

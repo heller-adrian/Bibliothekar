@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 
 UI_TRANSLATIONS = {
+  "Bestehendes Unterereignis ohne eigenen Ereignisordner": "Existing subevent without a dedicated event folder",
+  "Die event.json im Archiv entspricht noch nicht der vorbereiteten Datei.": "The event.json in the archive does not yet match the prepared file.",
   "Unterordnerstruktur": "Subfolder Layout",
   "Unterordner des Hauptereignisses erstellen": "Create parent event subfolder",
   "Bibliotheksstandard": "Library default",

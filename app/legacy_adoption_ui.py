@@ -78,6 +78,9 @@ _PAGE = r"""<!doctype html>
 .legacy-adoption .bk-event-layout-editor > summary{list-style:none}
 .legacy-adoption .bk-event-layout-editor > summary::-webkit-details-marker{display:none}
 .adoption-child-header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.legacy-adoption .adoption-child-card{padding:8px 12px;margin:8px 0}
+.adoption-child-card:has(.adoption-child-header details:not([open])){cursor:pointer}
+.legacy-adoption .adoption-child-card .bk-event-layout-editor{margin:0}
 .adoption-card .adoption-ack{align-items:start;gap:10px;margin:16px 0}
 .adoption-card .adoption-ack input{flex:none;margin-top:.25em}
 .adoption-proof{overflow-wrap:anywhere}
@@ -1075,20 +1078,18 @@ function eventEditor(index, newKind="event") {
     firstInput=name;
     const children=node("div");
     function addChild(child={},open=false) {
-      const row=node("div",undefined,"adoption-card");
+      const row=node("div",undefined,"adoption-card adoption-child-card");
       const details=node("details");details.open=open;
       const summary=node("summary",child.name || t("Unterereignis"));
       summary.dataset.bkPreserveLanguage="";
       const [nWrap,n]=field("Name des Unterereignisses","text",child.name);
       const [aWrap,a]=field("Beginn","datetime-local",child.start_datetime?.slice(0,16));
       const [bWrap,b]=field("Ende","datetime-local",child.end_datetime?.slice(0,16));
-      const [childFolders,childLayout]=layoutEditor(child.folder_layout,{inherit:true});
       const [createWrap,create]=field("Unterordner erstellen","checkbox");
-      create.checked=child.create_subfolder!==false;
-      childFolders.hidden=!create.checked;
-      create.addEventListener("change",()=>{childFolders.hidden=!create.checked;});
+      const editor=window.BibliothekarFolderLayout.subeventEditor({checkbox:create,saved:child,defaults:job.layout_default,translate:t});
+      const childFolders=editor.panel;childFolders.classList.add("adoption-card");
       row.childValues=()=>({name:n.value,start_datetime:a.value,end_datetime:b.value,
-        create_subfolder:create.checked,folder_layout:create.checked?childLayout():undefined});
+        ...editor.value()});
       const pair=node("div",undefined,"inline");pair.append(aWrap,bWrap);
       const remove=action("Unterereignis entfernen",()=>{
         if(!confirm(t("Dieses Unterereignis aus dem Entwurf entfernen?")))return;
@@ -1098,12 +1099,14 @@ function eventEditor(index, newKind="event") {
       const header=node("div",undefined,"adoption-child-header");
       header.append(details,remove);
       n.addEventListener("input",()=>{summary.textContent=n.value || t("Unterereignis");});
-      const body=node("div",undefined,"stack");body.append(createWrap,nWrap,pair,childFolders);
+      const nameRow=node("div",undefined,"bk-subevent-name-row");nameRow.append(nWrap,createWrap);
+      const body=node("div",undefined,"stack");body.append(nameRow,pair,childFolders);
       body.id=window.BibliothekarFolderLayout.nodeId();
       summary.setAttribute("aria-controls",body.id);
       details.append(summary);
       body.hidden=!open;
       details.addEventListener("toggle",()=>{body.hidden=!details.open;});
+      window.BibliothekarFolderLayout.expandCard(details,row);
       row.append(header,body);
       children.append(row);
       return n;

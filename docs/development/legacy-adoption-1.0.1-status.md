@@ -441,3 +441,37 @@ Unterereignisse behalten ihre logische Zeitzuordnung, wenn ihr eigener Ordner de
 Lokal bestanden 81 gezielte Tests zur Zeitplanung, Bestandsübernahme und Strukturänderung sowie 46 weitere Tests zu Sortierung, Ereignisplanung und Archivänderung. Beide erweiterten Lebenszyklustests bestanden lokal. Ein reguläres Ereignis wurde mit eigener Unterereignisstruktur sortiert und archiviert. Danach wurde dessen Unterordner in einer Archivänderung deaktiviert und der neue Zustand verifiziert und registriert. Der zweite Lebenszyklus prüft bei der Bestandsübernahme ein eigenes Layout samt Exportordner sowie ein flaches Unterereignis. Beide Fälle laufen in der Linux-Vorabprüfung auf synthetischem nativem ZFS.
 
 Nächster Schritt ist die vollständige Backend-QA mit beiden nativen Lebenszyklustests. Danach folgt die native Containerprüfung für exakt denselben Commit. Die Vorabversion und der geprüfte Image-Digest stehen aus.
+
+Die vollständige [Linux-Freigabe-QA 43495524359](https://github.com/heller-adrian/Bibliothekar/actions/runs/43495524359) wurde für `25cb2612be5d2bcc32c89b1b82c54739b45ef4e9` gestartet. Bei Fortsetzung zuerst den nativen ZFS-Vorabtest, alle acht Partitionen und den unabhängigen Coverage-Nachweis prüfen. Danach Containerprüfung für denselben Commit mit `adoption_qa_run=43495524359` starten. Diese Laufnotiz ist neben dem qualifizierbaren Commit lokal gesichert.
+
+### RC8 · Backend qualifiziert, Containerprüfung gestartet
+
+Die [Backend-QA 43495524359](https://github.com/heller-adrian/Bibliothekar/actions/runs/43495524359) für `25cb2612be5d2bcc32c89b1b82c54739b45ef4e9` ist vollständig bestanden. Alle 2.734 Fälle liefen in acht Partitionen genau einmal erfolgreich. Alle 95 Vorabfälle bestanden, einschließlich der beiden Archivlebenszyklen auf nativem ZFS und des schreibgeschützten Archivmounts. Zehn Artefakte wurden anhand ihrer SHA-256-Werte überprüft. Die unabhängig berechnete Coverage stimmt mit dem veröffentlichten Nachweis überein.
+
+Die [Containerprüfung 43505712636](https://github.com/heller-adrian/Bibliothekar/actions/runs/43505712636) prüft dasselbe Commit auf nativem ZFS. Anschließend den Workflow, das Artefakt `rc8-qualified-image`, den OCI-Revisionsnachweis und den GHCR-Digest prüfen. Die qualifizierte Vorabversion kann anschließend mit den Nachweisen veröffentlicht werden.
+
+GHCR liefert das Linux/amd64-Image für `25cb2612be5d2bcc32c89b1b82c54739b45ef4e9` unter `sha256:d83584e90f83d3f08128d00b62b4c96e2536c79359ef09479f99178c10201b41`. Der Digest und das OCI-Revisionslabel wurden vorab geprüft. Für die Freigabe steht der Abgleich mit dem Ergebnis der nativen Containerprüfung aus.
+
+### RC8 · Freigabeentwurf qualifiziert
+
+[Containerprüfung 43505712636](https://github.com/heller-adrian/Bibliothekar/actions/runs/43505712636) ist bestanden. Der Nachweis bestätigt manuelle und skriptgestützte Übernahme, Archiverweiterung, Neustart, Rücknahme und leere Einrichtung auf nativem ZFS. Artefakt, Backend-Coverage, GHCR-Digest, OCI-Revision und geschützte Referenzen wurden abgeglichen.
+
+Der GitHub-Entwurf für `v1.0.1-rc.8` (Release-ID `444730772`) enthält die Versionshinweise sowie `qualification.json` und `rc8-qualified-image.zip`. Geprüftes Image: `ghcr.io/heller-adrian/bibliothekar@sha256:d83584e90f83d3f08128d00b62b4c96e2536c79359ef09479f99178c10201b41`. Die praktische TrueNAS-Abnahme folgt nach Veröffentlichung der Vorabversion.
+
+### RC8 veröffentlicht
+
+Die [Vorabversion v1.0.1-rc.8](https://github.com/heller-adrian/Bibliothekar/releases/tag/v1.0.1-rc.8) ist öffentlich. Der Git-Tag zeigt auf `25cb2612be5d2bcc32c89b1b82c54739b45ef4e9`. Die beiden Prüfnachweise sind angehängt. GHCR-Digest, OCI-Revision und die geschützten Git- und Registry-Referenzen wurden nach der Veröffentlichung erneut abgeglichen.
+
+`ghcr.io/heller-adrian/bibliothekar@sha256:d83584e90f83d3f08128d00b62b4c96e2536c79359ef09479f99178c10201b41`
+
+Als Nächstes folgt die praktische TrueNAS-Abnahme.
+
+## RC9 · Ordnerkonfiguration und manuelle Archivänderungen
+
+Alle zwölf Seiten des RC8-Berichts wurden einschließlich Screenshots und Anmerkungen geprüft. Der Archivwächter verglich bei regulär angelegten Unterereignissen die echte Ablage mit dem Layout des Hauptereignisses. Er berücksichtigte gespeicherte Blattlayouts, aber keine unter der jeweiligen Unterereignis-ID gespeicherten Layouts. Der Sortierplan und das Ereignisdokument verwendeten diese bereits. Das erzeugte gleichzeitig vermeintlich neue und fehlende Ordner. Das manuelle Übernehmen forderte danach eine vorbereitete event.json, weil dieser Vorgang eine neue Projektion der vermeintlichen Änderung erwartet.
+
+Der Wächter und der Sortierplan verwenden nun dieselbe Auflösung für Tageslayout, Unterereignis und Hauptlayout. Strukturelle Elternpfade werden beim Vergleich mitgezählt. Der ZFS-Lebenszyklustest erstellt ein reguläres Ereignis mit verschachteltem Unterereignis, speichert zweimal mit geänderten Zeitgrenzen, archiviert und vergleicht Layout und Struktur in event.json mit SQLite. Er prüft auch, dass eine anschließende echte externe Umbenennung erkannt wird. Lokal ist der Lebenszyklus bestanden. Der Linux-Vorabtest führt ihn auf dem synthetischen nativen ZFS-Dataset aus.
+
+Die kompakteren Unterereigniskarten und der gemeinsame Ordnereditor werden in Workspace, Ereignisbearbeitung und Bestandsübernahme verwendet. „Create subfolder“ deaktiviert nur die zusätzlichen Ordner im Unterereignis. Bereits in RC8 ohne eigenen physischen Ordner gespeicherte Unterereignisse behalten diese Ablage. Erfolgreich abgeschlossene Aufträge verschwinden einzeln nach zehn Minuten. Aktive und fehlgeschlagene Aufträge bleiben sichtbar. Der Dialog für manuelle Änderungen hat einen Abstand zwischen den Abschnitten und übersetzt die gemeldete event.json-Abweichung.
+
+Die Chromium-Regressionsprüfung wurde über HTTP und HTTPS in englischer und deutscher Oberfläche durchgeführt. Sie prüft das Aufklappen der Karten, das erneut geöffnete Layout, den Erhalt des Unterereignisordners beim Abschalten zusätzlicher Verzeichnisse und den Ablauf bis zur Registrierung. Die Browserprüfung simuliert den Hostnachweis. Die vollständige Linux-, ZFS- und Containerprüfung des RC9-Commits folgt vor der Freigabe.

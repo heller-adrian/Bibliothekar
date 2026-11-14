@@ -4,6 +4,7 @@ import re
 
 
 TRANSLATIONS = {
+    "Bestehendes Unterereignis ohne eigenen Ereignisordner": "Existing subevent without a dedicated event folder",
     "Das Ereignis belegt einen durchgehenden Zeitraum.": "The event occupies one continuous time range.",
     "Das Ende muss nach dem Beginn liegen.": "The end must follow the start.",
     "Startzeit ist ungültig.": "The start time is invalid.",

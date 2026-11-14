@@ -3678,18 +3678,15 @@ EVENTS_HTML = r"""<!doctype html>
           normalContainer.querySelectorAll("[data-child-segment]").forEach(row=>{
             if(structural && !row.folderOptions){
               const original=(context.child_events || []).find(child=>child.id===row.dataset.childId);
-              const editor=window.BibliothekarFolderLayout.eventEditor({saved:original?.folder_layout,
-                defaults:context.folder_layout,inherit:true});
               const label=document.createElement("label");label.className="check-row";
               const checkbox=document.createElement("input");checkbox.type="checkbox";
-              checkbox.checked=original?.folder_name!=="";
               label.append(checkbox,document.createTextNode("Unterordner erstellen"));
               const fields=row.querySelector(".child-segment-fields");
-              fields.prepend(label);fields.append(editor.panel);
-              function sync(){editor.panel.hidden=!checkbox.checked;}
-              checkbox.addEventListener("change",sync);sync();
-              row.folderOptions=()=>({create_subfolder:checkbox.checked,
-                folder_layout:checkbox.checked ? (editor.value() || {mode:"inherit"}) : undefined});
+              const editor=window.BibliothekarFolderLayout.subeventEditor({checkbox,saved:original,defaults:context.folder_layout});
+              window.BibliothekarFolderLayout.expandCard(row);
+              const nameRow=fields.querySelector(".child-segment-top");nameRow.classList.add("bk-subevent-name-row");
+              nameRow.append(label);fields.append(editor.panel);
+              row.folderOptions=()=>editor.value({preserveSaved:true});
             }
             const remove=row.querySelector("[data-remove-child-segment]");
             if(remove){
@@ -6147,7 +6144,7 @@ EVENTS_HTML = r"""<!doctype html>
       }
       if(!archiveMode){
         structureChangeBody.innerHTML=`
-          <div class="card"><strong>${bk0511EventLabel("Erkannte Änderungen","Detected changes")}</strong>${changeDetails}</div>
+          <div class="card" style="margin-top:12px"><strong>${bk0511EventLabel("Erkannte Änderungen","Detected changes")}</strong>${changeDetails}</div>
           ${archiveChoices}`;
         attachArchiveMode();
         return;
@@ -6186,7 +6183,7 @@ EVENTS_HTML = r"""<!doctype html>
               "Archive change verified and recorded in SQLite."),false,true);
           }catch(error){
             button.disabled=false;button.classList.remove("loading");button.removeAttribute("aria-busy");
-            if(feedback){feedback.className="error-box";feedback.textContent=error.message;}
+            if(feedback){feedback.className="error-box";feedback.textContent=window.BibliothekarI18n?.t(error.message)||error.message;}
           }
         });
       }else{

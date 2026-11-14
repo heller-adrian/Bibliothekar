@@ -4294,16 +4294,15 @@ WORKSPACE_HTML = r"""<!doctype html>
       )||"23:59");
       row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Tag 1"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Remove subevent</button></div><label class="check-row"><input type="checkbox" data-create-child-folder><span>Unterordner erstellen</span></label><div class="create-subevent-boundaries"><div class="create-subevent-boundary">${subeventDayControl("data-create-child-start-date","data-create-child-start-month-year",sd,"Beginn")}<label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary">${subeventDayControl("data-create-child-end-date","data-create-child-end-month-year",ed,"Ende")}<label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
       const createFolder=row.querySelector("[data-create-child-folder]");
-      createFolder.checked=defaults.create_subfolder!==false;
       const remove=row.querySelector("[data-remove-create-subevent]");
       row.querySelector("summary").append(remove);
-      const childLayout=window.BibliothekarFolderLayout.eventEditor({saved:defaults.folder_layout,defaults:globalFolderLayout,inherit:true});
-      childLayout.panel.hidden=!createFolder.checked;
-      createFolder.addEventListener("change",()=>{childLayout.panel.hidden=!createFolder.checked;});
+      const childLayout=window.BibliothekarFolderLayout.subeventEditor({checkbox:createFolder,saved:defaults,defaults:globalFolderLayout});
+      window.BibliothekarFolderLayout.expandCard(row);
+      const nameRow=row.querySelector(".create-subevent-top");nameRow.classList.add("bk-subevent-name-row");
+      nameRow.append(createFolder.closest("label"));
       childLayout.panel.addEventListener("input",scheduleDialogPreview);
       row.querySelector(".create-subevent-grid").append(childLayout.panel);
-      row.folderOptions=()=>({create_subfolder:createFolder.checked,
-        folder_layout:createFolder.checked?childLayout.value():undefined});
+      row.folderOptions=childLayout.value;
       const name=row.querySelector("[data-create-child-name]"),summary=row.querySelector("[data-create-child-summary]");
       const syncDayDisplays=()=>{
         for(const [selector,displaySelector] of [

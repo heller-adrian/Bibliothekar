@@ -1220,12 +1220,12 @@ def build_event_sort_plan(
             layout_state = ensure_event_layout_snapshot(
                 connection, event_id, now=datetime.now(timezone.utc).isoformat()
             )
-            from app.event_leaf_layouts import effective_leaf_layouts
+            from app.event_leaf_layouts import effective_leaf_layouts, layout_for_leaf
             saved_leaves = effective_leaf_layouts(connection, event_id)
         except Exception as error:
             raise SortPlanError("Ereignis-Unterordnerstruktur ist ungültig: " + str(error)) from error
     def layout_for(owner, day=""):
-        return (saved_leaves.get(owner + "@" + day) if day else None) or saved_leaves.get(owner) or layout_state
+        return layout_for_leaf(saved_leaves, owner + ("@" + day if day else ""), layout_state)
 
     def layout_destination(state, asset_kind=""):
         exports = layout_role_paths(state["layout"], "export") if asset_kind == "export" else []
