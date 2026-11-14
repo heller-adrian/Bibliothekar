@@ -161,6 +161,7 @@ jobs:
               "test_adoption_reads_actual_read_only_archive",
               "test_wizard_and_f14_recovery_in_main_library[lifecycle]",
               "test_adopted_time_segments_survive_verified_archive_deletion_and_restart[segments]",
+              "test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy[review-zfs]",
           ):
               matches = [case for case in cases if case.get("name") == name]
               assert len(matches) == 1 and len(matches[0]) == 0, f"Missing successful native ZFS test: {name}"
