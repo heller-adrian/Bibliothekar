@@ -103,7 +103,7 @@ def _inventory_groups(rows, source):
         family = {"family_key": key, "status": "review_required"}
         if files:
             family = summarize_file_metadata(source, files)["families"][0]
-            if any(row["error"] for row in members) or any(row["review_required"] for row in files):
+            if any(row["error"] for row in members) or any(row["review_required"] or row.get("metadata_error") for row in files):
                 family["status"] = "review_required"
         yield family, members, files
 
@@ -140,8 +140,8 @@ def inventory_families(
             """WITH page AS (
                    SELECT family_key FROM legacy_adoption_families
                     WHERE job_id = :job AND family_key > :after
-                      AND (:day IS NULL OR substr(capture_time, 1, 10) = :day
-                           OR (:day = '' AND capture_time IS NULL))
+                      AND (:day IS NULL OR (NOT review_required AND substr(capture_time, 1, 10) = :day)
+                           OR (:day = '' AND review_required))
                     ORDER BY family_key LIMIT :limit
                )
                SELECT inventory.* FROM legacy_adoption_inventory AS inventory
@@ -183,6 +183,7 @@ def discard_job(library: LibraryContext, job_id: str) -> None:
             (job_id,),
         ).fetchone():
             raise AdoptionError("Der bestätigte Auftrag kann nur kontrolliert zurückgenommen werden.")
+        connection.execute("DELETE FROM legacy_adoption_review_batch WHERE job_id = ?", (job_id,))
         connection.execute("DELETE FROM legacy_adoption_plans WHERE job_id = ?", (job_id,))
         connection.execute("DELETE FROM legacy_adoption_families WHERE job_id = ?", (job_id,))
         connection.execute("DELETE FROM legacy_adoption_inventory WHERE job_id = ?", (job_id,))

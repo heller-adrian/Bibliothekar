@@ -18,13 +18,17 @@ trap cleanup EXIT
 docker pull "$image"
 test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$revision"
 export ADOPTION_SMOKE_PASSWORD=synthetic-legacy-adoption-smoke-password
-for method in manual script rollback skip; do
+for method in manual script rollback skip review; do
   install_root="$scratch/$method"
   archive="$media/archive-$method"
   source="$media/source-$method"
   mkdir -m 755 "$archive" "$source"
   sudo install -d -m 0750 -o 568 -g 568 "$install_root/appdata" "$install_root/workspace"
-  if [[ "$method" != skip ]]; then
+  if [[ "$method" == review ]]; then
+    printf 'native ZFS review RAW\n' > "$source/undated.raf"
+    printf 'native ZFS review JPEG\n' > "$source/undated.jpg"
+    printf 'native ZFS review sidecar\n' > "$source/undated.raf.xmp"
+  elif [[ "$method" != skip ]]; then
     if [[ "$method" == manual ]]; then day=21; else day=22; fi
     directory="$source/first/old-folders/camera/import"
     mkdir -p "$directory"

@@ -2,6 +2,7 @@
 from contextlib import ExitStack, contextmanager
 from datetime import date
 import json
+import logging
 import os
 from pathlib import Path
 from threading import Event, Lock
@@ -35,7 +36,9 @@ from app.legacy_adoption_mode import (
 )
 from app.legacy_adoption_plan import MAX_PLAN_ITEMS, create_plan, plan_directories, plan_moves, plan_status
 from app.legacy_adoption_registration import finalize_adoption
-from app.legacy_adoption_review import copy_review, review_cases, review_count
+from app.legacy_adoption_review import (
+    begin_review_batch, copy_review, review_batch_status, review_cases, review_count, review_selection, run_review_batch,
+)
 from app.legacy_adoption_verify import plan_issues, reopen_plan
 from app.library_registry import LibraryRegistryError, list_libraries
 from app.root_operations import RootOperationError, admission
@@ -111,6 +114,13 @@ class ReviewCopy(BaseModel):
     family_key: str = Field(min_length=1, max_length=4096)
 
 
+class ReviewBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # null selects all eligible families on the server, including later pages.
+    family_keys: list[str] | None = Field(min_length=1)
+
+
 class ScriptHost(PlanCommand):
     appdata: str | None = Field(default=None, min_length=1, max_length=4096)
     source: str | None = Field(default=None, min_length=1, max_length=4096)
@@ -155,6 +165,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
 
     router = APIRouter(prefix="/api/legacy-adoption", tags=["Bestandsübernahme"])
     running = {}
+    review_running = set()
     running_lock = Lock()
 
     def source_path(root, relative):
@@ -176,11 +187,47 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         except Exception as error:
             # Most failures are already persisted by scan_inventory. A job
             # rejected before claiming a generation remains visible as ready.
-            import logging
             logging.getLogger(__name__).info("Legacy inventory %s: %s", job_id, error)
         finally:
             with running_lock:
                 running.pop(key(library, job_id), None)
+
+    def copy_status(library, job_id):
+        with database_connection(library.database_path) as connection:
+            _job(connection, library.library_id, job_id)
+            result = review_batch_status(connection, job_id)
+        with running_lock:
+            result["running"] = key(library, job_id) in review_running
+        return result
+
+    def require_review_idle(library, job_id):
+        status = copy_status(library, job_id)
+        if status["running"] or status["pending"]:
+            raise AdoptionError("Schließe den Kopierauftrag zuerst ab.")
+
+    def run_copies(library, job_id, registry):
+        def copy_family(family_key):
+            with admission(library):
+                return copy_review(library, job_id, family_key)
+
+        try:
+            with adoption_execution_access(registry):
+                run_review_batch(library, job_id, copy_family=copy_family)
+        except Exception:
+            logging.getLogger(__name__).exception("Legacy review batch interrupted for job %s", job_id)
+        finally:
+            with running_lock:
+                review_running.discard(key(library, job_id))
+
+    def require_inventory_idle(library, job_id):
+        with running_lock:
+            if key(library, job_id) in running:
+                raise AdoptionError("Die Inventur muss zuerst abgeschlossen werden.")
+
+    def schedule_copies(library, job_id, tasks, registry):
+        with running_lock:
+            review_running.add(key(library, job_id))
+        tasks.add_task(run_copies, library, job_id, registry)
 
     @app.get("/setup/adoption", response_class=HTMLResponse, include_in_schema=False)
     def setup_choice(request: Request):
@@ -326,6 +373,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             status = inventory_status(library, job_id)
             if status["state"] not in {"ready", "scanning", "inventoried"} or plan_status(library, job_id):
                 raise AdoptionError("Der Auftrag ist nicht zur Inventur verfügbar.")
+            require_review_idle(library, job_id)
             with running_lock:
                 if key(library, job_id) not in running:
                     pause = Event()
@@ -368,7 +416,39 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def copy_case(job_id: str, payload: ReviewCopy):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
+            require_review_idle(library, job_id)
+            require_inventory_idle(library, job_id)
             return copy_review(library, job_id, payload.family_key)
+
+    @router.get("/jobs/{job_id}/review/selection")
+    def select_review_cases(job_id: str):
+        with _errors():
+            return review_selection(context(), job_id)
+
+    @router.get("/jobs/{job_id}/review/batch")
+    def review_progress(job_id: str):
+        with _errors():
+            return copy_status(context(), job_id)
+
+    @router.post("/jobs/{job_id}/review/batch", status_code=202)
+    def copy_cases(job_id: str, payload: ReviewBatch, tasks: BackgroundTasks):
+        library, registry = context(), registry_path()
+        with _errors(), adoption_execution_access(registry), admission(library):
+            require_review_idle(library, job_id)
+            require_inventory_idle(library, job_id)
+            begin_review_batch(library, job_id, payload.family_keys)
+            schedule_copies(library, job_id, tasks, registry)
+        return {"accepted": True}
+
+    @router.post("/jobs/{job_id}/review/batch/resume", status_code=202)
+    def resume_copies(job_id: str, tasks: BackgroundTasks):
+        library, registry = context(), registry_path()
+        with _errors(), adoption_execution_access(registry), admission(library):
+            require_inventory_idle(library, job_id)
+            status = copy_status(library, job_id)
+            if status["pending"] and not status["running"]:
+                schedule_copies(library, job_id, tasks, registry)
+        return {"accepted": True}
 
     @router.get("/jobs/{job_id}/events")
     def archived_events(job_id: str, day: date, request: Request):
@@ -430,6 +510,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         library = context()
         with _errors(), admission(library):
             require_adoption(request, library)
+            require_review_idle(library, job_id)
             return create_plan(library, registry_path(), job_id, draft_revision=draft.revision,
                                allow_existing=is_later(request))
 
@@ -527,6 +608,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
             require_adoption(request, library)
+            require_review_idle(library, job_id)
             return confirm_plan(library, job_id, command.plan_id, command.method,
                                 acknowledged=command.acknowledged, probe_digest=command.probe_sha256)
 
@@ -610,13 +692,16 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def reopen(job_id: str):
         library = context()
         with _errors(), admission(library):
+            require_review_idle(library, job_id)
             reopen_plan(library, job_id)
         return {"reopened": True}
 
     @router.delete("/jobs/{job_id}")
     def discard(job_id: str):
         library = context()
-        with _errors(), admission(library):
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
+            if copy_status(library, job_id)["running"]:
+                raise AdoptionError("Schließe den Kopierauftrag zuerst ab.")
             discard_job(library, job_id)
         return {"discarded": True}
 

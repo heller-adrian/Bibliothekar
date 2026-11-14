@@ -147,6 +147,38 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
     assert len(sources["roots"]) == 1
     nas = sources["roots"][0]
     assert nas["key"] == "nas" and nas["read_only"] and nas["dataset"].endswith("/media")
+    if method == "review":
+        originals = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in source.iterdir()}
+        job_id = api("/api/legacy-adoption/jobs", method="POST", expected=201, payload={"root": "nas"})["id"]
+        job = "/api/legacy-adoption/jobs/" + job_id
+        api(job + "/scan", method="POST", expected=202)
+        for attempt in range(60):
+            state = api(job)
+            if state["state"] == "inventoried" and not state["scan_running"]:
+                break
+            if state["scan_error"] or attempt == 59:
+                raise AssertionError(state)
+            time.sleep(1)
+        assert state["review_count"] == 1 and state["files"] == 3
+        assert api(job + "/review/selection") == ["undated"]
+        api(job + "/review/batch", method="POST", expected=202, payload={"family_keys": ["undated"]})
+        for attempt in range(60):
+            result = api(job + "/review/batch")
+            if not result["running"]:
+                break
+            if attempt == 59:
+                raise AssertionError(result)
+            time.sleep(1)
+        assert result == {"total": 1, "pending": 0, "copied": 1, "failed": 0, "running": False}, result
+        assert not api(job + "/review/selection")
+        api(job, method="DELETE")
+        api("/api/setup/adoption", method="POST", payload={"decision": "skipped"})
+        working = api("/api/metadata-correction/scan?area=general")["files"]
+        assert {file["filename"] for file in working} == set(originals)
+        assert {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in source.iterdir()} == originals
+        assert not list(archive.iterdir())
+        print("Review batch preserved a complete RAW/JPEG/XMP family and read-only originals on native ZFS.")
+        return
     folder = api("/api/legacy-adoption/source?root=nas&relative=first")
     assert folder["read_only"] and folder["dataset"] == nas["dataset"]
     assert folder["folders"] == ["old-folders"]

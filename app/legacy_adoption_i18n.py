@@ -4,6 +4,25 @@ import re
 
 
 TRANSLATIONS = {
+    "Schließe den Kopierauftrag zuerst ab.": "Finish the copy job first.",
+    "Setze zuerst den unterbrochenen Kopierauftrag fort.": "Resume the interrupted copy job first.",
+    "Keine geeigneten Prüffälle ausgewählt.": "Select at least one eligible review case.",
+    "Hilfe zur Metadatenkorrektur": "Help with metadata correction",
+    "Bibliothekar legt Arbeitskopien vollständiger Dateifamilien unter Workspace → Metadatenkorrektur → General ab. Nach Abschluss oder Verwerfen der Bestandsübernahme kannst du sie dort korrigieren und in den Tagesbestand einsortieren. Beim Kopieren wird nichts ins Zielarchiv übernommen.": "Bibliothekar saves working copies of complete file families under Workspace → Metadata correction → General. After completing or discarding adoption, you can correct them there and add them to the day folders. Copying leaves the target archive untouched.",
+    "Kopierfortschritt": "Copy progress",
+    "Arbeitskopien werden erstellt …": "Creating working copies …",
+    "Kopierauftrag unterbrochen": "Copy job interrupted",
+    "Kopierauftrag mit Fehlern beendet": "Copy job finished with errors",
+    "Für die Metadatenkorrektur kopiert": "Copied for metadata correction",
+    "Kopierauftrag fortsetzen": "Resume copy job",
+    "Alle geeigneten Prüffälle auswählen": "Select all eligible review cases",
+    "Dateifamilie auswählen": "Select file family",
+    "Arbeitskopien im Workspace benötigen zusätzlichen Speicherplatz. Ausgewählte Dateifamilien jetzt kopieren?": "Working copies need additional workspace space. Copy the selected file families now?",
+    "Ungeklärte Dateifamilien bleiben an der Quelle. Fertige Arbeitskopien in General bleiben auch nach dem Verwerfen erhalten.": "Unresolved file families stay at the source. Completed working copies in General are kept if you discard adoption.",
+    "Auftrag und Entwurf verwerfen? Originale und fertige Arbeitskopien in General bleiben erhalten.": "Discard the job and draft? Originals and completed working copies in General will be kept.",
+    "Ermittelte Aufnahmezeit": "Detected capture time",
+    "Von Dateifamilie übernommen": "Inherited from file family",
+    "Genauere Uhrzeit aus Dateifamilie": "More precise time from file family",
     "Bestehendes Unterereignis ohne eigenen Ereignisordner": "Existing subevent without a dedicated event folder",
     "Das Ereignis belegt einen durchgehenden Zeitraum.": "The event occupies one continuous time range.",
     "Das Ende muss nach dem Beginn liegen.": "The end must follow the start.",
@@ -538,6 +557,10 @@ def _regex_literal(value):
 
 
 PATTERNS = [
+    (r"^(\d+) kopiert · (\d+) fehlgeschlagen · (\d+) ausstehend$", "$1 copied · $2 failed · $3 pending"),
+    (r"^(\d+) ausgewählt$", "$1 selected"),
+    (r"^Dateifamilie auswählen: (.+)$", "Select file family: $1"),
+    (r"^Ohne gesichertes Datum \((\d+)\)$", r"No verified date ($1)"),
     (r"^Der Archiv-Mount ist nicht verfügbar: (.+)$", "The archive mount is unavailable: $1"),
     (r"^Der Archiv-Mount ist nicht lesbar: (.+)$", "The archive mount cannot be read: $1"),
     (r"^Der verwaltete Stamm für Bibliotheks-Arbeitsbereiche ist nicht verfügbar: (.+)$",

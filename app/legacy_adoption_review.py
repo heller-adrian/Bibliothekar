@@ -1,5 +1,6 @@
 """Review cases and verified working copies in the existing General intake."""
 from contextlib import ExitStack
+import errno
 import hashlib
 import json
 import os
@@ -7,6 +8,7 @@ from pathlib import Path
 import stat
 
 from app import legacy_adoption_host as host
+from app.legacy_adoption_dataset import DatasetError
 from app.database import database_connection
 from app.legacy_adoption_inventory import _inventory_groups, _job
 from app.legacy_adoption_paths import (
@@ -14,19 +16,19 @@ from app.legacy_adoption_paths import (
     directory_identity, relative_parent, target_key, validate_target,
 )
 from app.legacy_adoption_plan import _roots
-from app.metadata_correction import metadata_area_paths
-from app.root_operations import validate_active_roots
+from app.metadata_correction import MetadataCorrectionError, metadata_area_paths
+from app.root_operations import RootOperationError, validate_active_roots
 from app.source_filter import LEGACY_REVIEW_STAGING
 
 
 def _status(family, members, files, draft, copied, unassigned):
     key = family["family_key"]
     reasons = []
-    if not family.get("selected_capture_time"):
-        reasons.append("missing_capture_time")
     confidences = {file.get("capture_time_confidence") for file in files}
     if family.get("capture_time_confidence") == "conflict" or "conflict" in confidences:
         reasons.append("conflicting_capture_time")
+    elif not any(file.get("selected_capture_time") for file in files):
+        reasons.append("missing_capture_time")
     if any(file.get("metadata_error") for file in files):
         reasons.append("damaged_metadata")
     if any(row["error"] or not row["sha256"] for row in members):
@@ -44,7 +46,7 @@ def _status(family, members, files, draft, copied, unassigned):
         state = copied["state"]
     return {
         "family_key": key, "reasons": reasons, "state": state,
-        "can_copy": all(row["sha256"] for row in members) and state != "copied",
+        "can_copy": all(row["sha256"] and row["identity"] and not row["error"] for row in members) and state != "copied",
         "size_bytes": sum(row["size_bytes"] or 0 for row in members),
         "files": [{"relative_path": row["relative_path"], "error": row["error"],
                    "metadata": json.loads(row["metadata_json"]) if row["metadata_json"] else None}
@@ -86,6 +88,45 @@ def review_count(connection, job_id, plan_id):
     ).fetchone()[0]
 
 
+def _copy_allowed(job, plan):
+    return job["state"] == "inventoried" and not (plan and plan["method"])
+
+
+def _confirmed(draft, key):
+    return key in draft.get("capture_overrides", {}) and key not in draft.get("exclude_families", [])
+
+
+def _copyable_cases(connection, job_id, job, plan):
+    if not _copy_allowed(job, plan):
+        raise AdoptionError("Arbeitskopien sind nur während der Planung möglich.")
+    draft = json.loads(plan["draft_json"] if plan else job["draft_json"])
+    rows = connection.execute(
+        """SELECT family.family_key """ + _REVIEW_FROM + " WHERE " + _REVIEW_WHERE + """
+            AND (copy.state IS NULL OR copy.state = 'copying')
+            AND NOT EXISTS (
+                SELECT 1 FROM legacy_adoption_inventory member
+                 WHERE member.job_id = family.job_id AND member.family_key = family.family_key
+                   AND (member.sha256 IS NULL OR member.identity IS NULL OR member.error IS NOT NULL)
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM legacy_adoption_inventory member
+                 JOIN legacy_adoption_moves move ON move.plan_id = :plan AND move.relative_path = member.relative_path
+                 WHERE member.job_id = family.job_id AND member.family_key = family.family_key
+            )
+            ORDER BY family.family_key""",
+        {"job": job_id, "plan": plan["id"] if plan else None},
+    )
+    confirmed = draft.get("capture_overrides", {}).keys() - set(draft.get("exclude_families", []))
+    return [row[0] for row in rows if plan or row[0] not in confirmed]
+
+
+def review_selection(library, job_id):
+    with database_connection(library.database_path) as connection:
+        connection.execute("BEGIN")
+        job = _job(connection, library.library_id, job_id)
+        return _copyable_cases(connection, job_id, job, _plan_for(connection, job_id))
+
+
 def review_cases(library, job_id, *, after=""):
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN")
@@ -111,7 +152,13 @@ def review_cases(library, job_id, *, after=""):
             case = _status(family, members, files, draft, copied,
                            bool(plan and not assigned and family.get("selected_capture_time")
                                 and key not in draft.get("exclude_families", []) and not copied))
-            case["can_copy"] = case["can_copy"] and not assigned and not (plan and plan["method"])
+            case["can_copy"] = (case["can_copy"] and not assigned and _copy_allowed(job, plan)
+                                and (plan is not None or not _confirmed(draft, key)))
+            failure = connection.execute(
+                "SELECT error FROM legacy_adoption_review_batch WHERE job_id = ? AND family_key = ?",
+                (job_id, key),
+            ).fetchone()
+            case["copy_error"] = failure["error"] if failure and case["state"] != "copied" else None
             result.append(case)
         return result
 
@@ -140,7 +187,8 @@ def _new_directory(parent, name):
 
 def _member_proof(directory, name, member):
     with bound_file(directory, name) as (descriptor, info):
-        if info.st_size != member["size_bytes"] or bound_sha256(descriptor) != member["sha256"]:
+        if (info.st_nlink != 1 or info.st_size != member["size_bytes"]
+                or bound_sha256(descriptor) != member["sha256"]):
             raise AdoptionError("Die vorhandene Arbeitskopie weicht von der Inventur ab: " + name)
 
 
@@ -187,6 +235,11 @@ def _publish_copy(library, job, members, destination):
                     raise AdoptionError("Der Zielordner enthält andere Dateien: " + destination)
                 for name, member in members:
                     _member_proof(ready, name, member)
+            os.fsync(root)
+            previous_stage = host.info_at(root, LEGACY_REVIEW_STAGING)
+            if previous_stage is not None:
+                with bound_child_directory(root, LEGACY_REVIEW_STAGING, directory_identity(previous_stage)) as stage:
+                    os.fsync(stage)
             return
         staging = stack.enter_context(_new_directory(root, LEGACY_REVIEW_STAGING))
         with _new_directory(staging, destination) as stage:
@@ -214,7 +267,7 @@ def copy_review(library, job_id, key):
         connection.execute("BEGIN IMMEDIATE")
         job = dict(_job(connection, library.library_id, job_id))
         plan = _plan_for(connection, job_id)
-        if job["state"] != "inventoried" or (plan and plan["method"]):
+        if not _copy_allowed(job, plan):
             raise AdoptionError("Arbeitskopien sind nur während der Planung möglich.")
         row = connection.execute(
             "SELECT review_required FROM legacy_adoption_families WHERE job_id = ? AND family_key = ?",
@@ -228,12 +281,15 @@ def copy_review(library, job_id, key):
         ).fetchone()
         if previous and previous["state"] == "copied":
             return dict(previous)
+        draft = json.loads(job["draft_json"])
+        if not plan and not previous and _confirmed(draft, key):
+            raise AdoptionError("Diese Familie ist kein ausstehender Prüffall.")
         members = [(Path(item["relative_path"]).name, dict(item)) for item in connection.execute(
-            """SELECT relative_path, size_bytes, identity, sha256 FROM legacy_adoption_inventory
+            """SELECT relative_path, size_bytes, identity, sha256, error FROM legacy_adoption_inventory
                 WHERE job_id = ? AND family_key = ? ORDER BY relative_path""",
             (job_id, key),
         )]
-        if not members or any(not item["sha256"] or not item["identity"] for _, item in members):
+        if not members or any(not item["sha256"] or not item["identity"] or item["error"] for _, item in members):
             raise AdoptionError("Die Dateifamilie ist unvollständig und kann nicht als Arbeitskopie übernommen werden.")
         if len({target_key(name) for name, _ in members}) != len(members):
             raise AdoptionError("Mehrere Dateien der Familie beanspruchen denselben Namen.")
@@ -254,10 +310,69 @@ def copy_review(library, job_id, key):
     _publish_copy(library, job, members, destination)
     with database_connection(library.database_path) as connection:
         connection.execute(
-            """UPDATE legacy_adoption_review_copies SET state = 'copied', updated_at = CURRENT_TIMESTAMP
+            """UPDATE legacy_adoption_review_copies SET state = 'copied', target_relative = ?,
+                       file_count = ?, size_bytes = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE job_id = ? AND family_key = ?""",
-            (job_id, key),
+            (destination, len(members), sum(item["size_bytes"] for _, item in members), job_id, key),
         )
         return dict(connection.execute(
             "SELECT * FROM legacy_adoption_review_copies WHERE job_id = ? AND family_key = ?", (job_id, key),
         ).fetchone())
+
+
+def review_batch_status(connection, job_id):
+    return dict(connection.execute(
+        """SELECT count(*) AS total, count(*) FILTER (WHERE state = 'pending') AS pending,
+                  count(*) FILTER (WHERE state = 'copied') AS copied,
+                  count(*) FILTER (WHERE state = 'failed') AS failed
+             FROM legacy_adoption_review_batch WHERE job_id = ?""",
+        (job_id,),
+    ).fetchone())
+
+
+def begin_review_batch(library, job_id, keys):
+    with database_connection(library.database_path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        job = _job(connection, library.library_id, job_id)
+        if review_batch_status(connection, job_id)["pending"]:
+            raise AdoptionError("Setze zuerst den unterbrochenen Kopierauftrag fort.")
+        eligible = _copyable_cases(connection, job_id, job, _plan_for(connection, job_id))
+        if keys is not None:
+            selected = set(keys)
+            eligible = [key for key in eligible if key in selected]
+        if not eligible:
+            raise AdoptionError("Keine geeigneten Prüffälle ausgewählt.")
+        connection.execute("DELETE FROM legacy_adoption_review_batch WHERE job_id = ?", (job_id,))
+        connection.executemany(
+            "INSERT INTO legacy_adoption_review_batch (job_id, family_key) VALUES (?, ?)",
+            ((job_id, key) for key in eligible),
+        )
+
+
+def run_review_batch(library, job_id, *, copy_family):
+    while True:
+        with database_connection(library.database_path) as connection:
+            row = connection.execute(
+                """SELECT family_key FROM legacy_adoption_review_batch
+                    WHERE job_id = ? AND state = 'pending' ORDER BY family_key LIMIT 1""",
+                (job_id,),
+            ).fetchone()
+        if row is None:
+            return
+        key = row["family_key"]
+        try:
+            copy_family(key)
+        except OSError as error:
+            message = str(error)
+            if error.errno == errno.ENOSPC:
+                message = "Im Workspace ist nicht genug Speicherplatz für die vollständige Dateifamilie."
+        except (AdoptionError, DatasetError, MetadataCorrectionError, RootOperationError) as error:
+            message = str(error)
+        else:
+            message = None
+        with database_connection(library.database_path) as connection:
+            connection.execute(
+                """UPDATE legacy_adoption_review_batch SET state = ?, error = ?
+                    WHERE job_id = ? AND family_key = ?""",
+                ("failed" if message else "copied", message[:2000] if message else None, job_id, key),
+            )

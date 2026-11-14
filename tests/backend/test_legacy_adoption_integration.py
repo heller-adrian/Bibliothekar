@@ -1125,6 +1125,166 @@ def test_review_family_is_copied_to_general_once_and_survives_discard(
                               database_path=library.database_path)
     assert {item["filename"] for item in scan["files"]} == set(originals) - {"good.jpg"}
 
+@pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["review-zfs"])
+def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy(
+    fresh_main, monkeypatch, synthetic_dataset,
+):
+    import errno
+    from threading import Event, Thread
+
+    from PIL import Image
+    from app import legacy_adoption_review as review
+    from app import legacy_adoption_host as host
+    from app.database import get_job
+    from app.metadata_correction import execute_metadata_correction, metadata_area_paths, scan_metadata_area
+    from tests.backend.test_legacy_adoption_host import _macos_rename
+
+    workspace, db, registry, archive = fresh_main
+    source = archive.parent / "legacy-review-source"
+    source.mkdir()
+    if os.environ.get("ADOPTION_ZFS_ROOT"):
+        monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
+    if sys.platform == "darwin":
+        monkeypatch.setattr(host, "rename_noreplace", _macos_rename)
+    for i in range(61):
+        (source / f"photo-{i:03}.jpg").write_bytes(f"synthetic {i}".encode())
+    (source / "photo-001.raf").write_bytes(b"raw data")
+    (source / "photo-001.raf.xmp").write_bytes(b"sidecar data")
+    Image.new("RGB", (8, 8), "green").save(source / "photo-000.jpg")
+    originals = {p.name: p.read_bytes() for p in source.iterdir()}
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+    monkeypatch.setattr(main, "DATABASE_INITIALIZATION_ERROR", None)
+    reading, read_release = Event(), Event()
+
+    def metadata(descriptors, _cancel):
+        reading.set()
+        assert read_release.wait(10)
+        dates = {b"raw data": "2026:07:20 10:00:00", b"synthetic 1": "2026:07:21 10:00:00"}
+        return {fd: ({"EXIF:ExifIFD:DateTimeOriginal": dates[data]} if data in dates else {})
+                for fd in descriptors if (data := os.pread(fd, 13, 0))}
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    client = _onboard(fresh_main)
+    _adopt(client)
+    api = "/api/legacy-adoption"
+    job_id = _json(client, "POST", api + "/jobs", status=201, json={"root": "nas"})["id"]
+    job = api + "/jobs/" + job_id
+
+    inventory_responses = []
+    scan = Thread(target=lambda: inventory_responses.append(client.post(job + "/scan")))
+    scan.start()
+    try:
+        assert reading.wait(10)
+        reopened = TestClient(main.app, follow_redirects=False)
+        assert _json(reopened, "GET", job)["scan_running"]
+    finally:
+        read_release.set()
+        scan.join(15)
+    assert [r.status_code for r in inventory_responses] == [202]
+    page = _json(reopened, "GET", job + "/review")
+    assert len(page) == 60 and _json(reopened, "GET", job)["review_count"] == 61
+    available = _json(reopened, "GET", job + "/review/selection")
+    assert len(available) == 61 and available[-1] == "photo-060"
+    assert page[0]["reasons"] == ["missing_capture_time"]
+    assert page[1]["reasons"] == ["conflicting_capture_time"]
+    assert any(file["metadata"]["selected_capture_source"] for file in page[1]["files"])
+
+    general = metadata_area_paths(area="general", workspace_root=workspace, library_id="main", create=False)["root"]
+    publish = review._publish_copy
+    entered, release = Event(), Event()
+
+    def interrupt(library, adoption, members, destination):
+        if members[0][0] == "photo-001.jpg":
+            publish(library, adoption, members, destination)
+            entered.set()
+            assert release.wait(10)
+            raise RuntimeError("simulate process loss after atomic family publication")
+        publish(library, adoption, members, destination)
+
+    responses = []
+    with monkeypatch.context() as stopped:
+        stopped.setattr(review, "_publish_copy", interrupt)
+        copy = Thread(target=lambda: responses.append(reopened.post(job + "/review/batch", json={"family_keys": None})))
+        copy.start()
+        try:
+            assert entered.wait(20)
+            browser = TestClient(main.app, follow_redirects=False)
+            assert _json(browser, "GET", job + "/review/batch") == {
+                "total": 61, "copied": 1, "failed": 0, "pending": 60, "running": True,
+            }
+            _json(browser, "DELETE", job, status=409)
+            _json(browser, "POST", job + "/scan", status=409)
+            _json(browser, "POST", job + "/review/batch", status=409, json={"family_keys": None})
+        finally:
+            release.set()
+            copy.join(20)
+    assert [r.status_code for r in responses] == [202]
+    main.startup_database()
+    assert main.DATABASE_INITIALIZATION_ERROR is None
+    browser = TestClient(main.app, follow_redirects=False)
+    assert _json(browser, "GET", job + "/review/batch") == {
+        "total": 61, "copied": 1, "failed": 0, "pending": 60, "running": False,
+    }
+
+    def no_space(library, adoption, members, destination):
+        if members[0][0] == "photo-002.jpg":
+            raise OSError(errno.ENOSPC, "simulated insufficient space")
+        publish(library, adoption, members, destination)
+
+    with monkeypatch.context() as full:
+        full.setattr(review, "_publish_copy", no_space)
+        _json(browser, "POST", job + "/review/batch/resume", status=202)
+    assert _json(browser, "GET", job + "/review/batch") == {
+        "total": 61, "copied": 60, "failed": 1, "pending": 0, "running": False,
+    }
+    page = _json(browser, "GET", job + "/review")
+    assert page[2]["can_copy"] and "nicht genug Speicherplatz" in page[2]["copy_error"]
+    _json(browser, "POST", job + "/review/batch", status=409, json={"family_keys": ["photo-001"]})
+    _json(browser, "POST", job + "/review/batch", status=202,
+          json={"family_keys": ["photo-001", "photo-002", "photo-002"]})
+    assert _json(browser, "GET", job + "/review/batch")["copied"] == 1
+    page = _json(browser, "GET", job + "/review")
+    remaining = _json(browser, "GET", job + "/review", params={"after": page[-1]["family_key"]})
+    assert len(remaining) == 1 and remaining[0]["state"] == "copied"
+    assert not _json(browser, "GET", job + "/review/selection")
+    assert len(list(general.glob("legacy-*"))) == 61
+
+    _json(browser, "DELETE", job)
+    _json(browser, "POST", "/api/setup/adoption", json={"decision": "skipped"})
+    assert browser.get("/").status_code == 200
+    if main.ADOPTION_STARTUP_THREAD:
+        main.ADOPTION_STARTUP_THREAD.join(timeout=15)
+    assert operation_health.inspect(workspace)["writes_allowed"]
+    relatives = {f["relative_path"] for f in scan_metadata_area(
+        area="general", workspace_root=workspace, library_id="main", database_path=db,
+    )["files"]}
+    family = general / page[1]["target_relative"]
+    assert {p.name: p.read_bytes() for p in family.iterdir()} == {
+        filename: originals[filename] for filename in ("photo-001.jpg", "photo-001.raf", "photo-001.raf.xmp")
+    }
+    relative = page[0]["target_relative"] + "/photo-000.jpg"
+    assert relative in relatives
+    stamp = "2026-07-19T17:51:50+02:00"
+    correction = execute_metadata_correction(db, area="general", relative_path=relative,
+        proposed_datetime=stamp, workspace_root=workspace, library_id="main")
+    assert correction["status"] == "completed"
+    monkeypatch.setattr(main, "load_settings", lambda: {"storage": {"safety_reserve_gib": 0, "processing_buffer_percent": 0}})
+    transfer = _json(browser, "POST", "/api/metadata-correction/general/reintegrate", status=202,
+                     json={"items": [{"relative_path": relative}]})
+    queued = main.claim_next_job(db, operation="metadata_general_import")
+    assert queued and queued["id"] == transfer["job"]["id"]
+    main.process_claimed_job(queued, library_context=resolve_library_context(registry, "main"))
+    assert get_job(db, queued["id"])["state"] == "completed"
+    assert not (general / relative).exists()
+    with database_connection(db) as connection:
+        allocated = connection.execute(
+            "SELECT current_relative_path, sha256_current FROM files WHERE job_id = ?", (queued["id"],),
+        ).fetchone()
+    assert "2026-07-19" in allocated["current_relative_path"]
+    assert allocated["sha256_current"] == correction["output_sha256"]
+    assert {p.name: p.read_bytes() for p in source.iterdir()} == originals
+    assert not list(archive.iterdir())
+
 
 def test_review_capacity_gate_accounts_for_entire_family(monkeypatch):
     from types import SimpleNamespace

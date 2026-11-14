@@ -91,6 +91,17 @@ _PAGE = r"""<!doctype html>
 .adoption-command-box{display:grid;gap:12px;justify-items:start}
 #script-progress{margin:16px 0 0}
 #script-progress:empty{display:none}
+.adoption-review-progress:empty{display:none}
+.adoption-review-progress{display:grid;gap:8px;margin:12px 0}
+.adoption-review-progress progress{width:100%;accent-color:var(--bk-blue)}
+.adoption-review-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:start}
+.legacy-adoption .adoption-review-row>input[type=checkbox]{margin-top:12px}
+.adoption-review-row summary{overflow-wrap:anywhere}
+.adoption-review-error{color:var(--bk-danger);font-size:.875rem}
+.legacy-adoption .adoption-review-status{align-items:center}
+.legacy-adoption .adoption-review-help summary{display:grid;place-items:center;border:1px solid var(--bk-line);border-radius:50%;width:1.65rem;height:1.65rem;padding:0;list-style:none}
+.adoption-review-help summary::-webkit-details-marker{display:none}
+.adoption-review-cases>.inline{align-items:center;margin:12px 0}
 .adoption-stage .adoption-progress{display:grid;gap:8px}
 .adoption-stage .adoption-progress progress{width:100%;accent-color:var(--bk-blue)}
 .adoption-plan-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr));gap:12px;margin:18px 0}
@@ -248,7 +259,8 @@ if(later) {
   $("choice").href=librarySettings;
 }
 let job = null, draft = {}, draftRevision = 0, year = "", day = null;
-let familyCursor = "", moveCursor = "", reviewCursor = "", timer = 0, scriptTimer = 0;
+let familyCursor = "", moveCursor = "", timer = 0, scriptTimer = 0, reviewTimer = 0;
+let reviewSelection = new Set(), reviewOpened = new Set(), reviewBatch = {}, reviewSubmitting = false;
 let selectedSource = null, browsedSource = null, browseVersion = 0;
 let draftPage = 40;
 let inventoryStarting = false;
@@ -305,7 +317,7 @@ function navigation(){
   const previous={plan:"inventory",review:job.plan.execution?null:"plan",execution:"review",verify:job.plan.state==="completed"?null:"execute"}[viewStep];
   if(previous)nav.append(action("Zurück",()=>goStep(previous)));
   if(viewStep==="inventory" && job.state==="inventoried")nav.append(action("Weiter: Ereignisse planen",()=>goStep("plan"),true));
-  if(viewStep==="plan")nav.append(action("Weiter: Plan prüfen",()=>{
+  if(viewStep==="plan" && !reviewBusy())nav.append(action("Weiter: Plan prüfen",()=>{
     if(!draft.events.length)throw new Error("Lege mindestens ein Ereignis oder einen Sammelordner an.");
     return mutate("/plan","POST",{revision:draftRevision});
   },true));
@@ -482,7 +494,8 @@ async function browse(relative) {
 function openJob(id) {
   requireSaved();
   jobId=id;
-  year="";day=null;familyCursor="";moveCursor="";reviewCursor="";draftPage=40;
+  year="";day=null;familyCursor="";moveCursor="";draftPage=40;
+  reviewSelection.clear();reviewOpened.clear();reviewBatch={};
   const url=new URL(location.href);
   url.searchParams.set("job",id);
   url.searchParams.set("library",library);
@@ -492,6 +505,12 @@ function inventoryProgress(){
   const status=node("p","Fotosammlung wird gelesen …","bk-loading-status");
   status.setAttribute("role","status");
   return status;
+}
+async function refreshReviewView(){
+  const open=document.querySelector("details.adoption-review-panel")?.open;
+  await refresh();
+  const panel=document.querySelector("details.adoption-review-panel");
+  if(open && panel)panel.open=true;
 }
 async function startInventory(){
   if(inventoryStarting)return;
@@ -512,12 +531,13 @@ async function refresh() {
   clearTimeout(scriptTimer);
   if (!jobId) return;
   const requested=jobId;
-  const state=await api(jobPath());
+  const [state, batch]=await Promise.all([api(jobPath()),api(jobPath("/review/batch"))]);
   if (requested!==jobId) return;
   requireSaved();
-  job=state;
+  job=state;reviewBatch=batch;
   if(selectedDaysJob!==jobId){
     selectedDaysJob=jobId;
+    year=sessionStorage.getItem("bk-adoption-period:"+jobId)||"";
     try{selectedDays=new Set(JSON.parse(sessionStorage.getItem("bk-adoption-days:"+jobId)||"[]").filter(key=>typeof key==="string" && key.length<=40).slice(0,10000));}catch{selectedDays=new Set();}
     freeSegments=[];archiveSegments=[];draftStats=[];draftCoverage=null;previewRevision=-1;
     selectedEvent=null;selectedArchive=null;selectionAnchor="";day=null;
@@ -530,6 +550,7 @@ async function refresh() {
     applyDraftPreview(checked);previewRevision=draftRevision;
   }
   render();
+  scheduleReviewPoll();
   if(checked && !checked.valid && $("event-editor"))showConflicts(checked,draft);
   if (job.scan_running) {
     timer=setTimeout(()=>refresh().catch(error=>report(error.message)),2000);
@@ -568,11 +589,11 @@ async function mutate(path, method="POST", body) {
   }
 }
 function reviewControls(){
-  const details=node("details");
-  const cases=slot("review-cases");
+  const details=node("details",undefined,"adoption-review-panel");
+  const cases=node("div");
   details.append(node("summary",job.review_count+" Prüffälle – Überprüfung erforderlich"),cases);
   details.addEventListener("toggle",()=>{
-    if(details.open && !cases.childElementCount)showReview(true).catch(error=>report(error.message));
+    if(details.open && !cases.childElementCount)showReview(cases);
   });
   return details;
 }
@@ -616,15 +637,15 @@ function render() {
   if(job.review_count)status.append(reviewControls());
   const buttons=node("div",undefined,"inline");
   if (!recoveryOnly && job.scan_running) buttons.append(action("Inventur pausieren",()=>mutate("/pause")));
-  else if (!recoveryOnly && !terminal && !job.plan.id && !inventoryStarting) {
+  else if (!recoveryOnly && !terminal && !job.plan.id && !inventoryStarting && !reviewBusy()) {
     const labels={ready:"Inventur starten",scanning:"Inventur fortsetzen",inventoried:"Inventur erneut starten"};
     buttons.append(action(labels[job.state],async()=>{
       if(job.state==="inventoried" && !confirm(t("Inventur neu starten? Der bisherige Entwurf wird verworfen. Originaldateien bleiben unverändert.")))return;
       await startInventory();
     },true));
   }
-  if (!terminal && !job.plan.execution && !job.scan_running && !inventoryStarting) { const discard=action("Änderungen verwerfen",async()=>{
-    if (!confirm("Auftrag und Entwurf verwerfen? Originaldateien bleiben erhalten.")) return;
+  if (!terminal && !job.plan.execution && !job.scan_running && !inventoryStarting && !reviewBatch.running && !reviewSubmitting) { const discard=action("Änderungen verwerfen",async()=>{
+    if (!confirm(t("Auftrag und Entwurf verwerfen? Originale und fertige Arbeitskopien in General bleiben erhalten."))) return;
     await api(jobPath(),"DELETE");
     dirty.clear();
     location.replace(afterDiscard);
@@ -635,6 +656,11 @@ function render() {
   }));
   status.append(buttons,slot("inventory-errors"));
   host.replaceChildren();
+  const progress=slot("review-progress");
+  progress.className="adoption-review-progress";
+  progress.setAttribute("role","status");
+  host.append(progress);
+  renderReviewProgress();
   if(viewStep==="inventory")host.append(status);
   else if(job.plan.id)renderPlan(host);
   else if(viewStep==="plan" && !job.scan_running && job.state==="inventoried")renderDraft(host);
@@ -651,8 +677,11 @@ function applyDraftPreview(checked){
 }
 function renderDraft(host) {
   const panel=section("Ereignisse planen");
-  panel.append(line("Wähle freie Aufnahmetage oder Zeitabschnitte. Mit Umschalt wählst du einen Bereich. Du kannst auch ohne Auswahl planen."));
+  const instruction=line("Wähle freie Aufnahmetage oder Zeitabschnitte. Mit Umschalt wählst du einen Bereich. Du kannst auch ohne Auswahl planen.");
+  instruction.id="planning-instruction";
+  panel.append(instruction);
   const toolbar=node("div",undefined,"inline adoption-toolbar");
+  toolbar.id="event-actions";
   toolbar.append(
     action("+ Ereignis",()=>eventEditor(undefined,"event"),true),
     action("+ Sammelordner ohne Ereignis",()=>eventEditor(undefined,"no_event")),
@@ -662,13 +691,14 @@ function renderDraft(host) {
       selectedDays.clear();day=null;selectedEvent=null;selectedArchive=null;renderDays();renderPlanSelection();return showDay();
     }),
     slot("selection-count","span"));
-  panel.append(toolbar,slot("periods"));
+  panel.append(toolbar,slot("periods"),slot("planning-review"));
   const grid=node("div",undefined,"grid adoption-planning");
+  grid.id="dated-planning";
   const chronologyPane=node("div");chronologyPane.append(slot("draft-events"),slot("archive-segments"),slot("days"));
   const diagnostic=node("details");diagnostic.id="family-diagnostics";
   diagnostic.append(node("summary","Dateifamilien und Aufnahmezeiten prüfen"),slot("families"));
   diagnostic.addEventListener("toggle",()=>{if(diagnostic.open && !$("families").childElementCount)showFamilies().catch(error=>report(error.message));});
-  chronologyPane.append(diagnostic);
+  chronologyPane.append(diagnostic);chronologyPane.id="dated-media";
   const formPane=node("div");
   formPane.append(node("h3","Vorschau"),slot("draft-coverage"),slot("planning-preview"),slot("matches"));
   const editor=slot("event-editor","dialog");
@@ -690,18 +720,33 @@ async function chronology() {
       if(!periodCounts.has(period))periodCounts.set(period,0);
     }
   }
-  if(draftCoverage?.review)periodCounts.set("",draftCoverage.review);
+  if(job.review_count)periodCounts.set("review",job.review_count);
   const periods=[...periodCounts].sort(([a],[b])=>a.localeCompare(b));
-  if(!periodCounts.has(year))year=periods.find(([period])=>period)?.[0] || "";
+  if(!periodCounts.has(year))year=periods.find(([period])=>period!=="review")?.[0] || periods[0]?.[0] || "";
   const buttons=node("div",undefined,"inline");
   for(const [period,count] of periods){
-    const button=action(period ? period+(count?" ("+count+")":"") : t("Ohne gesichertes Datum")+" ("+count+")",async()=>{
+    const button=action(period==="review" ? "Ohne gesichertes Datum ("+count+")" : period+(count?" ("+count+")":""),async()=>{
       requireSaved($("families"));
-      year=period;day=period?null:"";selectedEvent=null;selectedArchive=null;dayPage=60;await chronology();
+      year=period;day=null;selectedEvent=null;selectedArchive=null;dayPage=60;
+      sessionStorage.setItem("bk-adoption-period:"+jobId,period);
+      await chronology();
     });
     button.setAttribute("aria-pressed",String(period===year));buttons.append(button);
   }
   $("periods").replaceChildren(buttons);
+  const reviewing=year==="review";
+  for(const id of ["planning-instruction","event-actions","dated-planning"])$(id).hidden=reviewing;
+  const cases=$("planning-review");
+  cases.hidden=!reviewing;
+  const diagnostic=$("family-diagnostics");
+  $("dated-media").append(diagnostic);
+  if(reviewing){
+    showReview(cases);
+    cases.append(diagnostic);
+    day="";
+    return showDay();
+  }
+  cases.replaceChildren();
   dayRows=freeSegments.filter(segment=>segment.day_key.startsWith(year+"-"));
   showDraftEvents();
   const archive=$('archive-segments');
@@ -724,7 +769,7 @@ async function chronology() {
   }
   renderDays();
   renderPlanSelection();
-  if(day!==null && ![...dirty].some(editor=>$("families").contains(editor)))await showDay();
+  if(![...dirty].some(editor=>$("families").contains(editor)))await showDay();
 }
 function renderDays(){
   const host=$("days");if(!host)return;
@@ -802,48 +847,176 @@ const reviewStates={
   copying:"Arbeitskopie kann fortgesetzt werden",
   copied:"Für die Metadatenkorrektur in General bereit"
 };
-async function showReview(reset=false) {
-  const target=$("review-cases");
-  if (reset) {
-    reviewCursor="";
-    target.replaceChildren(node("h3","Prüffälle"),line(
-      "Ungeklärte Familien bleiben bei der Archivübernahme ausgenommen. Arbeitskopien in General benötigen zusätzlichen Speicherplatz und bleiben auch nach dem Verwerfen der Planung erhalten."
-    ));
-  }
-  target.querySelector(".more")?.remove();
-  const rows=await api(jobPath("/review?"+new URLSearchParams({after:reviewCursor})));
-  for (const item of rows) {
-    const row=node("details",undefined,"row");
-    row.append(node("summary",item.family_key+" · "+t(reviewStates[item.state])));
-    for (const reason of item.reasons) row.append(line(reviewReasons[reason] || reason));
-    for (const file of item.files) {
-      row.append(node("strong",file.relative_path.split("/").at(-1)),
-        line(job.source_root+"/"+file.relative_path));
-      if (file.error) row.append(line(file.error));
-      if (file.metadata?.selected_capture_time) row.append(line(file.metadata.selected_capture_time));
-      for (const candidate of file.metadata?.metadata_candidates || []) {
-        row.append(line([candidate.technical_tag,candidate.normalized_datetime || candidate.raw_value].filter(Boolean).join(" · ")));
+function reviewBusy(){
+  return reviewSubmitting || reviewBatch.running || reviewBatch.pending>0;
+}
+function reviewHelp(){
+  const help=node("details",undefined,"adoption-source-help adoption-review-help");
+  const summary=node("summary","?");
+  summary.setAttribute("aria-label","Hilfe zur Metadatenkorrektur");
+  help.append(summary,line("Bibliothekar legt Arbeitskopien vollständiger Dateifamilien unter Workspace → Metadatenkorrektur → General ab. Nach Abschluss oder Verwerfen der Bestandsübernahme kannst du sie dort korrigieren und in den Tagesbestand einsortieren. Beim Kopieren wird nichts ins Zielarchiv übernommen."));
+  help.addEventListener("toggle",()=>{
+    if(!help.open)return;
+    const maxLeft=document.documentElement.clientWidth-16-help.querySelector("p").offsetWidth;
+    help.style.setProperty("--adoption-help-offset",Math.min(0,maxLeft-help.getBoundingClientRect().left)+"px");
+  });
+  help.addEventListener("keydown",event=>{
+    if(event.key==="Escape" && help.open){help.open=false;summary.focus();}
+  });
+  return help;
+}
+function renderReviewProgress(){
+  const target=$("review-progress");
+  if(!target)return;
+  target.replaceChildren();
+  if(!reviewBatch.total)return;
+  const {total,copied,failed,pending,running}=reviewBatch;
+  const bar=node("progress");bar.max=total;bar.value=total-pending;
+  bar.setAttribute("aria-label","Kopierfortschritt");
+  const status=node("div",undefined,"inline adoption-review-status");
+  const title=running?"Arbeitskopien werden erstellt …":pending?"Kopierauftrag unterbrochen":
+    failed?"Kopierauftrag mit Fehlern beendet":"Für die Metadatenkorrektur kopiert";
+  status.append(node("strong",title),reviewHelp());
+  target.append(status,bar,line(copied+" kopiert · "+failed+" fehlgeschlagen · "+pending+" ausstehend"));
+  if(pending && !running && !recoveryOnly)target.append(action("Kopierauftrag fortsetzen",async()=>{
+    await api(jobPath("/review/batch/resume"),"POST");await refreshReviewView();
+  },true));
+}
+function scheduleReviewPoll(){
+  clearTimeout(reviewTimer);
+  if(!reviewBatch.running)return;
+  const requested=jobId;
+  reviewTimer=setTimeout(async()=>{
+    try{
+      const status=await api(jobPath("/review/batch"));
+      if(requested!==jobId)return;
+      reviewBatch=status;
+      if(!status.running && !dirty.size){
+        previewRevision=-1;await refreshReviewView();
+      }else{
+        renderReviewProgress();
+        scheduleReviewPoll();
       }
+    }catch(error){report(error.message);scheduleReviewPoll();}
+  },1200);
+}
+function appendCaptureEvidence(target, metadata){
+  if(!metadata)return;
+  if(metadata.selected_capture_time){
+    const source=metadata.selected_capture_source || "";
+    const inherited={family_inheritance:"Von Dateifamilie übernommen",family_subsecond_inheritance:"Genauere Uhrzeit aus Dateifamilie"}[source];
+    const evidence=node("p");
+    evidence.append(node("span","Ermittelte Aufnahmezeit"),": ",node("code",metadata.selected_capture_time));
+    if(source)evidence.append(" · ",node(inherited?"span":"code",inherited || source));
+    target.append(evidence);
+  }
+  for(const candidate of metadata.metadata_candidates || []){
+    target.append(line([candidate.technical_tag,candidate.normalized_datetime || candidate.raw_value].filter(Boolean).join(" · ")));
+  }
+}
+function showReview(target) {
+  let cursor="";
+  const toolbar=node("div",undefined,"inline");
+  const list=node("div");
+  const selectionCount=slot("review-selection","span");
+  const selectAll=action("Alle geeigneten Prüffälle auswählen",async()=>{
+    reviewSelection=new Set(await api(jobPath("/review/selection")));
+    syncSelection();
+  },false,()=>syncSelection());
+  const clearSelection=action("Auswahl aufheben",()=>{
+    reviewSelection.clear();syncSelection();
+  },false,()=>syncSelection());
+  const copy=action("Zur Metadatenkorrektur kopieren",async()=>{
+    requireSaved();
+    if(!confirm(t("Arbeitskopien im Workspace benötigen zusätzlichen Speicherplatz. Ausgewählte Dateifamilien jetzt kopieren?")))return;
+    reviewSubmitting=true;
+    syncSelection();
+    try{
+      await api(jobPath("/review/batch"),"POST",{family_keys:[...reviewSelection]});
+      reviewSelection.clear();previewRevision=-1;
+    }finally{
+      reviewSubmitting=false;
+      await refreshReviewView();
     }
-    if (item.target_relative) row.append(line("Arbeitsordner in General · "+item.target_relative));
-    if (!recoveryOnly && item.can_copy) row.append(action("Zur Metadatenkorrektur kopieren",async()=>{
-      if (!confirm("Die vollständige Dateifamilie benötigt zusätzlichen Speicherplatz im Workspace. Jetzt nach General kopieren?")) return;
-      await api(jobPath("/review/copy"),"POST",{family_key:item.family_key});
-      await showReview(true);
-    }));
-    target.append(row);
+  },true,()=>syncSelection());
+  function syncSelection(){
+    const blocked=reviewBusy() || recoveryOnly || job.state!=="inventoried" || job.plan.execution;
+    selectAll.disabled=Boolean(blocked);
+    clearSelection.disabled=Boolean(blocked || !reviewSelection.size);
+    copy.disabled=Boolean(blocked || !reviewSelection.size);
+    selectionCount.textContent=reviewSelection.size+" ausgewählt";
+    for(const checkbox of list.querySelectorAll("input[type=checkbox]")){
+      checkbox.checked=reviewSelection.has(checkbox.value);
+      checkbox.disabled=Boolean(blocked || !checkbox.dataset.copyable);
+    }
   }
-  if (rows.length===60) {
-    reviewCursor=rows.at(-1).family_key;
-    const more=action("Weitere Prüffälle",()=>showReview());
-    more.className="more";
-    target.append(more);
+  if(!recoveryOnly && job.state==="inventoried" && !job.plan.execution){
+    toolbar.append(selectAll,clearSelection,copy,selectionCount);
+    if(!reviewBatch.total)toolbar.append(reviewHelp());
   }
+  target.className="adoption-review-cases";
+  target.replaceChildren(node("h3","Prüffälle"),
+    line("Ungeklärte Dateifamilien bleiben an der Quelle. Fertige Arbeitskopien in General bleiben auch nach dem Verwerfen erhalten."),
+    toolbar,list);
+  const more=action("Weitere Prüffälle",load);
+  async function load(){
+    const rows=await api(jobPath("/review?"+new URLSearchParams({after:cursor})));
+    if(!target.isConnected)return;
+    more.remove();
+    for(const item of rows){
+      const entry=node("div",undefined,"row adoption-review-row");
+      const checkbox=node("input");checkbox.type="checkbox";checkbox.value=item.family_key;
+      checkbox.setAttribute("aria-label","Dateifamilie auswählen: "+item.family_key);
+      if(item.can_copy)checkbox.dataset.copyable="yes";
+      else reviewSelection.delete(item.family_key);
+      checkbox.addEventListener("change",()=>{
+        if(checkbox.checked)reviewSelection.add(item.family_key);
+        else reviewSelection.delete(item.family_key);
+        syncSelection();
+      });
+      const row=node("details");
+      row.open=reviewOpened.has(item.family_key);
+      row.addEventListener("toggle",()=>{
+        if(row.open)reviewOpened.add(item.family_key);else reviewOpened.delete(item.family_key);
+      });
+      const summary=node("summary");
+      const name=node("strong",item.family_key);name.dataset.bkPreserveLanguage="";
+      summary.append(name," · ",node("span",reviewStates[item.state],"subtle"));
+      const reasons=node("small");
+      item.reasons.forEach((reason,index)=>{
+        if(index)reasons.append(" · ");
+        reasons.append(node("span",reviewReasons[reason] || reason));
+      });
+      row.append(summary);
+      reasons.className="subtle";
+      if(item.copy_error){
+        const error=node("span",item.copy_error,"adoption-review-error");
+        summary.append(node("br"),error);
+      }
+      for(const file of item.files){
+        const path=node("code",file.relative_path);path.dataset.bkPreserveLanguage="";
+        const fileRow=node("p");fileRow.append(path);row.append(fileRow);
+        if(file.error)row.append(line(file.error));
+        appendCaptureEvidence(row,file.metadata);
+      }
+      if(item.target_relative && item.state==="copied")row.append(line("Arbeitsordner in General · "+item.target_relative));
+      summary.append(node("br"),reasons);
+      entry.append(checkbox,row);list.append(entry);
+    }
+    if(rows.length===60){cursor=rows.at(-1).family_key;list.append(more);}
+    syncSelection();
+  }
+  syncSelection();
+  load().catch(error=>report(error.message));
 }
 async function showFamilies() {
   const target=$("families");
   target.querySelector(".more")?.remove();
-  const rows=await api(jobPath("/families?"+new URLSearchParams({day,after:familyCursor})));
+  const requestedDay=day;
+  const query=new URLSearchParams({after:familyCursor});
+  if(requestedDay!==null)query.set("day",requestedDay);
+  const rows=await api(jobPath("/families?"+query));
+  if(!target.isConnected || requestedDay!==day)return;
   for (const family of rows) {
     const row=node("details",undefined,"row");
     watchDraft(row);
@@ -853,9 +1026,7 @@ async function showFamilies() {
     row.append(summary);
     for (const file of family.files) {
       row.append(line(file.filename+" · "+file.media_type+" · "+file.size_bytes+" Bytes"));
-      for (const candidate of file.metadata_candidates.filter(item=>item.usable)) {
-        row.append(node("small",candidate.technical_tag+" · "+candidate.normalized_datetime),node("br"));
-      }
+      appendCaptureEvidence(row,file);
     }
     for (const error of family.errors) row.append(line(error.relative_path+" · "+t(error.message)));
     const [wrap,input]=field("Bestätigte Aufnahmezeit mit optionalem UTC-Offset","text",capture==="Aufnahmezeit offen"?"":capture);
