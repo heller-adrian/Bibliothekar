@@ -4308,6 +4308,11 @@ BIBLIOTHEKAR_JS = r"""
     button.addEventListener("click", () => setSettingsArea(button.dataset.bkSettingsArea));
   });
   setSettingsArea("appearance");
+  if (new URLSearchParams(location.search).get("settings") === "libraries") {
+    setSettingsArea("libraries");
+    openDialog("bk-settings-dialog");
+    bkRefreshLibraryManagement();
+  }
 
   document.querySelector("[data-bk-open-settings]")?.addEventListener("click", () => {
     openDialog("bk-settings-dialog");
@@ -4401,6 +4406,8 @@ BIBLIOTHEKAR_JS = r"""
       +'<div class="bk-library-actions">'
       +'<button type="button" data-bk-library-save>Speichern</button>'
       +'<button type="button" data-bk-library-check>Prüfen</button>'
+      +(!inactive?'<button type="button" data-bk-library-adopt>Bestehende Sammlung übernehmen</button>'
+        +'<a href="/legacy-adoption/history?library='+encodeURIComponent(id)+'">Übernahmehistorie</a>':'')
       +(row.is_main?'':(
         inactive
           ? '<button type="button" data-bk-library-activate class="bk-positive-action">Aktivieren</button>'
@@ -4443,6 +4450,28 @@ BIBLIOTHEKAR_JS = r"""
       const name = card.querySelector("[data-bk-library-name]");
       const work = card.querySelector("[data-bk-library-work]");
       const archive = card.querySelector("[data-bk-library-archive]");
+      const adopt = card.querySelector("[data-bk-library-adopt]");
+      adopt?.addEventListener("click", async () => {
+        adopt.disabled = true;
+        try {
+          const params = new URLSearchParams({library:id,mode:"library"});
+          const result = await bkJson("/api/legacy-adoption/eligibility?"+params);
+          if (result.eligible) {
+            window.location.assign("/legacy-adoption?"+params);
+            return;
+          }
+          const translate = text => window.BibliothekarI18n?.t(text) || text;
+          const messages = result.blockers.map(text => {
+            const separator = text.indexOf(": ");
+            return separator === -1 ? translate(text) : translate(text.slice(0,separator))+text.slice(separator);
+          });
+          setLibraryCardStatus(card, messages.join("\n"));
+        } catch (error) {
+          setLibraryCardStatus(card, error.message);
+        } finally {
+          adopt.disabled = false;
+        }
+      });
       card.querySelector("[data-bk-library-save]")?.addEventListener("click", async () => {
         try {
           await bkJson("/api/libraries/"+encodeURIComponent(id), {
@@ -4618,89 +4647,18 @@ BIBLIOTHEKAR_JS = r"""
   const folderSettings = document.getElementById("bk-folder-layout-settings");
   let folderLayoutState = null;
 
-  function bkNodeId() {
-    return (globalThis.crypto?.randomUUID?.() || ("node-" + Date.now() + "-" + Math.random().toString(16).slice(2))).replaceAll("/", "-");
-  }
-
-  function bkFlattenLayout(nodes, prefix="") {
-    const rows=[];
-    for (const node of (nodes||[])) {
-      const path=prefix ? prefix + "/" + node.name : node.name;
-      rows.push({node,path});
-      rows.push(...bkFlattenLayout(node.children||[],path));
-    }
-    return rows;
-  }
-
-  function bkFindParent(nodes, id, parent=null) {
-    for (const node of (nodes||[])) {
-      if (node.id===id) return {node,parent,nodes};
-      const hit=bkFindParent(node.children||[],id,node);
-      if(hit) return hit;
-    }
-    return null;
-  }
-
+  const {nodeId:bkNodeId, flatten:bkFlattenLayout} = window.BibliothekarFolderLayout;
   function bkRenderFolderLayout() {
     if(!folderSettings || !folderLayoutState) return;
-    const host=document.getElementById("bk-folder-layout-tree");
     const enabled=document.getElementById("bk-folder-layout-enabled");
-    enabled.checked=Boolean(folderLayoutState.structure_enabled);
-    const flattened=bkFlattenLayout(folderLayoutState.layout?.nodes||[]);
-    const exportSelect=document.getElementById("bk-folder-export-node");
-    if(exportSelect){
-      const selectedExport=flattened.find(item=>String(item.node?.role||"").toLowerCase()==="export");
-      exportSelect.innerHTML='<option value="">Kein Ordner fest als Exportordner klassifiziert</option>'
-        + flattened.map(item=>'<option value="'+String(item.node.id).replaceAll('"','&quot;')+'">'
-          +String(item.path).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;')
-          +'</option>').join('');
-      exportSelect.value=selectedExport ? String(selectedExport.node.id) : "";
-    }
-    const rows=[{node:null,path:"",depth:0},...flattened.map(item=>({...item,depth:item.path.split("/").length}))];
-    host.innerHTML=rows.map(item=>{
-      const root=item.node===null;
-      const checked=String(folderLayoutState.input_path||"")===item.path;
-      if(root) return '<label class="bk-folder-input-root"><input class="bk-folder-input-radio" data-bk-input-node="" type="radio" name="bk-input-folder" value="" '+(checked?'checked':'')+'><strong>Direkt im Ereignis</strong><span style="color:var(--bk-muted)">Input</span></label>';
-      const id=String(item.node.id).replaceAll('"','&quot;');
-      const name=String(item.node.name).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
-      const pad=Math.max(0,(item.depth-1)*20);
-      return '<div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;gap:7px;align-items:center;margin-left:'+pad+'px">'
-        +'<input class="bk-folder-input-radio" data-bk-input-node="'+id+'" type="radio" name="bk-input-folder" value="'+String(item.path).replaceAll('"','&quot;')+'" '+(checked?'checked':'')+' title="Als Input-Ordner">'
-        +'<input data-bk-layout-name="'+id+'" value="'+name+'" aria-label="Ordnername">'
-        +'<button type="button" data-bk-layout-child="'+id+'" title="Unterordner hinzufügen">＋</button>'
-        +'<button type="button" data-bk-layout-remove="'+id+'" class="danger-button" title="Ordner entfernen">×</button>'
-        +'<span style="color:var(--bk-muted);font-size:.82rem">'+(checked?'Input':'')+'</span></div>';
-    }).join("");
-    host.querySelectorAll("[data-bk-layout-name]").forEach(input=>input.addEventListener("input",()=>{
-      const selected=host.querySelector('input[name="bk-input-folder"]:checked');
-      const selectedNodeId=String(selected?.dataset?.bkInputNode||"");
-      const found=bkFindParent(folderLayoutState.layout.nodes,input.dataset.bkLayoutName);
-      if(found) found.node.name=input.value;
-      if(selectedNodeId){
-        const selectedRow=bkFlattenLayout(folderLayoutState.layout.nodes).find(item=>String(item.node?.id||"")===selectedNodeId);
-        folderLayoutState.input_path=selectedRow?.path||"";
-      }else if(selected){
-        folderLayoutState.input_path=selected.value;
-      }
-      bkUpdateSettingsPreview();
-    }));
-    host.querySelectorAll("[data-bk-layout-child]").forEach(button=>button.addEventListener("click",()=>{
-      const found=bkFindParent(folderLayoutState.layout.nodes,button.dataset.bkLayoutChild);
-      if(found){found.node.children=found.node.children||[];found.node.children.push({id:bkNodeId(),name:"Neuer Ordner",children:[]});bkRenderFolderLayout();}
-    }));
-    host.querySelectorAll("[data-bk-layout-remove]").forEach(button=>button.addEventListener("click",()=>{
-      const found=bkFindParent(folderLayoutState.layout.nodes,button.dataset.bkLayoutRemove);
-      if(!found)return;
-      const removedPath=bkFlattenLayout([found.node]).map(x=>x.path);
-      const index=found.nodes.findIndex(n=>n.id===found.node.id);
-      if(index>=0)found.nodes.splice(index,1);
-      if(removedPath.some(p=>String(folderLayoutState.input_path||"").endsWith(p)))folderLayoutState.input_path="";
-      bkRenderFolderLayout();
-    }));
-    host.querySelectorAll('input[name="bk-input-folder"]').forEach(radio=>radio.addEventListener("change",()=>{
-      if(radio.checked){folderLayoutState.input_path=radio.value;bkRenderFolderLayout();}
-    }));
-    bkUpdateSettingsPreview();
+    if(enabled) enabled.checked=Boolean(folderLayoutState.structure_enabled);
+    window.BibliothekarFolderLayout.render({
+      state:folderLayoutState,
+      host:document.getElementById("bk-folder-layout-tree"),
+      exportSelect:document.getElementById("bk-folder-export-node"),
+      onChange:bkUpdateSettingsPreview,
+      manageExport:false,
+    });
   }
 
   async function bkLoadFolderLayout() {
@@ -5741,6 +5699,9 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
 </section>
 """
 
+    if subarea == "adoption":
+        heading = ""  # The full-page workflow provides its own step heading.
+
     return f"""
 <header class="bk-shell">
   <a class="bk-brand bk-brand-new" href="/" aria-label="Bibliothekar Startseite">
@@ -5970,6 +5931,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <section class="bk-settings-group" id="bk-library-settings">
         <div><strong>Bibliotheken</strong><div style="color:var(--bk-muted);margin-top:4px">Anzeigenamen, Arbeitsbereiche und einzeln gemountete Archive verwalten</div></div>
         <div id="bk-library-management-list" class="bk-library-list"></div>
+
         <details class="bk-library-add-card">
           <summary>Bibliothek hinzufügen</summary>
           <div class="bk-library-form">
@@ -6011,7 +5973,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>1.0.0</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>1.0.1</span></p>
   </div>
 </dialog>
 
@@ -6560,7 +6522,8 @@ BIBLIOTHEKAR_0444_JS = r"""
       renderPageActivity(ops);
       window.dispatchEvent(new CustomEvent("bk-activity-updated", {detail: ops}));
       const active = ops.filter(item => item.active);
-      const finished = ops.filter(item => !item.active);
+      const finished = ops.filter(item => !item.active && !["completed","applied"].includes(item.status))
+        .concat(ops.filter(item => !item.active && ["completed","applied"].includes(item.status)));
       lastSeen = active.concat(finished).slice(0,5);
       box.hidden = lastSeen.length === 0;
       if (!box.hidden) {
@@ -7869,7 +7832,202 @@ BIBLIOTHEKAR_0553_POLISH_CSS = r"""
 }
 """
 
-def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> str:
+FOLDER_LAYOUT_JS = r"""
+(() => {
+  function bkNodeId() {
+    return (globalThis.crypto?.randomUUID?.() || ("node-" + Date.now() + "-" + Math.random().toString(16).slice(2))).replaceAll("/", "-");
+  }
+
+  function bkFlattenLayout(nodes, prefix="") {
+    const rows=[];
+    for (const node of (nodes||[])) {
+      const path=prefix ? prefix + "/" + node.name : node.name;
+      rows.push({node,path});
+      rows.push(...bkFlattenLayout(node.children||[],path));
+    }
+    return rows;
+  }
+
+  function bkFindParent(nodes, id, parent=null) {
+    for (const node of (nodes||[])) {
+      if (node.id===id) return {node,parent,nodes};
+      const hit=bkFindParent(node.children||[],id,node);
+      if(hit) return hit;
+    }
+    return null;
+  }
+
+  function render({state, host, exportSelect, radioName="bk-input-folder", onChange, manageExport=true}) {
+    const rerender=()=>render({state,host,exportSelect,radioName,onChange,manageExport});
+    const changed=()=>onChange?.(state);
+    const flattened=bkFlattenLayout(state.layout?.nodes||[]);
+    if(exportSelect){
+      const selectedExport=flattened.find(item=>String(item.node?.role||"").toLowerCase()==="export");
+      exportSelect.innerHTML='<option value="">Kein Ordner fest als Exportordner klassifiziert</option>'
+        + flattened.map(item=>'<option data-bk-preserve-language value="'+String(item.node.id).replaceAll('"','&quot;')+'">'
+          +String(item.path).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;')
+          +'</option>').join('');
+      exportSelect.value=selectedExport ? String(selectedExport.node.id) : "";
+    }
+    const rows=[{node:null,path:"",depth:0},...flattened.map(item=>({...item,depth:item.path.split("/").length}))];
+    host.innerHTML=rows.map(item=>{
+      const root=item.node===null;
+      const checked=String(state.input_path||"")===item.path;
+      if(root) return '<label class="bk-folder-input-root"><input class="bk-folder-input-radio" data-bk-input-node="" type="radio" name="'+radioName+'" value="" '+(checked?'checked':'')+'><strong>Direkt im Ereignis</strong><span style="color:var(--bk-muted)">Input</span></label>';
+      const id=String(item.node.id).replaceAll('"','&quot;');
+      const name=String(item.node.name).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
+      const pad=Math.max(0,(item.depth-1)*20);
+      return '<div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;gap:7px;align-items:center;margin-left:'+pad+'px">'
+        +'<input class="bk-folder-input-radio" data-bk-input-node="'+id+'" type="radio" name="'+radioName+'" value="'+String(item.path).replaceAll('"','&quot;')+'" '+(checked?'checked':'')+' title="Als Input-Ordner">'
+        +'<input data-bk-layout-name="'+id+'" value="'+name+'" aria-label="Ordnername">'
+        +'<button type="button" data-bk-layout-child="'+id+'" title="Unterordner hinzufügen">＋</button>'
+        +'<button type="button" data-bk-layout-remove="'+id+'" class="danger-button" title="Ordner entfernen">×</button>'
+        +'<span style="color:var(--bk-muted);font-size:.82rem">'+(checked?'Input':'')+'</span></div>';
+    }).join("");
+    host.querySelectorAll("[data-bk-layout-name]").forEach(input=>input.addEventListener("input",()=>{
+      const selected=host.querySelector('[data-bk-input-node]:checked');
+      const selectedNodeId=String(selected?.dataset?.bkInputNode||"");
+      const found=bkFindParent(state.layout.nodes,input.dataset.bkLayoutName);
+      if(found) found.node.name=input.value;
+      if(selectedNodeId){
+        const selectedRow=bkFlattenLayout(state.layout.nodes).find(item=>String(item.node?.id||"")===selectedNodeId);
+        state.input_path=selectedRow?.path||"";
+      }else if(selected){
+        state.input_path=selected.value;
+      }
+      changed();
+    }));
+    host.querySelectorAll("[data-bk-layout-child]").forEach(button=>button.addEventListener("click",()=>{
+      const found=bkFindParent(state.layout.nodes,button.dataset.bkLayoutChild);
+      if(found){found.node.children=found.node.children||[];found.node.children.push({id:bkNodeId(),name:"Neuer Ordner",children:[]});rerender();}
+    }));
+    host.querySelectorAll("[data-bk-layout-remove]").forEach(button=>button.addEventListener("click",()=>{
+      const found=bkFindParent(state.layout.nodes,button.dataset.bkLayoutRemove);
+      if(!found)return;
+      const removedPath=bkFlattenLayout([found.node]).map(x=>x.path);
+      const index=found.nodes.findIndex(n=>n.id===found.node.id);
+      if(index>=0)found.nodes.splice(index,1);
+      if(removedPath.some(p=>String(state.input_path||"").endsWith(p)))state.input_path="";
+      rerender();
+    }));
+    host.querySelectorAll('[data-bk-input-node]').forEach(radio=>radio.addEventListener("change",()=>{
+      if(radio.checked){state.input_path=radio.value;rerender();}
+    }));
+    if(manageExport && exportSelect) exportSelect.onchange=()=>{
+      for(const item of bkFlattenLayout(state.layout.nodes)){
+        if(item.node.role==="export")delete item.node.role;
+        if(item.node.id===exportSelect.value)item.node.role="export";
+      }
+      changed();
+    };
+    changed();
+  }
+  function eventEditor({saved,defaults,inherit=false,allowDisabled=true,translate=value=>value}) {
+    const el=(tag,text)=>{
+      const node=document.createElement(tag);
+      if(text)node.textContent=translate(text);
+      return node;
+    };
+    const panel=el("details");
+    panel.className="bk-event-layout-editor";
+    const type=el("select");
+    type.setAttribute("aria-label",translate("Unterordnerstruktur"));
+    const defaultMode=inherit?"inherit":"default";
+    const modes=[["default","Bibliotheksstandard"],["custom","Eigene Ordnerstruktur"]];
+    if(allowDisabled)modes.push(["disabled","Ohne zusätzliche Ordner"]);
+    if(inherit)modes.unshift(["inherit","Struktur des Ereignisses übernehmen"]);
+    for(const [value,label] of modes){
+      const option=el("option",label);option.value=value;type.append(option);
+    }
+    type.value=saved?.mode==="default" ? "default" : allowDisabled && saved?.structure_enabled===false ? "disabled" :
+      saved?.layout ? "custom" : defaultMode;
+    const custom=el("div"),tree=el("div"),exportSelect=el("select");
+    custom.className="bk-event-layout-fields";
+    const exportLabel=el("label","Exportordner");exportLabel.append(exportSelect);
+    const state=structuredClone(saved?.layout?saved:defaults||{structure_enabled:true,input_path:"",layout:{version:2,nodes:[]}});
+    const radioName="event-folder-layout-"+bkNodeId();
+    let initializing=true;
+    function notify(){if(!initializing)panel.dispatchEvent(new Event("input",{bubbles:true}));}
+    function update(){
+      custom.hidden=type.value!=="custom";
+      if(!custom.hidden)render({state,host:tree,exportSelect,radioName,onChange:notify});
+    }
+    const add=el("button","Ordner hinzufügen");add.type="button";
+    add.addEventListener("click",()=>{
+      state.layout.nodes.push({id:bkNodeId(),name:translate("Neuer Ordner"),children:[]});
+      update();
+    });
+    type.addEventListener("change",()=>{update();notify();});
+    custom.append(tree,add,exportLabel);
+    panel.append(el("summary","Unterordnerstruktur"),type,custom);
+    update();initializing=false;
+    function value(){
+      if(type.value==="inherit")return undefined;
+      if(type.value==="default")return {mode:"default"};
+      if(type.value==="disabled")return {...structuredClone(state),structure_enabled:false};
+      return {...structuredClone(state),structure_enabled:true};
+    }
+    return {panel,value,draft:()=>structuredClone(state)};
+  }
+  function subeventEditor({checkbox,saved,defaults,translate}){
+    // RC8's folderless children keep their physical placement on edit.
+    const hasEventFolder=(saved?.folder_name ?? (saved?.create_subfolder===false ? "" : null))!=="";
+    const editor=eventEditor({saved:saved?.folder_layout,defaults,inherit:true,allowDisabled:false,translate});
+    checkbox.checked=saved?.folder_layout?.structure_enabled!==false && hasEventFolder;
+    checkbox.disabled=!hasEventFolder;
+    if(!hasEventFolder)checkbox.title=(translate || (text=>text))("Bestehendes Unterereignis ohne eigenen Ereignisordner");
+    let changed=false;
+    const sync=()=>{editor.panel.hidden=!checkbox.checked;};
+    checkbox.addEventListener("change",()=>{changed=true;sync();});sync();
+    editor.panel.addEventListener("input",()=>{changed=true;});
+    return {panel:editor.panel, value:({preserveSaved=false}={})=>{
+      if(!hasEventFolder || (preserveSaved && saved?.id && !changed))return {create_subfolder:hasEventFolder};
+      return {
+        create_subfolder:true,
+        folder_layout:checkbox.checked ? (editor.value() || (preserveSaved ? {mode:"inherit"} : undefined)) :
+          {...editor.draft(), structure_enabled:false},
+      };
+    }};
+  }
+  function expandCard(details, surface=details){
+    surface.addEventListener("click",event=>{
+      if(!details.open && !event.target.closest("summary,button,input,label,select"))details.open=true;
+    });
+  }
+  window.BibliothekarFolderLayout={render,nodeId:bkNodeId,flatten:bkFlattenLayout,eventEditor,subeventEditor,expandCard};
+
+})();
+"""
+
+
+_BRAND_HEADER_CSS = """
+:root{--bk-brand-header:#15222c;--bk-brand-header-ink:#f8f4e9;--bk-on-blue:#fff}
+html[data-bk-theme="dark"]{--bk-on-blue:#07141d}
+.bk-shell,.bk-setup-banner{background:var(--bk-brand-header);color:var(--bk-brand-header-ink)}
+"""
+
+_EVENT_LAYOUT_CSS = """
+.bk-event-layout-editor{min-width:0}
+.bk-event-layout-editor > summary{cursor:pointer;padding-block:5px}
+.bk-event-layout-editor > select,.bk-event-layout-fields select{width:100%;min-width:0}
+.bk-event-layout-editor > select{margin-top:6px}
+.bk-event-layout-fields{display:grid;gap:10px;margin-top:10px}
+.bk-event-layout-fields[hidden]{display:none}
+.bk-event-layout-fields > button{justify-self:start}
+.bk-event-layout-fields .bk-folder-input-root{padding-block:5px;margin-block-end:6px}
+.bk-subevent-name-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center}
+.bk-subevent-name-row > label:last-child{display:flex;align-items:center;gap:6px;margin:0}
+.bk-subevent-name-row > label:last-child input{width:auto}
+.adoption-child-header > details{flex:1;min-width:0}
+.adoption-child-header summary{padding-block:5px}
+.create-subevent-card:not([open]),.child-segment-card:not([open]){padding-block:5px}
+.create-subevent-card > summary,.child-segment-card > summary{min-height:32px;cursor:pointer}
+@media(max-width:420px){.bk-subevent-name-row{grid-template-columns:1fr}}
+"""
+
+
+def apply_shell(html: str, *, active_area: str, subarea: str | None = None,
+                localization_js: str | None = None) -> str:
     result = re.sub(
         r"(<head(?:\s[^>]*)?>)",
         lambda match: match.group(0) + f'\n<script src="/auth/client.js"></script>\n<script>{BIBLIOTHEKAR_0505_LANGUAGE_HEAD_JS}</script>\n<style>{BIBLIOTHEKAR_0505_LANGUAGE_CSS}</style>\n<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n<script>{BIBLIOTHEKAR_0470_HEAD_JS}</script>\n',
@@ -7883,7 +8041,7 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         '<link rel="icon" type="image/svg+xml" href="/assets/bibliothekar-logo-symbol-background.svg?v=0.56.2">\n'
         '<link rel="apple-touch-icon" sizes="192x192" href="/assets/bibliothekar-icon-192.png?v=0.56.2">\n'
         '<meta name="apple-mobile-web-app-capable" content="yes">\n'
-        f"<style>{BIBLIOTHEKAR_CSS}</style>\n"
+        f"<style>{BIBLIOTHEKAR_CSS}\n{_BRAND_HEADER_CSS}\n{_EVENT_LAYOUT_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0310_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0311_CSS}</style>\n"
         f"<style>{BIBLIOTHEKAR_0350_CSS}</style>\n"
@@ -7936,11 +8094,12 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
         + f"<script>{BIBLIOTHEKAR_BOOTSTRAP_JS}</script>\n"
         + _shell_markup(area, subarea)
         + f"<script>{BIBLIOTHEKAR_0552_EARLY_LINKS_JS}</script>\n"
-        + f"<script>{I18N_UI_JS}</script>\n",
+        + f"<script>{I18N_UI_JS if localization_js is None else localization_js}</script>\n",
         1,
     )
     result = result.replace(
         "</body>",
+        f"<script>{FOLDER_LAYOUT_JS}</script>\n"
         f"<script>{BIBLIOTHEKAR_JS}</script>\n"
         f"<script>{BIBLIOTHEKAR_0444_JS}</script>\n"
         '<script>document.getElementById("bk-sign-out")?.addEventListener("click",async()=>{'
@@ -7950,3 +8109,90 @@ def apply_shell(html: str, *, active_area: str, subarea: str | None = None) -> s
     )
     from app.operation_ui import NOTICE
     return result.replace('</body>', NOTICE + '</body>')
+
+
+SETUP_THEME_CONTROL = """
+<label>Darstellung
+  <select id="bk-setup-theme">
+    <option value="system">System</option><option value="light">Hell</option><option value="dark">Dunkel</option>
+  </select>
+</label>
+"""
+
+SETUP_BANNER = f"""
+<header class="bk-setup-banner">
+  <img src="/assets/bibliothekar-logo-v3.svg?v=0.56.2" alt="Bibliothekar" width="190" height="52">
+  <div class="bk-setup-appearance">
+    {SETUP_THEME_CONTROL}
+    <div role="group" aria-label="Language / Sprache">
+      <button type="button" data-bk-language-choice="en">EN</button>
+      <button type="button" data-bk-language-choice="de">DE</button>
+    </div>
+  </div>
+</header>
+"""
+
+SETUP_CSS = """
+.bk-setup-banner{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;
+padding:10px clamp(12px,3vw,32px);background:var(--bk-brand-header);color:var(--bk-brand-header-ink);border-bottom:1px solid var(--bk-line)}
+.bk-setup-banner img{box-sizing:content-box;object-fit:contain;padding:4px 0;max-width:100%}
+.bk-setup-appearance,.bk-setup-appearance label{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.bk-setup-appearance :is(button,select){min-height:32px;padding:4px 8px;border-radius:8px;border:1px solid var(--bk-line);background:var(--bk-surface);color:var(--bk-ink)}
+.bk-setup-appearance button[aria-pressed="true"]{border-color:var(--bk-blue);font-weight:750}
+body[data-bk-setup]{--bk-area-accent:var(--bk-blue)}
+body[data-bk-setup] main{max-width:none}
+body[data-bk-setup] [hidden]{display:none!important}
+.bk-setup-choice{width:min(760px,calc(100% - 32px));margin:clamp(24px,7vh,80px) auto}
+.bk-setup-choice section{padding:clamp(20px,4vw,36px);border:1px solid var(--bk-line);
+border-radius:var(--bk-radius);background:var(--bk-surface);box-shadow:var(--bk-shadow)}
+.bk-setup-choice h1{margin-top:0}
+.bk-setup-choice-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr));gap:12px;margin-top:24px}
+.bk-setup-choice-actions :is(a,button){display:flex;align-items:center;justify-content:center;text-align:center;
+box-sizing:border-box;min-height:48px;padding:10px 16px;border:1px solid var(--bk-line);border-radius:10px;
+background:var(--bk-surface-2);color:var(--bk-ink);font:inherit;font-weight:650;text-decoration:none}
+.bk-setup-choice-actions .primary{background:var(--bk-blue);color:var(--bk-on-blue);border-color:transparent}
+.bk-setup-choice-actions :focus-visible{outline:2px solid var(--bk-blue);outline-offset:3px}
+"""
+
+SETUP_CONTROL_CSS = """
+#bk-setup-theme{min-height:36px;max-width:14rem;padding:6px 10px;border:1px solid var(--bk-line);
+  border-radius:8px;background:var(--bk-surface-2);color:var(--bk-ink);font:inherit}
+#bk-setup-theme:hover{border-color:var(--bk-muted)}
+#bk-setup-theme:focus-visible{outline:2px solid var(--bk-blue);outline-offset:2px}
+"""
+
+SETUP_THEME_JS = """
+(() => {
+  const root=document.documentElement, select=document.getElementById("bk-setup-theme");
+  const system=matchMedia("(prefers-color-scheme: dark)");
+  select.value=root.dataset.bkThemeChoice;
+  function update() {
+    root.dataset.bkThemeChoice=select.value;
+    root.dataset.bkTheme=select.value==="dark" || (select.value==="system" && system.matches) ? "dark" : "light";
+  }
+  select.addEventListener("change",()=>{
+    try { localStorage.setItem("bibliothekar-theme",select.value); } catch (_) {}
+    update();
+  });
+  system.addEventListener?.("change",update);
+})();
+"""
+
+
+def apply_setup_shell(html: str, *, localization_js: str = I18N_UI_JS) -> str:
+    """Use the shared visual system without installing app navigation or its clients."""
+    html = html.replace("<head>", "<head>\n"
+        '<script src="/auth/client.js"></script>\n'
+        f"<script>{BIBLIOTHEKAR_0505_LANGUAGE_HEAD_JS}</script>\n"
+        f"<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>\n", 1)
+    html = html.replace("</head>",
+        '<link rel="icon" type="image/svg+xml" href="/assets/bibliothekar-logo-symbol-background.svg">\n'
+        f"<style>{BIBLIOTHEKAR_CSS}\n{BIBLIOTHEKAR_0451_CSS}\n{BIBLIOTHEKAR_0505_LANGUAGE_CSS}\n{_BRAND_HEADER_CSS}\n{SETUP_CSS}\n{SETUP_CONTROL_CSS}</style>\n"
+        f"<style>{_EVENT_LAYOUT_CSS}</style>\n"
+        "</head>", 1)
+    return html.replace("<body>",
+        '<body class="bibliothekar-redesign" data-bk-setup="true">\n'
+        + SETUP_BANNER
+        + f"<script>{SETUP_THEME_JS}</script>\n"
+        + f"<script>{localization_js}</script>\n"
+        + f"<script>{FOLDER_LAYOUT_JS}</script>\n", 1)

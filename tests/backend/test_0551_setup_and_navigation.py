@@ -13,15 +13,24 @@ from app.workspace_layout import ensure_workspace_layout
 
 def test_0551_bilingual_first_run():
     assert __version__ == EXPECTED_RELEASE_VERSION
-    for html in (_login_html(), _login_html(unavailable=True), _library_onboarding_html()):
+    for html in (_login_html(), _login_html(unavailable=True)):
         assert 'data-bk-setup-choice="en"' in html
         assert 'data-bk-setup-choice="de"' in html
         assert 'localStorage.setItem(key,l)' in html
         assert "bibliothekar-language" in html
         assert "bk-language-changed" in html
         assert "data-bk-setup-title-de" in html
-    assert "Set up your first library" in _library_onboarding_html()
-    assert "Check and create library" in _library_onboarding_html()
+    onboarding = _library_onboarding_html()
+    header = onboarding.split('<header class="bk-setup-banner">', 1)[1].split("</header>", 1)[0]
+    for language in ("en", "de"):
+        assert f'data-bk-language-choice="{language}"' in header
+    assert 'id="bk-setup-theme"' in header
+    assert onboarding.count('id="bk-setup-theme"') == 1
+    assert "bibliothekar-language" in onboarding
+    assert "bk-language-changed" in onboarding
+    assert "data-bk-setup-title-de" in onboarding
+    assert "Set up your first library" in onboarding
+    assert "Check and create library" in onboarding
     assert "Administratorpasswort" in _login_html()
     assert "Es ist noch kein Administratorpasswort eingerichtet." in _login_html(unavailable=True)
 

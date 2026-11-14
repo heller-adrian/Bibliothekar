@@ -16,9 +16,11 @@ import urllib.request
 import uuid
 import time
 import tempfile
+from functools import wraps
 
 from PIL import Image, ImageOps
 
+from fastapi.concurrency import contextmanager_in_threadpool
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from app import __version__
@@ -34,7 +36,8 @@ from app.trash import (
 )
 from app.ui_shell import apply_shell
 from app import view_cache
-from app.root_operations import RootOperationError, protect, reserve, mutate, assert_workspace_startable, _identity, generation, admission
+from app.legacy_adoption_mode import active_adoption, adoption_access, pending_initial_setup
+from app.root_operations import RootOperationBusy, RootOperationError, protect, reserve, mutate, assert_workspace_startable, _identity, generation, admission
 from app import background_mutation_cancel as cancel_queue
 from app.background_activity import current_activity, clear_finished_activity
 from app import ssd_release_background as release_queue
@@ -527,7 +530,20 @@ def _root_request(fn):
                     ident=kwargs.get('job_id') or (args[0] if args else None)
                     from app.root_operations import _read
                     accepted={p for p in accepted if _read(Path(p),{}).get('ids',{}).get('job_id')==ident}
-                if accepted:retry=operation_health.qualified_retry(context.workspace_root,accepted)
+                elif fn.__name__=='api_archive_change':
+                    bound=__import__('inspect').signature(fn).bind(*args,**kwargs)
+                    ident=bound.arguments['cr_id']
+                    accepted={r['path'] for r in operation_health.inspect(context.workspace_root)['reservations']
+                              if not r['live'] and r['qualified'] and r.get('kind')=='archive'
+                              and r.get('library')==context.library_id
+                              and r.get('database')==str(context.database_path.absolute())
+                              and r.get('ids')=={'cr_id':ident,'function':'app.event_change_apply.finish_event_change'}}
+                if accepted:
+                    if fn.__name__=='api_archive_change':
+                        from app.archive_change_recovery import qualified_finish_retry
+                        retry=qualified_finish_retry(context.workspace_root,accepted)
+                    else:
+                        retry=operation_health.qualified_retry(context.workspace_root,accepted)
             from app.operation_scopes import admission as scoped_admission
             extra = ('metadata',) if 'metadata' in fn.__name__ else ()
             if fn.__name__=='api_correct_metadata':
@@ -541,9 +557,11 @@ def _root_request(fn):
             if 'trash' in fn.__name__:extra = (*extra, 'trash')
             with retry, scoped_admission(context.workspace_root, context.library_id, extra=extra), admission(context):
                 result=fn(*args,**kwargs)
-                if accepted and fn.__name__=='api_reintegrate_metadata_families':
+                if accepted and fn.__name__ in {'api_reintegrate_metadata_families','api_archive_change'}:
                     operation_health.finish_qualified_retry(context.workspace_root)
-            if accepted and fn.__name__=='api_reintegrate_metadata_families':
+            if accepted and (fn.__name__=='api_reintegrate_metadata_families'
+                             or (fn.__name__=='api_archive_change'
+                                 and operation_health.inspect(context.workspace_root)['issues'])):
                 startup_database()
             return result
         except RootOperationError as error:
@@ -778,6 +796,12 @@ def _default_requested_library_id() -> str:
 
 
 def _requested_library_id(request: Request) -> str:
+    adoption = getattr(request.state, "legacy_adoption", None)
+    if adoption is not None:
+        return adoption["library_id"]
+    setup = getattr(request.state, "initial_setup", None)
+    if setup is not None:
+        return setup["library_id"]
     fallback = _default_requested_library_id()
     return str(
         request.headers.get("X-Bibliothekar-Library")
@@ -792,6 +816,7 @@ CANCEL_WORKER_STOP = Event()
 CANCEL_WORKER_WAKE = Event()
 CANCEL_WORKER_THREAD: Thread | None = None
 WORKER_THREAD: Thread | None = None
+ADOPTION_STARTUP_THREAD: Thread | None = None
 IMPORT_CANCEL_LOCK = Lock()
 IMPORT_CANCEL_REQUESTS: set[str] = set()
 
@@ -1082,7 +1107,9 @@ def _onboarding_required() -> bool:
 
 
 def _library_onboarding_html() -> str:
-    from app.ui_i18n import I18N_UI_JS
+    from app.legacy_adoption_i18n import PATTERNS, TRANSLATIONS
+    from app.ui_i18n import i18n_ui_js
+    from app.ui_shell import BIBLIOTHEKAR_0451_HEAD_JS, BIBLIOTHEKAR_CSS, SETUP_BANNER, SETUP_CONTROL_CSS, SETUP_CSS, SETUP_THEME_JS, _BRAND_HEADER_CSS
     workspaces_root = str(
         storage_paths(WORKSPACE_PATH)["workspaces_root"]
     )
@@ -1093,17 +1120,21 @@ def _library_onboarding_html() -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Bibliothekar · Set up library</title>
 <script src="/auth/client.js"></script>
+<script>{BIBLIOTHEKAR_0451_HEAD_JS}</script>
+<style>{BIBLIOTHEKAR_CSS}{_BRAND_HEADER_CSS}{SETUP_CSS}{SETUP_CONTROL_CSS}</style>
 <style>
-:root{{color-scheme:dark;--bg:#0c1115;--surface:#172027;--border:#34414a;--text:#f2f4f5;--muted:#aeb8bf;--accent:#58aaf2;--danger:#ff716f}}
+:root{{--bg:var(--bk-paper);--surface:var(--bk-surface);--border:var(--bk-line);--text:var(--bk-ink);--muted:var(--bk-muted);--accent:var(--bk-blue);--danger:var(--bk-danger)}}
 *{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--text);font-family:Futura, "Helvetica Neue", Helvetica, Arial, sans-serif}}
 main{{width:min(760px,calc(100% - 32px));margin:7vh auto}} .card{{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:28px}}
-h1{{margin:0 0 8px;font-size:2rem}} p{{color:var(--muted);line-height:1.5}} label{{display:grid;gap:7px;margin:18px 0}}
-input{{width:100%;padding:13px 14px;border-radius:11px;border:1px solid var(--border);background:#10171c;color:var(--text);font:inherit}}
-button{{border:0;border-radius:11px;padding:13px 18px;background:var(--accent);color:white;font:inherit;font-weight:650;cursor:pointer}}
+h1{{margin:0 0 8px;font-size:2rem}} p{{color:var(--muted);line-height:1.5}} main label{{display:grid;gap:7px;margin:18px 0}}
+input{{width:100%;padding:13px 14px;border-radius:11px;border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit}}
+html[data-bk-theme=light]:has(body.bk-setup-page){{color-scheme:light}}
+body.bk-setup-page .card{{color:var(--text)}}
+main button{{border:0;border-radius:11px;padding:13px 18px;background:var(--accent);color:var(--bk-on-blue);font:inherit;font-weight:650;cursor:pointer}}
 button:disabled{{opacity:.45;cursor:default}} #status{{white-space:pre-wrap;margin-top:15px;color:var(--muted)}} #status.error{{color:var(--danger)}} .hint{{font-size:.9rem}}
 </style>
 </head>
-<body><main><section class="card">
+<body>{SETUP_BANNER}<main><section class="card">
 <h1>Erste Bibliothek einrichten</h1>
 <p>Bibliothekar besitzt noch keine Bibliothek. Lege jetzt Name, Arbeitsbereich und das in TrueNAS read-only gemountete Archiv fest. Es wird kein technischer <code>main</code>-Arbeitsordner angelegt.</p>
 <label>Bibliotheksname<input id="name" value="" placeholder="z. B. Kamerabibliothek"></label>
@@ -1116,18 +1147,22 @@ button:disabled{{opacity:.45;cursor:default}} #status{{white-space:pre-wrap;marg
 <script>
 const nameEl=document.getElementById("name"),workEl=document.getElementById("work"),archiveEl=document.getElementById("archive"),statusEl=document.getElementById("status"),button=document.getElementById("create");
 async function json(url,options={{}}){{const r=await fetch(url,options);let d={{}};try{{d=await r.json()}}catch{{}}if(!r.ok)throw new Error(typeof d.detail==="string"?d.detail:JSON.stringify(d.detail||d));return d}}
-button.addEventListener("click",async()=>{{button.disabled=true;statusEl.className="";statusEl.textContent="Bibliothek wird geprüft …";try{{
+let statusMessage="";
+function showSetupStatus(message=statusMessage){{statusMessage=message;
+statusEl.textContent=message.split("\\n").map(line=>window.BibliothekarI18n.t(line)).join("\\n")}}
+window.addEventListener("bk-language-changed",()=>showSetupStatus());
+button.addEventListener("click",async()=>{{button.disabled=true;statusEl.className="";showSetupStatus("Bibliothek wird geprüft …");try{{
 const payload={{display_name:nameEl.value,work_root:workEl.value,archive_root:archiveEl.value}};
 const managedName=String(payload.display_name||"Bibliothek").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,32)||"bibliothek";
 const check=await json("/api/libraries/check",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{work_root:payload.work_root,archive_root:payload.archive_root,default_library_id:payload.work_root?"":managedName}})}});
 if(!check.valid)throw new Error((check.errors||[]).join("\\n"));
 await json("/api/libraries",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify(payload)}});
-statusEl.textContent="Bibliothek eingerichtet. Bibliothekar wird geöffnet …";location.assign("/");
-}}catch(e){{statusEl.className="error";statusEl.textContent=e.message;button.disabled=false;}}}});
+showSetupStatus("Bibliothek eingerichtet. Bibliothekar wird geöffnet …");location.assign("/");
+}}catch(e){{statusEl.className="error";showSetupStatus(e.message);button.disabled=false;}}}});
 </script></body></html>"""
     from app.setup_language import localize_setup_html
     html = localize_setup_html(html, "onboarding")
-    return html.replace("</body>", f"<script>{I18N_UI_JS}</script></body>")
+    return html.replace("</body>", f"<script>{i18n_ui_js(TRANSLATIONS, PATTERNS)}</script><script>{SETUP_THEME_JS}</script></body>")
 
 
 @app.middleware("http")
@@ -1169,14 +1204,13 @@ async def library_context_middleware(request: Request, call_next):
             return JSONResponse(status_code=409,content={'detail':'operation_recovery_required','storage_state':'READY','operations':operational})
     if _onboarding_required():
         path = request.url.path
-        allowed_api = (
-            path.startswith("/api/libraries")
-            or path == "/api/settings/storage-paths"
-            or path == "/api/health"
-        )
+        allowed_api = (request.method, path) in {
+            ("POST", "/api/libraries"), ("POST", "/api/libraries/check"),
+            ("GET", "/api/health"),
+        }
         if not allowed_api:
             if request.method == "GET" and not path.startswith("/api/"):
-                return HTMLResponse(_library_onboarding_html(), status_code=200)
+                return HTMLResponse(_library_onboarding_html(), headers={"Cache-Control": "no-store"})
             return JSONResponse(
                 status_code=409,
                 content={
@@ -2358,8 +2392,12 @@ def _release_for_context(context) -> bool:
 def release_worker_loop() -> None:
     while not RELEASE_WORKER_STOP.is_set():
         try:
-            while not RELEASE_WORKER_STOP.is_set() and process_background_release():
-                pass
+            while not RELEASE_WORKER_STOP.is_set():
+                with adoption_access(REGISTRY_DATABASE_FILE) as active:
+                    if active or pending_initial_setup(REGISTRY_DATABASE_FILE) or not process_background_release():
+                        break
+        except RootOperationBusy:
+            pass
         except Exception as error:
             print("SSD-Freigabeworker fehlgeschlagen:", error, flush=True)
         RELEASE_WORKER_WAKE.wait(3.0)
@@ -2383,8 +2421,12 @@ def cancel_worker_loop() -> None:
     """Unabhängiger, ereignisgesteuerter Worker; keine Leerlauf-DB-Abfragen."""
     while not CANCEL_WORKER_STOP.is_set():
         try:
-            while not CANCEL_WORKER_STOP.is_set() and process_background_mutation_cancel():
-                pass
+            while not CANCEL_WORKER_STOP.is_set():
+                with adoption_access(REGISTRY_DATABASE_FILE) as active:
+                    if active or pending_initial_setup(REGISTRY_DATABASE_FILE) or not process_background_mutation_cancel():
+                        break
+        except RootOperationBusy:
+            pass
         except Exception as error:
             print("Hintergrund-Verwerfworker:", error, flush=True)
         CANCEL_WORKER_WAKE.wait(5.0)
@@ -2404,47 +2446,51 @@ def start_cancel_worker() -> None:
     CANCEL_WORKER_WAKE.set()
 
 
+def _claim_runtime_job(last_library_id):
+    # Kamera-/Ordnerimporte sind seit 0.31.1 globaler Bestand und
+    # liegen ausschließlich in der Main-Datenbank. Sie werden deshalb
+    # direkt aus dieser Queue übernommen und nicht über die
+    # Bibliotheks-Registry wiederentdeckt. Ein fehlerhafter oder
+    # vorübergehend unvollständiger Sekundärkontext kann den globalen
+    # Import damit nicht mehr dauerhaft auf "queued" halten.
+    from app.library_context import _context_from_row
+    row = get_library(REGISTRY_DATABASE_FILE,MAIN_LIBRARY_ID,active_only=False)
+    import_context = _context_from_row(row) if row else build_main_library_context()
+    with admission(import_context):
+        global_import = None
+        for operation in ['sd_recheck','folder_import','metadata_multiple_import','metadata_general_import','trash_import']:
+            global_import = claim_next_job(DATABASE_FILE,operation=operation)
+            if global_import is not None:break
+    if global_import is not None:
+        claimed = (import_context, global_import)
+    else:
+        contexts = ordered_worker_contexts(
+            list_active_library_contexts(
+                REGISTRY_DATABASE_FILE
+            ),
+            last_library_id,
+        )
+        claimed = claim_next_library_job(contexts)
+
+    return claimed
+
+
 def worker_loop() -> None:
     last_library_id: str | None = None
-
     while not WORKER_STOP.is_set():
         try:
-            # Kamera-/Ordnerimporte sind seit 0.31.1 globaler Bestand und
-            # liegen ausschließlich in der Main-Datenbank. Sie werden deshalb
-            # direkt aus dieser Queue übernommen und nicht über die
-            # Bibliotheks-Registry wiederentdeckt. Ein fehlerhafter oder
-            # vorübergehend unvollständiger Sekundärkontext kann den globalen
-            # Import damit nicht mehr dauerhaft auf "queued" halten.
-            from app.library_context import _context_from_row
-            row = get_library(REGISTRY_DATABASE_FILE,MAIN_LIBRARY_ID,active_only=False)
-            import_context = _context_from_row(row) if row else build_main_library_context()
-            with admission(import_context):
-                global_import = None
-                for operation in ['sd_recheck','folder_import','metadata_multiple_import','metadata_general_import','trash_import']:
-                    global_import = claim_next_job(DATABASE_FILE,operation=operation)
-                    if global_import is not None:break
-            if global_import is not None:
-                claimed = (import_context, global_import)
-            else:
-                contexts = ordered_worker_contexts(
-                    list_active_library_contexts(
-                        REGISTRY_DATABASE_FILE
-                    ),
-                    last_library_id,
-                )
-                claimed = claim_next_library_job(contexts)
-
-            if claimed is None:
-                WORKER_STOP.wait(1.0)
-                continue
-
-            context, job = claimed
-            process_claimed_job(
-                job,
-                library_context=context,
-            )
-            last_library_id = context.library_id
-
+            with adoption_access(REGISTRY_DATABASE_FILE) as active:
+                if active or pending_initial_setup(REGISTRY_DATABASE_FILE):
+                    claimed = None
+                else:
+                    claimed = _claim_runtime_job(last_library_id)
+                if claimed is not None:
+                    context, job = claimed
+                    process_claimed_job(job, library_context=context)
+                    last_library_id = context.library_id
+                    continue
+        except RootOperationBusy:
+            pass
         except Exception as error:
             print(
                 "Fehler im bibliotheksbewussten Hintergrund-Worker:",
@@ -2452,6 +2498,24 @@ def worker_loop() -> None:
                 flush=True,
             )
             WORKER_STOP.wait(2.0)
+            continue
+        WORKER_STOP.wait(1.0)
+
+
+def _after_adoption(fn):
+    """Defer an already queued thread until normal work can resume."""
+    @wraps(fn)
+    def run(*args, **kwargs):
+        while not WORKER_STOP.is_set():
+            try:
+                with adoption_access(REGISTRY_DATABASE_FILE) as active:
+                    if not active and not pending_initial_setup(REGISTRY_DATABASE_FILE):
+                        return fn(*args, **kwargs)
+            except RootOperationBusy:
+                pass
+            WORKER_STOP.wait(1.0)
+
+    return run
 
 
 def _startup_step(name, function, *args, **kwargs):
@@ -2540,6 +2604,9 @@ def _coordinate_startup(fn):
                     complete(WORKSPACE_PATH, startup_reservation)
             from app.appdata import finish as finish_appdata
             finish_appdata(WORKSPACE_PATH)
+            if active_adoption(REGISTRY_DATABASE_FILE) or pending_initial_setup(REGISTRY_DATABASE_FILE):
+                _defer_startup_for_adoption(coordinated)
+                return
             # Domain recovery never owns the already completed technical lease.
             result=fn()
             from app.import_recovery import finish_published_envelopes
@@ -2590,6 +2657,17 @@ def _coordinate_startup(fn):
                     _STORAGE_STARTUP_PAUSED=False
                     _start_runtime_workers(recover_domain=False)
     return coordinated
+
+
+def _defer_startup_for_adoption(startup):
+    global ADOPTION_STARTUP_THREAD
+    if ADOPTION_STARTUP_THREAD is not None and ADOPTION_STARTUP_THREAD.is_alive():
+        return
+    WORKER_STOP.clear()
+    ADOPTION_STARTUP_THREAD = Thread(
+        target=_after_adoption(startup), name="bibliothekar-adoption-startup", daemon=True,
+    )
+    ADOPTION_STARTUP_THREAD.start()
 
 
 def _quiesce_runtime_for_recovery():
@@ -3074,6 +3152,8 @@ def shutdown_worker() -> None:
     CANCEL_WORKER_WAKE.set()
     RELEASE_WORKER_STOP.set()
     RELEASE_WORKER_WAKE.set()
+    if ADOPTION_STARTUP_THREAD is not None and ADOPTION_STARTUP_THREAD.is_alive():
+        ADOPTION_STARTUP_THREAD.join(timeout=5)
     if RELEASE_WORKER_THREAD is not None and RELEASE_WORKER_THREAD.is_alive():
         RELEASE_WORKER_THREAD.join(timeout=5)
     if CANCEL_WORKER_THREAD is not None and CANCEL_WORKER_THREAD.is_alive():
@@ -3108,6 +3188,7 @@ def _event_payload_with_folder_layout(
     result = dict(payload)
     naming: dict[str, Any]
     with database_connection(current_database_file()) as connection:
+        result["default_folder_layout"] = get_global_event_folder_layout(connection)
         if event_id:
             state = ensure_event_layout_snapshot(
                 connection,
@@ -3172,13 +3253,19 @@ def _event_payload_with_folder_layout(
             naming = naming_from_library_settings(
                 current_library_context().settings
             )
+        requested_layout = result.get("folder_layout")
+        if isinstance(requested_layout, dict) and requested_layout.get("mode") == "default":
+            state = get_global_event_folder_layout(connection)
+            result.pop("folder_layout")
     result.setdefault("folder_layout", {
         "structure_enabled": bool(state["structure_enabled"]),
         "input_path": str(state["input_path"]),
         "layout": state["layout"],
     })
     result.setdefault("folder_naming", naming)
-    result.setdefault("create_subfolders", bool(state["structure_enabled"]))
+    selected_layout = result.get("folder_layout")
+    enabled = selected_layout.get("structure_enabled", state["structure_enabled"]) if isinstance(selected_layout, dict) else state["structure_enabled"]
+    result.setdefault("create_subfolders", bool(enabled))
     return result
 
 def _naming_snapshot_from_event_context(context: dict[str, Any]) -> dict[str, Any]:
@@ -4266,6 +4353,16 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
                             updated_at=datetime.now(timezone.utc).isoformat(),
                         )
                 ensure_library_identity(database_path, library_id)
+                initial_setup = False
+                if first_library:
+                    from app.managed_storage_health import catalog_has_history, empty_bootstrap_registry
+                    if not catalog_has_history(database_path):
+                        try:
+                            empty_bootstrap_registry(REGISTRY_DATABASE_FILE, WORKSPACE_PATH, database_path)
+                        except ValueError:
+                            pass  # Retired libraries or prior stock are an existing installation.
+                        else:
+                            initial_setup = True
                 projection = (
                     {"jobs": 0, "families": 0, "files": 0}
                     if first_library
@@ -4284,6 +4381,7 @@ def api_create_library(payload: dict[str, Any]) -> dict[str, Any]:
                     archive_root=Path(str(checked["archive_root"])),
                     is_main=first_library,
                     is_active=True,
+                    initial_setup=initial_setup,
                     settings={
                         "created_by": f"bibliothekar-{DEPLOYMENT_VERSION}",
                         "projected_imports": projection,
@@ -7463,6 +7561,7 @@ def api_accept_event_suggestion(job_id: str, payload: dict[str, Any]) -> dict[st
                             "name": child.get("name"),
                             "start_datetime": child.get("start_datetime"),
                             "end_datetime": child.get("end_datetime"),
+                            "folder_name": child.get("folder_name"),
                         }
                         for child in (context.get("child_events") or [])
                     ],
@@ -7654,6 +7753,8 @@ def api_create_event(
                 "end_time": extension["new_end"][11:16],
                 "uses_time_range": True,
                 "preserve_day_folders": bool(archived_target["preserve_day_folders"]),
+                "folder_layout": context["folder_layout"],
+                "default_folder_layout": payload.get("default_folder_layout"),
                 "folder_naming": archived_naming,
                 "subevents": [
                     *[
@@ -7662,6 +7763,7 @@ def api_create_event(
                             "name": child.get("name"),
                             "start_datetime": child.get("start_datetime"),
                             "end_datetime": child.get("end_datetime"),
+                            "folder_name": child.get("folder_name"),
                         }
                         for child in (context.get("child_events") or [])
                     ],
@@ -8095,6 +8197,17 @@ def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, A
     if str(event.get("status") or "") != "applied" or not event.get("applied_at"):
         return False
 
+    current_layout = context.get("folder_layout") or {}
+    requested_layout = payload.get("folder_layout") or current_layout
+    if not isinstance(requested_layout, dict):
+        return False
+    if any(requested_layout.get(key) != current_layout.get(key) for key in ("layout", "input_path")):
+        return False
+    if bool(payload.get("create_subfolders", current_layout.get("structure_enabled", True))) != bool(
+        current_layout.get("structure_enabled", True)
+    ):
+        return False
+
     if str(event.get("event_kind") or "event") == "no_event":
         try:
             from app.event_timeline import normalize_no_event_segments
@@ -8121,11 +8234,6 @@ def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, A
 
     if str(payload.get("event_kind") or "event") != "event":
         return False
-    current_layout = context.get("folder_layout") or {}
-    if bool(payload.get("create_subfolders", current_layout.get("structure_enabled", True))) != bool(
-        current_layout.get("structure_enabled", True)
-    ):
-        return False
     if bool(payload.get("preserve_day_folders")) != bool(event.get("preserve_day_folders")):
         return False
 
@@ -8151,6 +8259,14 @@ def _applied_edit_is_metadata_only(context: dict[str, Any], payload: dict[str, A
         )
         if current is None:
             return False
+        if segment.get('create_subfolder', bool(current.get('folder_name'))) != bool(current.get('folder_name')):
+            return False
+        if choice := segment.get('folder_layout'):
+            from app.event_layout import resolve_layout_choice
+            child_layout = current.get('folder_layout') or current_layout
+            selected = resolve_layout_choice(choice, current_layout, payload.get('default_folder_layout'))
+            if any(selected.get(key) != child_layout.get(key) for key in ('layout', 'input_path', 'structure_enabled')):
+                return False
         requested_start = str(
             segment.get("start_datetime")
             or f"{start_date}T{str(segment.get('start_time') or '00:00')}:00"
@@ -8521,6 +8637,7 @@ def api_delete_event(
     }
 
 
+@_after_adoption
 def _apply_batch_thread_target(
     batch_id: str,
     library_context: LibraryContext,
@@ -8550,6 +8667,7 @@ def _apply_batch_thread_target(
 
 
 @protect(kind='sort', context_provider=lambda a: a['library_context'])
+@_after_adoption
 def _sort_run_thread_target(
     run_id: str,
     library_context: LibraryContext,
@@ -8579,6 +8697,7 @@ def _sort_run_thread_target(
         )
 
 
+@_after_adoption
 def _reconcile_run_thread_target(
     run_id: str,
     library_context: LibraryContext,
@@ -9814,6 +9933,12 @@ def api_global_workspace_summary(
             return cached
 
     snapshot_stamp=view_cache.database_stamp(db_path)
+    with database_connection(db_path) as connection:
+        released_job_ids = {
+            str(row[0]) for row in connection.execute(
+                "SELECT DISTINCT job_id FROM released_free_families WHERE archive_origin=1"
+            )
+        }
     excluded_by_job = {
         job_id: blocked_family_ids(
             REGISTRY_DATABASE_FILE,
@@ -9821,7 +9946,7 @@ def api_global_workspace_summary(
             library_id=current_library_context().library_id,
             job_id=job_id,
         )
-        for job_id in selected
+        for job_id in set(selected) | released_job_ids
     }
     payload = build_global_workspace_summary(
         current_database_file(),
@@ -14225,13 +14350,19 @@ def api_archive_change(cr_id: str) -> JSONResponse:
     try:
         change_request = get_event_change_request(current_database_file(), cr_id)
         if change_request is None:
-            raise EventChangeApplyError("ChangeRequest nicht gefunden.")
-        event_id = str(change_request["event_id"])
-        selected_ids = _change_request_selected_family_ids(change_request)
-        previously_assigned = _assigned_family_ids_for_root_event(event_id)
+            event_id = ''
+            selected_ids = set()
+            previously_assigned = set()
+        else:
+            event_id = str(change_request["event_id"])
+            selected_ids = (set() if change_request.get('delete_event') else
+                            _change_request_selected_family_ids(change_request))
+            previously_assigned = _assigned_family_ids_for_root_event(event_id)
         result = finish_event_change(
             current_database_file(), cr_id, current_archive_root(), current_workspace_root()
         )
+        if result.get('event_deleted'):
+            previously_assigned.update(result.get('released_family_ids') or [])
         if selected_ids:
             _promote_global_family_ids_owned(
                 event_id,
@@ -14259,9 +14390,132 @@ def api_archive_change(cr_id: str) -> JSONResponse:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@app.middleware("http")
+async def adoption_access_middleware(request: Request, call_next):
+    import sqlite3
+    from urllib.parse import urlencode
+    from starlette.responses import RedirectResponse
+    from app.legacy_adoption_paths import AdoptionError
+
+    path = request.url.path
+    read = request.method in {"GET", "HEAD", "OPTIONS"}
+    if read and (path.startswith("/assets/") or path in {
+        "/healthz", "/api/health", "/manifest.webmanifest", "/favicon.ico",
+        "/apple-touch-icon.png", "/api/settings/storage-health",
+        "/api/settings/recovery-diagnostics", "/api/operations/status",
+    }):
+        return await call_next(request)
+    method = request.method
+    start = (method, path) == ("POST", "/api/legacy-adoption/jobs")
+    decision = (method, path) == ("POST", "/api/setup/adoption")
+    source_entry = method == "GET" and path in {
+        "/legacy-adoption", "/api/legacy-adoption/source", "/api/legacy-adoption/sources",
+    }
+    later_entry = request.query_params.get("mode") == "library" and (start or source_entry)
+    eligibility = (method, path) == ("GET", "/api/legacy-adoption/eligibility")
+    exclusive = start or decision or (method, path) == ("POST", "/api/libraries")
+    try:
+        async with contextmanager_in_threadpool(adoption_access(REGISTRY_DATABASE_FILE, exclusive=exclusive)) as active:
+            setup = pending_initial_setup(REGISTRY_DATABASE_FILE)
+            request.state.initial_setup = setup
+            request.state.legacy_adoption = active
+            adoption_path = path == "/legacy-adoption" or path.startswith("/api/legacy-adoption/")
+            decision_path = path in {"/setup/adoption", "/api/setup/adoption"}
+            if active:
+                wizard = "/legacy-adoption?" + urlencode({"library": active["library_id"], "job": active["job_id"]})
+                later = active["access_kind"] == "library" and setup is None
+                initial = setup is not None and active["library_id"] == setup["library_id"]
+                recovery_only = not (later or initial)
+                request.state.legacy_adoption_later = later
+                request.state.legacy_adoption_recovery = recovery_only
+                job_path = "/api/legacy-adoption/jobs/" + active["job_id"]
+                if path == "/legacy-adoption" and read:
+                    if (request.query_params.get("job"), request.query_params.get("library")) == (
+                        active["job_id"], active["library_id"],
+                    ):
+                        return await call_next(request)
+                    return RedirectResponse(wizard, status_code=303)
+                if path == job_path or path.startswith(job_path + "/"):
+                    recovery_action = (
+                        (method == "DELETE" and path == job_path)
+                        or (method == "POST" and path in {job_path + "/rollback/start", job_path + "/rollback/check"})
+                        or (method == "POST" and path == job_path + "/finalize" and active["phase"] == "registering")
+                    )
+                    if read or not recovery_only or recovery_action:
+                        return await call_next(request)
+                code = "legacy_adoption_recovery_only" if recovery_only and adoption_path else "legacy_adoption_active"
+            elif setup:
+                wizard = "/setup/adoption" if setup["decision"] == "choice" else "/legacy-adoption"
+                if (method == "GET" and path == "/setup/adoption") or decision or (
+                    method == "POST" and path == "/api/settings/storage-replace"
+                ):
+                    return await call_next(request)
+                if setup["decision"] == "adopting" and not later_entry and (start or source_entry):
+                    if path == "/legacy-adoption" and request.query_params.get("job"):
+                        return RedirectResponse("/legacy-adoption", status_code=303)
+                    return await call_next(request)
+                code = "initial_setup_required"
+            elif adoption_path or decision_path:
+                if method == "GET" and path == "/legacy-adoption" and request.query_params.get("job"):
+                    from app.legacy_adoption_mode import adoption_reservation
+                    completed = adoption_reservation(REGISTRY_DATABASE_FILE)
+                    if (completed and completed["plan_state"] == "completed"
+                            and completed["job_id"] == request.query_params["job"]
+                            and completed["library_id"] == _requested_library_id(request)):
+                        return RedirectResponse("/legacy-adoption/history?" + urlencode({
+                            "library": completed["library_id"], "job": completed["job_id"],
+                        }), status_code=303)
+                if later_entry or eligibility:
+                    request.state.legacy_adoption_later = True
+                    if path == "/legacy-adoption" and request.query_params.get("job"):
+                        return RedirectResponse("/legacy-adoption?" + urlencode({
+                            "library": _requested_library_id(request), "mode": "library",
+                        }), status_code=303)
+                    return await call_next(request)
+                # The exact completion request can be repeated after a lost
+                # response. It cannot create a job or change the plan.
+                if method == "POST" and path.startswith("/api/legacy-adoption/jobs/") and path.endswith("/finalize"):
+                    from app.legacy_adoption_mode import adoption_reservation
+                    completed = adoption_reservation(REGISTRY_DATABASE_FILE)
+                    if completed and completed["plan_state"] == "completed" and (
+                        path == "/api/legacy-adoption/jobs/" + completed["job_id"] + "/finalize"
+                    ):
+                        request.state.legacy_adoption = completed
+                        return await call_next(request)
+                if read and not path.startswith("/api/"):
+                    return RedirectResponse("/", status_code=303)
+                return JSONResponse(status_code=409, content={"code": "legacy_adoption_inactive",
+                    "detail": "Die Bestandsübernahme ist nur während der Ersteinrichtung verfügbar."})
+            else:
+                return await call_next(request)
+            if (method, path) == ("POST", "/api/settings/storage-recheck"):
+                return await call_next(request)
+            if read and not path.startswith("/api/"):
+                return RedirectResponse(wizard, status_code=303)
+            return JSONResponse(status_code=409, content={
+                "detail": "Bitte schließe die Einrichtung oder den aktiven Übernahmeauftrag ab.",
+                "code": code, "wizard": wizard,
+            })
+    except RootOperationBusy:
+        return JSONResponse(status_code=409, content={
+            "detail": "Ein anderer Vorgang läuft noch. Bitte versuche es erneut.",
+            "code": "legacy_adoption_busy",
+        })
+    except (AdoptionError, RootOperationError, OSError, sqlite3.DatabaseError) as error:
+        return JSONResponse(status_code=409, content={"detail": str(error)})
+
+
 # BA-03: The last registered HTTP middleware executes first. In particular,
 # authenticate BEFORE library-context resolution, onboarding or APIs.
 @app.middleware("http")
 async def owner_authentication_middleware(request: Request, call_next):
     from app.security import protect_request
     return await protect_request(request, call_next)
+
+
+from app.legacy_adoption_api import install_legacy_adoption_routes
+
+install_legacy_adoption_routes(
+    app, context=current_library_context, registry_path=lambda: REGISTRY_DATABASE_FILE,
+    source_root_path=source_root_path,
+)

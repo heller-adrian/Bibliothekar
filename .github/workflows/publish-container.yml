@@ -4,6 +4,16 @@ on:
   # Stable releases require an explicit, authorized manual start.
   # Documentation-only pushes to main must never trigger publication.
   workflow_dispatch:
+    inputs:
+      verify_existing_adoption_image:
+        description: Verify and release the already built qualified 1.0.1 image
+        type: boolean
+        default: false
+        required: true
+      adoption_qa_run:
+        description: Successful full Backend QA run ID for this exact RC10 commit
+        type: string
+        default: ''
   workflow_call:
 
 permissions:
@@ -20,7 +30,16 @@ env:
   IMAGE_NAME: ${{ github.repository_owner }}/bibliothekar
 
 jobs:
+  verify-existing-adoption-image:
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_existing_adoption_image
+    uses: ./.github/workflows/verify-adoption-image.yml
+    permissions:
+      actions: read
+      contents: write
+      packages: read
+
   build-and-push:
+    if: github.event_name != 'workflow_dispatch' || !inputs.verify_existing_adoption_image
     runs-on: ubuntu-24.04
     timeout-minutes: 75
 
@@ -34,8 +53,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Require authorized ref and new release request for patch publishing
+      - name: Require an authorized release ref and trigger
         shell: bash
+        env:
+          ADOPTION_QA_INPUT: ${{ inputs.adoption_qa_run }}
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
@@ -43,6 +64,17 @@ jobs:
               if [[ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]]; then
                 echo 'Stable publishing requires explicit workflow dispatch from main.' >&2
                 exit 1
+              fi
+              ;;
+            refs/heads/patch/1.0.1-legacy-adoption)
+              test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
+              test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
+              [[ "$ADOPTION_QA_INPUT" =~ ^[0-9]+$ ]]
+              if git ls-remote --exit-code --tags origin 'refs/tags/v1.0.1-rc.10' >/dev/null; then
+                echo 'Release candidate tag already exists.' >&2
+                exit 1
+              else
+                test "$?" = 2
               fi
               ;;
             refs/heads/patch/*)
@@ -115,6 +147,45 @@ jobs:
           print('APPROVED: 2634/2634 exact-case backend QA, container, frontend, preflight and coverage.')
           PY
           echo 'Verified source identity and successful GitHub qualification #42002573062.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify full backend qualification for the exact RC10 commit
+        if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QA_SOURCE: ${{ github.sha }}
+          ADOPTION_QA_INPUT: ${{ inputs.adoption_qa_run }}
+        run: |
+          set -euo pipefail
+          qa_run="$ADOPTION_QA_INPUT"
+          [[ "$qa_run" =~ ^[0-9]+$ ]]
+          test "$(git rev-parse HEAD)" = "$QA_SOURCE"
+          test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
+          evidence="$RUNNER_TEMP/adoption-qualification"
+          mkdir "$evidence"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$qa_run" > "$evidence/run.json"
+          attempt="$(jq -er --arg sha "$QA_SOURCE" '
+            select(.status == "completed" and .conclusion == "success"
+              and .path == ".github/workflows/qa-tests.yml"
+              and .head_branch == "patch/1.0.1-legacy-adoption" and .head_sha == $sha
+              and .event == "workflow_dispatch" and .head_repository.full_name == "heller-adrian/Bibliothekar")
+            | .run_attempt' "$evidence/run.json")"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$qa_run/attempts/$attempt/jobs?per_page=100" > "$evidence/jobs.json"
+          python - "$evidence/jobs.json" <<'PY'
+          import json, sys
+          jobs = json.load(open(sys.argv[1]))["jobs"]
+          required = {"adoption-preflight", "backend-coverage"} | {
+              f"backend-regression ({index})" for index in range(8)
+          }
+          assert len(jobs) == len(required) and {job["name"] for job in jobs} == required
+          assert all(job["status"] == "completed" and job["conclusion"] == "success" for job in jobs)
+          PY
+          gh run download "$qa_run" --repo "$GITHUB_REPOSITORY" --pattern 'backend-qa-part-*' --dir "$evidence"
+          gh run download "$qa_run" --repo "$GITHUB_REPOSITORY" --name "backend-coverage-$attempt" --dir "$evidence/published"
+          python qa/release/verify_backend_coverage.py "$evidence" "$evidence/verified.json"
+          diff -u "$evidence/published/coverage-summary.json" "$evidence/verified.json"
+          echo "ADOPTION_QA_RUN=$qa_run" >> "$GITHUB_ENV"
+          echo "Verified complete backend and read-only mount qualification in run $qa_run." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Validate TrueNAS Custom App compose
         env:
           BIBLIOTHEKAR_APPDATA_DIR: /tmp/bibliothekar/appdata
@@ -124,11 +195,11 @@ jobs:
         run: docker compose -f compose.example.yaml config -q
 
       - name: Install metadata regression dependency
-        if: github.ref != 'refs/heads/main'
+        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/patch/1.0.1-legacy-adoption'
         run: sudo apt-get update -qq && sudo apt-get install -y libimage-exiftool-perl
 
       - name: Complete QA before publishing
-        if: github.ref != 'refs/heads/main'
+        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/patch/1.0.1-legacy-adoption'
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
@@ -138,7 +209,7 @@ jobs:
           pytest -q -o addopts='' --junitxml=/tmp/bibliothekar-qa.xml tests/backend
 
       - name: Retain QA evidence
-        if: always() && github.ref != 'refs/heads/main'
+        if: always() && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/patch/1.0.1-legacy-adoption'
         uses: actions/upload-artifact@v4
         with:
           name: backend-qa
@@ -207,6 +278,53 @@ jobs:
 
       - name: Record published digest
         run: echo '${{ steps.publish.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify the immutable RC10 image with native ZFS
+        if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
+          test "$VERSION" = '1.0.1'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          image="$REGISTRY/$IMAGE_NAME"
+          evidence="$RUNNER_TEMP/adoption-qualification"
+          bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh "$image@$IMAGE_DIGEST" "$GITHUB_SHA" |
+            tee "$evidence/container-smoke.log"
+          grep -Fxq "Review batch preserved a complete RAW/JPEG/XMP family and read-only originals on native ZFS." "$evidence/container-smoke.log"
+          jq -n --arg source "$GITHUB_SHA" --arg image "$image" --arg digest "$IMAGE_DIGEST" \
+            --arg qa_run "$ADOPTION_QA_RUN" --arg image_run "$GITHUB_RUN_ID" \
+            '{tag:"v1.0.1-rc.10", source:$source, image:$image, digest:$digest, qa_run:$qa_run, image_run:$image_run}' \
+            > "$evidence/qualified-image.json"
+          cat > "$evidence/release-notes.md" <<EOF
+          Bibliothekar 1.0.1 RC10 adds bulk selection, resumable working copies, visible progress, and capture-time evidence for review cases in collection adoption.
+
+          Source commit: \`$GITHUB_SHA\`
+          Test image: \`$image:patch-$VERSION-$GITHUB_SHA\`
+          Verified image digest: \`$image@$IMAGE_DIGEST\`
+
+          [Adoption guide](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/docs/legacy-adoption.md)
+          [Full Backend QA](https://github.com/$GITHUB_REPOSITORY/actions/runs/$ADOPTION_QA_RUN)
+          [Container and ZFS checks](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)
+          EOF
+
+      # Workflow-file changes require an authorized maintainer token when
+      # tagging this commit. The workflow token builds and verifies the image.
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption'
+        with:
+          name: rc10-qualified-image
+          path: |
+            ${{ runner.temp }}/adoption-qualification/qualified-image.json
+            ${{ runner.temp }}/adoption-qualification/verified.json
+            ${{ runner.temp }}/adoption-qualification/container-smoke.log
+            ${{ runner.temp }}/adoption-qualification/release-notes.md
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Publish stable GitHub release
         if: github.ref == 'refs/heads/main'

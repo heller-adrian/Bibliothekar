@@ -8,6 +8,17 @@ from __future__ import annotations
 import json
 
 UI_TRANSLATIONS = {
+  "Bestehendes Unterereignis ohne eigenen Ereignisordner": "Existing subevent without a dedicated event folder",
+  "Die event.json im Archiv entspricht noch nicht der vorbereiteten Datei.": "The event.json in the archive does not yet match the prepared file.",
+  "Unterordnerstruktur": "Subfolder Layout",
+  "Unterordner des Hauptereignisses erstellen": "Create parent event subfolder",
+  "Bibliotheksstandard": "Library default",
+  "Eigene Ordnerstruktur": "Custom folder layout",
+  "Ohne zusätzliche Ordner": "No additional folders",
+  "Struktur des Ereignisses übernehmen": "Use the parent event layout",
+  "Ordnername": "Folder name",
+  "Bestehende Fotosammlung übernehmen": "Adopt existing photo collection",
+  "Ordner hinzufügen": "Add folder",
   "Verbindung, Integrität und Schema sind bestätigt. Fachliche Vorgänge werden getrennt geprüft.": "Connection, integrity and schema are confirmed. Domain operations are checked separately.",
   "Die Datenbankprüfung meldet einen Fehler. Ursprüngliche Speicherorte und konsistenten Sicherungsstand prüfen; keine Datenbank zurücksetzen.": "Database checks report an error. Check the original storage locations and a consistent backup; do not reset the database.",
   "Aufnahmezeit belastbar": "Reliable capture time",
@@ -32,6 +43,13 @@ UI_TRANSLATIONS = {
   "Bibliotheken": "Libraries",
   "Sprache": "Language",
   "Sitzung": "Session",
+    "Bestehende Sammlung übernehmen": "Adopt an existing collection",
+    "Übernahmehistorie": "Adoption history",
+    "Schließe laufende Vorgänge oder offene Wiederherstellungen ab.": "Finish active operations or resolve pending recovery.",
+    "Schließe offene Archivänderungen ab.": "Finish open archive changes.",
+    "Schließe offene Import- und Hintergrundaufträge ab.": "Finish pending imports and background jobs.",
+    "Noch nicht vollständig archivierte Ereignisse": "Events that still need to be archived",
+  "Darstellung": "Appearance",
   "Hell": "Light",
   "Dunkel": "Dark",
   "System": "System",
@@ -458,7 +476,7 @@ UI_TRANSLATIONS.update({
   "Alle vorgesehenen alten Ordner sind bereits entfernt.": "All designated old folders have already been removed.",
   "Finder-Arbeit erledigt · weiter zu Prüfen": "Finder work complete · proceed to verification",
   "✓ Prüfung erfolgreich": "✓ Verification successful",
-  "Änderung abschließen & SSD freigeben": "Finish change & release SSD inventory",
+  "Änderung abschließen & Arbeitsbereich freigeben": "Complete archive change and release workspace",
   "Archivdateien werden geprüft und sicher auf die SSD kopiert …": "Checking archive files and safely copying them to the SSD…",
   "SSD-Kopien werden nach Größe und SHA-256 geprüft …": "Checking SSD copies by size and SHA-256…",
   "Alle SSD-Kopien sind vollständig geprüft.": "All SSD copies have been verified.",
@@ -925,6 +943,8 @@ UI_TRANSLATIONS.update({
   "Neuladen": "Reload",
   "Alle aktiven Sicherungen": "All active backups",
   "Day folder": "Day folder",
+  "Die gespeicherten „Ohne Ereignis“-Zeitsegmente sind ungültig.": "The saved No Event time segments are invalid.",
+  "Für „Ohne Ereignis“ fehlt mindestens ein Zeitsegment.": "At least one time segment is required for No Event.",
   "Weitere Aufnahmen aus ausgeblendeten Sicherungen": "More photos from hidden backups",
   "Neue Aufnahmen passen zu bestehenden Ereignissen": "New photos match existing events",
   "Keine aktiven Sicherungen.": "No active backups.",
@@ -1551,7 +1571,7 @@ from app.ui_pre import TRANSLATIONS as PRE_TRANSLATIONS, PATTERNS as PRE_PATTERN
 UI_TRANSLATIONS.update(PRE_TRANSLATIONS)
 UI_PATTERNS[:0]=PRE_PATTERNS
 
-I18N_UI_JS = r"""
+_I18N_UI_TEMPLATE = r"""
 (function () {
   "use strict";
   const dictionary = __DICTIONARY__;
@@ -1864,6 +1884,13 @@ I18N_UI_JS = r"""
     init();
   }
 })();
-""".replace("__DICTIONARY__", json.dumps(UI_TRANSLATIONS, ensure_ascii=False)).replace(
-    "__PATTERNS__", json.dumps(UI_PATTERNS, ensure_ascii=False)
-)
+"""
+
+
+def i18n_ui_js(translations=None, patterns=()):
+    return _I18N_UI_TEMPLATE.replace(
+        "__DICTIONARY__", json.dumps({**UI_TRANSLATIONS, **(translations or {})}, ensure_ascii=False),
+    ).replace("__PATTERNS__", json.dumps([*patterns, *UI_PATTERNS], ensure_ascii=False))
+
+
+I18N_UI_JS = i18n_ui_js()

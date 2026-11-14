@@ -1158,6 +1158,8 @@ EVENTS_HTML = r"""<!doctype html>
     #normal-event-segments { display:grid; gap:10px; }
     .child-segment-card { padding:12px 14px !important; margin:0 !important; }
     .child-segment-card > summary { padding:2px 0 8px; }
+    .child-segment-card > summary:has([data-remove-child-segment]){display:flex;align-items:center;gap:8px}
+    .child-segment-card > summary [data-remove-child-segment]{margin-inline-start:auto}
     .child-segment-fields { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; padding-top:4px; }
     .child-segment-top { display:flex; align-items:end; justify-content:space-between; gap:12px; }
     .child-segment-name { flex:0 1 55%; min-width:220px; }
@@ -1960,7 +1962,9 @@ EVENTS_HTML = r"""<!doctype html>
           jobId: String(cr.job_id || "")
         };
         changeRequestClose.disabled = false;
-        changeRequestClose.textContent = "Änderung verwerfen";
+        changeRequestClose.textContent = String(cr.status)==="aenderbar_vorschlagen"
+          ? bk0511EventLabel("Änderung verwerfen","Discard change")
+          : bk0511EventLabel("Änderung sicher zurücknehmen","Safely reverse change");
         changeRequestClose.classList.add("danger-button");
         setChangeTaskInUrl(cr.id, cr.job_id || "");
         return true;
@@ -2222,7 +2226,7 @@ EVENTS_HTML = r"""<!doctype html>
 
     function renderSummary(events) {
       const familyCount = events.reduce((sum,event)=>sum+Number(event.assigned_family_count||0),0);
-      const deletableCount = events.filter(isDeletable).length;
+      const deletableCount = events.filter(event=>event.status!=="archived" && isDeletable(event)).length;
       const cards = [
         ["Angezeigte Ereignisse", events.length],
         ["Zugeordnete Familien", familyCount],
@@ -2251,6 +2255,17 @@ EVENTS_HTML = r"""<!doctype html>
         && !event.mutation_id;
     }
 
+    function eventDateRange(start, end) {
+      const first = formatDateTime(start), last = formatDateTime(end);
+      return first && last && first !== last ? `${first} – ${last}` : first || last;
+    }
+
+    window.addEventListener("bk-language-changed",()=>{
+      eventList.querySelectorAll("[data-event-start]").forEach(node=>{
+        node.textContent = eventDateRange(node.dataset.eventStart,node.dataset.eventEnd);
+      });
+    });
+
 
     function renderEvents(events) {
       currentEvents = events;
@@ -2271,7 +2286,7 @@ EVENTS_HTML = r"""<!doctype html>
         const reconcileTargetNotice = isReconcileTarget ? `
           <div class="reassignment-resume"><span><strong>↳ Ziel einer offenen Nachsortierung</strong><br><span class="muted">Dieses geplante Ereignis wird nicht separat angewendet. Es wird zusammen mit dem bearbeiteten Ursprungsereignis im gemeinsamen Nachsortierplan geprüft und angewendet.</span></span></div>` : "";
         card.innerHTML = `
-          <div class="event-card-header"><div><strong class="event-name" data-bk-preserve-language>${escapeHtml(event.display_title || event.name)}</strong><div class="event-folder" data-bk-preserve-language>${escapeHtml(event.folder_name||"")}</div><div class="muted">${escapeHtml(String(event.start_datetime||"").slice(0,16))} bis ${escapeHtml(String(event.end_datetime||"").slice(0,16))} · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
+          <div class="event-card-header"><div><strong class="event-name" data-bk-preserve-language>${escapeHtml(event.display_title || event.name)}</strong><div class="event-folder" data-bk-preserve-language>${escapeHtml(event.folder_name||"")}</div><div class="muted"><span data-event-start="${escapeHtml(event.start_datetime||"")}" data-event-end="${escapeHtml(event.end_datetime||"")}" data-bk-preserve-language>${escapeHtml(eventDateRange(event.start_datetime,event.end_datetime))}</span> · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
           ${reconcileTargetNotice}
           <div class="event-card-actions" hidden>
             <button type="button" data-view-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Öffnen</button>
@@ -3397,12 +3412,12 @@ EVENTS_HTML = r"""<!doctype html>
           <div class="inspect-field"><span>Zugeordnet</span><strong>${assigned.length} Familien</strong></div>
         </div>
         ${event.notes?`<div class="inspect-section"><strong>Notizen</strong><p class="muted">${escapeHtml(event.notes)}</p></div>`:""}
-        ${noEvent?`<div class="inspect-section"><strong>Gespeicherte Tages-/Zeitsegmente</strong><div id="inspect-segment-host"></div><button type="button" id="inspect-more-segments" class="inspect-more" hidden>Weitere</button></div>`:""}
+        ${noEvent?`<div class="inspect-section"><strong>Gespeicherte Tages-/Zeitsegmente</strong><div id="inspect-segment-host"></div><button type="button" id="inspect-more-segments" class="inspect-more" hidden>${bk0511EventLabel("Weitere Zeitsegmente","More time segments")}</button></div>`:""}
         ${childEvents.length?`<div class="inspect-section"><strong>Unterereignisse</strong>${childCards}</div>`:""}
         <details class="inspect-section inspect-card collapse-card" id="inspect-family-days">
           <summary><strong>Dateifamilien nach Aufnahmetag</strong><span class="muted">${dayEntries.length} Tage</span></summary>
           <div id="inspect-family-day-host"></div>
-          <button type="button" id="inspect-more-family-days" class="inspect-more" hidden>Weitere</button>
+          <button type="button" id="inspect-more-family-days" class="inspect-more" hidden>${bk0511EventLabel("Weitere Tage","More days")}</button>
         </details>
         <div class="inspect-section"><strong>Zielstruktur</strong><pre class="inspect-structure">${escapeHtml(structureData?.structure_text||"Keine Struktur vorhanden.")}</pre></div>`;
 
@@ -3595,7 +3610,7 @@ EVENTS_HTML = r"""<!doctype html>
         const startDate=isoDate(segment.start_datetime);
         const endDate=isoDate(segment.end_datetime);
         const title=segment.name || "Unterereignis";
-        return `<details class="card child-segment-card" data-child-segment data-child-id="${escapeHtml(segment.id)}" open>
+        return `<details class="card child-segment-card" data-child-segment data-child-id="${escapeHtml(segment.id)}">
           <summary><strong data-child-summary>${escapeHtml(title)}</strong> <span class="muted">· ${escapeHtml(start)}–${escapeHtml(end)}</span></summary>
           <div class="child-segment-fields">
             <div class="child-segment-top">
@@ -3627,7 +3642,7 @@ EVENTS_HTML = r"""<!doctype html>
               <p class="muted">Jeder Tag bzw. Teil eines Tages wird separat gespeichert. Zwischenräume gehören ausdrücklich nicht zu „Ohne Ereignis“.</p>
             </div>
             <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
-            <label class="edit-field"><span>Unterordner</span><select id="edit-subfolders" ${structural ? "" : "disabled"}><option value="1" ${context.folder_layout?.structure_enabled ? "selected" : ""}>Erstellen</option><option value="0" ${context.folder_layout?.structure_enabled ? "" : "selected"}>Nicht erstellen</option></select></label>` : `
+            ` : `
           <div class="edit-boundaries">
             <div class="edit-boundary">
               <label class="edit-field"><span>Beginn</span><input id="edit-start-date" type="date" value="${escapeHtml(isoDate(event.start_datetime))}" ${structural ? "" : "disabled"}></label>
@@ -3639,10 +3654,11 @@ EVENTS_HTML = r"""<!doctype html>
             </div>
           </div>
           <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
-          <label class="edit-field"><span>Unterordner</span><select id="edit-subfolders" ${structural ? "" : "disabled"}><option value="1" ${context.folder_layout?.structure_enabled ? "selected" : ""}>Erstellen</option><option value="0" ${context.folder_layout?.structure_enabled ? "" : "selected"}>Nicht erstellen</option></select></label>
+          <label class="edit-field check-row"><input id="edit-subfolders" type="checkbox" ${context.folder_layout?.structure_enabled ? "checked" : ""} ${structural ? "" : "disabled"}><span>Unterordner des Hauptereignisses erstellen</span></label>
           <input id="edit-time-enabled" type="hidden" value="1">
           <div class="edit-field full"><span>Optionale Unterereignisse</span><div id="normal-event-segments">${normalSegmentHtml}</div><button id="add-normal-segment" type="button">Unterereignis hinzufügen</button></div>`}
 
+          ${structural ? '<div class="edit-field full" id="edit-event-layout"></div>' : ''}
           <label class="edit-field full"><span>Notizen</span><textarea id="edit-notes" maxlength="4000">${escapeHtml(event.notes || "")}</textarea></label>
         </div>
         <div class="edit-actions">
@@ -3650,12 +3666,33 @@ EVENTS_HTML = r"""<!doctype html>
           <button type="submit" class="plan-button bk-positive-action">${event.status === "applied" ? "Änderungen anwenden" : "Änderungen speichern"}</button>
         </div>`;
 
+      if (structural) {
+        const host=document.getElementById("edit-event-layout");
+        const editor=window.BibliothekarFolderLayout.eventEditor({saved:context.folder_layout,defaults:context.folder_layout,allowDisabled:noEvent});
+        host.layoutValue=editor.value;
+        host.append(editor.panel);
+      }
       if (!noEvent) {
         const normalContainer=document.getElementById('normal-event-segments');
         const bind=()=>{
           normalContainer.querySelectorAll("[data-child-segment]").forEach(row=>{
+            if(structural && !row.folderOptions){
+              const original=(context.child_events || []).find(child=>child.id===row.dataset.childId);
+              const label=document.createElement("label");label.className="check-row";
+              const checkbox=document.createElement("input");checkbox.type="checkbox";
+              label.append(checkbox,document.createTextNode("Unterordner erstellen"));
+              const fields=row.querySelector(".child-segment-fields");
+              const editor=window.BibliothekarFolderLayout.subeventEditor({checkbox,saved:original,defaults:context.folder_layout});
+              window.BibliothekarFolderLayout.expandCard(row);
+              const nameRow=fields.querySelector(".child-segment-top");nameRow.classList.add("bk-subevent-name-row");
+              nameRow.append(label);fields.append(editor.panel);
+              row.folderOptions=()=>editor.value({preserveSaved:true});
+            }
             const remove=row.querySelector("[data-remove-child-segment]");
-            if(remove)remove.onclick=()=>row.remove();
+            if(remove){
+              row.querySelector("summary").append(remove);
+              remove.onclick=event=>{event.preventDefault();row.remove();};
+            }
             const nameInput=row.querySelector("[data-child-name]");
             const summary=row.querySelector("[data-child-summary]");
             if(nameInput&&summary){
@@ -3807,7 +3844,9 @@ EVENTS_HTML = r"""<!doctype html>
         notes: document.getElementById("edit-notes").value,
       };
       if (structural) {
-        payload.create_subfolders = document.getElementById("edit-subfolders").value === "1";
+        const layout=document.getElementById("edit-event-layout")?.layoutValue();
+        if(layout)payload.folder_layout=layout;
+        if(!noEvent)payload.create_subfolders=document.getElementById("edit-subfolders").checked && layout?.structure_enabled!==false;
         if (noEvent) {
           payload.event_kind = "no_event";
           payload.preserve_day_folders = document.getElementById("edit-preserve").value === "1";
@@ -3834,7 +3873,8 @@ EVENTS_HTML = r"""<!doctype html>
                 : `${row.querySelector('[data-child-start-date]').value}T${row.querySelector('[data-child-start-time]').value}:00`,
               end_datetime:row.querySelector('[data-child-end]')
                 ? row.querySelector('[data-child-end]').value
-                : `${row.querySelector('[data-child-end-date]').value}T${row.querySelector('[data-child-end-time]').value}:59`
+                : `${row.querySelector('[data-child-end-date]').value}T${row.querySelector('[data-child-end-time]').value}:59`,
+              ...row.folderOptions?.()
             }))
           });
         }
@@ -4764,13 +4804,24 @@ EVENTS_HTML = r"""<!doctype html>
       const raw=String(error?.message||error||"");
       if(raw.includes("operation_recovery_required"))
         return bk0511EventLabel(
-          "Eine unterbrochene Archivoperation muss vor weiteren Änderungen sicher überprüft werden. Keine Originale oder Reservationsdateien löschen.",
-          "An interrupted archive operation requires verified recovery before further changes. Do not delete originals or reservation records."
+          "Der Datenbankabschluss wartet auf eine sichere Wiederaufnahme. Versuche den Abschluss erneut; dabei werden alle Dateien erneut geprüft. Bleibt die Sperre bestehen, öffne die Wiederherstellungsdiagnose in den Einstellungen. Keine Originale oder Reservationsdateien löschen.",
+          "Database completion is waiting for verified recovery. Retry completion to recheck every file. If it remains blocked, inspect recovery diagnostics in Settings. Do not delete originals or reservation records."
+        );
+      if(/archive_completion_|archive_retry_|retry_|not authorized|database is locked/.test(raw))
+        return bk0511EventLabel(
+          "Der Datenbankabschluss ist noch offen. Ein Abschlussnachweis, eine Rückkopie oder eine andere Operation muss sicher geprüft werden. Bewahre alle Dateien auf und prüfe die Wiederherstellungsdiagnose.",
+          "Database completion is still pending. A completion receipt, return copy or another operation requires verified recovery. Keep all files and inspect recovery diagnostics."
         );
       if(raw.includes("Am SSD-Rückkehrpfad existiert bereits ein Eintrag"))
         return bk0511EventLabel("Der SSD-Rückkehrpfad ist bereits belegt. Nicht überschreiben.",
           "The SSD return path is already occupied. Do not overwrite it.");
       return window.BibliothekarI18n?.t?.(raw)||raw;
+    }
+    function bkArchiveTechnicalDetails(error){
+      return '<details class="card" style="margin-top:10px"><summary>'+
+        bk0511EventLabel("Technische Diagnose","Technical diagnostics")+
+        '</summary><code style="display:block;white-space:pre-wrap;overflow-wrap:anywhere">'+
+        escapeHtml(String(error?.message||error))+'</code></details>';
     }
     async function showChangeRequestDetail(crId, options={}) {
       try {
@@ -5037,7 +5088,8 @@ EVENTS_HTML = r"""<!doctype html>
           if (targetTree) html += `<div class="card"><strong>${bk0511EventLabel("SOLL-Struktur","Target structure")}</strong><pre class="change-target-tree" style="margin-top:9px">${targetStructureDeleted ? escapeHtml(bk0511EventLabel("Ereignis wird vollständig aus der Kamerabibliothek entfernt.","The entire event will be removed from the archive.")) : escapeHtml(targetTree)}</pre></div>`;
           html += `<div id="change-verify-panel" class="card"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button type="button" class="plan-button${initiallyVerified ? " success" : ""}" data-cr-verify>${initiallyVerified ? bk0511EventLabel("✓ Prüfung erfolgreich","✓ Verification successful") : bk0511EventLabel("Prüfen","Verify")}</button><span id="change-verify-summary" class="${initiallyVerified ? "success-text" : "muted"}">${initiallyVerified ? `${reviewRows.length}/${reviewRows.length} ${bk0511EventLabel("Dateien bestätigt.","files verified.")}` : bk0511EventLabel("Noch nicht geprüft.","Not verified yet.")}</span></div><div id="change-work-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div><div id="change-verify-errors" style="display:none;margin-top:10px"></div></div>`;
           html += renderTechnicalDetails();
-          html += `<div class="change-footer"><button type="button" class="plan-button" data-cr-back hidden>${bk0511EventLabel("Zur manuellen Arbeit zurück","Back to manual steps")}</button><button type="button" class="plan-button bk-positive-action" data-cr-archive ${initiallyVerified ? "" : "disabled"}>${bk0511EventLabel("Änderung abschließen & SSD freigeben","Complete change and release SSD")}</button></div></section>`;
+          html += `<div id="change-finalize-status" class="card" role="status"><strong>${bk0511EventLabel("Datenbankabschluss offen","Database completion pending")}</strong><p class="muted">${bk0511EventLabel("Eine erfolgreiche Dateiprüfung bestätigt noch nicht den Datenbankabschluss. Beim Abschließen werden die Dateien erneut geprüft und die Archiv- und Bestandsdaten übernommen.","Successful file verification does not complete the database operation. Completion rechecks the files and updates the archive and stock records.")}</p><div id="change-finalize-errors"></div></div>`;
+          html += `<div class="change-footer"><button type="button" class="plan-button" data-cr-back hidden>${bk0511EventLabel("Zur manuellen Arbeit zurück","Back to manual steps")}</button><button type="button" class="plan-button bk-positive-action" data-cr-archive ${initiallyVerified ? "" : "disabled"}>${bk0511EventLabel("Änderung abschließen & Arbeitsbereich freigeben","Complete archive change and release workspace")}</button></div></section>`;
         }
 
         changeRequestBody.innerHTML = html;
@@ -5096,7 +5148,7 @@ EVENTS_HTML = r"""<!doctype html>
             if(label) label.textContent=bk0511EventLabel("Kopieren fehlgeschlagen.","Copy failed.");
             if(errors){
               errors.style.display="block";
-              errors.textContent=error.message;
+              errors.textContent=bkPre71ArchiveError(error);
             }
           }
         });
@@ -5137,7 +5189,7 @@ EVENTS_HTML = r"""<!doctype html>
             if(label) label.textContent="Prüfung fehlgeschlagen.";
             if(errors){
               errors.style.display="block";
-              errors.textContent=error.message;
+              errors.textContent=bkPre71ArchiveError(error);
             }
           }
         });
@@ -5178,7 +5230,7 @@ EVENTS_HTML = r"""<!doctype html>
             if(label) label.textContent="Prüfung fehlgeschlagen.";
             if(errors){
               errors.style.display="block";
-              errors.textContent=error.message;
+              errors.textContent=bkPre71ArchiveError(error);
             }
           }
         });
@@ -5186,14 +5238,14 @@ EVENTS_HTML = r"""<!doctype html>
         for (const button of changeRequestBody.querySelectorAll("[data-change-step]")) {
           button.addEventListener("click", () => {
             showChangeRequestDetail(crId, {phase:button.dataset.changeStep})
-              .catch(error => setStatus(error.message, true));
+              .catch(error => setStatus(bkPre71ArchiveError(error), true));
           });
         }
 
         const preparedNextBtn = changeRequestBody.querySelector("[data-cr-prepared-next]");
         if (preparedNextBtn) preparedNextBtn.addEventListener("click", () => {
           showChangeRequestDetail(crId, {phase:verifyUnlocked ? "verify" : finderNeeded ? "finder" : "verify"})
-            .catch(error => setStatus(error.message, true));
+            .catch(error => setStatus(bkPre71ArchiveError(error), true));
         });
 
         const prepareBtn = changeRequestBody.querySelector("[data-cr-prepare]");
@@ -5281,7 +5333,7 @@ EVENTS_HTML = r"""<!doctype html>
             }
           };
           prepareBtn.addEventListener("click", () => {
-            runArchivePreparation(null).catch(error => setStatus(error.message, true));
+            runArchivePreparation(null).catch(error => setStatus(bkPre71ArchiveError(error), true));
           });
         }
 
@@ -5420,7 +5472,8 @@ EVENTS_HTML = r"""<!doctype html>
             verifyBtn.textContent = "✕ Prüfung fehlgeschlagen";
             if (failedVerificationBack) failedVerificationBack.hidden = false;
             sessionStorage.removeItem(manualGateKey);
-            if (summary) { summary.className = "danger-text"; summary.textContent = error.message; }
+            if (summary) { summary.className = "danger-text"; summary.textContent = bkPre71ArchiveError(error); }
+            if (errors) { errors.style.display="block"; errors.innerHTML=bkArchiveTechnicalDetails(error); }
             if (archiveBtn) archiveBtn.disabled = true;
           } finally {
             verifyBtn.disabled = false;
@@ -5442,7 +5495,7 @@ EVENTS_HTML = r"""<!doctype html>
           const pulse = window.setInterval(() => {
             pct = Math.min(78, pct + 7);
             if (bar) bar.style.width = `${pct}%`;
-            if (pct >= 48 && label) label.textContent = "SSD-Originale und Hilfslinks sicher freigeben …";
+            if (pct >= 48 && label) label.textContent = bk0511EventLabel("Arbeitsbereich und Hilfslinks sicher freigeben …","Safely releasing workspace and helper links…");
           }, 220);
           try {
             const res = await fetch(`/api/change-requests/${encodeURIComponent(crId)}/archive`, {
@@ -5454,7 +5507,7 @@ EVENTS_HTML = r"""<!doctype html>
             if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
             window.clearInterval(pulse);
             if (bar) bar.style.width = "100%";
-            if (label) label.textContent = "Abgeschlossen · SSD freigegeben und leere Quellordner aufgeräumt.";
+            if (label) label.textContent = bk0511EventLabel("Abgeschlossen · Arbeitsbereich freigegeben und leere Quellordner aufgeräumt.","Completed · workspace released and empty source folders cleaned up.");
             if (summary) { summary.className = "success-text"; summary.textContent = "Änderung vollständig abgeschlossen."; }
             await new Promise(resolve => setTimeout(resolve, 280));
 
@@ -5471,8 +5524,12 @@ EVENTS_HTML = r"""<!doctype html>
             window.clearInterval(pulse);
             archiveBtn.disabled = false;
             verifyBtn && (verifyBtn.disabled = false);
-            if (label) label.textContent = error.message;
-            setStatus(error.message, true);
+            archiveBtn.textContent=bk0511EventLabel("Abschluss erneut prüfen","Retry completion");
+            const friendly=bkPre71ArchiveError(error);
+            if (label) label.textContent = friendly;
+            const completionErrors=changeRequestBody.querySelector("#change-finalize-errors");
+            if(completionErrors) completionErrors.innerHTML='<p class="danger-text">'+escapeHtml(friendly)+'</p>'+bkArchiveTechnicalDetails(error);
+            setStatus(friendly, true);
           }
         });
       } catch (error) {
@@ -5482,7 +5539,7 @@ EVENTS_HTML = r"""<!doctype html>
           bk0511EventLabel("Technische Diagnose","Technical diagnostics")+
           '</summary><code style="display:block;white-space:pre-wrap;overflow-wrap:anywhere">'+
           escapeHtml(String(error?.message||error))+'</code></details>';
-        setStatus(error.message, true);
+        setStatus(bkPre71ArchiveError(error), true);
       }
     }
 
@@ -6087,7 +6144,7 @@ EVENTS_HTML = r"""<!doctype html>
       }
       if(!archiveMode){
         structureChangeBody.innerHTML=`
-          <div class="card"><strong>${bk0511EventLabel("Erkannte Änderungen","Detected changes")}</strong>${changeDetails}</div>
+          <div class="card" style="margin-top:12px"><strong>${bk0511EventLabel("Erkannte Änderungen","Detected changes")}</strong>${changeDetails}</div>
           ${archiveChoices}`;
         attachArchiveMode();
         return;
@@ -6126,7 +6183,7 @@ EVENTS_HTML = r"""<!doctype html>
               "Archive change verified and recorded in SQLite."),false,true);
           }catch(error){
             button.disabled=false;button.classList.remove("loading");button.removeAttribute("aria-busy");
-            if(feedback){feedback.className="error-box";feedback.textContent=error.message;}
+            if(feedback){feedback.className="error-box";feedback.textContent=window.BibliothekarI18n?.t(error.message)||error.message;}
           }
         });
       }else{

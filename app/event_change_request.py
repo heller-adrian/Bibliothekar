@@ -67,6 +67,13 @@ def _compute_event_plan(
             raise EventChangeRequestError(
                 "Nur archivierte Ereignisse koennen ueber einen manuellen Aenderungsauftrag geaendert werden."
             )
+        from app.event_leaf_layouts import effective_leaf_layouts
+        old_leaves = effective_leaf_layouts(connection, event_id)
+        from app.event_layout import get_global_default
+        default_layout = get_global_default(connection)
+        saved_layout = connection.execute(
+            "SELECT 1 FROM event_folder_layouts WHERE event_id=?", (event_id,)
+        ).fetchone()
         from app.event_layout import ensure_event_layout_snapshot
         current_layout_state = ensure_event_layout_snapshot(
             connection,
@@ -164,14 +171,18 @@ def _compute_event_plan(
         else:
             rows = []
 
+    from app.event_layout import layout_paths, layout_role_paths, normalize_layout, resolve_layout_choice, validate_input_path
+    from app.physical_state import organization_path_for_event_relative
+
     layout_explicit = bool(preview.get("_folder_layout_explicit"))
+    current_root = PurePosixPath(str(event["start_datetime"])[:4], str(event["folder_name"]))
+    configured_exports = layout_role_paths(current_layout_state["layout"], "export")
     requested_layout_state: dict[str, Any] | None = None
     requested_layout_paths: set[str] = set()
     if layout_explicit:
         raw_layout = preview.get("folder_layout")
         if not isinstance(raw_layout, dict):
             raise EventChangeRequestError("Die gewünschte Ereignisstruktur fehlt.")
-        from app.event_layout import normalize_layout, validate_input_path, layout_paths
         normalized_layout = normalize_layout(
             raw_layout.get("layout") or current_layout_state["layout"]
         )
@@ -220,6 +231,38 @@ def _compute_event_plan(
         raise EventChangeRequestError("Aus dem neuen Ereignisbeginn konnte kein Jahr ermittelt werden.")
     if not parent_folder:
         raise EventChangeRequestError("Der neue Ereignisordner fehlt.")
+
+    target_leaves = {}
+    parent_layout = requested_layout_state or current_layout_state
+    child_folders = {
+        str(segment["id"]): segment["folder"]
+        for segment in normalized_child_segments if segment.get("id") and segment["folder"]
+    }
+    child_overrides = {str(segment['id']): segment for segment in normalized_child_segments
+                       if segment.get('id') and segment['folder'] and segment.get('folder_layout') is not None}
+    for key, leaf in old_leaves.items():
+        owner, _, day = key.partition("@")
+        if owner != event_id and owner not in child_folders:
+            continue
+        if owner in child_overrides:
+            continue
+        if day and (not preserve_day_folders or not start_date <= day <= str(preview.get("end_date") or start_date)):
+            continue
+        if owner == event_id and requested_layout_state is not None and any(
+            requested_layout_state[field] != current_layout_state[field] for field in requested_layout_state
+        ):
+            leaf = {**leaf, **requested_layout_state}
+        prefix = "/".join(part for part in (child_folders.get(owner, ""), day) if part)
+        target_leaves[key] = {**leaf, "leaf_prefix": prefix}
+    for owner, segment in child_overrides.items():
+        choice = segment['folder_layout']
+        layout = resolve_layout_choice(choice, parent_layout, default_layout)
+        target_leaves[owner] = {**layout, 'leaf_key': owner, 'leaf_prefix': child_folders[owner]}
+        if choice.get('mode') != 'inherit':
+            segment['folder_layout'] = layout
+    old_leaves_by_prefix = sorted(
+        old_leaves.values(), key=lambda leaf: -len(leaf["leaf_prefix"])
+    )
 
     removed_family_ids = current_family_ids - requested_set
     added_family_ids = requested_set - current_family_ids
@@ -314,18 +357,41 @@ def _compute_event_plan(
         old_event_relative_path: str,
     ) -> str | None:
         value = str(capture or "")[:19]
-        safe_branch = branch if branch in {"Alle", "Sortiert", "Export"} else ""
+        safe_branch = branch if branch in {"All", "Sorted", "Alle", "Sortiert", "Export"} else ""
 
-        def organization_path() -> str:
+        def organization_path(target_leaf: dict[str, Any] | None = None) -> str:
+            if target_leaf is not None:
+                if not target_leaf["structure_enabled"]:
+                    return ""
+                for old_leaf in old_leaves_by_prefix:
+                    prefix = old_leaf["leaf_prefix"]
+                    if not old_event_relative_path or (prefix and not old_event_relative_path.startswith(prefix + "/")):
+                        continue
+                    relative = old_event_relative_path.removeprefix(prefix + "/") if prefix else old_event_relative_path
+                    observed = organization_path_for_event_relative(relative, old_leaf)
+                    if observed in layout_paths(target_leaf["layout"]):
+                        return observed
+                    if PurePosixPath(relative).parent == PurePosixPath(".") and not target_leaf["input_path"]:
+                        return ""
+                    break
+                exports = layout_role_paths(target_leaf["layout"], "export")
+                return exports[0] if branch == "Export" and exports else str(target_leaf["input_path"])
             if requested_layout_state is None:
-                return safe_branch
+                if saved_layout is None:
+                    return safe_branch
+                if not current_layout_state["structure_enabled"]:
+                    return ""
+                if old_event_relative_path:
+                    return organization_path_for_event_relative(old_event_relative_path, current_layout_state)
+                if branch == "Export" and configured_exports:
+                    return configured_exports[0]
+                return str(current_layout_state["input_path"] or "")
             if not bool(requested_layout_state["structure_enabled"]):
                 return ""
             # OFF -> ON is intentionally simple in 0.28.3: no historical
             # placement restoration; everything enters the chosen input.
             if not bool(current_layout_state.get("structure_enabled")):
                 return str(requested_layout_state["input_path"] or "")
-            from app.physical_state import organization_path_for_event_relative
             observed = organization_path_for_event_relative(
                 old_event_relative_path,
                 current_layout_state,
@@ -337,6 +403,7 @@ def _compute_event_plan(
         parts = [year, parent_folder]
 
         if value and capture_belongs(value):
+            owner = event_id
             if normalized_child_segments:
                 matching = [
                     segment for segment in normalized_child_segments
@@ -351,7 +418,10 @@ def _compute_event_plan(
                 if len(matching) > 1:
                     return None
                 if matching:
-                    parts.append(str(matching[0]["folder"]))
+                    folder = matching[0]["folder"]
+                    if folder:
+                        parts.append(folder)
+                        owner = str(matching[0].get("id") or owner)
             elif child_folder:
                 parts.append(child_folder)
 
@@ -361,7 +431,12 @@ def _compute_event_plan(
                     return None
                 parts.append(day_key)
 
-            organization = organization_path()
+            key = owner + ("@" + value[:10] if preserve_day_folders else "")
+            leaf = target_leaves.get(key) or target_leaves.get(owner)
+            if leaf is not None and key not in target_leaves:
+                prefix = "/".join(parts[2:])
+                target_leaves[key] = {**leaf, 'leaf_key': key, 'leaf_prefix': prefix}
+            organization = organization_path(leaf)
             if organization:
                 parts.extend(PurePosixPath(organization).parts)
             parts.append(filename)
@@ -373,7 +448,7 @@ def _compute_event_plan(
         # Legacy-Aufträge behalten weiterhin ihre vollständige interne Lage.
         if not normalized_child_segments and not child_folder and not preserve_day_folders:
             if requested_layout_state is not None:
-                organization = organization_path()
+                organization = organization_path(target_leaves.get(event_id))
                 if organization:
                     parts.extend(PurePosixPath(organization).parts)
                 parts.append(filename)
@@ -419,9 +494,13 @@ def _compute_event_plan(
         if not filename:
             raise EventChangeRequestError(f"Dateiname fuer Datei {row['file_id']} fehlt.")
         old_path = stored_path
+        if not incoming_workspace and not old_event_relative:
+            path = PurePosixPath(old_path)
+            if path.is_relative_to(current_root):
+                old_event_relative = path.relative_to(current_root).as_posix()
         if not branch:
-            for part in Path(old_path).parts:
-                if part in {"Alle", "Sortiert", "Export"}:
+            for part in PurePosixPath(old_event_relative).parts[:-1]:
+                if part in {"All", "Sorted", "Alle", "Sortiert", "Export"}:
                     branch = part
                     break
         if not branch:
@@ -767,6 +846,8 @@ def _compute_event_plan(
         "assets_with_plans": asset_plans,
         "selected_family_ids": sorted(requested_set),
         "folder_layout_state": requested_layout_state,
+        "target_leaf_layouts": list(target_leaves.values()) if old_leaves or target_leaves else None,
+        "normalized_subevents": normalized_child_segments if preview.get("subevents") else None,
         "structure_lines": lines,
         "structure_text": "\n".join(lines),
         "inventory_summary": inventory.get("summary") if inventory is not None else None,
@@ -836,6 +917,7 @@ def propose_event_change(
     # Dadurch kann die vorbereitete event.json exakt denselben SOLL-Zustand
     # beschreiben, der beim Abschluss in SQLite geschrieben wird.
     preview = dict(preview)
+    preview.pop("target_leaf_layouts", None)
     if preview.get("subevents"):
         stable_subevents = []
         for item in preview.get("subevents") or []:
@@ -884,6 +966,12 @@ def propose_event_change(
     # Archivbestand und wirklich freien SSD-Zuführungen unterschieden.
     plan = _compute_event_plan(database_path, job_id, event_id, preview, archive_root=archive_root)
     requested_layout_state = plan.get("folder_layout_state")
+    target_leaf_layouts = plan.get("target_leaf_layouts")
+    normalized_subevents = plan.get("normalized_subevents")
+    if normalized_subevents is not None:
+        preview["subevents"] = normalized_subevents
+    if target_leaf_layouts is not None:
+        preview["target_leaf_layouts"] = target_leaf_layouts
     preview = dict(preview)
     # Die aktuelle Archiv-Inventur ist für den neuen Zustand maßgeblich.
     # Manuell seit der letzten Archivierung gelöschte Dateien/Familien werden
@@ -1023,6 +1111,12 @@ def propose_event_change(
                 now,
             ),
         )
+
+        if target_leaf_layouts is not None:
+            connection.execute(
+                "UPDATE event_change_requests SET target_leaf_layouts_json=? WHERE id=?",
+                (json.dumps(target_leaf_layouts, ensure_ascii=False), cr_id),
+            )
 
         connection.execute('UPDATE event_change_requests SET time_model_version=2, guided_structure_change_id=? WHERE id=?',(guided_structure_change_id,cr_id))
         # Datei-Bestaetigungen (loeschen/bewegen/behalten) fuer jede Familie

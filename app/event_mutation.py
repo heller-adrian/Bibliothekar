@@ -57,6 +57,11 @@ def capture_job_event_state(connection: Any, job_id: str) -> dict[str, Any]:
         "event_assignments": assignments,
         "event_time_segments": segments,
         "event_folder_layouts": layouts,
+        "event_leaf_folder_layouts": _rows(
+            connection,
+            f"SELECT * FROM event_leaf_folder_layouts WHERE parent_event_id IN ({ph}) ORDER BY parent_event_id,leaf_key",
+            tuple(event_ids),
+        ) if event_ids else [],
         "event_reapply_removed_families": (
             _rows(
                 connection,
@@ -278,7 +283,11 @@ def _state_bundle(state: dict[str, Any], root_id: str) -> dict[str, Any]:
         ),
         "event_folder_layouts": rows_for(
             "event_folder_layouts",
-            lambda row: str(row.get("event_id") or "") == root_id,
+            lambda row: str(row.get("event_id") or "") in graph_ids,
+        ),
+        "event_leaf_folder_layouts": rows_for(
+            "event_leaf_folder_layouts",
+            lambda row: str(row.get("parent_event_id") or "") == root_id,
         ),
         "event_reapply_removed_families": rows_for(
             "event_reapply_removed_families",
@@ -437,6 +446,15 @@ def cancel_mutation(connection: Any, mutation_id: str, job_id: str, *, workspace
                 )
 
             original_graph_ids = {root_id} | {str(item["id"]) for item in original_children}
+            _insert_dict_rows(connection, "event_folder_layouts", [
+                dict(item) for item in (state.get("event_folder_layouts") or [])
+                if str(item.get("event_id") or "") in original_graph_ids - {root_id}
+            ])
+            if "event_leaf_folder_layouts" in state:
+                connection.execute("DELETE FROM event_leaf_folder_layouts WHERE parent_event_id=?", (root_id,))
+                _insert_dict_rows(connection, "event_leaf_folder_layouts", [
+                    dict(item) for item in state["event_leaf_folder_layouts"] if item["parent_event_id"] == root_id
+                ])
             _insert_dict_rows(
                 connection,
                 "event_assignments",

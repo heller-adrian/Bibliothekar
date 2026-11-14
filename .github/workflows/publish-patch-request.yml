@@ -10,6 +10,7 @@ on:
       - '.github/release-requests/**'
 
 permissions:
+  actions: read
   contents: write
   packages: write
 
@@ -17,5 +18,6 @@ jobs:
   publish:
     uses: ./.github/workflows/publish-container.yml
     permissions:
+      actions: read
       contents: write
       packages: write

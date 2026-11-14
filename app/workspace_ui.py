@@ -425,6 +425,10 @@ WORKSPACE_HTML = r"""<!doctype html>
       min-width: 0;
     }
     #event-dialog{inline-size:min(700px,calc(100dvw - 32px))}
+    #create-event-layout .bk-event-layout-editor{padding:8px 12px;border:1px solid var(--bk-line);border-radius:8px}
+    #create-event-layout summary{cursor:pointer;list-style:none}
+    #create-event-layout summary::-webkit-details-marker{display:none}
+    .create-subevent-card > summary:has([data-remove-create-subevent]){display:flex;align-items:center;justify-content:space-between;gap:8px}
     .event-boundaries{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
     .event-boundary{display:grid;grid-template-columns:minmax(150px,1.18fr) minmax(140px,.82fr);gap:10px;align-items:end}
     .create-subevents{display:grid;gap:10px;margin-top:4px}
@@ -1709,8 +1713,9 @@ WORKSPACE_HTML = r"""<!doctype html>
 
         <label id="create-subfolders-row" class="full-width check-row">
           <input id="create-subfolders" type="checkbox">
-          <span>Unterordner erstellen</span>
+          <span>Unterordner des Hauptereignisses erstellen</span>
         </label>
+        <div id="create-event-layout" class="full-width"></div>
 
         <label id="preserve-day-folders-row" class="full-width check-row">
           <input
@@ -2083,6 +2088,8 @@ WORKSPACE_HTML = r"""<!doctype html>
       document.getElementById("preserve-day-folders-row");
     const createSubfolders = document.getElementById("create-subfolders");
     const createSubfoldersRow = document.getElementById("create-subfolders-row");
+    const createEventLayout = document.getElementById("create-event-layout");
+    let parentLayoutEditor = null;
     let globalFolderLayout = null;
 
     const dialogPreview =
@@ -2514,7 +2521,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         for (const source of sources) {
           const jobId = String(source.job_id || "");
           if (!jobId) continue;
-          const local = source.group || group;
+          const local = source.group || source;
           const bucket = result.get(jobId) || {groups:[], family_ids:new Set()};
           bucket.groups.push(local);
           for (const id of (local.family_ids || [])) bucket.family_ids.add(Number(id));
@@ -2582,178 +2589,6 @@ WORKSPACE_HTML = r"""<!doctype html>
       };
     }
 
-    function mergeWorkspacePayloads(items) {
-      if (!items.length) {
-        return {
-          job:null,jobs:[],selected_job_ids:[],
-          statistics:{day_count:0,file_count:0,family_count:0,review_required_count:0,without_date_file_count:0},
-          events:[],day_groups:[],time_segments:[],
-          planning_overview:{event_groups:[],available_day_groups:[],timeline_groups:[]},
-          released_archive_groups:[],archive_change_reviews:[]
-        };
-      }
-
-      const rawEvents = [];
-      const rawChildren = [];
-      const eventComponents = new Map();
-      const planningEvents = new Map();
-      const dayMap = new Map();
-      const timeSegments = [];
-      const reviews = [];
-
-      for (const item of items) {
-        const jobId = item.jobId;
-        for (const event of (item.data.events || [])) {
-          const enriched = {...event, job_id:event.job_id || jobId};
-          if (enriched.event_level === "parent") rawEvents.push(enriched);
-          else rawChildren.push(enriched);
-        }
-        timeSegments.push(...(item.data.time_segments || []).map(row=>({...row,job_id:row.job_id||jobId})));
-        reviews.push(...(item.data.archive_change_reviews || []).map(row=>({...row,job_id:row.job_id||jobId})));
-
-        for (const group of (item.data.planning_overview?.event_groups || [])) {
-          const enriched={...group,job_id:group.job_id||jobId};
-          const canonical=String(enriched.linked_event_id || enriched.event_id);
-          const current=planningEvents.get(canonical);
-          const component={job_id:jobId,event_id:String(enriched.event_id),status:String(enriched.status||""),linkage_kind:enriched.linkage_kind||null};
-          if(!current){
-            planningEvents.set(canonical,{
-              ...enriched,
-              event_id:canonical,
-              canonical_event_id:canonical,
-              component_events:[component],
-              family_ids:[...(enriched.family_ids||[])],
-              source_job_ids:[jobId],
-              linked_pending_count: enriched.linked_event_id && enriched.status==="planned" ? 1 : 0
-            });
-          }else{
-            current.component_events.push(component);
-            if(!current.source_job_ids.includes(jobId))current.source_job_ids.push(jobId);
-            current.family_ids=[...new Set([...(current.family_ids||[]),...(enriched.family_ids||[])])];
-            current.family_count=Number(current.family_count||0)+Number(enriched.family_count||0);
-            current.file_count=Number(current.file_count||0)+Number(enriched.file_count||0);
-            current.total_size_bytes=Number(current.total_size_bytes||0)+Number(enriched.total_size_bytes||0);
-            current.review_required_count=Number(current.review_required_count||0)+Number(enriched.review_required_count||0);
-            if(enriched.linked_event_id && enriched.status==="planned")current.linked_pending_count=Number(current.linked_pending_count||0)+1;
-            if(!enriched.linked_event_id){
-              const keep={
-                event_name:enriched.event_name,folder_name:enriched.folder_name,
-                start_datetime:enriched.start_datetime,end_datetime:enriched.end_datetime,
-                status:enriched.status,event_kind:enriched.event_kind,
-                preserve_day_folders:enriched.preserve_day_folders,resort_required:enriched.resort_required,
-                job_id:enriched.job_id,linked_event_id:null,linkage_kind:null
-              };
-              Object.assign(current,keep);
-            }
-          }
-        }
-
-        for (const group of (item.data.planning_overview?.available_day_groups || [])) {
-          const start=String(group.start_datetime||"");
-          const end=String(group.end_datetime||"");
-          const key=`${group.has_date ? group.day_key : "__without_date__"}|${start}|${end}`;
-          const sourceGroup={...group,job_id:jobId};
-          const current=dayMap.get(key);
-          if(!current){
-            dayMap.set(key,{
-              ...sourceGroup,
-              card_key:`global:${key}`,
-              family_ids:[...(group.family_ids||[])],
-              families:(group.families||[]).map(f=>({...f,job_id:jobId})),
-              source_job_ids:[jobId],
-              source_groups:[{job_id:jobId,group:sourceGroup}]
-            });
-          }else{
-            current.file_count=Number(current.file_count||0)+Number(group.file_count||0);
-            current.family_count=Number(current.family_count||0)+Number(group.family_count||0);
-            current.total_size_bytes=Number(current.total_size_bytes||0)+Number(group.total_size_bytes||0);
-            current.review_required_count=Number(current.review_required_count||0)+Number(group.review_required_count||0);
-            current.family_ids=[...new Set([...(current.family_ids||[]),...(group.family_ids||[])])];
-            current.families.push(...(group.families||[]).map(f=>({...f,job_id:jobId})));
-            if(!current.source_job_ids.includes(jobId))current.source_job_ids.push(jobId);
-            current.source_groups.push({job_id:jobId,group:sourceGroup});
-            current.partially_assigned=Boolean(current.partially_assigned||group.partially_assigned);
-          }
-        }
-      }
-
-      for (const root of rawEvents.filter(event=>!event.linkage_kind)) {
-        eventComponents.set(String(root.id),{
-          ...root,
-          component_events:[{job_id:String(root.job_id),event_id:String(root.id),status:String(root.status||""),linkage_kind:null}]
-        });
-      }
-      for (const linked of rawEvents.filter(event=>event.linkage_kind)) {
-        const canonical=String(linked.linked_event_id||linked.id);
-        const current=eventComponents.get(canonical) || {
-          ...linked,id:canonical,linked_event_id:null,linkage_kind:null,component_events:[]
-        };
-        current.component_events.push({
-          job_id:String(linked.job_id),event_id:String(linked.id),
-          status:String(linked.status||""),linkage_kind:linked.linkage_kind
-        });
-        current.assigned_family_count=Number(current.assigned_family_count||0)+Number(linked.assigned_family_count||0);
-        current.assigned_file_count=Number(current.assigned_file_count||0)+Number(linked.assigned_file_count||0);
-        eventComponents.set(canonical,current);
-      }
-      for(const event of eventComponents.values()){
-        event.has_planned_component=(event.component_events||[]).some(component=>component.status==="planned");
-      }
-
-      const available=[...dayMap.values()].sort((a,b)=>String(a.start_datetime||a.day_key||"").localeCompare(String(b.start_datetime||b.day_key||"")));
-      const visibleEvents=[...planningEvents.values()].sort((a,b)=>String(a.start_datetime||"").localeCompare(String(b.start_datetime||"")));
-      const timeline=[...visibleEvents,...available].sort((a,b)=>{
-        const aUndated = a.group_type !== "event" && !a.has_date;
-        const bUndated = b.group_type !== "event" && !b.has_date;
-        if (aUndated !== bUndated) return aUndated ? -1 : 1;
-        const aa=String(a.start_datetime||a.day_key||"9999");
-        const bb=String(b.start_datetime||b.day_key||"9999");
-        return aa.localeCompare(bb) || (a.group_type==="event"?-1:1);
-      });
-
-      const releasedMap=new Map();
-      for(const group of (items[0].data.released_archive_groups||[])){
-        releasedMap.set(String(group.card_key||group.id||JSON.stringify(group)),group);
-      }
-      const released=[...releasedMap.values()];
-
-      const dayKeys=new Set();
-      for(const group of timeline){
-        if(group.day_key)dayKeys.add(group.day_key);
-        for(const day of (group.day_keys||[]))if(day)dayKeys.add(day);
-      }
-      let fileCount=0,familyCount=0,reviewCount=0,withoutDate=0;
-      for(const group of [...visibleEvents,...available]){
-        fileCount+=Number(group.file_count||0);
-        familyCount+=Number(group.family_count||0);
-        reviewCount+=Number(group.review_required_count||0);
-        if(!group.has_date && group.group_type!=="event")withoutDate+=Number(group.file_count||0);
-      }
-
-      return {
-        job:items[0].data.job,
-        jobs:items.map(item=>item.data.job),
-        selected_job_ids:items.map(item=>item.jobId),
-        statistics:{
-          day_count:dayKeys.size,
-          file_count:fileCount,
-          family_count:familyCount,
-          review_required_count:reviewCount,
-          without_date_file_count:withoutDate
-        },
-        events:[...eventComponents.values(),...rawChildren],
-        day_groups:available,
-        time_segments:timeSegments,
-        planning_overview:{
-          event_groups:visibleEvents,
-          available_day_groups:available,
-          timeline_groups:timeline
-        },
-        released_archive_groups:released,
-        archive_change_reviews:reviews
-      };
-    }
-
     function refreshBackupSelection(availableJobs) {
       selectedJobIds = allActiveBackups
         ? new Set(availableJobs.filter(job=>job.workflow_status!=="archived").map(job=>job.id))
@@ -2814,11 +2649,6 @@ WORKSPACE_HTML = r"""<!doctype html>
       updateTechnicalAnchor(requestedJob || "");
       renderBackupFilter();
 
-      if(!jobs.length){
-        setStatus("Noch kein analysierter Arbeitsbestand vorhanden.");
-        await loadWorkspace({physicalRefresh});
-        return;
-      }
       await loadWorkspace({physicalRefresh});
     }
 
@@ -2843,18 +2673,6 @@ WORKSPACE_HTML = r"""<!doctype html>
       if(request!==workspaceLoadSerial)return;
       const ids=[...selectedJobIds].filter(id=>jobs.some(job=>job.id===id));
       selectedDays.clear();
-
-      if(!ids.length){
-        workspace=mergeWorkspacePayloads([]);
-        eventSuggestions=[];
-        renderSummary();
-        renderEventSuggestions();
-        renderDays();
-        renderPlannedActions();
-        renderSelection();
-        setStatus("Keine Sicherung im Filter ausgewählt.");
-        return;
-      }
 
       const query=ids.sort().map(encodeURIComponent).join(",");
       const snapshotKey = "bk-workspace-pre:" + (window.__bkLibraryId || "main") + ":" + query;
@@ -2901,7 +2719,8 @@ WORKSPACE_HTML = r"""<!doctype html>
       renderPlannedActions();
       renderSelection();
 
-      setStatus(refreshWarning);
+      const hasMedia = workspace.statistics?.family_count || workspace.released_archive_groups?.length;
+      setStatus(refreshWarning || (!ids.length && !hasMedia ? "Keine Sicherung im Filter ausgewählt." : ""));
     }
 
     function renderEventSuggestions() {
@@ -4127,7 +3946,8 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     async function autoAttachExistingNoEventCollection() {
-      if (dialogMode !== "no_event" || !jobSelect.value) return;
+      const jobId = anchorJobIdForSelection();
+      if (dialogMode !== "no_event" || !jobId) return;
       const months=monthKeysForNoEventDialog();
       if (months.length > 1) {
         activeNoEventTarget=null;
@@ -4136,7 +3956,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
       try {
         const query=months.length===1 ? `?months=${encodeURIComponent(months[0])}` : "";
-        const targetData=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/no-event/targets${query}`);
+        const targetData=await getJson(`/api/jobs/${encodeURIComponent(jobId)}/no-event/targets${query}`);
         noEventTargetCache=targetData.targets||[];
       } catch (_) { noEventTargetCache=[]; }
 
@@ -4406,53 +4226,21 @@ WORKSPACE_HTML = r"""<!doctype html>
       const current=days.includes(selected) ? selected : (days[0]||selected||"");
       return `<label><span>${escapeHtml(label)}</span><input ${attribute} type="date" min="${escapeHtml(bounds.minDate||"")}" max="${escapeHtml(bounds.maxDate||"")}" value="${escapeHtml(current)}"></label>`;
     }
-    function minuteAfter(value){
-      const match=/^(\d{2}):(\d{2})$/.exec(String(value||""));
-      if(!match)return null;
-      const total=Number(match[1])*60+Number(match[2])+1;
-      if(total>=24*60)return null;
-      return `${String(Math.floor(total/60)).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`;
-    }
-
+    /* SHARED_EVENT_TIME_JS */
     function nextSubeventDefaults(){
-      const bounds=subeventBounds();
-      if(!bounds.minDate||!bounds.maxDate)return null;
       const rows=[...createSubeventList.querySelectorAll("[data-create-subevent]")];
-      if(!rows.length){
-        return {
-          start_date:bounds.minDate,
-          start_time:bounds.minTime||"00:00",
-          end_date:bounds.minDate,
-          end_time:bounds.minDate===bounds.maxDate ? (bounds.maxTime||"23:59") : "23:59",
-        };
-      }
-
-      const previous=rows[rows.length-1];
-      const previousDay=previous.querySelector("[data-create-child-end-date]")?.value||bounds.minDate;
-      const previousTime=previous.querySelector("[data-create-child-end-time]")?.value||"23:59";
-      let startDate=previousDay;
-      let startTime=minuteAfter(previousTime);
-      if(!startTime){
-        startDate=shiftIsoDay(previousDay,1);
-        startTime="00:00";
-      }
-      if(!startDate || startDate>bounds.maxDate){
+      const previous=rows.at(-1);
+      const bounds=subeventBounds();
+      const defaults=nextChildInterval(bounds, previous ? {
+        day:previous.querySelector("[data-create-child-end-date]")?.value||bounds.minDate,
+        time:previous.querySelector("[data-create-child-end-time]")?.value||"23:59",
+      } : null);
+      if(defaults?.error){
         dialogError.hidden=false;
-        dialogError.textContent="Der bisherige Unterereigniszeitraum reicht bereits bis zum Ende des Oberereignisses. Ändere zuerst die letzte Endzeit.";
+        dialogError.textContent=defaults.error;
         return null;
       }
-      const endTime=startDate===bounds.maxDate ? (bounds.maxTime||"23:59") : "23:59";
-      if(startDate===bounds.maxDate && startTime>endTime){
-        dialogError.hidden=false;
-        dialogError.textContent="Im Oberereignis ist hinter dem letzten Unterereignis kein weiterer Zeitraum frei.";
-        return null;
-      }
-      return {
-        start_date:startDate,
-        start_time:startTime,
-        end_date:startDate,
-        end_time:endTime,
-      };
+      return defaults;
     }
 
     function refreshCreateSubeventDayControls(){
@@ -4504,7 +4292,17 @@ WORKSPACE_HTML = r"""<!doctype html>
       const defaultEnd=String(defaults.end_time||(
         ed===bounds.maxDate ? bounds.maxTime : "23:59"
       )||"23:59");
-      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Tag 1"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Remove subevent</button></div><div class="create-subevent-boundaries"><div class="create-subevent-boundary">${subeventDayControl("data-create-child-start-date","data-create-child-start-month-year",sd,"Beginn")}<label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary">${subeventDayControl("data-create-child-end-date","data-create-child-end-month-year",ed,"Ende")}<label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
+      row.innerHTML=`<summary style="cursor:pointer"><strong data-create-child-summary>${escapeHtml(defaults.name||"Unterereignis")}</strong></summary><div class="create-subevent-grid" style="margin-top:9px"><div class="create-subevent-top"><label class="create-subevent-name"><span>Name</span><input data-create-child-name value="${escapeHtml(defaults.name||"")}" placeholder="Zum Beispiel Tag 1"></label><button type="button" class="danger-button create-subevent-remove" data-remove-create-subevent>Remove subevent</button></div><label class="check-row"><input type="checkbox" data-create-child-folder><span>Unterordner erstellen</span></label><div class="create-subevent-boundaries"><div class="create-subevent-boundary">${subeventDayControl("data-create-child-start-date","data-create-child-start-month-year",sd,"Beginn")}<label><span>Startzeit</span><input data-create-child-start-time type="time" value="${escapeHtml(defaultStart)}"></label></div><div class="create-subevent-boundary">${subeventDayControl("data-create-child-end-date","data-create-child-end-month-year",ed,"Ende")}<label><span>Endzeit</span><input data-create-child-end-time type="time" value="${escapeHtml(defaultEnd)}"></label></div></div></div>`;
+      const createFolder=row.querySelector("[data-create-child-folder]");
+      const remove=row.querySelector("[data-remove-create-subevent]");
+      row.querySelector("summary").append(remove);
+      const childLayout=window.BibliothekarFolderLayout.subeventEditor({checkbox:createFolder,saved:defaults,defaults:globalFolderLayout});
+      window.BibliothekarFolderLayout.expandCard(row);
+      const nameRow=row.querySelector(".create-subevent-top");nameRow.classList.add("bk-subevent-name-row");
+      nameRow.append(createFolder.closest("label"));
+      childLayout.panel.addEventListener("input",scheduleDialogPreview);
+      row.querySelector(".create-subevent-grid").append(childLayout.panel);
+      row.folderOptions=childLayout.value;
       const name=row.querySelector("[data-create-child-name]"),summary=row.querySelector("[data-create-child-summary]");
       const syncDayDisplays=()=>{
         for(const [selector,displaySelector] of [
@@ -4517,7 +4315,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         }
       };
       name?.addEventListener("input",()=>{summary.textContent=String(name.value||"").trim()||"Unterereignis";scheduleDialogPreview();});
-      row.querySelector("[data-remove-create-subevent]")?.addEventListener("click",()=>{row.remove();updateSubeventPrefixToggle();scheduleDialogPreview();});
+      remove.addEventListener("click",event=>{event.preventDefault();row.remove();updateSubeventPrefixToggle();scheduleDialogPreview();});
       row.querySelectorAll("input,select").forEach(input=>input.addEventListener("change",()=>{syncDayDisplays();scheduleDialogPreview();}));
       createSubeventList.appendChild(row);
       syncDayDisplays();
@@ -4526,7 +4324,13 @@ WORKSPACE_HTML = r"""<!doctype html>
       dialogError.hidden=true;
       dialogError.textContent="";
     }
-    function collectCreateSubevents(){return [...createSubeventList.querySelectorAll("[data-create-subevent]")].map(row=>{const name=row.querySelector("[data-create-child-name]")?.value?.trim()||"",sd=row.querySelector("[data-create-child-start-date]")?.value||"",st=row.querySelector("[data-create-child-start-time]")?.value||"00:00",ed=row.querySelector("[data-create-child-end-date]")?.value||"",et=row.querySelector("[data-create-child-end-time]")?.value||"23:59";return{name,start_datetime:`${sd}T${st}:00`,end_datetime:`${ed}T${et}:59`};});}
+    function collectCreateSubevents(){return [...createSubeventList.querySelectorAll("[data-create-subevent]")].map(row=>{const name=row.querySelector("[data-create-child-name]")?.value?.trim()||"",sd=row.querySelector("[data-create-child-start-date]")?.value||"",st=row.querySelector("[data-create-child-start-time]")?.value||"00:00",ed=row.querySelector("[data-create-child-end-date]")?.value||"",et=row.querySelector("[data-create-child-end-time]")?.value||"23:59";return{name,start_datetime:`${sd}T${st}:00`,end_datetime:`${ed}T${et}:59`,...row.folderOptions()};});}
+
+    function syncCreateEventLayout(){
+      const noEvent=["no_event","existing_no_event"].includes(dialogMode);
+      createEventLayout.hidden=Boolean(existingParentEvent?.value || activeNoEventTarget);
+      createSubfoldersRow.hidden=noEvent;
+    }
 
     async function openEventDialog(mode){
       dialogMode=mode;const dated=selectedDatedGroups(),noEvent=mode==="no_event"||mode==="existing_no_event",existingNoEvent=mode==="existing_no_event";activeNoEventTarget=null;
@@ -4540,9 +4344,13 @@ WORKSPACE_HTML = r"""<!doctype html>
       dialogSubeventPrefixEnabled=globalSubeventPrefixEnabled;
       createSubeventList.innerHTML="";createSubevents.hidden=noEvent;createSubeventHeading.textContent="Unterereignisse (optional)";eventBoundaries.hidden=noEvent;preserveDayFolders.checked=false;preserveDayFolders.disabled=false;preserveDayFoldersRow.hidden=false;createSubfolders.checked=Boolean(globalFolderLayout?.structure_enabled ?? true);createSubfolders.disabled=false;createSubfoldersRow.hidden=false;dialogError.hidden=true;dialogError.textContent="";updateSubeventPrefixToggle();
       noEventSegmentEditor.hidden=!noEvent;existingNoEventTargetRow.hidden=!existingNoEvent;
-      if(existingNoEvent){const months=[...new Set(dated.map(group=>String(group.day_key||"").slice(0,7)).filter(Boolean))];noEventTargetCache=[];if(months.length){try{const d=await getJson(`/api/jobs/${encodeURIComponent(jobSelect.value)}/no-event/targets?months=${encodeURIComponent(months[0])}`);noEventTargetCache=d.targets||[];}catch(_){}}const target=noEventTargetCache[0]||null;if(target){existingNoEventTargetRow.hidden=false;existingNoEventTarget.innerHTML=`<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(target.status))}</option>`;existingNoEventTarget.value=target.id;existingNoEventTarget.disabled=true;activateNoEventTarget(target);}else renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));}
+      parentLayoutEditor=window.BibliothekarFolderLayout.eventEditor({defaults:globalFolderLayout,allowDisabled:noEvent});
+      createEventLayout.replaceChildren(parentLayoutEditor.panel);
+      parentLayoutEditor.panel.addEventListener("input",scheduleDialogPreview);
+      if(existingNoEvent){const months=[...new Set(dated.map(group=>String(group.day_key||"").slice(0,7)).filter(Boolean))];noEventTargetCache=[];if(months.length){try{const d=await getJson(`/api/jobs/${encodeURIComponent(anchorJobIdForSelection())}/no-event/targets?months=${encodeURIComponent(months[0])}`);noEventTargetCache=d.targets||[];}catch(_){}}const target=noEventTargetCache[0]||null;if(target){existingNoEventTargetRow.hidden=false;existingNoEventTarget.innerHTML=`<option value="${escapeHtml(target.id)}">${escapeHtml(String(target.month_key||"").slice(5,7))} – Ohne Ereignis · ${escapeHtml(workspaceStatusLabel(target.status))}</option>`;existingNoEventTarget.value=target.id;existingNoEventTarget.disabled=true;activateNoEventTarget(target);}else renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));}
       else if(noEvent){renderNoEventSegmentEditor(dated.map(day=>({...day,_new:true})));await autoAttachExistingNoEventCollection();}
       else{applyAutomaticFreeTimeSuggestion(dated);if(parentCandidates.length)applyExistingParentChoice();}
+      syncCreateEventLayout();
       dialogPreview.textContent="Vorschau wird vorbereitet …";dialogPreview.hidden=true;calculatePreviewButton.textContent="Vorschau einblenden";saveResult.hidden=true;saveResult.textContent="";eventDialog.showModal();syncCreateEventCompactPairs();scheduleDialogPreview();
     }
 
@@ -4567,6 +4375,14 @@ WORKSPACE_HTML = r"""<!doctype html>
       }
       const parentId = base.existing_parent_event_id;
       const parent = parentId ? (workspace?.events||[]).find(event=>event.id===parentId) : null;
+      if(!parent && !activeNoEventTarget){
+        const layout=parentLayoutEditor?.value();
+        if(layout && layout.mode!=="default"){
+          base.folder_layout={...globalFolderLayout,...layout};
+          if(base.event_kind==="no_event")base.create_subfolders=layout.structure_enabled;
+          else base.create_subfolders=base.create_subfolders && layout.structure_enabled;
+        }
+      }
       if (parent) {
         if(!activeExtension) throw new Error("Der Erweiterungsbereich ist nicht mehr aktuell.");
         if(activeExtension.direction==="after"){
@@ -4617,7 +4433,7 @@ WORKSPACE_HTML = r"""<!doctype html>
     }
 
     async function calculateDialogPreview() {
-      const jobId = anchorJobIdForSelection();
+      let jobId = anchorJobIdForSelection();
 
       if (!jobId) {
         dialogPreview.textContent =
@@ -4920,7 +4736,7 @@ WORKSPACE_HTML = r"""<!doctype html>
       scheduleDialogPreview();
     });
 
-    existingParentEvent?.addEventListener("change", applyExistingParentChoice);
+    existingParentEvent?.addEventListener("change",()=>{applyExistingParentChoice();syncCreateEventLayout();});
 
     existingNoEventTarget?.addEventListener("change", () => {
       const target=noEventTargetCache.find(item=>String(item.id)===String(existingNoEventTarget.value));
@@ -5302,3 +5118,6 @@ WORKSPACE_HTML = _workspace_words(WORKSPACE_HTML)
 
 from app.ui_workspace_cache import WORKSPACE_CACHE_JS
 WORKSPACE_HTML = WORKSPACE_HTML.replace("/* PRE_WORKSPACE_CACHE */",WORKSPACE_CACHE_JS)
+
+from app.ui_event_time import EVENT_TIME_JS
+WORKSPACE_HTML = WORKSPACE_HTML.replace("/* SHARED_EVENT_TIME_JS */", EVENT_TIME_JS)

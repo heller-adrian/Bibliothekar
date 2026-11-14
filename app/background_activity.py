@@ -27,8 +27,8 @@ _BATCH_STATES = ("queued", "running", "interrupted")
 
 def current_activity(library_database: Path, global_import_database: Path) -> dict[str, Any]:
     operations: list[dict[str, Any]] = []
-    # Keep recently completed operations visible long enough for a 2.5s UI poll.
-    recent_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+    # Each successful operation expires from the dock based on its own completion.
+    recent_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
 
     # Camera and folder imports are globally managed in the main DB, even
     # while a secondary library is selected in the browser.
@@ -47,7 +47,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
                        AND (state IN ('failed','interrupted')
                          OR (state='completed' AND updated_at>=?)))
                  )
-               ORDER BY updated_at DESC,id DESC LIMIT 12"""
+               ORDER BY (state='completed'),updated_at DESC,id DESC LIMIT 12"""
         try:
             rows=connection.execute(sql,(recent_cutoff,)).fetchall()
         except (OperationalError,TypeError) as error:
@@ -105,7 +105,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
         batch_candidates = connection.execute(
             """SELECT * FROM operation_batches
                WHERE status IN ('queued','running','interrupted','applied','failed')
-               ORDER BY created_at DESC,id DESC LIMIT 12"""
+               ORDER BY (status='applied'),created_at DESC,id DESC LIMIT 12"""
         ).fetchall()
         batches = [
             row for row in batch_candidates

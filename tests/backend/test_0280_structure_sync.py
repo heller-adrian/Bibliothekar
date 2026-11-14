@@ -233,8 +233,10 @@ def test_0280_archived_manual_rename_requires_staged_event_json_before_commit(tm
 
 def test_0280_event_edit_ui_has_one_subfolder_control_per_event_kind():
     source = Path("app/events_ui.py").read_text(encoding="utf-8")
-    assert source.count('id="edit-subfolders"') == 2
-    assert 'document.getElementById("edit-subfolders").value === "1"' in source
+    assert source.count('id="edit-subfolders"') == 1
+    assert 'document.getElementById("edit-subfolders").checked' in source
+    assert 'id="edit-event-layout"' in source
+    assert 'window.BibliothekarFolderLayout.eventEditor(' in source
 
 
 def test_0280_structure_task_auto_opens_once_per_page():

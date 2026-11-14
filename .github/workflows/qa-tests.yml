@@ -1,6 +1,6 @@
 name: Backend QA
 on:
-  # Documentation and housekeeping commits do not need the long regression suite.
+  # PRs run the focused adoption gate. Full release qualification is explicit.
   pull_request:
     paths:
       - 'app/**'
@@ -21,15 +21,25 @@ on:
       - 'compose*.yaml'
       - '!qa/README.md'
   workflow_dispatch:
+    inputs:
+      full_backend:
+        description: Run complete eight-part release qualification
+        type: boolean
+        default: false
+        required: true
 permissions:
   contents: read
+env:
+  QA_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
 concurrency:
-  group: bibliothekar-main-qa-${{ github.ref }}
-  cancel-in-progress: true
+  group: bibliothekar-qa-${{ github.event_name == 'workflow_dispatch' && inputs.full_backend && 'release' || 'development' }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || !inputs.full_backend }}
 jobs:
-  backend-regression:
+  adoption-preflight:
+    outputs:
+      request-only: ${{ steps.scope.outputs.request-only }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 15
     env:
       PYTHONPATH: ${{ github.workspace }}
       PYTEST_ADDOPTS: ''
@@ -42,43 +52,215 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+          ref: ${{ env.QA_SOURCE }}
+      - name: Identify a release request for already qualified source
+        id: scope
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$QA_SOURCE"
+          request=.github/release-requests/v1.0.1-rc.1.txt
+          if [[ "$HEAD_REPOSITORY" == "$GITHUB_REPOSITORY" && "$HEAD_BRANCH" == 'patch/1.0.1-legacy-adoption' ]] &&
+             [[ "$(git diff-tree --no-commit-id --name-only -r HEAD)" == "$request" ]] &&
+             [[ -f "$request" && "$(sed -n '2p' "$request")" == "$(git rev-parse HEAD^)" ]]; then
+            echo 'request-only=true' >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-python@v5
+        if: steps.scope.outputs.request-only != 'true'
         with:
           python-version: '3.12'
       - name: Install external test prerequisites
+        if: steps.scope.outputs.request-only != 'true'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y libimage-exiftool-perl
+          bash qa/release/install_runner_packages.sh libimage-exiftool-perl
           exiftool -ver
           git --version
       - name: Install test-only dependencies
+        if: steps.scope.outputs.request-only != 'true'
         run: |
           python -m pip install --disable-pip-version-check -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2
       - name: Check Compose template without privileged host access
+        if: steps.scope.outputs.request-only != 'true'
         run: docker compose -f compose.example.yaml config -q
       - name: Compile backend and QA helpers
+        if: steps.scope.outputs.request-only != 'true'
         run: python -m compileall -q app qa
       - name: Validate shell and JavaScript syntax
+        if: steps.scope.outputs.request-only != 'true'
         run: |
           bash -n qa/archive_e2e/*.sh
           python - <<'PY'
           from pathlib import Path
           from app.events_ui import EVENTS_HTML
-          from app.ui_shell import BIBLIOTHEKAR_JS
+          from app.ui_shell import BIBLIOTHEKAR_JS, FOLDER_LAYOUT_JS
+          from app.main import _library_onboarding_html
+          from app.legacy_adoption_i18n import PATTERNS
+          from app.legacy_adoption_ui import setup_choice_html, wizard_html
+          import json
           import re
           scripts=re.findall(r'<script[^>]*>(.*?)</script>',EVENTS_HTML,flags=re.S)
           assert scripts
           Path("/tmp/bibliothekar-events.js").write_text("\n".join(scripts))
-          Path("/tmp/bibliothekar-shell.js").write_text(BIBLIOTHEKAR_JS)
+          Path("/tmp/bibliothekar-shell.js").write_text(FOLDER_LAYOUT_JS + "\n" + BIBLIOTHEKAR_JS)
+          for name, html in (("adoption", wizard_html("main")), ("choice", setup_choice_html("choice")),
+                             ("onboarding", _library_onboarding_html())):
+              scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
+              assert scripts
+              Path(f"/tmp/bibliothekar-{name}.js").write_text("\n".join(scripts))
+          Path("/tmp/bibliothekar-adoption-patterns.json").write_text(json.dumps(PATTERNS))
           PY
           node --check /tmp/bibliothekar-shell.js
           node --check /tmp/bibliothekar-events.js
-      # Public pull requests must never execute their code on a self-hosted runner.
-      - name: Full backend regression tests (synthetic fixtures only)
-        run: pytest -q -o addopts='' --junitxml=/tmp/bibliothekar-main-qa.xml tests/backend
-      - name: Save test results
+          node --check /tmp/bibliothekar-adoption.js
+          node --check /tmp/bibliothekar-choice.js
+          node --check /tmp/bibliothekar-onboarding.js
+          node -e 'for (const [source] of require("/tmp/bibliothekar-adoption-patterns.json")) new RegExp(source, "u")'
+      - name: Verify adoption including the kernel read-only bind mount
+        if: steps.scope.outputs.request-only != 'true'
+        env:
+          RECOVERY_PROBE: ${{ github.event_name == 'workflow_dispatch' && !inputs.full_backend }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$QA_SOURCE"
+          cat > "$RUNNER_TEMP/adoption-targets.json" <<'JSON'
+          [
+            "tests/backend/test_legacy_adoption_inventory.py",
+            "tests/backend/test_legacy_adoption_dataset.py",
+            "tests/backend/test_legacy_adoption_host.py",
+            "tests/backend/test_legacy_adoption_plan.py",
+            "tests/backend/test_legacy_adoption_integration.py",
+            "tests/backend/test_rc2_archive_finish_recovery.py",
+            "tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.hash_chunk]",
+            "tests/backend/test_f12_no_clobber.py::test_real_sigkill_around_atomic_publication_and_three_startups[import.publish_before]"
+          ]
+          JSON
+          if [[ "$RECOVERY_PROBE" == true ]]; then
+            python - "$RUNNER_TEMP/adoption-targets.json" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          cases = json.loads(path.read_text())
+          cases += [
+              "tests/backend/test_0562_process_recovery.py::test_sort_reconcile_sigkill[reconcile-reconcile.move1]",
+              "tests/backend/test_f11_trash_reservation.py::test_f11_delete_wins_restore_rejected[full]",
+              "tests/backend/test_f11_trash_reservation.py::test_f11_two_concurrent_requests[restore]",
+          ]
+          path.write_text(json.dumps(cases))
+          PY
+          fi
+          bash qa/release/with_synthetic_zfs.sh python qa/f14/linux/run_linux.py "$GITHUB_WORKSPACE" targets "$RUNNER_TEMP/adoption-targets.json"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from xml.etree import ElementTree
+          junit = Path(os.environ["RUNNER_TEMP"]) / "f14-qa/targets/results/result.xml"
+          cases = list(ElementTree.parse(junit).iter("testcase"))
+          for name in (
+              "test_adoption_reads_actual_read_only_archive",
+              "test_wizard_and_f14_recovery_in_main_library[lifecycle]",
+              "test_adopted_time_segments_survive_verified_archive_deletion_and_restart[segments]",
+              "test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy[review-zfs]",
+          ):
+              matches = [case for case in cases if case.get("name") == name]
+              assert len(matches) == 1 and len(matches[0]) == 0, f"Missing successful native ZFS test: {name}"
+          PY
+      - name: Save adoption preflight evidence
+        if: always() && steps.scope.outputs.request-only != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: adoption-preflight
+          path: ${{ runner.temp }}/f14-qa/targets/results
+          retention-days: 14
+      - name: Retain synthetic recovery diagnostics on failure
+        if: failure() && steps.scope.outputs.request-only != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: adoption-recovery-diagnostics
+          path: |
+            ${{ runner.temp }}/f14-qa/targets/scratch/pytest/0562-evidence/thread-*.json
+            ${{ runner.temp }}/f14-qa/targets/scratch/pytest/0562-evidence/**/process.log
+            ${{ runner.temp }}/f14-qa/targets/scratch/pytest/**/f11-evidence/**/process.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Public pull requests must never execute their code on a self-hosted runner.
+  backend-regression:
+    needs: adoption-preflight
+    if: github.event_name == 'workflow_dispatch' && inputs.full_backend && needs.adoption-preflight.outputs.request-only != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 58
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        partition: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ env.QA_SOURCE }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test prerequisites
+        run: |
+          bash qa/release/install_runner_packages.sh libimage-exiftool-perl
+          python -m pip install --disable-pip-version-check -r requirements.txt -c requirements-rc.constraints.txt pytest httpx tinycss2
+      - name: Execute one disjoint backend partition
+        env:
+          PARTITION: ${{ matrix.partition }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$QA_SOURCE"
+          printf '%s\n' "$QA_SOURCE" > "$RUNNER_TEMP/source.txt"
+          python qa/rc13/regression.py "$PARTITION"
+      - name: Save test results and partial diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-qa
-          path: /tmp/bibliothekar-main-qa.xml
+          name: backend-qa-part-${{ matrix.partition }}
+          path: |
+            ${{ runner.temp }}/source.txt
+            ${{ runner.temp }}/rc13-partition.json
+            ${{ runner.temp }}/f14-qa/targets/results/exit.json
+            ${{ runner.temp }}/f14-qa/targets/results/result.xml
+            ${{ runner.temp }}/f14-qa/targets/results/stdout.log
+            ${{ runner.temp }}/f14-qa/targets/results/targets-incremental.jsonl
+          retention-days: 14
+      - name: Retain synthetic recovery diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-recovery-diagnostics-${{ matrix.partition }}
+          path: |
+            ${{ runner.temp }}/f14-qa/targets/scratch/pytest/0562-evidence/thread-*.json
+            ${{ runner.temp }}/f14-qa/targets/scratch/pytest/0562-evidence/**/process.log
+            ${{ runner.temp }}/f14-qa/targets/scratch/pytest/**/f11-evidence/**/process.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  backend-coverage:
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.full_backend && needs.adoption-preflight.result == 'success' && needs.adoption-preflight.outputs.request-only != 'true'
+    needs: [adoption-preflight, backend-regression]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ env.QA_SOURCE }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: backend-qa-part-*
+          path: ${{ runner.temp }}/coverage
+      - name: Require exactly one successful execution per backend test
+        run: |
+          test "$(git rev-parse HEAD)" = "$QA_SOURCE"
+          python qa/release/verify_backend_coverage.py "$RUNNER_TEMP/coverage" "$RUNNER_TEMP/coverage-summary.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/coverage-summary.json
+          retention-days: 30

@@ -1,3 +1,11 @@
+## 1.0.1-rc.1 – Bestandsübernahme
+
+- Bestehende Fotosammlungen in Etappen inventarisieren und auf neue oder vorhandene Archivereignisse verteilen.
+- Entwürfe, Ereignislayouts und Prüffälle dauerhaft verwalten. Ungeklärte Familien können als geprüfte Arbeitskopien zur späteren Metadatenkorrektur in General bereitgestellt werden.
+- Innerhalb desselben ZFS-Datasets über SMB oder mit einem separat gestarteten TrueNAS-Skript verschieben. Der bestätigte Plan, das Journal und die kontrollierte Rücknahme bleiben über Neustarts verfügbar.
+- Zielpfade, Dateiidentitäten, SHA-256 und Ereignisdokumente vor der Registrierung in Bibliothek und Besitzregistry prüfen.
+- [Anleitung für die Bestandsübernahme](docs/legacy-adoption.md)
+
 ## 1.0.0 – Erste stabile Veröffentlichung
 
 - Stabile Version aus dem praktisch abgenommenen Stand `1.0.0-pre.7.2`, ohne neue Foto- oder Archivfunktionen.

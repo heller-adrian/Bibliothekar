@@ -710,6 +710,93 @@ def verify_event_change(
     }
 
 
+def _checked_finish_entry(function):
+    """Reject an unverified first submission before creating a durable intent.
+
+    Interrupted original intents still enter their exact protected function;
+    only its pinned roots and full physical revalidation can complete a retry.
+    """
+    from functools import wraps
+
+    @wraps(function)
+    def call(database_path, cr_id, archive_root, workspace_path=None):
+        from app.event_change_request import get_event_change_request, get_event_change_files
+        from app.operation_health import inspect
+        cr = get_event_change_request(database_path, cr_id)
+        if cr is None:
+            with database_connection(database_path) as connection:
+                receipt = connection.execute("SELECT 1 FROM audit_log WHERE action='archived_event_deleted_after_release' "
+                                             "AND entity_id=?", (cr_id,)).fetchone()
+            if receipt is None:
+                raise EventChangeApplyError('Änderungsauftrag nicht gefunden.')
+        elif cr['status'] != 'aenderbar_bestaetigt':
+            raise EventChangeApplyError(f"Status '{cr['status']}' erlaubt keinen Abschluss.")
+        from app.root_operations import _registered
+        owner = _registered(database_path)
+        workspace = Path(owner['workspace_root']) if owner else workspace_path
+        if cr is not None and cr['status'] == 'aenderbar_bestaetigt' and (
+                workspace is None or inspect(workspace)['writes_allowed']):
+            reviews = [row for row in get_event_change_files(database_path, cr_id) if not row.get('advisory')]
+            if not reviews or any(row.get('verification_status') != 'verified' for row in reviews):
+                verification = verify_event_change(database_path, cr_id, archive_root, workspace_path)
+                if not verification['complete']:
+                    raise EventChangeApplyError('Die Archivdateien müssen zuerst vollständig geprüft werden.')
+        return function(database_path, cr_id, archive_root, workspace_path)
+    return call
+
+
+def _completed_archive_deletion(database_path, cr_id, archive_root, workspace_path):
+    """A transactional receipt survives deletion of the event and its request.
+
+    Recheck every retained return copy and its canonical catalogue location.
+    A legacy receipt without the frozen manifest never grants completion.
+    """
+    with database_connection(database_path) as connection:
+        rows = connection.execute(
+            "SELECT details_json FROM audit_log WHERE action='archived_event_deleted_after_release' "
+            "AND entity_type='event_change_request' AND entity_id=?", (cr_id,),
+        ).fetchall()
+        if len(rows) != 1:
+            return None
+        details = json.loads(rows[0]['details_json'])
+        proof = details.get('completion')
+        if not proof or proof.get('format') != 1 or workspace_path is None:
+            raise EventChangeApplyError('archive_completion_receipt_requires_review')
+        result = proof['result']
+        files = proof['files']
+        if (not result.get('event_deleted') or result.get('change_request_id') != cr_id
+                or len(files) != result['verified_file_count'] or not files):
+            raise EventChangeApplyError('archive_completion_receipt_invalid')
+        if connection.execute('SELECT 1 FROM events WHERE id=?', (details['event_id'],)).fetchone():
+            raise EventChangeApplyError('archive_completion_event_still_present')
+        from app.archive_release_stock import _safe_workspace_path
+        seen = set()
+        for item in files:
+            if item['path'] in seen:
+                raise EventChangeApplyError('archive_completion_duplicate_path')
+            seen.add(item['path'])
+            target = _safe_workspace_path(workspace_path, item['path'])
+            if (not target.is_file() or target.is_symlink() or target.stat().st_size != item['size']
+                    or _sha256_file(target) != item['sha256']):
+                raise EventChangeApplyError('archive_completion_return_copy_changed')
+            if item['file_id'] is not None:
+                row = connection.execute('SELECT current_relative_path,current_root_kind,sha256_current '
+                                         'FROM files WHERE id=?', (item['file_id'],)).fetchone()
+                if row is None or tuple(row) != (item['path'], 'shared_workspace', item['sha256']):
+                    raise EventChangeApplyError('archive_completion_catalogue_changed')
+            else:
+                row = connection.execute('SELECT 1 FROM released_archive_assets WHERE origin_change_request_id=? '
+                                         'AND current_relative_path=? AND size_bytes=? AND sha256=?',
+                                         (cr_id, item['path'], item['size'], item['sha256'])).fetchone()
+                if row is None:
+                    raise EventChangeApplyError('archive_completion_asset_changed')
+            if _safe_archive_path(archive_root, item['old_path']).exists():
+                raise EventChangeApplyError('archive_completion_original_reappeared')
+        validate_active_roots()
+        return result
+
+
+@_checked_finish_entry
 @protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=EventChangeApplyError)
 def finish_event_change(
     database_path: Path,
@@ -725,6 +812,9 @@ def finish_event_change(
 
     cr = get_event_change_request(database_path, cr_id)
     if cr is None:
+        completed = _completed_archive_deletion(database_path, cr_id, archive_root, workspace_path)
+        if completed is not None:
+            return completed
         raise EventChangeApplyError("Änderungsauftrag nicht gefunden.")
     if cr["status"] != "aenderbar_bestaetigt":
         raise EventChangeApplyError(
@@ -773,29 +863,32 @@ def finish_event_change(
     end_date = str(cr["end_date"])
     event_kind = str(cr.get("event_kind") or "event")
     no_event_segments = []
-    if event_kind == "no_event":
+    # A deletion has no replacement timeline. Its release intervals come
+    # from the existing archived assignments and its verified return manifest.
+    if not delete_event:
+        if event_kind == "no_event":
+            try:
+                no_event_segments = normalize_no_event_segments(json.loads(cr.get("no_event_segments") or "[]"))
+            except Exception as exc:
+                raise EventChangeApplyError("Die gespeicherten „Ohne Ereignis“-Zeitsegmente sind ungültig.") from exc
+            if not no_event_segments:
+                raise EventChangeApplyError("Für „Ohne Ereignis“ fehlt mindestens ein Zeitsegment.")
+            parent_start = no_event_segments[0]["start_datetime"]
+            parent_end = no_event_segments[-1]["end_datetime"]
+        else:
+            parent_start = f"{start_date}T00:00:00"
+            parent_end = f"{end_date}T23:59:59"
+        uses_time_range = bool(cr["uses_time_range"]) if event_kind != "no_event" else False
         try:
-            no_event_segments = normalize_no_event_segments(json.loads(cr.get("no_event_segments") or "[]"))
+            child_segments = json.loads(cr.get("child_segments_json") or "[]") if event_kind == "event" else []
         except Exception as exc:
-            raise EventChangeApplyError("Die gespeicherten „Ohne Ereignis“-Zeitsegmente sind ungültig.") from exc
-        if not no_event_segments:
-            raise EventChangeApplyError("Für „Ohne Ereignis“ fehlt mindestens ein Zeitsegment.")
-        parent_start = no_event_segments[0]["start_datetime"]
-        parent_end = no_event_segments[-1]["end_datetime"]
-    else:
-        parent_start = f"{start_date}T00:00:00"
-        parent_end = f"{end_date}T23:59:59"
-    uses_time_range = bool(cr["uses_time_range"]) if event_kind != "no_event" else False
-    try:
-        child_segments = json.loads(cr.get("child_segments_json") or "[]") if event_kind == "event" else []
-    except Exception as exc:
-        raise EventChangeApplyError("Die gespeicherten Unterereignisse sind ungültig.") from exc
-    start_time = str(cr["start_time"] or "00:00")
-    end_time = str(cr["end_time"] or "23:59")
-    child_start = f"{start_date}T{start_time}:00"
-    child_end = f"{end_date}T{end_time}:59"
-    if event_kind == 'event' and uses_time_range:
-        parent_start, parent_end = child_start, child_end
+            raise EventChangeApplyError("Die gespeicherten Unterereignisse sind ungültig.") from exc
+        start_time = str(cr["start_time"] or "00:00")
+        end_time = str(cr["end_time"] or "23:59")
+        child_start = f"{start_date}T{start_time}:00"
+        child_end = f"{end_date}T{end_time}:59"
+        if event_kind == 'event' and uses_time_range:
+            parent_start, parent_end = child_start, child_end
     now = _now()
 
     from app.archive_release_stock import describe_archive_release_stock
@@ -909,6 +1002,19 @@ def finish_event_change(
             )
 
         if delete_event:
+            result = {
+                "status": "archiviert", "change_request_id": cr_id,
+                "archive_read_only": True, "files_changed_by_app": 0,
+                "verified_file_count": verification["verified_file_count"],
+                "event_deleted": True, "released_family_ids": released_family_ids,
+            }
+            completion_files = [{
+                "file_id": row.get('file_id') if str(row.get('review_kind') or 'camera') == 'camera' else None,
+                "path": str(row['workspace_release_path']), "old_path": str(row['old_path']),
+                "size": int(row['expected_size_bytes']), "sha256": str(row['expected_sha256']),
+            } for row in release_rows]
+            if len(completion_files) != verification['verified_file_count']:
+                raise EventChangeApplyError('archive_completion_manifest_incomplete')
             if workspace_path is not None:
                 from app.archive_staging import cleanup_archive_change_staging
                 cleanup_archive_change_staging(
@@ -929,6 +1035,7 @@ def finish_event_change(
                         "verified_file_count": verification["verified_file_count"],
                         "released_family_ids": released_family_ids,
                         "event_id": cr["event_id"],
+                        "completion": {"format": 1, "result": result, "files": completion_files},
                     }, ensure_ascii=False, sort_keys=True),
                     now,
                 ),
@@ -938,15 +1045,7 @@ def finish_event_change(
                 (cr["event_id"], cr["job_id"]),
             )
             connection.commit()
-            return {
-                "status": "archiviert",
-                "change_request_id": cr_id,
-                "archive_read_only": True,
-                "files_changed_by_app": 0,
-                "verified_file_count": verification["verified_file_count"],
-                "event_deleted": True,
-                "released_family_ids": released_family_ids,
-            }
+            return result
 
         connection.execute(
             """
@@ -1011,6 +1110,13 @@ def finish_event_change(
                 source="cascade",
             )
         elif child_segments:
+            # Stable child IDs retain their independent layouts across the
+            # rebuild of assignments and timeline rows.
+            child_layout_rows = [dict(row) for row in connection.execute(
+                "SELECT layouts.* FROM event_folder_layouts AS layouts JOIN events ON events.id=layouts.event_id "
+                "WHERE events.parent_event_id=?", (cr['event_id'],),
+            )]
+            layouts_by_child = {row['event_id']: row for row in child_layout_rows}
             connection.execute("DELETE FROM event_assignments WHERE event_id IN (SELECT id FROM events WHERE parent_event_id=?)",(cr["event_id"],))
             connection.execute("DELETE FROM events WHERE parent_event_id=?",(cr["event_id"],))
             created_children=[]
@@ -1019,13 +1125,28 @@ def finish_event_change(
                 child_id=str(segment.get("id") or ("EVENT_"+uuid.uuid4().hex.upper()))
                 seg_start=segment.get('start_datetime') or f"{start_date}T{segment['start_time']}:00"; seg_end=segment.get('end_datetime') or f"{end_date}T{segment['end_time']}:59"
                 validate_active_roots()
-                folder=str(segment.get("folder_name") or segment.get("folder") or f"{segment['start_time'].replace(':','-')} - {segment['end_time'].replace(':','-')} - {segment['name']}")
+                folder = '' if segment.get('create_subfolder') is False else str(
+                    segment.get("folder_name") or segment.get("folder") or
+                    f"{segment['start_time'].replace(':','-')} - {segment['end_time'].replace(':','-')} - {segment['name']}"
+                )
                 connection.execute(
                     """INSERT INTO events(id,job_id,parent_event_id,event_level,name,start_datetime,end_datetime,uses_time_range,folder_name,status,created_at,updated_at,event_kind,preserve_day_folders,revision,applied_at,archived_at,notes,edited_at,timeline_model)
                        VALUES (?,?,?,'child',?,?,?,1,?,'archived',?,?,'event',?,1,?,?,'',?,'continuous')""",
                     (child_id,cr["job_id"],cr["event_id"],segment["name"],seg_start,seg_end,folder,now,now,
                      int(bool(cr["preserve_day_folders"])),event["applied_at"],event["archived_at"],now),
                 )
+                if folder:
+                    from app.subevents import store_subevent_layout
+                    previous_layout = layouts_by_child.get(child_id)
+                    if segment.get('folder_layout') is None and previous_layout:
+                        connection.execute(
+                            "INSERT INTO event_folder_layouts VALUES (?,?,?,?,?,?,?)",
+                            tuple(previous_layout[key] for key in (
+                                'event_id', 'structure_enabled', 'input_path', 'layout_json', 'revision', 'created_at', 'updated_at',
+                            )),
+                        )
+                    elif segment.get('folder_layout') is not None:
+                        store_subevent_layout(connection, str(cr['event_id']), {**segment, 'id': child_id, 'folder_name': folder}, now)
                 created_children.append((child_id,seg_start,seg_end))
             assignment_event_id=None
         elif uses_time_range and cr.get('child_folder'):
@@ -1063,6 +1184,10 @@ def finish_event_change(
             assignment_event_id = str(cr["event_id"])
             if children:
                 connection.execute("DELETE FROM events WHERE parent_event_id = ?", (cr["event_id"],))
+
+        if cr.get("target_leaf_layouts_json") is not None:
+            from app.event_leaf_layouts import save_leaf_layouts
+            save_leaf_layouts(connection, str(cr["event_id"]), json.loads(cr["target_leaf_layouts_json"]), now=now)
 
         selected_family_rows = []
         if selected_ids:

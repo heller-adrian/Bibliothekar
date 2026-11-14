@@ -101,6 +101,12 @@ def _visible_events(
                  AND status IN ('draft','planned','applied')
                ORDER BY start_datetime,id"""
         ).fetchall()
+        adoption_jobs = {
+            str(row[0]) for row in connection.execute(
+                "SELECT id FROM jobs WHERE operation='legacy_adoption'"
+            )
+        }
+        visible_source_ids = selected_job_ids | adoption_jobs
         for raw in roots:
             event = dict(raw)
             event_id = str(event["id"])
@@ -108,7 +114,7 @@ def _visible_events(
             source_ids = {str(row["job_id"]) for row in source_rows}
             if not source_ids:
                 source_ids = {str(event["job_id"])}
-            if not selected_job_ids or source_ids.isdisjoint(selected_job_ids):
+            if source_ids.isdisjoint(visible_source_ids):
                 continue
             family_rows = event_family_rows(connection, event_id)
             counts = _event_counts(
@@ -319,15 +325,19 @@ def build_global_workspace_summary(
         key=_workspace_group_sort_key,
     )
 
+    released = list_global_released_archive_groups(
+        database_path,
+        excluded_family_ids=set().union(*(excluded_family_ids_by_job or {}).values()),
+        workspace_path=workspace_path,
+    )
+    visible_media = [*timeline, *released]
     day_keys: set[str] = set()
-    for group in timeline:
+    for group in visible_media:
         if group.get("day_key"):
             day_keys.add(str(group["day_key"]))
         day_keys.update(str(day) for day in (group.get("day_keys") or []) if day)
-
-    file_count = sum(int(group.get("file_count") or 0) for group in [*event_groups, *available])
-    family_count = sum(int(group.get("family_count") or 0) for group in [*event_groups, *available])
-    review_count = sum(int(group.get("review_required_count") or 0) for group in [*event_groups, *available])
+    for group in released:
+        day_keys.update(str(family["day_key"]) for family in group["families"] if family.get("day_key"))
 
     return {
         "job": jobs[0] if jobs else None,
@@ -342,22 +352,14 @@ def build_global_workspace_summary(
             "available_day_groups": available,
             "timeline_groups": timeline,
         },
-        "released_archive_groups": list_global_released_archive_groups(
-            database_path,
-            excluded_family_ids={
-                int(family_id)
-                for values in (excluded_family_ids_by_job or {}).values()
-                for family_id in values
-            },
-            workspace_path=workspace_path,
-        ),
+        "released_archive_groups": released,
         "archive_change_review_count": len(reviews),
         "archive_change_reviews": reviews,
         "statistics": {
             "day_count": len(day_keys),
-            "file_count": file_count,
-            "family_count": family_count,
-            "review_required_count": review_count,
+            "file_count": sum(int(group.get("file_count") or 0) for group in visible_media),
+            "family_count": sum(int(group.get("family_count") or 0) for group in visible_media),
+            "review_required_count": sum(int(group.get("review_required_count") or 0) for group in visible_media),
             "without_date_file_count": sum(
                 int(group.get("file_count") or 0)
                 for group in available if not group.get("has_date")

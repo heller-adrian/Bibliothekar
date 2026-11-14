@@ -222,6 +222,7 @@ def run_exiftool(
     *,
     progress_callback: Callable[[int, int], None] | None = None,
     cancellation_callback: Callable[[], None] | None = None,
+    _bound_descriptors: tuple[int, ...] = (),
 ) -> list[dict[str, Any]]:
     common = [
         "exiftool",
@@ -258,13 +259,14 @@ def run_exiftool(
         if cancellation_callback is None:
             result = subprocess.run(
                 command, check=False, capture_output=True, text=True,
+                pass_fds=_bound_descriptors,
             )
         else:
             # Nur den zu diesem Import gehörenden ExifTool-Kindprozess beenden.
             cancellation_callback()
             process = subprocess.Popen(
                 command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True,
+                text=True, pass_fds=_bound_descriptors,
             )
             try:
                 while True:
@@ -301,6 +303,9 @@ def run_exiftool(
                 "ExifTool-Ausgabe besitzt ein unerwartetes Format."
             )
         return data
+
+    if _bound_descriptors:
+        return execute([*common, *(f"/dev/fd/{fd}" for fd in _bound_descriptors)])
 
     if progress_callback is None:
         command = [
@@ -371,6 +376,24 @@ def run_exiftool(
         )
 
     return entries
+
+def read_bound_metadata(
+    descriptors: tuple[int, ...],
+    cancellation_callback: Callable[[], None],
+) -> dict[int, dict[str, Any]]:
+    """Read already opened files without looking up their original paths."""
+    paths = {f"/dev/fd/{fd}": fd for fd in descriptors}
+    if not paths:
+        return {}
+    entries = run_exiftool(
+        Path("/dev/fd"), cancellation_callback=cancellation_callback, _bound_descriptors=descriptors,
+    )
+    return {
+        paths[entry["SourceFile"]]: entry
+        for entry in entries
+        if entry.get("SourceFile") in paths
+    }
+
 
 def _candidate_rule(
     tag_name: str,
@@ -616,6 +639,56 @@ def select_candidate(
     )
 
 
+def analyze_file_metadata(
+    source_root: Path, path: Path, size_bytes: int, metadata: dict[str, Any],
+) -> dict[str, Any]:
+    relative = path.relative_to(source_root).as_posix()
+    media_type = classify_media(path)
+    candidates = build_candidates(
+        metadata,
+        media_type,
+    )
+
+    (
+        selected_time,
+        selected_source,
+        confidence,
+        conflict,
+    ) = select_candidate(
+        candidates,
+        media_type,
+    )
+
+    return {
+        "relative_path": relative,
+        "filename": path.name,
+        "extension": path.suffix.lower(),
+        "media_type": media_type,
+        "family_key": family_key(
+            source_root,
+            path,
+        ),
+        "size_bytes": size_bytes,
+        "selected_capture_time": selected_time,
+        "selected_capture_source": selected_source,
+        "capture_time_confidence": confidence,
+        "metadata_conflict": conflict,
+        "camera_make": metadata.get("EXIF:IFD0:Make")
+            or metadata.get("EXIF:ExifIFD:Make")
+            or metadata.get("QuickTime:Make"),
+        "camera_model": metadata.get("EXIF:IFD0:Model")
+            or metadata.get("EXIF:ExifIFD:Model")
+            or metadata.get("QuickTime:Model"),
+        "inherited_from_family": False,
+        "review_required": confidence in {
+            "low",
+            "conflict",
+            "missing",
+        },
+        "metadata_candidates": candidates,
+    }
+
+
 def analyze_tree(
     source_root: Path,
     *,
@@ -664,59 +737,19 @@ def analyze_tree(
         if not include_other and media_type == "other":
             continue
 
-        relative = path.relative_to(
-            source_root
-        ).as_posix()
-
         metadata = metadata_by_path.get(
             str(path.resolve()),
             {},
         )
 
-        candidates = build_candidates(
-            metadata,
-            media_type,
-        )
+        files.append(analyze_file_metadata(source_root, path, path.stat().st_size, metadata))
 
-        (
-            selected_time,
-            selected_source,
-            confidence,
-            conflict,
-        ) = select_candidate(
-            candidates,
-            media_type,
-        )
+    return summarize_file_metadata(source_root, files)
 
-        files.append({
-            "relative_path": relative,
-            "filename": path.name,
-            "extension": path.suffix.lower(),
-            "media_type": media_type,
-            "family_key": family_key(
-                source_root,
-                path,
-            ),
-            "size_bytes": path.stat().st_size,
-            "selected_capture_time": selected_time,
-            "selected_capture_source": selected_source,
-            "capture_time_confidence": confidence,
-            "metadata_conflict": conflict,
-            "camera_make": metadata.get("EXIF:IFD0:Make")
-                or metadata.get("EXIF:ExifIFD:Make")
-                or metadata.get("QuickTime:Make"),
-            "camera_model": metadata.get("EXIF:IFD0:Model")
-                or metadata.get("EXIF:ExifIFD:Model")
-                or metadata.get("QuickTime:Model"),
-            "inherited_from_family": False,
-            "review_required": confidence in {
-                "low",
-                "conflict",
-                "missing",
-            },
-            "metadata_candidates": candidates,
-        })
 
+def summarize_file_metadata(
+    source_root: Path, files: list[dict[str, Any]],
+) -> dict[str, Any]:
     families: dict[
         str,
         list[dict[str, Any]],

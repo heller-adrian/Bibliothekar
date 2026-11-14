@@ -1,5 +1,5 @@
 
-from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION, EXPECTED_STABLE_VERSION
 from tests.backend.default_constant_fixture import shipped_constants
 from app import __version__ as PACKAGE_VERSION
 from pathlib import Path
@@ -54,7 +54,7 @@ def test_0291_source_helper_mounts_directly_without_host_namespace(monkeypatch):
 
 def test_0291_compose_is_one_service_and_guided_custom_app_compatible():
     compose = (REPO_ROOT / "compose.example.yaml").read_text()
-    assert ("ghcr.io/heller-adrian/bibliothekar:" + EXPECTED_RELEASE_VERSION) in compose
+    assert ("ghcr.io/heller-adrian/bibliothekar:" + EXPECTED_STABLE_VERSION) in compose
     assert "\n  source-helper:" not in compose
     assert "pid: host" not in compose
     assert "network_mode:" not in compose

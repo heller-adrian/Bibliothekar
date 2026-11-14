@@ -1,0 +1,1803 @@
+"""Browser wizard for planning and checking a legacy adoption."""
+from html import escape
+import re
+
+from app.legacy_adoption_i18n import TRANSLATIONS, PATTERNS
+from app.ui_i18n import i18n_ui_js
+from app.ui_shell import apply_setup_shell
+from app.ui_event_time import EVENT_TIME_JS
+
+_I18N_JS = i18n_ui_js(TRANSLATIONS, PATTERNS)
+
+
+def setup_choice_html(decision: str) -> str:
+    primary = (
+        '<a class="primary" href="/legacy-adoption">Bestandsübernahme fortsetzen</a>'
+        if decision == "adopting"
+        else '<button class="primary" type="button" data-decision="adopting">Bestehende Sammlung übernehmen</button>'
+    )
+    return apply_setup_shell(_CHOICE.replace("{{primary}}", primary), localization_js=_I18N_JS)
+
+
+def wizard_html(library_id: str, *, later: bool = False, recovery_only: bool = False) -> str:
+    html = apply_setup_shell(_PAGE.replace("/* SHARED_EVENT_TIME_JS */", EVENT_TIME_JS), localization_js=_I18N_JS)
+    return re.sub(r'(<body\b[^>]*)(>)',
+                  lambda match: (match[1] + ' data-library="' + escape(library_id, quote=True) + '"'
+                                 + (' data-recovery-only="true"' if recovery_only else '')
+                                 + (' data-later="true"' if later else '') + match[2]),
+                  html, count=1)
+
+
+_CHOICE = """<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ersteinrichtung · Bibliothekar</title></head>
+<body>
+<main class="bk-setup-choice">
+<section>
+<p>Hauptbibliothek einrichten</p>
+<h1>Hast du eine bestehende Fotosammlung?</h1>
+<p>Wenn du eine bestehende Sammlung übernehmen möchtest, lege sie vorab in einem gemeinsamen Quellordner ab. Bibliothekar erfasst auch verschachtelte Ordner und gruppiert die Aufnahmen nach Datum.</p>
+<div class="bk-setup-choice-actions">
+{{primary}}
+<button type="button" data-decision="skipped">Mit einer leeren Bibliothek beginnen</button>
+</div>
+<p id="setup-status" role="status"></p>
+</section>
+</main>
+<script>
+document.querySelectorAll("[data-decision]").forEach(button=>button.addEventListener("click",async()=>{
+  const buttons=document.querySelectorAll("[data-decision]");
+  buttons.forEach(item=>item.disabled=true);
+  try {
+    const response=await fetch("/api/setup/adoption",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({decision:button.dataset.decision})});
+    const result=await response.json();
+    if(!response.ok)throw new Error(result.detail);
+    location.replace(result.next);
+  } catch (error) {
+    document.getElementById("setup-status").textContent=error.message;
+    buttons.forEach(item=>item.disabled=false);
+  }
+}));
+</script>
+</body></html>"""
+
+
+_PAGE = r"""<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bestandsübernahme · Bibliothekar</title>
+<style>
+.legacy-adoption{width:100%;max-width:1600px;margin:auto;padding:24px;box-sizing:border-box;color:var(--bk-ink)}
+.legacy-adoption section{min-width:0;background:var(--bk-surface);border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:24px;margin:18px 0;box-shadow:var(--bk-shadow)}
+.legacy-adoption .adoption-card{min-width:0;border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:clamp(12px,2vw,22px);margin:12px 0}
+.legacy-adoption .adoption-card>:first-child{margin-top:0}
+.adoption-card h4{font-size:1rem;margin:0 0 12px}
+.legacy-adoption .bk-event-layout-editor:not([open]){padding-block:4px}
+.legacy-adoption .bk-event-layout-editor > summary{list-style:none}
+.legacy-adoption .bk-event-layout-editor > summary::-webkit-details-marker{display:none}
+.adoption-child-header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.legacy-adoption .adoption-child-card{padding:8px 12px;margin:8px 0}
+.adoption-child-card:has(.adoption-child-header details:not([open])){cursor:pointer}
+.legacy-adoption .adoption-child-card .bk-event-layout-editor{margin:0}
+.adoption-card .adoption-ack{align-items:start;gap:10px;margin:16px 0}
+.adoption-card .adoption-ack input{flex:none;margin-top:.25em}
+.adoption-proof{overflow-wrap:anywhere}
+.adoption-stage{display:grid;gap:16px;margin:24px 0}
+.adoption-stage :is(h3,p){margin:0}
+.adoption-stage details>div{padding:8px 0 4px}
+.adoption-stage .adoption-status{background:var(--bk-surface-2);border-radius:8px;padding:12px 14px}
+.adoption-command-box{display:grid;gap:12px;justify-items:start}
+#script-progress{margin:16px 0 0}
+#script-progress:empty{display:none}
+.adoption-review-progress:empty{display:none}
+.adoption-review-progress{display:grid;gap:8px;margin:12px 0}
+.adoption-review-progress progress{width:100%;accent-color:var(--bk-blue)}
+.adoption-review-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:start}
+.legacy-adoption .adoption-review-row>input[type=checkbox]{margin-top:12px}
+.adoption-review-row summary{overflow-wrap:anywhere}
+.adoption-review-error{color:var(--bk-danger);font-size:.875rem}
+.legacy-adoption .adoption-review-status{align-items:center}
+.legacy-adoption .adoption-review-help summary{display:grid;place-items:center;border:1px solid var(--bk-line);border-radius:50%;width:1.65rem;height:1.65rem;padding:0;list-style:none}
+.adoption-review-help summary::-webkit-details-marker{display:none}
+.adoption-review-cases>.inline{align-items:center;margin:12px 0}
+.adoption-stage .adoption-progress{display:grid;gap:8px}
+.adoption-stage .adoption-progress progress{width:100%;accent-color:var(--bk-blue)}
+.adoption-plan-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr));gap:12px;margin:18px 0}
+.adoption-plan-facts div{padding:10px 12px;background:var(--bk-surface-2);border-radius:10px;overflow-wrap:anywhere}
+.adoption-plan-facts dt{font-size:.875rem;color:var(--bk-muted)}
+.adoption-plan-facts dd{font-weight:650;margin:3px 0 0}
+.legacy-adoption h1{font-size:clamp(1.5rem,3vw,2.25rem);margin:12px 0 24px}
+.legacy-adoption :is(h2,h3){margin:0 0 16px}
+.legacy-adoption label{display:flex;flex-direction:column;gap:7px;min-width:0}
+.legacy-adoption label:has(input[type=checkbox]){flex-direction:row;align-items:center;gap:9px;cursor:pointer}
+.legacy-adoption input[type=checkbox]{width:auto;margin:0;order:-1}
+.legacy-adoption :is(input,select,textarea){box-sizing:border-box;max-width:100%;min-width:0}
+.legacy-adoption .inline{display:flex;gap:12px;align-items:end;flex-wrap:wrap}
+.legacy-adoption .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:24px}
+.legacy-adoption .stack{display:grid;gap:12px}
+.legacy-adoption .row{border-top:1px solid var(--bk-line);padding:12px 0}
+.legacy-adoption :is(code,.paths){overflow-wrap:anywhere}
+.legacy-adoption :is(small,.subtle){color:var(--bk-muted)}
+.legacy-adoption :is(#message,#safety){border-left:4px solid var(--bk-yellow);padding:12px 16px;background:var(--bk-surface-2);border-radius:8px}
+.legacy-adoption #message:empty{display:none}
+.legacy-adoption #dirty{color:var(--bk-danger);font-weight:600}
+.legacy-adoption [hidden]{display:none!important}
+.legacy-adoption summary{cursor:pointer;padding:8px 0}
+.legacy-adoption textarea{min-height:5rem;width:100%}
+.legacy-adoption :focus-visible{outline:3px solid var(--bk-blue);outline-offset:3px}
+@media(max-width:640px){.legacy-adoption{padding:12px}.legacy-adoption section{padding:16px}.legacy-adoption .inline>*{max-width:100%}}
+.adoption-heading{display:flex;justify-content:space-between;align-items:start;gap:16px}
+.adoption-back{display:inline-flex;align-items:center;min-height:36px;padding:6px 12px;border:1px solid var(--bk-line);border-radius:8px;background:var(--bk-surface-2);color:var(--bk-ink);font-weight:650;text-decoration:none}
+.adoption-back:hover{border-color:var(--bk-blue)}
+#source-notice:empty{display:none}
+#source-actions{align-items:center}
+#source-actions + #source-notice:empty + #source:not(:empty){margin-block-start:12px}
+.adoption-source-help{position:relative}
+.adoption-source-help>p{position:absolute;z-index:2;inset-inline-start:var(--adoption-help-offset,0px);top:calc(100% + 6px);
+width:min(26rem,calc(100vw - 32px));box-sizing:border-box;margin:0;padding:14px 16px;border:1px solid var(--bk-line);
+border-radius:10px;background:var(--bk-surface);color:var(--bk-ink);box-shadow:var(--bk-shadow)}
+#source .adoption-source-path{align-items:center;padding-bottom:4px}
+#source-notice{margin-block:14px}
+#pick-source[aria-pressed=true]{border-color:var(--bk-green)}
+.adoption-folder-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,8.5rem),1fr));gap:10px}
+.legacy-adoption button.adoption-folder{display:grid;justify-items:center;align-content:start;gap:8px;padding:14px 10px;overflow-wrap:anywhere}
+.adoption-folder-icon{position:relative;width:26px;height:18px;border:2px solid currentColor;border-radius:4px;color:var(--bk-blue);margin-top:5px}
+.adoption-folder-icon::before{content:"";position:absolute;top:-6px;left:-2px;width:10px;height:4px;border:2px solid currentColor;border-bottom:0;border-radius:4px 4px 0 0}
+.legacy-adoption button.adoption-parent{min-height:32px;padding:4px 10px;font-size:.875rem;margin-inline-end:6px}
+.adoption-stepper{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.legacy-adoption :is(button:not(.day-card),summary.adoption-control){min-height:40px;padding:8px 14px;font:inherit;font-weight:650}
+.legacy-adoption .adoption-toolbar{align-items:center}
+.legacy-adoption .adoption-toolbar :is(button,summary.adoption-control){box-sizing:border-box;min-height:36px;padding:6px 12px;font-size:.875rem;font-weight:600}
+.legacy-adoption summary.adoption-control{display:inline-flex;align-items:center;border-radius:11px}
+#periods:not(:empty){display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 10px}
+.legacy-adoption :is(input:not([type=checkbox],[type=radio]),select,textarea){min-height:38px;padding:7px 10px;background:var(--bk-surface-2);color:var(--bk-ink);border:1px solid var(--bk-line);border-radius:8px;font:inherit}
+.legacy-adoption input[type=checkbox]{accent-color:var(--bk-blue)}
+.legacy-adoption .adoption-command{width:100%;font: .85rem/1.4 ui-monospace,monospace;overflow-wrap:anywhere}
+.legacy-adoption button:disabled{opacity:.45;cursor:not-allowed}
+.adoption-planning{grid-template-columns:minmax(0,1.5fr) minmax(19rem,1fr)!important}
+.legacy-adoption .adoption-month{padding:12px;box-shadow:none;margin:14px 0}
+.adoption-day-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;max-height:clamp(280px,62vh,640px);overflow:auto;padding:3px}
+.legacy-adoption .day-card{display:grid;grid-template-columns:auto minmax(0,1fr);text-align:left;padding:14px;gap:8px;border:1px solid var(--bk-line);border-radius:15px;background:var(--bk-surface);color:var(--bk-ink);user-select:none}
+.day-card .subtle{grid-column:2}
+#archive-segments{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+#archive-segments:empty{display:none}
+#archive-segments .day-card{grid-template-columns:minmax(0,1fr)}
+#archive-segments .subtle{grid-column:1}
+.legacy-adoption .day-card.selected{border-color:var(--bk-blue);background:color-mix(in srgb,var(--bk-blue) 16%,var(--bk-surface))}
+.adoption-event-card{max-width:24rem;border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:6px 12px;margin-bottom:8px}
+.adoption-event-card summary{display:block;list-style:none;cursor:pointer;overflow-wrap:anywhere}
+.adoption-event-card summary::-webkit-details-marker{display:none}
+.adoption-event-card summary .subtle{display:block;margin-top:6px}
+.adoption-event-card summary:focus-visible{outline:2px solid var(--bk-blue);outline-offset:3px}
+.adoption-event-card:hover{border-color:var(--bk-blue)}
+.adoption-event-card[open]{border-color:var(--bk-blue);background:color-mix(in srgb,var(--bk-blue) 16%,var(--bk-surface))}
+.adoption-event-card > p{margin-block:6px 10px}
+.adoption-event-card[open]{padding-bottom:12px}
+.adoption-folder-tree{max-height:20rem;overflow:auto;margin:8px 0 0;padding:8px 12px;background:var(--bk-surface-2);border-radius:8px}
+.adoption-folder-tree :is(ul,li){list-style:none;margin:0;padding:0}
+.adoption-folder-tree ul ul{margin-inline-start:.55rem;padding-inline-start:.8rem;border-inline-start:1px solid var(--bk-line)}
+.adoption-folder-tree code{display:inline-block;padding:3px 0;overflow-wrap:anywhere}
+.adoption-stepper [aria-current=step]:disabled{border-color:var(--bk-blue);color:var(--bk-ink);opacity:1;cursor:default;
+background:color-mix(in srgb,var(--bk-blue) 17%,var(--bk-surface))}
+.adoption-card.adoption-compact:not([open]){padding-block:8px}
+.adoption-compact:not([open]) > summary{margin:0}
+.adoption-target-preview{margin-block:12px 20px}
+.legacy-adoption .adoption-methods{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:12px;margin-block:12px}
+.legacy-adoption .adoption-methods label{display:grid;grid-template-columns:auto minmax(0,1fr);align-content:start;align-items:start;
+border:1px solid var(--bk-line);border-radius:10px;padding:14px;background:var(--bk-surface-2);cursor:pointer}
+.adoption-methods label:has(:checked){border-color:var(--bk-blue);box-shadow:inset 0 0 0 1px var(--bk-blue)}
+.adoption-methods label:has(:focus-visible){outline:3px solid var(--bk-blue);outline-offset:3px}
+.adoption-methods small{grid-column:2}
+.adoption-methods input{accent-color:var(--bk-blue);margin-top:.25em}
+.adoption-proof[data-verified=true]{border-inline-start:4px solid var(--bk-green);padding:10px 14px;
+background:color-mix(in srgb,var(--bk-green) 13%,var(--bk-surface));border-radius:8px}
+.adoption-proof[data-verified=true] p:first-child{margin:0;font-weight:700}
+.adoption-confirm-actions{display:flex;align-items:center;gap:8px}
+.adoption-confirm-actions span{color:var(--bk-muted);flex:none}
+@media(max-width:640px){
+  .adoption-confirm-actions{flex-direction:column;align-items:start}
+  .adoption-confirm-actions span{transform:rotate(90deg);margin-inline-start:12px}
+}
+#event-editor .bk-folder-input-root{display:flex;flex-direction:row;align-items:center;flex-wrap:wrap;
+min-height:38px;margin-block:5px 8px;gap:8px}
+#event-editor .adoption-interval{margin:-6px 0 4px}
+#wizard-navigation{justify-content:space-between;align-items:center}
+#wizard-navigation .primary{margin-inline-start:auto}
+.legacy-adoption dialog{width:min(760px,calc(100% - 24px));max-height:calc(100% - 24px);box-sizing:border-box;padding:clamp(16px,3vw,28px);border:1px solid var(--bk-line);border-radius:var(--bk-radius);background:var(--bk-surface);color:var(--bk-ink);box-shadow:var(--bk-shadow)}
+.legacy-adoption dialog::backdrop{background:rgb(5 12 18 / .65)}
+.legacy-adoption dialog .inline>label{flex:1 1 10rem}
+.legacy-adoption dialog [role=alert]{color:var(--bk-danger);white-space:pre-wrap}
+.legacy-adoption dialog [role=alert]:empty{display:none}
+.legacy-adoption dialog .editor-actions{justify-content:flex-end}
+@media(max-width:900px){.adoption-planning{grid-template-columns:minmax(0,1fr)!important}.adoption-heading{flex-wrap:wrap;margin-bottom:12px}}
+</style>
+</head>
+<body>
+<main class="bk-page legacy-adoption">
+<header class="adoption-heading"><div><a id="choice" class="adoption-back" href="/setup/adoption">Zur Einrichtungsentscheidung</a><h1>Bestehende Fotosammlung übernehmen</h1></div><div id="top-actions"></div></header>
+<nav id="wizard-steps" class="adoption-stepper" aria-label="Übernahmeschritte"></nav>
+<details id="introduction"><summary>Sicherheit und Zeitbedarf</summary>
+  <p>Die Übernahme einer bestehenden Fotosammlung ist ein umfangreicher Vorgang und kann längere Zeit dauern. Abhängig von der Anzahl und Größe der Dateien können Inventur, Planung und Sicherheitsprüfung mehrere Stunden benötigen. Bitte plane ausreichend Zeit ein und führe die Übernahme möglichst ohne Zeitdruck durch.</p>
+  <p>Die alte Fotosammlung und das neue Zielarchiv müssen sich auf demselben ZFS-Dataset befinden. Unterschiedliche Ordner innerhalb desselben Datasets sind zulässig. Unterschiedliche Datasets werden nicht unterstützt, auch wenn sie auf demselben ZFS-Pool liegen.</p>
+  <p>Liegt deine Fotosammlung auf einem anderen Dataset, kopiere sie vor der Bestandsübernahme eigenständig auf das Dataset des Zielarchivs.</p>
+</details>
+<p id="safety" role="status">Bitte keine manuellen Änderungen an der alten Fotosammlung oder am Zielarchiv vornehmen. Andernfalls kann der gespeicherte Übernahmeplan ungültig werden.</p>
+<div id="message" role="status" aria-live="polite"></div>
+<div id="dirty" role="status" aria-live="polite"></div>
+<section id="setup">
+  <h2>Gemeinsamen Quellordner auswählen</h2>
+  <p>Lege alle Fotos, die du übernehmen möchtest, unter einem gemeinsamen Quellordner ab. Die Inventur durchsucht seine Unterordner und gruppiert Aufnahmen anhand der Aufnahmezeit.</p>
+  <div class="inline" id="source-actions" hidden>
+    <label id="source-root-label" hidden>Quellenbereich <select id="source-root"></select></label>
+    <button type="button" id="browse">Ordner anzeigen</button>
+    <button type="button" id="pick-source" class="primary" aria-pressed="false" disabled>Diesen Quellordner wählen</button>
+    <button type="button" id="start" class="primary" hidden>Dataset prüfen und Inventur starten</button>
+    <details id="source-help" class="adoption-source-help"><summary>Fehlt dein Dataset?</summary>
+      <p>Bibliothekar zeigt Ordner auf dem ZFS-Dataset des Zielarchivs und die Wege dorthin. Lege deine Fotosammlung in einen getrennten Ordner auf diesem Dataset und binde ihn lesend ein.</p>
+    </details>
+  </div>
+  <p id="source-notice" role="status"></p>
+  <div id="source" class="stack"></div>
+</section>
+<div id="work"></div><nav id="wizard-navigation" class="inline" aria-label="Schrittnavigation"></nav>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const library = document.body.dataset.library;
+const recoveryOnly = document.body.dataset.recoveryOnly === "true";
+const later = document.body.dataset.later === "true";
+const librarySettings = "/?"+new URLSearchParams({library,settings:"libraries"});
+const afterDiscard = later ? librarySettings : recoveryOnly ? "/" : "/setup/adoption";
+const currentUrl = new URL(location.href);
+let jobId = currentUrl.searchParams.get("job") || "";
+$("choice").hidden = Boolean(jobId);
+if(later) {
+  $("choice").textContent="Zurück zu den Bibliotheken";
+  $("choice").href=librarySettings;
+}
+let job = null, draft = {}, draftRevision = 0, year = "", day = null;
+let familyCursor = "", moveCursor = "", timer = 0, scriptTimer = 0, reviewTimer = 0;
+let reviewSelection = new Set(), reviewOpened = new Set(), reviewBatch = {}, reviewSubmitting = false;
+let selectedSource = null, browsedSource = null, browseVersion = 0;
+let draftPage = 40;
+let inventoryStarting = false;
+let viewStep=currentUrl.searchParams.get("step") || "";
+/* SHARED_EVENT_TIME_JS */
+let freeSegments=[], archiveSegments=[], selectedEvent=null, selectedArchive=null;
+let selectedDays=new Set(), dayRows=[], selectionAnchor="", dayPage=60, selectedDaysJob="", draftStats=[], draftCoverage=null, previewRevision=-1;
+const steps=[["setup","Einrichten"],["inventory","Inventur"],["plan","Ereignisse planen"],["review","Plan prüfen"],["execution","Methode wählen"],["execute","Durchführen"],["verify","Prüfen und abschließen"]];
+function allowedSteps(){
+  if(!job || job.state==="discarded")return ["setup"];
+  if(recoveryOnly){
+    if(!job.plan.id)return ["inventory"];
+    if(!job.plan.execution)return ["inventory","review"];
+    return [job.plan.execution.phase==="registering"?"verify":"execute"];
+  }
+  if(!job.plan.id)return job.state==="inventoried" ? ["inventory","plan"] : ["inventory"];
+  if(!job.plan.execution)return ["inventory","review","execution"];
+  const phase=job.plan.execution.phase;
+  if(phase==="rolling_back")return ["execute"];
+  if(job.plan.state==="completed" || phase==="registering")return ["verify"];
+  return ["execute","verify"];
+}
+function rememberView(step,push=false){
+  if(viewStep!==step) $("introduction").open=false;
+  viewStep=step;
+  const url=new URL(location.href);url.searchParams.set("step",step);
+  history[push?"pushState":"replaceState"](null,"",url);
+}
+async function goStep(step){
+  requireSaved();
+  if(step==="plan" && job?.plan.id && !job.plan.execution)await mutate("/reopen");
+  if(!allowedSteps().includes(step))return;
+  rememberView(step,true);await refresh();
+  window.scrollTo({top:0});
+}
+function navigation(){
+  const allowed=allowedSteps();
+  if(!allowed.includes(viewStep))rememberView(allowed.at(-1));
+  $("wizard-steps").replaceChildren(...steps.map(([id,title],index)=>{
+    const button=node("button",(index+1)+". "+t(title));
+    button.disabled=true;
+    button.setAttribute("aria-current",id===viewStep?"step":"false");
+    return button;
+  }));
+  const nav=$("wizard-navigation");nav.replaceChildren();
+  if(!job)return;
+  const phase=job.plan.execution?.phase;
+  if(viewStep==="verify" && (phase==="registering" || (!recoveryOnly && phase==="registration_pending"))){
+    if(!recoveryOnly && phase==="registration_pending")nav.append(action("Zurück",()=>goStep("execute")));
+    nav.append(action("Übernahme registrieren",()=>mutate("/finalize","POST",{plan_id:job.plan.id}),true));
+    return;
+  }
+  if(recoveryOnly)return;
+  const previous={plan:"inventory",review:job.plan.execution?null:"plan",execution:"review",verify:job.plan.state==="completed"?null:"execute"}[viewStep];
+  if(previous)nav.append(action("Zurück",()=>goStep(previous)));
+  if(viewStep==="inventory" && job.state==="inventoried")nav.append(action("Weiter: Ereignisse planen",()=>goStep("plan"),true));
+  if(viewStep==="plan" && !reviewBusy())nav.append(action("Weiter: Plan prüfen",()=>{
+    if(!draft.events.length)throw new Error("Lege mindestens ein Ereignis oder einen Sammelordner an.");
+    return mutate("/plan","POST",{revision:draftRevision});
+  },true));
+  if(viewStep==="review" && !job.plan.execution)nav.append(action("Weiter: Methode wählen",async()=>{
+    if(!job.plan.documents_at)await mutate("/documents");
+    await goStep("execution");
+  },true));
+  if(viewStep==="execute" && phase!=="rolling_back")nav.append(action("Weiter: Archiv prüfen",()=>goStep("verify"),true));
+}
+window.addEventListener("bk-language-changed",()=>{
+  navigation();
+  if($("days"))renderDays();
+  if($("draft-events"))showDraftEvents();
+  if($("inventory-counts"))$("inventory-counts").textContent=inventoryCounts();
+  document.querySelectorAll(".adoption-command").forEach(area=>area.setAttribute("aria-label",t("TrueNAS-Shell-Befehl")));
+});
+window.addEventListener("popstate",()=>{
+  if(dirty.size){rememberView(viewStep);report("Speichere deine Eingaben zuerst.");return;}
+  $("introduction").open=false;
+  viewStep=new URL(location.href).searchParams.get("step")||"";
+  refresh().catch(error=>report(error.message));
+});
+const base = "/api/legacy-adoption";
+const dirty = new Set();
+function watchDraft(editor) {
+  editor.addEventListener("input", () => markDirty(editor));
+}
+function markDirty(editor) {
+  dirty.add(editor);
+  if(!editor.closest("dialog[open]"))$("dirty").textContent = "Du hast ungespeicherte Eingaben.";
+}
+function savedEditor(editor) {
+  dirty.delete(editor);
+  if (!dirty.size) $("dirty").textContent = "";
+}
+function requireSaved(scope, except) {
+  if ([...dirty].some(editor => editor !== except && (!scope || scope.contains(editor)))) {
+    throw new Error("Speichere deine Eingaben zuerst.");
+  }
+}
+window.addEventListener("beforeunload", event => {
+  if (dirty.size) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
+const labels = {
+ ready:"Bereit", scanning:"Inventur", inventoried:"Inventur abgeschlossen", prepared:"Plan vorbereitet",
+ manual:"Manuelle Verschiebung", verifying:"Archivprüfung läuft", repair:"Fehlerbehebung erforderlich",
+ script_prepared:"Skript bereitgestellt", script_running:"Skript wird extern ausgeführt",
+ script_interrupted:"Skriptausführung unterbrochen", operations_done:"Dateioperationen abgeschlossen",
+ attention_required:"Fehlerbehebung erforderlich",
+ registration_pending:"Registrierung ausstehend", registering:"Registrierung läuft",
+ rolling_back:"Wiederherstellung läuft", rolled_back:"Wiederherstellung geprüft",
+ media_verified:"Medien geprüft", verified:"Medien und Ereignisdokumente geprüft", completed:"Registriert",
+ pending:"Ausstehend", duplicate:"Duplikat bleibt an der Quelle", missing:"Zieldatei fehlt", unsafe:"Unsicherer Pfad",
+ size_mismatch:"Dateigröße weicht ab", sha256_mismatch:"Prüfsumme weicht ab", source_present:"Datei auch an der Quelle",
+ identity_mismatch:"Die Zieldatei hat eine andere Dateiidentität als das Original"
+};
+function label(value) { return labels[value] || value; }
+function t(value) { return window.BibliothekarI18n.t(value); }
+function node(tag, content, className) {
+  const el = document.createElement(tag);
+  if (content !== undefined) el.textContent = content;
+  if (className) el.className = className;
+  return el;
+}
+function report(message="") {
+  const editorMessage=document.querySelector("#event-editor[open] #editor-message");
+  (editorMessage || $("message")).textContent=message;
+}
+function detail(value) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(item=>{
+    if(item.type==="too_long" && item.loc?.at(-1)==="events")
+      return "Pro Auftrag sind bis zu "+item.ctx.max_length+" Planobjekte möglich.";
+    return item.msg || "";
+  }).join("\n");
+  if (value?.errors?.length) return value.errors.map(item=>window.BibliothekarI18n.t(item)).join("\n");
+  return "Der Vorgang konnte nicht ausgeführt werden.";
+}
+async function api(path, method="GET", body) {
+  const headers = {"X-Bibliothekar-Library":library};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const response = await fetch(path, {method,headers,cache:"no-store",
+    body:body===undefined ? undefined : JSON.stringify(body)});
+  const value = await response.json();
+  if (!response.ok) throw new Error(detail(value.detail));
+  return value;
+}
+function jobPath(path="") { return base+"/jobs/"+encodeURIComponent(jobId)+path; }
+function action(text, handler, primary=false, settled) {
+  const button = node("button", text, primary ? "primary" : "");
+  button.type = "button";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    report();
+    try { await handler(); } catch (error) { report(error.message); }
+    finally { button.disabled = false; settled?.(); }
+  });
+  return button;
+}
+function field(text, type, value="") {
+  const wrap = node("label", text);
+  const input = node("input");
+  input.type = type;
+  input.value = value;
+  wrap.append(input);
+  return [wrap,input];
+}
+function section(title) { const el=node("section"); el.append(node("h2",title)); return el; }
+function line(text) { return node("p",text); }
+function link(text, path) {
+  const el=node("a",text);
+  const url=new URL(path,location.href);
+  url.searchParams.set("library",library);
+  el.href=url.pathname+url.search;
+  return el;
+}
+function slot(id, type="div") {const el=node(type);el.id=id;return el;}
+async function setupSourceBrowser(){
+  const query=later?"?mode=library":"";
+  const choices=await api(base+"/sources"+query);
+  const select=$("source-root");
+  for(const {key} of choices.roots){
+    const option=node("option",key==="nas"?"NAS-Quelle":"Eingebundene Sicherungen");
+    option.value=key;select.append(option);
+  }
+  if(!choices.preferred){
+    $("source-actions").hidden=false;
+    $("browse").hidden=true;
+    $("source-notice").textContent="Binde einen NAS-Quellordner auf dem Dataset des Zielarchivs schreibgeschützt ein.";
+    return;
+  }
+  select.value=choices.preferred;
+  $("source-root-label").hidden=choices.roots.length<2;
+  $("source-actions").hidden=false;
+  await browse("");
+}
+async function browse(relative) {
+  const version=++browseVersion;
+  const root=$("source-root").value;
+  const query=new URLSearchParams({root,relative});
+  if(later)query.set("mode","library");
+  browsedSource=null;selectedSource=null;
+  $("source-help").hidden=false;
+  $("start").hidden=true;
+  $("pick-source").setAttribute("aria-pressed","false");
+  $("pick-source").classList.add("primary");
+  $("pick-source").disabled=true;
+  const data=await api(base+"/source?"+query);
+  if(version!==browseVersion)return;
+  browsedSource={root,...data};
+  $("pick-source").disabled=!data.dataset;
+  $("source-notice").textContent=data.reason || (data.read_only?"":"Die Quell-Einbindung ist nicht schreibgeschützt.");
+  const bar=node("div",undefined,"inline adoption-source-path");
+  if(data.parent!==null){
+    const parent=action("‹ Übergeordneter Ordner",()=>browse(data.parent));
+    parent.classList.add("adoption-parent");
+    bar.append(parent);
+  }
+  const path=node("code",data.path);path.dataset.bkPreserveLanguage="";bar.append(path);
+  const children=node("div",undefined,"adoption-folder-grid");
+  for(const name of data.folders){
+    const folder=action(undefined,()=>browse([data.relative,name].filter(Boolean).join("/")));
+    folder.classList.add("adoption-folder");
+    const icon=node("span",undefined,"adoption-folder-icon");icon.setAttribute("aria-hidden","true");
+    const label=node("span",name);label.dataset.bkPreserveLanguage="";
+    folder.append(icon,label);
+    children.append(folder);
+  }
+  $("source").replaceChildren(bar,children);
+}
+function openJob(id) {
+  requireSaved();
+  jobId=id;
+  year="";day=null;familyCursor="";moveCursor="";draftPage=40;
+  reviewSelection.clear();reviewOpened.clear();reviewBatch={};
+  const url=new URL(location.href);
+  url.searchParams.set("job",id);
+  url.searchParams.set("library",library);
+  history.replaceState(null,"",url);
+}
+function inventoryProgress(){
+  const status=node("p","Fotosammlung wird gelesen …","bk-loading-status");
+  status.setAttribute("role","status");
+  return status;
+}
+async function refreshReviewView(){
+  const open=document.querySelector("details.adoption-review-panel")?.open;
+  await refresh();
+  const panel=document.querySelector("details.adoption-review-panel");
+  if(open && panel)panel.open=true;
+}
+async function startInventory(){
+  if(inventoryStarting)return;
+  inventoryStarting=true;
+  previewRevision=-1;
+  rememberView("inventory");
+  if(job)render();
+  else{
+    $("setup").hidden=true;
+    $("choice").hidden=true;
+    $("work").replaceChildren(inventoryProgress());
+  }
+  try{await api(jobPath("/scan"),"POST");}
+  finally{inventoryStarting=false;await refresh();}
+}
+async function refresh() {
+  clearTimeout(timer);
+  clearTimeout(scriptTimer);
+  if (!jobId) return;
+  const requested=jobId;
+  const [state, batch]=await Promise.all([api(jobPath()),api(jobPath("/review/batch"))]);
+  if (requested!==jobId) return;
+  requireSaved();
+  job=state;reviewBatch=batch;
+  if(selectedDaysJob!==jobId){
+    selectedDaysJob=jobId;
+    year=sessionStorage.getItem("bk-adoption-period:"+jobId)||"";
+    try{selectedDays=new Set(JSON.parse(sessionStorage.getItem("bk-adoption-days:"+jobId)||"[]").filter(key=>typeof key==="string" && key.length<=40).slice(0,10000));}catch{selectedDays=new Set();}
+    freeSegments=[];archiveSegments=[];draftStats=[];draftCoverage=null;previewRevision=-1;
+    selectedEvent=null;selectedArchive=null;selectionAnchor="";day=null;
+  }
+  draftRevision=state.draft_revision;
+  draft={events:[],capture_overrides:{},exclude_families:[],target_stems:{},...state.draft};
+  let checked=null;
+  if(!recoveryOnly && job.state==="inventoried" && !job.plan.id && previewRevision!==draftRevision){
+    checked=await api(jobPath("/draft/check"),"POST",draft);
+    applyDraftPreview(checked);previewRevision=draftRevision;
+  }
+  render();
+  scheduleReviewPoll();
+  if(checked && !checked.valid && $("event-editor"))showConflicts(checked,draft);
+  if (job.scan_running) {
+    timer=setTimeout(()=>refresh().catch(error=>report(error.message)),2000);
+  } else if (!job.plan.id && job.state==="inventoried" && viewStep==="plan") {
+    await chronology();
+  } else if (job.plan.id) {
+    if($("moves"))await showMoves(true);
+    if (job.plan.execution?.method==="script" && !["completed","rolled_back"].includes(job.plan.execution.phase)) {
+      await pollScript();
+    }
+  }
+}
+async function mutate(path, method="POST", body) {
+  requireSaved();
+  report("Bibliothekar verarbeitet den Auftrag …");
+  const checking=path==="/verify" || path==="/finalize";
+  if (checking) $("safety").textContent="Bitte keine Dateien mehr verändern. Bibliothekar prüft und registriert gerade den übernommenen Archivbestand.";
+  try {
+    const result=await api(jobPath(path),method,body);
+    if(path==="/finalize" && result.state==="completed") {
+      location.replace("/legacy-adoption/history?"+new URLSearchParams({library,job:jobId}));
+      return result;
+    }
+    if(path==="/rollback/check" && result.execution?.phase==="rolled_back") {
+      location.replace(afterDiscard);
+      return result;
+    }
+    const target={"/plan":"review","/confirm":"execute","/verify":"verify","/finalize":"verify","/reopen":"plan","/scan":"inventory"}[path];
+    if(target)rememberView(target);
+    await refresh();
+    report();
+    return result;
+  } catch (error) {
+    if (checking) await refresh().catch(()=>{});
+    throw error;
+  }
+}
+function reviewControls(){
+  const details=node("details",undefined,"adoption-review-panel");
+  const cases=node("div");
+  details.append(node("summary",job.review_count+" Prüffälle – Überprüfung erforderlich"),cases);
+  details.addEventListener("toggle",()=>{
+    if(details.open && !cases.childElementCount)showReview(cases);
+  });
+  return details;
+}
+function inventoryCounts() {
+  const phase=job.state==="scanning" && !job.scan_running && !inventoryStarting?"Inventur unterbrochen":label(job.state);
+  return [t(phase),job.files+" "+t("Dateien"),job.families+" "+t("Familien"),
+    job.errors+" "+t("Pfadfehler")].join(" · ");
+}
+function render() {
+  const phase=job.plan.execution?.phase;
+  const terminal=job.state==="discarded" || job.plan.state==="completed";
+  navigation();
+  $("introduction").hidden=false;
+  $("setup").hidden=viewStep!=="setup";
+  $("top-actions").replaceChildren();
+  $("choice").hidden=true;
+  $("safety").hidden=terminal;
+  const warnings={
+    manual:"Jetzt sind ausschließlich die im freigegebenen Plan beschriebenen manuellen Verschiebungen erlaubt.",
+    rolling_back:"Führe nur die im Wiederherstellungsplan beschriebenen Rückschritte aus.",
+    repair:"Bitte keine Dateien verändern. Prüfe die Abweichungen und wähle einen Weg zur Fortsetzung.",
+    script:"Bitte keine zusätzlichen manuellen Dateioperationen ausführen. Das Übernahmeskript arbeitet mit dem verbindlich geprüften Plan.",
+    checking:"Bitte keine Dateien mehr verändern. Bibliothekar prüft und registriert gerade den übernommenen Archivbestand."
+  };
+  const runningScript=job.plan.execution?.method==="script" &&
+    ["script_prepared","rolling_back","repair"].includes(phase);
+  $("safety").textContent=runningScript ? warnings.script : warnings[phase] || (
+    ["operations_done","verifying","registration_pending","registering"].includes(phase) ? warnings.checking :
+    "Bitte keine manuellen Änderungen an der alten Fotosammlung oder am Zielarchiv vornehmen. Andernfalls kann der gespeicherte Übernahmeplan ungültig werden."
+  );
+  if(recoveryOnly)$("safety").textContent="Dieser Auftrag stammt aus einer älteren Version. Prüfe den gespeicherten Stand und verwirf den Entwurf oder verwende die angezeigte Wiederherstellung.";
+  const host=$("work");
+  const status=section("Lesende Inventur");
+  const counts=line(inventoryCounts());
+  counts.id="inventory-counts";
+  status.append(line(job.source_root));
+  if(job.scan_running || inventoryStarting)status.append(inventoryProgress());
+  counts.setAttribute("aria-live","polite");
+  status.append(counts);
+  if (job.scan_error) status.append(line(job.scan_error));
+  if(job.review_count)status.append(reviewControls());
+  const buttons=node("div",undefined,"inline");
+  if (!recoveryOnly && job.scan_running) buttons.append(action("Inventur pausieren",()=>mutate("/pause")));
+  else if (!recoveryOnly && !terminal && !job.plan.id && !inventoryStarting && !reviewBusy()) {
+    const labels={ready:"Inventur starten",scanning:"Inventur fortsetzen",inventoried:"Inventur erneut starten"};
+    buttons.append(action(labels[job.state],async()=>{
+      if(job.state==="inventoried" && !confirm(t("Inventur neu starten? Der bisherige Entwurf wird verworfen. Originaldateien bleiben unverändert.")))return;
+      await startInventory();
+    },true));
+  }
+  if (!terminal && !job.plan.execution && !job.scan_running && !inventoryStarting && !reviewBatch.running && !reviewSubmitting) { const discard=action("Änderungen verwerfen",async()=>{
+    if (!confirm(t("Auftrag und Entwurf verwerfen? Originale und fertige Arbeitskopien in General bleiben erhalten."))) return;
+    await api(jobPath(),"DELETE");
+    dirty.clear();
+    location.replace(afterDiscard);
+  });discard.classList.add("danger-button");$("top-actions").append(discard);}
+  if (job.errors) buttons.append(action("Pfadfehler anzeigen", async()=>{
+    const rows=await api(jobPath("/errors"));
+    $("inventory-errors").replaceChildren(...rows.map(row=>line(row.relative_path+" · "+t(row.error))));
+  }));
+  status.append(buttons,slot("inventory-errors"));
+  host.replaceChildren();
+  const progress=slot("review-progress");
+  progress.className="adoption-review-progress";
+  progress.setAttribute("role","status");
+  host.append(progress);
+  renderReviewProgress();
+  if(viewStep==="inventory")host.append(status);
+  else if(job.plan.id)renderPlan(host);
+  else if(viewStep==="plan" && !job.scan_running && job.state==="inventoried")renderDraft(host);
+}
+function segmentKey(segment){return segment.start_datetime+"/"+segment.end_datetime;}
+function applyDraftPreview(checked){
+  draftStats=checked.events;
+  draftCoverage=checked.coverage;
+  freeSegments=checked.free_segments || [];
+  archiveSegments=checked.archive_segments || [];
+  const previousDays=selectedDays;
+  selectedDays=new Set(freeSegments.filter(segment=>previousDays.has(segment.day_key) ||
+    previousDays.has(segmentKey(segment))).map(segmentKey));
+}
+function renderDraft(host) {
+  const panel=section("Ereignisse planen");
+  const instruction=line("Wähle freie Aufnahmetage oder Zeitabschnitte. Mit Umschalt wählst du einen Bereich. Du kannst auch ohne Auswahl planen.");
+  instruction.id="planning-instruction";
+  panel.append(instruction);
+  const toolbar=node("div",undefined,"inline adoption-toolbar");
+  toolbar.id="event-actions";
+  toolbar.append(
+    action("+ Ereignis",()=>eventEditor(undefined,"event"),true),
+    action("+ Sammelordner ohne Ereignis",()=>eventEditor(undefined,"no_event")),
+    action("Alle auswählen",()=>{for(const row of dayRows)selectedDays.add(segmentKey(row));renderDays();}),
+    action("Auswahl aufheben",()=>{
+      requireSaved($("families"));
+      selectedDays.clear();day=null;selectedEvent=null;selectedArchive=null;renderDays();renderPlanSelection();return showDay();
+    }),
+    slot("selection-count","span"));
+  panel.append(toolbar,slot("periods"),slot("planning-review"));
+  const grid=node("div",undefined,"grid adoption-planning");
+  grid.id="dated-planning";
+  const chronologyPane=node("div");chronologyPane.append(slot("draft-events"),slot("archive-segments"),slot("days"));
+  const diagnostic=node("details");diagnostic.id="family-diagnostics";
+  diagnostic.append(node("summary","Dateifamilien und Aufnahmezeiten prüfen"),slot("families"));
+  diagnostic.addEventListener("toggle",()=>{if(diagnostic.open && !$("families").childElementCount)showFamilies().catch(error=>report(error.message));});
+  chronologyPane.append(diagnostic);chronologyPane.id="dated-media";
+  const formPane=node("div");
+  formPane.append(node("h3","Vorschau"),slot("draft-coverage"),slot("planning-preview"),slot("matches"));
+  const editor=slot("event-editor","dialog");
+  editor.setAttribute("aria-labelledby","event-editor-title");
+  grid.append(chronologyPane,formPane);panel.append(grid,editor);host.append(panel);
+  showDraftEvents();
+  renderPlanSelection();
+}
+async function chronology() {
+  const periodCounts=new Map();
+  for(const segment of [...freeSegments,...archiveSegments]){
+    const period=segment.day_key.slice(0,4);
+    periodCounts.set(period,(periodCounts.get(period)||0)+segment.families);
+  }
+  for(const stats of draftStats){
+    if(!stats.start || !stats.end)continue;
+    for(let y=Number(stats.start.slice(0,4));y<=Number(stats.end.slice(0,4));y++){
+      const period=String(y).padStart(4,"0");
+      if(!periodCounts.has(period))periodCounts.set(period,0);
+    }
+  }
+  if(job.review_count)periodCounts.set("review",job.review_count);
+  const periods=[...periodCounts].sort(([a],[b])=>a.localeCompare(b));
+  if(!periodCounts.has(year))year=periods.find(([period])=>period!=="review")?.[0] || periods[0]?.[0] || "";
+  const buttons=node("div",undefined,"inline");
+  for(const [period,count] of periods){
+    const button=action(period==="review" ? "Ohne gesichertes Datum ("+count+")" : period+(count?" ("+count+")":""),async()=>{
+      requireSaved($("families"));
+      year=period;day=null;selectedEvent=null;selectedArchive=null;dayPage=60;
+      sessionStorage.setItem("bk-adoption-period:"+jobId,period);
+      await chronology();
+    });
+    button.setAttribute("aria-pressed",String(period===year));buttons.append(button);
+  }
+  $("periods").replaceChildren(buttons);
+  const reviewing=year==="review";
+  for(const id of ["planning-instruction","event-actions","dated-planning"])$(id).hidden=reviewing;
+  const cases=$("planning-review");
+  cases.hidden=!reviewing;
+  const diagnostic=$("family-diagnostics");
+  $("dated-media").append(diagnostic);
+  if(reviewing){
+    showReview(cases);
+    cases.append(diagnostic);
+    day="";
+    return showDay();
+  }
+  cases.replaceChildren();
+  dayRows=freeSegments.filter(segment=>segment.day_key.startsWith(year+"-"));
+  showDraftEvents();
+  const archive=$('archive-segments');
+  archive.replaceChildren();
+  const archiveRows=archiveSegments.filter(segment=>segment.day_key.startsWith(year+"-"));
+  for(const part of archiveRows.slice(0,dayPage)){
+    const button=action(undefined,async()=>{
+      requireSaved($('families'));
+      day=part.day_key;selectedEvent=null;selectedArchive=part;selectionAnchor="";
+      renderPlanSelection();
+      await showDay();
+    });
+    button.classList.add('day-card');
+    const name=node('strong',part.event_name);name.dataset.bkPreserveLanguage="";
+    button.append(name,node('span',part.day_key),node('span','Archiviertes Ereignis','subtle'));
+    archive.append(button);
+  }
+  if(archiveRows.length>dayPage){
+    archive.append(action('Weitere Tage',()=>{dayPage+=60;return chronology();}));
+  }
+  renderDays();
+  renderPlanSelection();
+  if(![...dirty].some(editor=>$("families").contains(editor)))await showDay();
+}
+function renderDays(){
+  const host=$("days");if(!host)return;
+  host.replaceChildren();
+  const months=new Map();
+  for(const item of dayRows.slice(0,dayPage)){
+    const month=item.day_key.slice(0,7);
+    if(!months.has(month)){
+      const group=node("section",undefined,"adoption-month");group.append(node("h3",month));
+      const cards=node("div",undefined,"adoption-day-grid");group.append(cards);months.set(month,cards);host.append(group);
+    }
+    const key=segmentKey(item);
+    const card=node("button",undefined,"day-card"+(selectedDays.has(key)?" selected":""));
+    card.type="button";card.dataset.day=key;card.setAttribute("role","checkbox");
+    card.setAttribute("aria-checked",String(selectedDays.has(key)));
+    card.append(node("span",selectedDays.has(key)?"☑":"□"),node("strong",item.day_key+(item.start_time==="00:00" && item.end_time==="23:59"?"":" · "+item.start_time+"–"+item.end_time)),node("span",item.families+" "+t(item.families===1?"Dateifamilie":"Familien"),"subtle"));
+    function choose(event){
+      requireSaved($("families"));
+      if(event.shiftKey && selectionAnchor){
+        const keys=dayRows.map(segmentKey),a=keys.indexOf(selectionAnchor),b=keys.indexOf(key);
+        if(a>=0 && b>=0)for(const key of keys.slice(Math.min(a,b),Math.max(a,b)+1))selectedDays.add(key);
+      }else if(selectedDays.has(key))selectedDays.delete(key);
+      else selectedDays.add(key);
+      selectionAnchor=key;day=selectedDays.has(key)?item.day_key:null;selectedEvent=null;selectedArchive=null;
+      renderDays();renderPlanSelection();showDay().catch(error=>report(error.message));
+      $("days").querySelector('[data-day="'+key+'"]')?.focus();
+    }
+    card.addEventListener("mousedown",event=>{if(event.shiftKey)event.preventDefault();});
+    card.addEventListener("click",event=>{try{choose(event);}catch(error){report(error.message);}});
+    card.addEventListener("keydown",event=>{
+      if(!["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(event.key))return;
+      event.preventDefault();const cards=[...host.querySelectorAll("[data-day]")],at=cards.indexOf(card);
+      const next=cards[at+(["ArrowLeft","ArrowUp"].includes(event.key)?-1:1)];
+      if(next){next.focus();if(event.shiftKey)next.dispatchEvent(new MouseEvent("click",{bubbles:true,shiftKey:true}));}
+    });
+    months.get(month).append(card);
+  }
+  if(dayRows.length>dayPage)host.append(action("Weitere Tage",()=>{dayPage+=60;renderDays();}));
+  sessionStorage.setItem("bk-adoption-days:"+jobId,JSON.stringify([...selectedDays]));
+  $("selection-count").textContent=selectedDays.size+" "+t(selectedDays.size===1?"Abschnitt ausgewählt":"Abschnitte ausgewählt");
+}
+async function showDay() {
+  requireSaved($("families"));
+  $("matches").replaceChildren();
+  $("families").replaceChildren();
+  familyCursor="";
+  if (day) {
+    const requestedDay=day;
+    if(later) {
+      const matches=await api(jobPath("/events?"+new URLSearchParams({day:requestedDay})));
+      if(day!==requestedDay || !$("matches"))return;
+      for(const item of matches) {
+        const card=node("div",undefined,"row");
+        const title=node("strong",item.name);title.dataset.bkPreserveLanguage="";
+        card.append(title,line(item.start_datetime.slice(0,10)+" → "+item.end_datetime.slice(0,10)),
+          action("Zu bestehendem Ereignis hinzufügen",()=>addExisting(item)));
+        $("matches").append(card);
+      }
+    }
+  }
+  if($("family-diagnostics")?.open)await showFamilies();
+}
+const reviewReasons={
+  missing_capture_time:"Aufnahmezeit fehlt",
+  conflicting_capture_time:"Aufnahmezeiten widersprechen sich",
+  damaged_metadata:"Metadaten sind beschädigt",
+  unreadable_member:"Mindestens eine Datei der Familie ist nicht vollständig lesbar",
+  unassigned_event:"Kein geplantes Ereignis enthält die Aufnahmezeit",
+  uncertain_capture_time:"Die Aufnahmezeit ist nicht ausreichend belegt"
+};
+const reviewStates={
+  open:"Von der Archivübernahme ausgenommen",
+  excluded:"Ausdrücklich ausgenommen",
+  confirmed:"Aufnahmezeit im Entwurf bestätigt",
+  copying:"Arbeitskopie kann fortgesetzt werden",
+  copied:"Für die Metadatenkorrektur in General bereit"
+};
+function reviewBusy(){
+  return reviewSubmitting || reviewBatch.running || reviewBatch.pending>0;
+}
+function reviewHelp(){
+  const help=node("details",undefined,"adoption-source-help adoption-review-help");
+  const summary=node("summary","?");
+  summary.setAttribute("aria-label","Hilfe zur Metadatenkorrektur");
+  help.append(summary,line("Bibliothekar legt Arbeitskopien vollständiger Dateifamilien unter Workspace → Metadatenkorrektur → General ab. Nach Abschluss oder Verwerfen der Bestandsübernahme kannst du sie dort korrigieren und in den Tagesbestand einsortieren. Beim Kopieren wird nichts ins Zielarchiv übernommen."));
+  help.addEventListener("toggle",()=>{
+    if(!help.open)return;
+    const maxLeft=document.documentElement.clientWidth-16-help.querySelector("p").offsetWidth;
+    help.style.setProperty("--adoption-help-offset",Math.min(0,maxLeft-help.getBoundingClientRect().left)+"px");
+  });
+  help.addEventListener("keydown",event=>{
+    if(event.key==="Escape" && help.open){help.open=false;summary.focus();}
+  });
+  return help;
+}
+function renderReviewProgress(){
+  const target=$("review-progress");
+  if(!target)return;
+  target.replaceChildren();
+  if(!reviewBatch.total)return;
+  const {total,copied,failed,pending,running}=reviewBatch;
+  const bar=node("progress");bar.max=total;bar.value=total-pending;
+  bar.setAttribute("aria-label","Kopierfortschritt");
+  const status=node("div",undefined,"inline adoption-review-status");
+  const title=running?"Arbeitskopien werden erstellt …":pending?"Kopierauftrag unterbrochen":
+    failed?"Kopierauftrag mit Fehlern beendet":"Für die Metadatenkorrektur kopiert";
+  status.append(node("strong",title),reviewHelp());
+  target.append(status,bar,line(copied+" kopiert · "+failed+" fehlgeschlagen · "+pending+" ausstehend"));
+  if(pending && !running && !recoveryOnly)target.append(action("Kopierauftrag fortsetzen",async()=>{
+    await api(jobPath("/review/batch/resume"),"POST");await refreshReviewView();
+  },true));
+}
+function scheduleReviewPoll(){
+  clearTimeout(reviewTimer);
+  if(!reviewBatch.running)return;
+  const requested=jobId;
+  reviewTimer=setTimeout(async()=>{
+    try{
+      const status=await api(jobPath("/review/batch"));
+      if(requested!==jobId)return;
+      reviewBatch=status;
+      if(!status.running && !dirty.size){
+        previewRevision=-1;await refreshReviewView();
+      }else{
+        renderReviewProgress();
+        scheduleReviewPoll();
+      }
+    }catch(error){report(error.message);scheduleReviewPoll();}
+  },1200);
+}
+function appendCaptureEvidence(target, metadata){
+  if(!metadata)return;
+  if(metadata.selected_capture_time){
+    const source=metadata.selected_capture_source || "";
+    const inherited={family_inheritance:"Von Dateifamilie übernommen",family_subsecond_inheritance:"Genauere Uhrzeit aus Dateifamilie"}[source];
+    const evidence=node("p");
+    evidence.append(node("span","Ermittelte Aufnahmezeit"),": ",node("code",metadata.selected_capture_time));
+    if(source)evidence.append(" · ",node(inherited?"span":"code",inherited || source));
+    target.append(evidence);
+  }
+  for(const candidate of metadata.metadata_candidates || []){
+    target.append(line([candidate.technical_tag,candidate.normalized_datetime || candidate.raw_value].filter(Boolean).join(" · ")));
+  }
+}
+function showReview(target) {
+  let cursor="";
+  const toolbar=node("div",undefined,"inline");
+  const list=node("div");
+  const selectionCount=slot("review-selection","span");
+  const selectAll=action("Alle geeigneten Prüffälle auswählen",async()=>{
+    reviewSelection=new Set(await api(jobPath("/review/selection")));
+    syncSelection();
+  },false,()=>syncSelection());
+  const clearSelection=action("Auswahl aufheben",()=>{
+    reviewSelection.clear();syncSelection();
+  },false,()=>syncSelection());
+  const copy=action("Zur Metadatenkorrektur kopieren",async()=>{
+    requireSaved();
+    if(!confirm(t("Arbeitskopien im Workspace benötigen zusätzlichen Speicherplatz. Ausgewählte Dateifamilien jetzt kopieren?")))return;
+    reviewSubmitting=true;
+    syncSelection();
+    try{
+      await api(jobPath("/review/batch"),"POST",{family_keys:[...reviewSelection]});
+      reviewSelection.clear();previewRevision=-1;
+    }finally{
+      reviewSubmitting=false;
+      await refreshReviewView();
+    }
+  },true,()=>syncSelection());
+  function syncSelection(){
+    const blocked=reviewBusy() || recoveryOnly || job.state!=="inventoried" || job.plan.execution;
+    selectAll.disabled=Boolean(blocked);
+    clearSelection.disabled=Boolean(blocked || !reviewSelection.size);
+    copy.disabled=Boolean(blocked || !reviewSelection.size);
+    selectionCount.textContent=reviewSelection.size+" ausgewählt";
+    for(const checkbox of list.querySelectorAll("input[type=checkbox]")){
+      checkbox.checked=reviewSelection.has(checkbox.value);
+      checkbox.disabled=Boolean(blocked || !checkbox.dataset.copyable);
+    }
+  }
+  if(!recoveryOnly && job.state==="inventoried" && !job.plan.execution){
+    toolbar.append(selectAll,clearSelection,copy,selectionCount);
+    if(!reviewBatch.total)toolbar.append(reviewHelp());
+  }
+  target.className="adoption-review-cases";
+  target.replaceChildren(node("h3","Prüffälle"),
+    line("Ungeklärte Dateifamilien bleiben an der Quelle. Fertige Arbeitskopien in General bleiben auch nach dem Verwerfen erhalten."),
+    toolbar,list);
+  const more=action("Weitere Prüffälle",load);
+  async function load(){
+    const rows=await api(jobPath("/review?"+new URLSearchParams({after:cursor})));
+    if(!target.isConnected)return;
+    more.remove();
+    for(const item of rows){
+      const entry=node("div",undefined,"row adoption-review-row");
+      const checkbox=node("input");checkbox.type="checkbox";checkbox.value=item.family_key;
+      checkbox.setAttribute("aria-label","Dateifamilie auswählen: "+item.family_key);
+      if(item.can_copy)checkbox.dataset.copyable="yes";
+      else reviewSelection.delete(item.family_key);
+      checkbox.addEventListener("change",()=>{
+        if(checkbox.checked)reviewSelection.add(item.family_key);
+        else reviewSelection.delete(item.family_key);
+        syncSelection();
+      });
+      const row=node("details");
+      row.open=reviewOpened.has(item.family_key);
+      row.addEventListener("toggle",()=>{
+        if(row.open)reviewOpened.add(item.family_key);else reviewOpened.delete(item.family_key);
+      });
+      const summary=node("summary");
+      const name=node("strong",item.family_key);name.dataset.bkPreserveLanguage="";
+      summary.append(name," · ",node("span",reviewStates[item.state],"subtle"));
+      const reasons=node("small");
+      item.reasons.forEach((reason,index)=>{
+        if(index)reasons.append(" · ");
+        reasons.append(node("span",reviewReasons[reason] || reason));
+      });
+      row.append(summary);
+      reasons.className="subtle";
+      if(item.copy_error){
+        const error=node("span",item.copy_error,"adoption-review-error");
+        summary.append(node("br"),error);
+      }
+      for(const file of item.files){
+        const path=node("code",file.relative_path);path.dataset.bkPreserveLanguage="";
+        const fileRow=node("p");fileRow.append(path);row.append(fileRow);
+        if(file.error)row.append(line(file.error));
+        appendCaptureEvidence(row,file.metadata);
+      }
+      if(item.target_relative && item.state==="copied")row.append(line("Arbeitsordner in General · "+item.target_relative));
+      summary.append(node("br"),reasons);
+      entry.append(checkbox,row);list.append(entry);
+    }
+    if(rows.length===60){cursor=rows.at(-1).family_key;list.append(more);}
+    syncSelection();
+  }
+  syncSelection();
+  load().catch(error=>report(error.message));
+}
+async function showFamilies() {
+  const target=$("families");
+  target.querySelector(".more")?.remove();
+  const requestedDay=day;
+  const query=new URLSearchParams({after:familyCursor});
+  if(requestedDay!==null)query.set("day",requestedDay);
+  const rows=await api(jobPath("/families?"+query));
+  if(!target.isConnected || requestedDay!==day)return;
+  for (const family of rows) {
+    const row=node("details",undefined,"row");
+    watchDraft(row);
+    const capture=draft.capture_overrides[family.family_key] || family.selected_capture_time || "Aufnahmezeit offen";
+    const excluded=draft.exclude_families.includes(family.family_key);
+    const summary=node("summary",family.family_key+" · "+t(capture)+(excluded?" · "+t("Ausgeschlossen"):family.status==="review_required"?" · "+t("Prüfen"):""));
+    row.append(summary);
+    for (const file of family.files) {
+      row.append(line(file.filename+" · "+file.media_type+" · "+file.size_bytes+" Bytes"));
+      appendCaptureEvidence(row,file);
+    }
+    for (const error of family.errors) row.append(line(error.relative_path+" · "+t(error.message)));
+    const [wrap,input]=field("Bestätigte Aufnahmezeit mit optionalem UTC-Offset","text",capture==="Aufnahmezeit offen"?"":capture);
+    input.placeholder="2026-07-21T12:00:00+02:00";
+    const [stemWrap,stem]=field("Neuer Dateiname für alle Mitglieder, ohne Endung (optional)","text",draft.target_stems[family.family_key]);
+    const [excludeWrap,exclude]=field("Familie aus dieser Übernahme auslassen","checkbox");
+    exclude.checked=excluded;
+    row.append(wrap,stemWrap,excludeWrap,action("Familie im Entwurf speichern",async()=>{
+      const capture_overrides={...draft.capture_overrides};
+      const target_stems={...draft.target_stems};
+      const exclude_families=draft.exclude_families.filter(key=>key!==family.family_key);
+      if (input.value.trim() && input.value.trim() !== family.selected_capture_time) capture_overrides[family.family_key]=input.value.trim();
+      else if (!input.value.trim() || family.status!=="review_required") delete capture_overrides[family.family_key];
+      else capture_overrides[family.family_key]=input.value.trim();
+      if (stem.value.trim()) target_stems[family.family_key]=stem.value.trim();
+      else delete target_stems[family.family_key];
+      if (exclude.checked) exclude_families.push(family.family_key);
+      await setDraft({...draft,capture_overrides,target_stems,exclude_families},row);
+      if (![...dirty].some(editor=>$("families").contains(editor))) await showDay();
+      report("Familie im Entwurf gespeichert.");
+    }));
+    target.append(row);
+  }
+  if (rows.length===60) {
+    familyCursor=rows[rows.length-1].family_key;
+    const more=action("Weitere Familien",showFamilies);more.className="more";
+    target.append(more);
+  }
+}
+async function setDraft(value, editor) {
+  const checked=await api(jobPath("/draft/check"),"POST",value);
+  if(!checked.valid){showConflicts(checked,value,editor);throw new Error("Zeitkonflikt: Korrigiere die markierte Planung. Gespeicherte Entwürfe bleiben erhalten.");}
+  const result=await api(jobPath("/draft"),"PUT",{...value,revision:draftRevision});
+  applyDraftPreview(checked);previewRevision=result.revision;
+  draft=value;
+  draftRevision=result.revision;
+  savedEditor(editor);
+  selectedEvent=null;
+  selectedArchive=null;
+  await chronology();
+}
+async function addExisting(item, candidate=draft, replaceAt=null, editor=null) {
+  const events=candidate.events.filter((event,index)=>event.existing_id!==item.id && index!==replaceAt);
+  events.push({existing_id:item.id,name:item.name});
+  await setDraft({...candidate,events},editor);
+  $("planning-conflicts")?.remove();
+  if(editor) $("event-editor").close();
+  report("Aufnahmen innerhalb des gespeicherten Zeitraums zugeordnet.");
+}
+function showConflicts(checked,candidate,editor){
+  $("planning-conflicts")?.remove();
+  const panel=node("section");panel.id="planning-conflicts";panel.setAttribute("role","alert");
+  panel.append(node("h3","Zeitkonflikte lösen"),line("Gespeicherte Entwürfe bleiben erhalten. Korrigiere den betroffenen Zeitraum."));
+  for(const conflict of checked.conflicts){
+    const proposed=candidate.events[conflict.index];
+    const row=node("div",undefined,"row");
+    const title=node("strong",(proposed.name||t("Sammelordner ohne Ereignis"))+" ↔ "+conflict.name);title.dataset.bkPreserveLanguage="";
+    row.append(title,line(conflict.start.slice(0,10)+" → "+conflict.end.slice(0,10)));
+    if(later && conflict.kind==="archive")row.append(action("Zu bestehendem Ereignis hinzufügen",()=>addExisting({
+      id:conflict.existing_id,name:conflict.name,
+    },candidate,conflict.index,editor)));
+    row.append(action("Zeitraum ändern",()=>{
+      if(editor?.isConnected)editor.querySelector('input[type="date"],textarea')?.focus();
+      else eventEditor(conflict.index);
+    }));panel.append(row);
+  }
+  if(editor?.isConnected) editor.prepend(panel);
+  else if($("event-editor")) $("event-editor").before(panel);
+  else $("work").prepend(panel);
+}
+function renderPlanSelection() {
+  const target=$("planning-preview");
+  const coverage=$("draft-coverage");
+  if(!target || !coverage)return;
+  target.replaceChildren();
+  coverage.replaceChildren();
+  if(draftCoverage?.unassigned){
+    const message=draftCoverage.unassigned===1?"Eine Dateifamilie ist noch nicht zugeordnet.":
+      draftCoverage.unassigned+" Dateifamilien sind noch nicht zugeordnet.";
+    coverage.append(node("p",message,"subtle"));
+  }
+  const stats=draftStats[selectedEvent];
+  if(stats){
+    const title=node("strong",stats.name);title.dataset.bkPreserveLanguage="";
+    target.append(title,line(formatPlanRange(stats.start,stats.end)),
+      line(planCounts(stats)));
+    if(stats.children?.length || stats.segments?.length){
+      const parts=node("ul");
+      for(const child of stats.children || []){
+        const name=node("strong",child.name);name.dataset.bkPreserveLanguage="";
+        const item=node("li");item.append(name,line(formatPlanRange(child.start,child.end)));parts.append(item);
+      }
+      for(const segment of stats.segments || [])parts.append(node("li",formatPlanRange(segment.start_datetime,segment.end_datetime)));
+      target.append(parts);
+    }
+    const structure=node("div",undefined,"adoption-structure-preview");target.append(structure);
+    draftStructure([draft.events[selectedEvent]]).then(preview=>structure.replaceChildren(preview))
+      .catch(error=>{if(structure.isConnected)report(error.message);});
+    return;
+  }
+  const segment=selectedArchive || freeSegments.find(item=>segmentKey(item)===selectionAnchor && selectedDays.has(selectionAnchor));
+  if(segment)target.append(line(formatPlanRange(segment.start_datetime,segment.end_datetime)),line(planCounts(segment)));
+}
+function planCounts(item){return item.families+" "+t(item.families===1?"Dateifamilie":"Familien")+" · "+item.files+" "+t(item.files===1?"Datei":"Dateien");}
+function formatPlanRange(start,end){
+  return start.slice(0,16).replace("T"," ")+" → "+end.slice(0,16).replace("T"," ");
+}
+function showDraftEvents() {
+  const el=$("draft-events");if(!el)return;
+  el.replaceChildren();
+  const visible=draft.events.map((item,index)=>({item,index,stats:draftStats[index]}))
+    .filter(({stats})=>!year || !stats || (stats.start.slice(0,4)<=year && year<=stats.end.slice(0,4)))
+    .sort((a,b)=>(a.stats?.start||"").localeCompare(b.stats?.start||""));
+  for(const {item,index,stats} of visible.slice(0,draftPage)){
+    const row=node("details",undefined,"adoption-event-card");
+    const kind=item.existing_id?"Archivereignis ergänzen":item.event_kind==="no_event"?"Sammelordner ohne Ereignis":"Neues Ereignis";
+    const summary=node("summary");
+    const name=item.event_kind==="no_event" ? stats?.folder_name : item.name;
+    const title=node("strong",name||kind);
+    if(name)title.dataset.bkPreserveLanguage="";
+    summary.append(title);
+    if(item.name && item.existing_id)summary.append(node("span",kind,"subtle"));
+    if(stats)summary.append(node("span",formatPlanRange(stats.start,stats.end),"subtle"));
+    summary.addEventListener("click",()=>{
+      if(!row.open){
+        for(const other of el.querySelectorAll("details[open]"))other.open=false;
+        selectedEvent=index;selectedArchive=null;day=null;
+        $("matches").replaceChildren();
+        renderPlanSelection();
+      }
+    });
+    row.open=selectedEvent===index;row.append(summary);
+    if(stats)row.append(line(planCounts(stats)));
+    const controls=node("div",undefined,"inline");
+    if(!item.existing_id)controls.append(action("Bearbeiten",()=>eventEditor(index)));
+    const remove=action("Entfernen",async()=>{
+      if(!confirm(t("Dieses Planobjekt entfernen?")))return;
+      await setDraft({...draft,events:draft.events.filter((_,at)=>at!==index)});report("Entwurf entfernt.");
+    });
+    remove.classList.add("danger-button");controls.append(remove);
+    row.append(controls);el.append(row);
+  }
+  if(draftPage<visible.length)el.append(action("Weitere Planobjekte",()=>{draftPage+=40;showDraftEvents();}));
+}
+function folderTree(){
+  const frame=node("div",undefined,"adoption-folder-tree");
+  const root={row:frame,children:new Map()};
+  function add(paths){
+    for(const path of paths){
+      let parent=root;
+      for(const name of path.split("/").filter(Boolean)){
+        if(!parent.children.has(name)){
+          const row=node("li"), label=node("code",name);
+          label.dataset.bkPreserveLanguage="";
+          if(!parent.list){parent.list=node("ul");parent.row.append(parent.list);}
+          row.append(label);parent.list.append(row);
+          parent.children.set(name,{row,children:new Map()});
+        }
+        parent=parent.children.get(name);
+      }
+    }
+  }
+  return {frame,add};
+}
+async function draftStructure(events) {
+  const result=await api(jobPath("/draft/structure"),"POST",{...draft,events});
+  const card=node("div",undefined,"adoption-card");
+  card.append(node("h4","Vorschau der Zielstruktur"));
+  const tree=folderTree();
+  card.append(tree.frame);
+  let offset=0;
+  const more=action("Weitere Ordner anzeigen",showMore);
+  function showMore(){
+    tree.add(result.directories.slice(offset,offset+200));
+    offset+=200;
+    more.hidden=offset>=result.directories.length;
+  }
+  showMore();card.append(more);
+  return card;
+}
+function layoutEditor(saved,{inherit=false,allowDisabled=true}={}) {
+  const {panel,value}=window.BibliothekarFolderLayout.eventEditor({
+    saved,inherit,allowDisabled,defaults:job.layout_default,translate:t,
+  });
+  panel.classList.add("adoption-card");
+  return [panel,value];
+}
+function eventEditor(index, newKind="event") {
+  requireSaved($("event-editor"));
+  const dialog=$("event-editor");
+  const item=draft.events[index] || {};
+  const kind=item.event_kind || newKind;
+  const isEvent=kind==="event";
+  const selected=freeSegments.filter(segment=>selectedDays.has(segmentKey(segment)));
+  const form=node("div",undefined,"stack");
+  watchDraft(form);
+  const edited=()=>form.dispatchEvent(new Event("input"));
+  const title=node("h3",index===undefined?(isEvent?"Neues Ereignis":"Sammelordner ohne Ereignis"):"Entwurf bearbeiten");
+  title.id="event-editor-title";
+  const message=node("p");message.id="editor-message";message.setAttribute("role","alert");
+  form.append(title);
+  if(isEvent)form.append(node("p","Das Ereignis belegt einen durchgehenden Zeitraum.","subtle adoption-interval"));
+  form.append(message);
+  const [keepWrap,keep]=field("Tagesordner erhalten","checkbox");
+  keep.checked=Boolean(item.preserve_day_folders);
+  const [folders,folderLayout]=layoutEditor(item.folder_layout,{allowDisabled:!isEvent});
+  const [parentWrap,parentFolders]=field("Unterordner des Hauptereignisses erstellen","checkbox");
+  parentFolders.checked=item.folder_layout?.structure_enabled ?? job.layout_default?.structure_enabled ?? true;
+  parentWrap.hidden=!isEvent;
+  let firstInput, fields;
+
+  if(isEvent){
+    const [nameWrap,name]=field("Ereignisname","text",item.name);
+    const [startWrap,start]=field("Erster Tag","date",item.start_date || selected[0]?.day_key);
+    const [fromWrap,from]=field("Von","time",item.start_time ?? selected[0]?.start_time ?? "00:00");
+    const [endWrap,end]=field("Letzter Tag","date",item.end_date || selected.at(-1)?.day_key);
+    const [toWrap,to]=field("Bis","time",item.end_time ?? selected.at(-1)?.end_time ?? "23:59");
+    const dates=node("div",undefined,"inline");dates.append(startWrap,fromWrap,endWrap,toWrap);
+    form.append(nameWrap,dates);
+    firstInput=name;
+    const children=node("div");
+    function addChild(child={},open=false) {
+      const row=node("div",undefined,"adoption-card adoption-child-card");
+      const details=node("details");details.open=open;
+      const summary=node("summary",child.name || t("Unterereignis"));
+      summary.dataset.bkPreserveLanguage="";
+      const [nWrap,n]=field("Name des Unterereignisses","text",child.name);
+      const [aWrap,a]=field("Beginn","datetime-local",child.start_datetime?.slice(0,16));
+      const [bWrap,b]=field("Ende","datetime-local",child.end_datetime?.slice(0,16));
+      const [createWrap,create]=field("Unterordner erstellen","checkbox");
+      const editor=window.BibliothekarFolderLayout.subeventEditor({checkbox:create,saved:child,defaults:job.layout_default,translate:t});
+      const childFolders=editor.panel;childFolders.classList.add("adoption-card");
+      row.childValues=()=>({name:n.value,start_datetime:a.value,end_datetime:b.value,
+        ...editor.value()});
+      const pair=node("div",undefined,"inline");pair.append(aWrap,bWrap);
+      const remove=action("Unterereignis entfernen",()=>{
+        if(!confirm(t("Dieses Unterereignis aus dem Entwurf entfernen?")))return;
+        row.remove();edited();
+      });
+      remove.classList.add("danger-button");
+      const header=node("div",undefined,"adoption-child-header");
+      header.append(details,remove);
+      n.addEventListener("input",()=>{summary.textContent=n.value || t("Unterereignis");});
+      const nameRow=node("div",undefined,"bk-subevent-name-row");nameRow.append(nWrap,createWrap);
+      const body=node("div",undefined,"stack");body.append(nameRow,pair,childFolders);
+      body.id=window.BibliothekarFolderLayout.nodeId();
+      summary.setAttribute("aria-controls",body.id);
+      details.append(summary);
+      body.hidden=!open;
+      details.addEventListener("toggle",()=>{body.hidden=!details.open;});
+      window.BibliothekarFolderLayout.expandCard(details,row);
+      row.append(header,body);
+      children.append(row);
+      return n;
+    }
+    for(const child of item.children || [])addChild(child);
+    let prefixEnabled=item.subevent_prefix_enabled ?? job.subevent_prefix_enabled ?? true;
+    function showPrefix(){
+      prefix.textContent=t(prefixEnabled ? "Präfix: an" : "Präfix: aus");
+      prefix.setAttribute("aria-pressed",String(prefixEnabled));
+    }
+    const prefix=action(undefined,()=>{prefixEnabled=!prefixEnabled;showPrefix();edited();});
+    showPrefix();
+    const childActions=node("div",undefined,"inline");
+    childActions.append(prefix,action("Unterereignis hinzufügen",()=>{
+      const previousEnd=children.lastElementChild?.childValues().end_datetime;
+      const next=nextChildInterval(
+        {minDate:start.value,maxDate:end.value,minTime:from.value,maxTime:to.value},
+        previousEnd ? {day:previousEnd.slice(0,10),time:previousEnd.slice(11,16)} : null,
+      );
+      if(!next || next.error)throw new Error(next?.error || "Name, Beginn und Ende fehlen.");
+      addChild({start_datetime:next.start_date+"T"+next.start_time,end_datetime:next.end_date+"T"+next.end_time},true).focus();
+      edited();
+    }));
+    form.append(childActions,children);
+    fields=()=>{
+      if(!name.value.trim() || !start.value || !end.value || !from.value || !to.value)throw new Error("Name, Beginn und Ende fehlen.");
+      return {name:name.value.trim(),start_date:start.value,end_date:end.value,
+        start_time:from.value,end_time:to.value,subevent_prefix_enabled:prefixEnabled,
+        children:[...children.children].map(row=>row.childValues())};
+    };
+  }else{
+    const segments=node("div",undefined,"stack");
+    function addSegment(segment={}) {
+      const row=node("div",undefined,"inline");
+      const [dayWrap,day]=field("Aufnahmetag","date",segment.day_key);
+      const [fromWrap,from]=field("Von","time",segment.start_time);
+      const [toWrap,to]=field("Bis","time",segment.end_time);
+      row.segmentValue=()=>{
+        if(!day.value || Boolean(from.value)!==Boolean(to.value))throw new Error("Gib ein Datum und entweder beide Uhrzeiten oder keine Uhrzeit an.");
+        return {day_key:day.value,...(from.value?{start_time:from.value,end_time:to.value}:{})};
+      };
+      row.append(dayWrap,fromWrap,toWrap,action("Entfernen",()=>{row.remove();edited();}));
+      segments.append(row);
+      return day;
+    }
+    const initial=item.segments || selected;
+    for(const segment of initial.length?initial:[{}]){
+      const input=addSegment(segment);
+      firstInput ??= input;
+    }
+    form.append(line("Lasse beide Uhrzeiten leer, um den ganzen Tag zu übernehmen."));
+    if(index===undefined)form.append(line("Für jeden Monat mit ausgewählten Tagen wird ein Sammelordner angelegt."));
+    const segmentActions=node("div",undefined,"inline");
+    segmentActions.append(action("Tag oder Zeitabschnitt hinzufügen",()=>{addSegment().focus();edited();}));
+    const sameMonth=index===undefined?[]:selected.filter(part=>part.day_key.slice(0,7)===initial[0]?.day_key.slice(0,7));
+    if(sameMonth.length){
+      const appendSelection=action("Ausgewählte freie Abschnitte hinzufügen",()=>{
+        for(const part of sameMonth)addSegment(part);
+        appendSelection.disabled=true;
+        edited();
+      });
+      segmentActions.append(appendSelection);
+    }
+    form.append(segments,segmentActions);
+    fields=()=>{
+      if(!segments.children.length)throw new Error("Mindestens ein Zeitabschnitt fehlt.");
+      return {segments:[...segments.children].map(row=>row.segmentValue())};
+    };
+  }
+  const controls=node("div",undefined,"inline editor-actions");
+  const structure=node("div",undefined,"adoption-structure-preview");
+  let previewVersion=0;
+  form.addEventListener("input",()=>{previewVersion++;structure.replaceChildren();});
+  function definitions(){
+    let layout=folderLayout();
+    if(isEvent && (layout.mode!=="default" || !parentFolders.checked || !job.layout_default?.structure_enabled)){
+      layout={...job.layout_default,...layout,mode:"custom",structure_enabled:parentFolders.checked};
+    }
+    const value={event_kind:kind,preserve_day_folders:keep.checked,folder_layout:layout,...fields()};
+    if(isEvent || index!==undefined)return [value];
+    const months=new Map();
+    for(const segment of value.segments){
+      const month=segment.day_key.slice(0,7);
+      if(!months.has(month))months.set(month,[]);
+      months.get(month).push(segment);
+    }
+    return [...months.values()].map(segments=>({...value,segments}));
+  }
+  function cancel(){
+    if(dirty.has(form) && !confirm(t("Ungespeicherte Änderungen an diesem Planobjekt verwerfen?")))return;
+    dialog.close();
+  }
+  dialog.oncancel=event=>{event.preventDefault();cancel();};
+  dialog.onclose=()=>{savedEditor(form);dialog.replaceChildren();};
+  controls.append(action("Vorschau der Zielstruktur",async()=>{
+    const current=previewVersion;
+    const preview=await draftStructure(definitions());
+    if(current===previewVersion)structure.replaceChildren(preview);
+  }),action("Abbrechen",cancel),action("Im Entwurf speichern",async()=>{
+    const events=[...draft.events];
+    const items=definitions();
+    if(index!==undefined)events[index]=items[0];
+    else events.push(...items);
+    await setDraft({...draft,events},form);
+    dialog.close();
+    report("Entwurf gespeichert.");
+  },true));
+  form.append(parentWrap,keepWrap,folders,controls,structure);
+  dialog.replaceChildren(form);
+  dialog.showModal();
+  firstInput?.focus();
+}
+function renderPlan(host) {
+  const plan=job.plan;
+  const panel=section(steps.find(([id])=>id===viewStep)?.[1]||"Durchführung und Prüfung");
+  const phase=plan.execution?.phase;
+  const command={plan_id:plan.id};
+  const run=path=>mutate(path,"POST",command);
+  const completed=plan.state==="completed";
+  const scripted=plan.execution?.method==="script";
+  if(!scripted || viewStep==="review")panel.append(line(label(phase || plan.state)));
+  const locale=window.BibliothekarI18n.getLocale();
+  const format=new Intl.NumberFormat(locale);
+  const unit=["B","KiB","MiB","GiB","TiB"];
+  const power=Math.min(unit.length-1,Math.floor(Math.log(Math.max(1,plan.move_bytes))/Math.log(1024)));
+  const facts=node("dl",undefined,"adoption-plan-facts");
+  for (const [title,value] of [
+    ["Zu übernehmende Dateien",format.format(plan.move_files)],
+    ["Dateifamilien im Verschiebeplan",format.format(plan.move_families)],
+    ["Datenvolumen",format.format(plan.move_bytes / 1024**power)+" "+unit[power]],
+    ["Zielbibliothek",plan.library_name],
+    ["Neue Ereignisse und Sammelordner",format.format(plan.events.filter(event=>!event.existing).length)],
+    ["Zu ergänzende Archivereignisse",format.format(plan.events.filter(event=>event.existing).length)],
+    ["Offene Prüffälle",format.format(job.review_count)],
+    ["Duplikate bleiben an der Quelle",format.format(plan.counts.duplicate || 0)],
+  ]) {
+    const fact=node("div");fact.append(node("dt",title),node("dd",value));facts.append(fact);
+  }
+  panel.append(facts);
+  if (plan.counts.duplicate) panel.append(line("Duplikate sind bereits registriert oder in diesem Plan mit identischem Inhalt enthalten."));
+  if (job.review_count) panel.append(line("Dateifamilien ohne Zuordnung und ausgenommene Prüffälle bleiben an der Quelle. Prüfe sie in der Liste der Prüffälle."),reviewControls());
+  const diagnostics=node("details",undefined,"adoption-proof");
+  diagnostics.append(node("summary","Technische Plandetails"),
+    line("ZFS-Dataset: "+(plan.dataset?.dataset || "—")),
+    node("code",plan.source_root+" → "+plan.archive_root),
+    line(Object.entries(plan.counts).map(([state,count])=>t(label(state))+": "+count).join(" · ")));
+  panel.append(diagnostics);
+  if (!completed && phase!=="rolled_back") panel.append(line(
+    "Vor größeren Dateiänderungen empfehlen wir, einen ZFS-Snapshot oder eine andere geeignete Sicherung anzulegen. Diese zusätzliche Sicherheitsmaßnahme ist freiwillig."
+  ));
+  const files=node("div",undefined,"inline");
+  const manifest=link("Verschiebeplan mit Rückwegen",jobPath("/download/manifest"));
+  if(phase && plan.execution?.method==="manual") files.append(manifest);
+  else diagnostics.append(line(""),manifest);
+  if (phase==="manual") {
+    panel.append(line("Stelle die Ordner im Archiv über SMB bereit und verschiebe nur die aufgeführten Dateien. Sichere frühere Ereignisdokumente vor dem Ersetzen."));
+    files.append(link("Leeres Ordnergerüst",jobPath("/download/folders")),
+      link("Ereignisdokumente",jobPath("/download/documents")));
+  }
+  if (["manual","rolling_back","repair"].includes(phase)) {
+    files.append(link("Frühere Ereignisdokumente",jobPath("/download/original-documents")));
+  }
+  panel.append(files);
+  const directoryPreview=node("details",undefined,"adoption-target-preview");
+  const tree=folderTree(), directoryControls=node("div",undefined,"inline");
+  directoryPreview.append(node("summary","Vorschau der Zielordner"),tree.frame,directoryControls);
+  let loadedDirectories=false;
+  directoryPreview.addEventListener("toggle",()=>{
+    if (directoryPreview.open && !loadedDirectories) {
+      loadedDirectories=true;
+      showDirectories(tree,directoryControls).catch(error=>{loadedDirectories=false;report(error.message);});
+    }
+  });
+  panel.append(directoryPreview);
+  if(!recoveryOnly && !phase && plan.documents_at && viewStep==="execution")renderConfirmation(panel,command);
+  if (plan.folder_moves.length && phase==="manual") {
+    const groups=node("details");
+    groups.append(node("summary","Tagesordner im Ganzen verschieben"));
+    groups.append(line("Diese Vorschläge sind Alternativen zu den Einzeloperationen. Lasse den jeweiligen Zielordner beim Bereitstellen des Gerüsts frei. Nutze die Sammelanweisung nur, wenn sich der Quellordner seit der Inventur nicht verändert hat."));
+    for (const move of plan.folder_moves) groups.append(line(
+      plan.source_root+"/"+move.source_path+" → "+plan.archive_root+"/"+move.target_path+" · "+move.file_count+" Dateien"
+    ));
+    panel.append(groups);
+  }
+  const controls=node("div",undefined,"inline");
+  if (!recoveryOnly && !phase && !completed) {
+    controls.append(
+      action(plan.documents_at?"Ereignisdokumente neu vorbereiten":"Ereignisdokumente vorbereiten",()=>mutate("/documents")),
+      action("Plan zur Bearbeitung öffnen",()=>mutate("/reopen")));
+  }
+  let scriptDetails=null;
+  if (scripted && !completed && phase!=="rolled_back") {
+    const execution=node("div",undefined,"adoption-card adoption-stage");
+    const title=phase==="rolling_back"?"Wiederherstellung auf TrueNAS":viewStep==="verify"?"Archiv prüfen und registrieren":"Skript auf TrueNAS ausführen";
+    execution.append(node("h3",title));
+    if(viewStep==="execute" && phase!=="rolling_back")execution.append(line("Kopiere den freigegebenen Befehl in die TrueNAS-Host-Shell. TrueNAS kann wegen sudo nach deinem Passwort fragen."));
+    if(viewStep==="verify" && ["registration_pending","registering"].includes(phase)){
+      const status=node("p",label(phase),"adoption-status");status.setAttribute("role","status");execution.append(status);
+    }
+    execution.append(slot("script-state"));
+    panel.append(execution);
+    scriptDetails=node("details",undefined,"adoption-stage adoption-card adoption-compact");
+    scriptDetails.append(node("summary","Erweiterte Details zu Skript und Prüfung"),scriptLinks(true));
+  }
+  if (!recoveryOnly && viewStep==="verify" && !scripted && ["manual","verifying","repair"].includes(phase)) {
+    controls.append(action("Archiv prüfen",()=>run("/verify"),true));
+  }
+  if (!recoveryOnly && phase==="repair" && !scripted) controls.append(action("Manuelle Schritte fortsetzen",()=>run("/resume")));
+  let recovery=null;
+  if (["manual","script_prepared","operations_done","verifying","repair","registration_pending"].includes(phase)) {
+    recovery=node("details",undefined,"adoption-card adoption-stage adoption-compact");
+    const options=node("div",undefined,"stack");
+    options.append(line("Verwende die kontrollierte Rücknahme, wenn du die Übernahme beenden und bereits ausgeführte Verschiebungen rückgängig machen möchtest."),action("Kontrollierte Wiederherstellung starten",async()=>{
+      if (confirm("Möchtest du die Übernahme anhand des gespeicherten Plans rückgängig machen?")) {
+        await run("/rollback/start");
+      }
+    }));
+    recovery.append(node("summary","Wiederherstellungsoptionen"),options);
+  }
+  if (phase==="rolling_back") {
+    if (!scripted) panel.append(line("Bringe verschobene Dateien über SMB an ihre ursprünglichen Pfade zurück. Stelle frühere Ereignisdokumente wieder her und entferne ausschließlich die für diesen Auftrag neu bereitgestellten Ereignisdokumente."));
+    else controls.append(action("Befehl für die Skriptrücknahme bereitstellen",()=>run("/rollback/start")));
+    controls.append(action("Wiederherstellung prüfen und Auftrag beenden",()=>run("/rollback/check"),true));
+  }
+  if (plan.issues) controls.append(action("Prüfprobleme anzeigen",async()=>{
+    const issues=await api(jobPath("/issues"));
+    $("issues").replaceChildren(...issues.map(item=>line([item.relative_path,t(item.issue)].filter(Boolean).join(" · "))));
+  }));
+  const moves=node("details");moves.append(node("summary","Verschiebeplan anzeigen"),slot("moves"));
+  if(controls.childElementCount)panel.append(controls);
+  if(scriptDetails)panel.append(scriptDetails);
+  if(recovery)panel.append(recovery);
+  panel.append(slot("issues"),moves);
+  host.append(panel);
+}
+
+function commandBox(command) {
+  const area=node("textarea",undefined,"adoption-command");
+  area.setAttribute("aria-label",t("TrueNAS-Shell-Befehl"));
+  area.readOnly=true;
+  area.value=command;
+  const host=node("div",undefined,"adoption-command-box");
+  host.append(area,action("Befehl kopieren",async()=>{
+    area.select();
+    if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(command);
+    else document.execCommand("copy");
+  }));
+  return host;
+}
+function scriptLinks(confirmed=false) {
+  const links=node("div",undefined,"stack");
+  links.append(link("Python-Skript ansehen",jobPath("/script/source/legacy_adoption_host.py")),
+    link("Code für die Dataset-Prüfung ansehen",jobPath("/script/source/legacy_adoption_dataset.py")),
+    link("Code für die automatische Hostprüfung ansehen",jobPath("/script/source/legacy_adoption_discover.py")),
+    confirmed ? link("Bestätigtes Skriptmanifest",jobPath("/script/manifest")) :
+      link("Verschiebeplan mit Rückwegen",jobPath("/download/manifest")));
+  return links;
+}
+function renderConfirmation(panel,command) {
+  const confirmation=node("div",undefined,"adoption-card");
+  const choice=node("div",undefined,"adoption-methods");
+  choice.setAttribute("role","radiogroup");
+  choice.setAttribute("aria-label",t("Durchführungsmethode"));
+  const methods=[
+    ["manual","Manuelle Durchführung über SMB","Verschiebe die Dateien selbst anhand des bestätigten Plans."],
+    ["script","Skriptgestützte Durchführung auf TrueNAS","Prüfe die Hostpfade und führe den freigegebenen Befehl in der TrueNAS-Shell aus."],
+  ];
+  for(const [value,title,description] of methods){
+    const option=node("label"), radio=node("input");
+    radio.type="radio";radio.name="adoption-execution";radio.value=value;radio.checked=value==="manual";
+    option.append(radio,node("strong",title),node("small",description));choice.append(option);
+  }
+  const method=()=>choice.querySelector("input:checked").value;
+  const scripts=node("div",undefined,"stack");
+  scripts.hidden=true;
+  const proofState=node("div",undefined,"adoption-proof");
+  proofState.setAttribute("role","status");
+  const [appWrap,appdata]=field("AppData auf dem TrueNAS-Host","text");
+  const [sourceWrap,source]=field("Quellordner auf dem TrueNAS-Host","text");
+  const [archiveWrap,archive]=field("Archivordner auf dem TrueNAS-Host","text");
+  const [wrap,ack]=field("Ich bestätige die Sicherheitsbedingungen und den angezeigten Plan.","checkbox");
+  wrap.classList.add("adoption-ack");
+  let probe=null, checking=false, confirming=false;
+  function updateConfirmation(){
+    const scripted=method()==="script";
+    const busy=checking || confirming;
+    wrap.hidden=scripted && !probe?.verified;
+    ack.disabled=busy || wrap.hidden;
+    confirmButton.disabled=ack.disabled || !ack.checked;
+    prepareButton.disabled=busy;
+    readButton.disabled=busy || (!probe?.command && !probe?.verified);
+    fallbackButton.disabled=busy;
+  }
+  async function checkProbe(method="GET", payload){
+    checking=true;
+    updateConfirmation();
+    try {
+      const result=await api(jobPath("/script/probe"),method,payload);
+      showProbe(result);
+      return result;
+    } catch (error) {
+      showProbe(null);
+      throw error;
+    } finally {
+      checking=false;
+      updateConfirmation();
+    }
+  }
+  function showProbe(result) {
+    if (method()==="script" && (!result?.verified || probe?.sha256!==result.sha256)) ack.checked=false;
+    probe=result;
+    proofState.dataset.verified=String(Boolean(result?.verified));
+    proofState.replaceChildren();
+    if (!result) return;
+    if (result.verified) {
+      const paths=node("details");
+      paths.append(node("summary","Bestätigte Hostpfade"),node("code",result.host.source+" → "+result.host.archive));
+      proofState.append(line("Hostpfade und gemeinsames ZFS-Dataset bestätigt."),line(result.dataset),
+        line("Bestätige jetzt die Sicherheitsbedingungen, um die Durchführung freizugeben."),paths);
+      return;
+    }
+    if (result.diagnostic) proofState.append(line(result.diagnostic),
+      line("Prüfe die Ausgabe in der TrueNAS-Shell. Bei einer nicht erkannten Einbindung kannst du die Hostpfadprüfung unter den erweiterten Details manuell vorbereiten."));
+    if (!result.command) return;
+    proofState.append(line("Führe den Prüfbefehl in der TrueNAS-Shell aus und lies den Nachweis anschließend ein. Die Prüfung verschiebt keine Dateien."),
+      commandBox(result.command));
+  }
+  async function readProbe() {
+    const result=await checkProbe();
+    if (!result.verified && !result.diagnostic) proofState.append(line(result.command ?
+      "Noch kein Nachweis. Führe den Befehl auf dem TrueNAS-Host aus und prüfe die Ausgabe der Shell." :
+      "Bereite zuerst die Hostprüfung vor."));
+  }
+  const fallbackButton=action("Manuelle Hostpfadprüfung vorbereiten",()=>checkProbe("POST",{
+    ...command,appdata:appdata.value,source:source.value,archive:archive.value
+  }),false,updateConfirmation);
+  const fallback=node("details",undefined,"adoption-card");
+  fallback.append(node("summary","Technischer Ausnahmeweg: Hostpfade manuell zuordnen"),
+    line("Verwende diesen Weg, wenn die automatische Prüfung keine passende Einbindung findet."),
+    appWrap,sourceWrap,archiveWrap,fallbackButton);
+  const advanced=node("details");
+  advanced.append(node("summary","Erweiterte Details zu Skript und Prüfung"),scriptLinks(),fallback);
+  const actions=node("div",undefined,"adoption-confirm-actions");
+  const prepareButton=action("Skript vorbereiten",()=>checkProbe("POST",command),false,updateConfirmation);
+  const readButton=action("Hostnachweis einlesen",readProbe,false,updateConfirmation);
+  function arrow(){
+    const separator=node("span","→");
+    separator.setAttribute("aria-hidden","true");
+    return separator;
+  }
+  const confirmButton=action("Durchführung verbindlich starten",()=>{
+    const selected=method();
+    if (!ack.checked) throw new Error("Bitte bestätige zuerst die Sicherheitsbedingungen.");
+    if (selected==="script" && !probe?.verified) throw new Error("Führe zuerst die Host- und Dataset-Prüfung durch.");
+    const payload={...command,method:selected,acknowledged:true};
+    if (selected==="script") payload.probe_sha256=probe.sha256;
+    confirming=true;
+    updateConfirmation();
+    return mutate("/confirm","POST",payload);
+  },true,()=>{
+    confirming=false;
+    updateConfirmation();
+  });
+  actions.append(prepareButton,arrow(),readButton,arrow());
+  scripts.append(line("Führe die Prüfung in der TrueNAS-Host-Shell aus. Der automatische Befehl verwendet sudo für den Zugriff auf das geschützte AppData-Paket. TrueNAS kann nach deinem Passwort fragen."),
+    actions,proofState);
+  const manualConfirm=node("div");
+  manualConfirm.hidden=true;
+  function selectMethod(){
+    scripts.hidden=advanced.hidden=method()!=="script";
+    manualConfirm.hidden=!scripts.hidden;
+    const placement=scripts.hidden ? manualConfirm : actions;
+    placement.append(confirmButton);
+    ack.checked=false;
+    updateConfirmation();
+    if (!scripts.hidden && !probe && !checking) checkProbe().catch(error=>report(error.message));
+  }
+  choice.addEventListener("change",selectMethod);
+  ack.addEventListener("change",updateConfirmation);
+  confirmation.append(node("h3","Verbindliche Sicherheitsbestätigung"),choice,
+    line("Nach dieser Bestätigung müssen die geplanten Verschiebungen abgeschlossen, überprüft oder kontrolliert rückgängig gemacht werden."),
+    line("Quelle und Ziel müssen auf demselben ZFS-Dataset liegen. Führe währenddessen keine weiteren Änderungen am Archiv durch."),
+    scripts,wrap,manualConfirm,advanced);
+  selectMethod();
+  panel.append(confirmation);
+}
+async function pollScript() {
+  const target=$("script-state");
+  const plan=job.plan;
+  if (!target) return;
+  const phase=plan.execution.phase;
+  const run=path=>mutate(path,"POST",{plan_id:plan.id});
+  try {
+    const result=await api(jobPath("/script"));
+    if (target!==$("script-state")) return;
+    const status=result.status;
+    const state=result.running ? "script_running" :
+      status?.state==="running" ? "script_interrupted" :
+      status?.state==="completed" ? "operations_done" : status?.state || phase;
+    const nodes=[];
+    if(status || result.running){
+      const progress=node("div",undefined,"adoption-status adoption-progress");
+      progress.append(node("strong",label(state)));
+      if(status){
+        const counts=node("span",status.processed+" / "+status.total+" "+t("Vorgänge"));
+        if(status.total>0){
+          const bar=node("progress");bar.max=status.total;bar.value=status.processed;
+          bar.setAttribute("aria-label",t("Dateioperationen"));progress.append(bar);
+        }
+        progress.append(counts,node("small","Vorgänge umfassen Mediendateien und Ereignisdokumente."));
+      }
+      nodes.push(progress);
+    }
+    if (status?.error) nodes.push(line(status.error));
+    const readyCommand=(["script_prepared","repair","rolling_back"].includes(phase) &&
+      !(status?.state==="completed" && phase!=="repair"))?result.command:null;
+    if (readyCommand && target.dataset.command!==readyCommand) {
+      target.dataset.command=readyCommand;
+      target.replaceChildren(commandBox(readyCommand),slot("script-progress"));
+    } else if (!readyCommand && target.dataset.command) {
+      delete target.dataset.command;
+      target.replaceChildren();
+    }
+    if (!recoveryOnly && !result.running && ["script_prepared","repair"].includes(phase) && !result.command) {
+      nodes.push(action("Skriptbefehl bereitstellen",()=>run("/script/release"),true));
+    }
+    if (!recoveryOnly && !result.running && status?.state==="completed" && status.mode==="apply" &&
+        ["script_prepared","operations_done","verifying","repair"].includes(phase)) {
+      nodes.push(action("Archiv unabhängig prüfen",()=>run("/verify"),true));
+    }
+    if (!$("script-progress")) target.append(slot("script-progress"));
+    $("script-progress").classList.add("adoption-stage");
+    $("script-progress").replaceChildren(...nodes);
+  } catch (error) {
+    report(error.message);
+  }
+  if (target===$("script-state")) scriptTimer=setTimeout(pollScript,3000);
+}
+async function showDirectories(tree,controls,after="") {
+  const rows=await api(jobPath("/directories?"+new URLSearchParams({after})));
+  tree.add(rows);
+  controls.replaceChildren();
+  if(rows.length===100)controls.append(action("Weitere Zielordner",()=>showDirectories(tree,controls,rows.at(-1))));
+}
+async function showMoves(reset=false) {
+  const target=$("moves");
+  if (reset) { target.replaceChildren();moveCursor=""; }
+  target.querySelector(".more")?.remove();
+  const rows=await api(jobPath("/moves?"+new URLSearchParams({after:moveCursor})));
+  for (const move of rows) {
+    const row=node("div",undefined,"row paths");
+    row.append(node("strong",label(move.status)),node("br"),node("code",move.source));
+    if (move.target) row.append(node("br"),node("code","→ "+move.target));
+    target.append(row);
+  }
+  if (rows.length===100) {
+    moveCursor=rows[rows.length-1].relative_path;
+    const more=action("Weitere Verschiebungen",()=>showMoves());more.className="more";
+    target.append(more);
+  }
+}
+$("browse").addEventListener("click",()=>browse("").catch(error=>report(error.message)));
+$("source-root").addEventListener("change",()=>browse("").catch(error=>report(error.message)));
+$("pick-source").addEventListener("click",()=>{
+  if(!browsedSource?.dataset)return;
+  selectedSource={root:browsedSource.root,relative:browsedSource.relative};
+  $("pick-source").setAttribute("aria-pressed","true");
+  $("pick-source").classList.remove("primary");
+  $("source-help").open=false;
+  $("source-help").hidden=true;
+  $("start").hidden=false;
+  $("start").focus();
+});
+const sourceHelp=$("source-help");
+function positionSourceHelp(){
+  if (!sourceHelp.open) return;
+  const bubble=sourceHelp.querySelector("p");
+  const left=sourceHelp.getBoundingClientRect().left;
+  const maxLeft=document.documentElement.clientWidth-16-bubble.offsetWidth;
+  sourceHelp.style.setProperty("--adoption-help-offset",Math.min(0,maxLeft-left)+"px");
+}
+sourceHelp.addEventListener("toggle",positionSourceHelp);
+window.addEventListener("resize",positionSourceHelp);
+window.addEventListener("bk-language-changed",()=>requestAnimationFrame(positionSourceHelp));
+document.addEventListener("click",event=>{
+  if(sourceHelp.open && !sourceHelp.contains(event.target))sourceHelp.open=false;
+});
+document.addEventListener("keydown",event=>{
+  if(event.key==="Escape" && sourceHelp.open){
+    sourceHelp.open=false;sourceHelp.querySelector("summary").focus();
+  }
+});
+$("start").addEventListener("click",async()=>{
+  if (!selectedSource) return;
+  const button=$("start");
+  button.disabled=true;
+  $("pick-source").disabled=true;
+  $("browse").disabled=true;
+  $("source-root").disabled=true;
+  $("source-notice").textContent="Quelle und Ziel werden geprüft …";
+  try {
+    const created=await api(base+"/jobs"+(later?"?mode=library":""),"POST",selectedSource);
+    openJob(created.id);
+    await startInventory();
+  } catch (error) {
+    report(error.message);
+  } finally {
+    $("source-notice").textContent="";
+    button.disabled=false;
+    $("pick-source").disabled=!browsedSource?.dataset;
+    $("browse").disabled=false;
+    $("source-root").disabled=false;
+  }
+});
+(async()=>{
+  try {
+    if(!jobId){navigation();await setupSourceBrowser();}
+    else{$("setup").hidden=true;await refresh();}
+  }
+  catch(error) { report(error.message); }
+})();
+</script>
+</body></html>"""

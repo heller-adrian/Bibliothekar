@@ -3730,9 +3730,11 @@ def get_event_edit_context(
 
         from app.event_access import event_source_jobs
         from app.event_layout import ensure_event_layout_snapshot
+        from app.event_leaf_layouts import effective_leaf_layouts
         folder_layout = ensure_event_layout_snapshot(
             connection, event_id, now=utc_now_iso()
         )
+        leaf_layouts = effective_leaf_layouts(connection, event_id)
         source_jobs = event_source_jobs(connection, event_id)
 
         live_root_kind = (
@@ -3893,7 +3895,10 @@ def get_event_edit_context(
         "legacy_disjoint": legacy_blocked,
         "legacy_warning": "Älteres Ereignis mit getrennten Zeitbereichen: manuelle Aufteilung erforderlich." if legacy_blocked else None,
         "child_event": dict(child) if child is not None else None,
-        "child_events": [dict(row) for row in children],
+        "child_events": [
+            {**dict(row), "folder_layout": leaf_layouts.get(str(row['id']))}
+            for row in children
+        ],
         "assigned_family_ids": sorted(assigned_ids),
         "time_segments": [dict(row) for row in segment_rows],
         "structural_editable": structural_editable,
