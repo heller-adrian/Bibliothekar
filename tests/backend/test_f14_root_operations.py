@@ -262,6 +262,37 @@ def test_f14_two_independent_real_worker_processes(fixture):
             log.close()
 
 
+def test_f14_completion_between_record_read_and_lock_probe(fixture, monkeypatch):
+    from app import operation_health
+
+    case, workspace, registry, _, evidence = fixture
+    source = workspace / "staged-main.JPG"
+    source.write_bytes(b"transfer-main")
+    process, control, log = spawn(case, workspace, registry, evidence, "reserve-live-main")
+    original_live = operation_health._live
+
+    def observe_after_completion(path):
+        assert path.exists()
+        (control / "continue").write_text("continue")
+        process.wait(timeout=10)
+        assert process.returncode == 0, (control / "process.log").read_text()
+        assert not path.exists()
+        return original_live(path)
+
+    try:
+        monkeypatch.setattr(operation_health, "_live", observe_after_completion)
+        observed = operation_health.inspect(workspace)
+        assert observed["writes_allowed"] and not observed["reservations"], observed
+        assert (storage_paths(workspace)["workspaces_root"] / "main/moved.JPG").read_bytes() == b"transfer-main"
+        assert not source.exists()
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+        log.close()
+
+
+
 def test_f14_duplicate_real_worker_is_rejected(fixture):
     case,ws,reg,dbs,ev=fixture;(ws/'staged-main.JPG').write_bytes(b'only-one-transfer')
     process,control,log=spawn(case,ws,reg,ev,'reserve-live-main');second=ev/'second-worker';second.mkdir()
