@@ -345,3 +345,36 @@ def test_mutation_waits_for_idle_admission_and_rechecks_generation(case):
     assert finished.is_set() and not errors
     with pytest.raises(ro.RootOperationError,match='generation|generation|Generation'):
         with ro.mutate(root,expected_generation=(0,0),wait_seconds=1):pass
+
+
+def test_new_working_directory_replaces_inherited_native_acl_and_reads_it_back(tmp_path, monkeypatch):
+    from app import private_storage_security as security
+
+    workspace = tmp_path / "staging"
+    workspace.mkdir(mode=0o750)
+    workspace.chmod(0o750)
+    inherited = xdr([(0, 3, 1, 0x1f01ff, 1), (0, 3, 1, 0x21, 3)])
+    stages = {security.NFS4[0]: inherited}
+    monkeypatch.setattr(security, "attributes", lambda *_args, **_kwargs: dict(stages))
+
+    def replace_acl(fd, name, value, flags):
+        assert name == security.NFS4[0] and flags == os.XATTR_REPLACE
+        assert list(security._native_entries(value, name)) == [(0, 0, 0, 1, 0x1f01ff, 1)]
+        stages[name] = value
+        os.fchmod(fd, 0o700)  # Emulate the native filesystem updating the access mode.
+
+    monkeypatch.setattr(os, "XATTR_REPLACE", 2, raising=False)
+    monkeypatch.setattr(os, "setxattr", replace_acl, raising=False)
+    fd = os.open(workspace, os.O_DIRECTORY | os.O_RDONLY)
+    try:
+        with pytest.raises(security.PrivateStorageError, match="owner-only"):
+            security.secure_working_directory(fd, "staging")
+        assert stages[security.NFS4[0]] == inherited
+        security.secure_working_directory(fd, "staging", created=True)
+        security.secure_working_directory(fd, "staging")
+        # A broad native allow can still be present in a mode-0700 directory.
+        stages[security.NFS4[0]] = inherited
+        with pytest.raises(security.PrivateStorageError, match="owner-only"):
+            security.secure_working_directory(fd, "staging")
+    finally:
+        os.close(fd)

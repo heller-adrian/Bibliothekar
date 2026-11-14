@@ -94,6 +94,10 @@ _PAGE = r"""<!doctype html>
 .adoption-review-progress:empty{display:none}
 .adoption-review-progress{display:grid;gap:8px;margin:12px 0}
 .adoption-review-progress progress{width:100%;accent-color:var(--bk-blue)}
+.adoption-review-progress[data-result]{border-inline-start:4px solid currentColor;background:var(--bk-surface-2);padding:12px 16px;border-radius:8px}
+.adoption-review-progress[data-result=success],.adoption-review-copied{color:var(--bk-green)}
+.adoption-review-progress[data-result=error]{color:var(--bk-danger)}
+.adoption-review-row[data-copied] strong{color:var(--bk-muted)}
 .adoption-review-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:start}
 .legacy-adoption .adoption-review-row>input[type=checkbox]{margin-top:12px}
 .adoption-review-row summary{overflow-wrap:anywhere}
@@ -261,6 +265,7 @@ if(later) {
 let job = null, draft = {}, draftRevision = 0, year = "", day = null;
 let familyCursor = "", moveCursor = "", timer = 0, scriptTimer = 0, reviewTimer = 0;
 let reviewSelection = new Set(), reviewOpened = new Set(), reviewBatch = {}, reviewSubmitting = false;
+let reviewSelectionVersion=0;
 let selectedSource = null, browsedSource = null, browseVersion = 0;
 let draftPage = 40;
 let inventoryStarting = false;
@@ -390,11 +395,11 @@ function report(message="") {
   (editorMessage || $("message")).textContent=message;
 }
 function detail(value) {
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return value.split("\n").map(t).join("\n");
   if (Array.isArray(value)) return value.map(item=>{
     if(item.type==="too_long" && item.loc?.at(-1)==="events")
       return "Pro Auftrag sind bis zu "+item.ctx.max_length+" Planobjekte möglich.";
-    return item.msg || "";
+    return [item.loc?.slice(1).join(" › "),item.msg].filter(Boolean).join(" · ");
   }).join("\n");
   if (value?.errors?.length) return value.errors.map(item=>window.BibliothekarI18n.t(item)).join("\n");
   return "Der Vorgang konnte nicht ausgeführt werden.";
@@ -844,8 +849,10 @@ const reviewStates={
   open:"Von der Archivübernahme ausgenommen",
   excluded:"Ausdrücklich ausgenommen",
   confirmed:"Aufnahmezeit im Entwurf bestätigt",
-  copying:"Arbeitskopie kann fortgesetzt werden",
-  copied:"Für die Metadatenkorrektur in General bereit"
+  copying:"Arbeitskopie begonnen",
+  queued:"Zum Kopieren vorgemerkt",
+  failed:"Kopieren fehlgeschlagen",
+  copied:"Kopiert"
 };
 function reviewBusy(){
   return reviewSubmitting || reviewBatch.running || reviewBatch.pending>0;
@@ -869,15 +876,24 @@ function renderReviewProgress(){
   const target=$("review-progress");
   if(!target)return;
   target.replaceChildren();
-  if(!reviewBatch.total)return;
+  delete target.dataset.result;
   const {total,copied,failed,pending,running}=reviewBatch;
-  const bar=node("progress");bar.max=total;bar.value=total-pending;
-  bar.setAttribute("aria-label","Kopierfortschritt");
-  const status=node("div",undefined,"inline adoption-review-status");
-  const title=running?"Arbeitskopien werden erstellt …":pending?"Kopierauftrag unterbrochen":
+  if(!total && !reviewSubmitting)return;
+  const active=running || reviewSubmitting;
+  const title=active?"Arbeitskopien werden erstellt …":pending?"Kopierauftrag unterbrochen":
     failed?"Kopierauftrag mit Fehlern beendet":"Für die Metadatenkorrektur kopiert";
+  const status=node("div",undefined,"inline adoption-review-status");
   status.append(node("strong",title),reviewHelp());
-  target.append(status,bar,line(copied+" kopiert · "+failed+" fehlgeschlagen · "+pending+" ausstehend"));
+  target.append(status);
+  if(active){
+    const bar=node("progress");bar.setAttribute("aria-label","Kopierfortschritt");
+    if(total && !reviewSubmitting){bar.max=total;bar.value=total-pending;}
+    target.append(bar);
+  }else{
+    target.dataset.result=failed || pending?"error":"success";
+  }
+  if(total && !reviewSubmitting)target.append(line(copied+" kopiert · "+failed+" fehlgeschlagen · "+pending+" ausstehend"));
+  if(failed && !active)target.append(line("Prüfe die Hinweise bei den betroffenen Dateifamilien. Fehlgeschlagene Fälle kannst du erneut auswählen."));
   if(pending && !running && !recoveryOnly)target.append(action("Kopierauftrag fortsetzen",async()=>{
     await api(jobPath("/review/batch/resume"),"POST");await refreshReviewView();
   },true));
@@ -919,18 +935,22 @@ function showReview(target) {
   const toolbar=node("div",undefined,"inline");
   const list=node("div");
   const selectionCount=slot("review-selection","span");
-  const selectAll=action("Alle geeigneten Prüffälle auswählen",async()=>{
-    reviewSelection=new Set(await api(jobPath("/review/selection")));
-    syncSelection();
+  const selectAll=action("Alle auswählen",async()=>{
+    const version=++reviewSelectionVersion;
+    const keys=await api(jobPath("/review/selection"));
+    if(version===reviewSelectionVersion && target.isConnected && !reviewBusy()){
+      reviewSelection=new Set(keys);
+      syncSelection();
+    }
   },false,()=>syncSelection());
   const clearSelection=action("Auswahl aufheben",()=>{
-    reviewSelection.clear();syncSelection();
+    reviewSelectionVersion++;reviewSelection.clear();syncSelection();
   },false,()=>syncSelection());
   const copy=action("Zur Metadatenkorrektur kopieren",async()=>{
     requireSaved();
     if(!confirm(t("Arbeitskopien im Workspace benötigen zusätzlichen Speicherplatz. Ausgewählte Dateifamilien jetzt kopieren?")))return;
-    reviewSubmitting=true;
-    syncSelection();
+    reviewSubmitting=true;reviewSelectionVersion++;
+    syncSelection();renderReviewProgress();
     try{
       await api(jobPath("/review/batch"),"POST",{family_keys:[...reviewSelection]});
       reviewSelection.clear();previewRevision=-1;
@@ -970,6 +990,7 @@ function showReview(target) {
       if(item.can_copy)checkbox.dataset.copyable="yes";
       else reviewSelection.delete(item.family_key);
       checkbox.addEventListener("change",()=>{
+        reviewSelectionVersion++;
         if(checkbox.checked)reviewSelection.add(item.family_key);
         else reviewSelection.delete(item.family_key);
         syncSelection();
@@ -981,7 +1002,9 @@ function showReview(target) {
       });
       const summary=node("summary");
       const name=node("strong",item.family_key);name.dataset.bkPreserveLanguage="";
-      summary.append(name," · ",node("span",reviewStates[item.state],"subtle"));
+      const copied=item.state==="copied";
+      if(copied)entry.dataset.copied="";
+      summary.append(name," · ",node("span",reviewStates[item.state],copied?"adoption-review-copied":"subtle"));
       const reasons=node("small");
       item.reasons.forEach((reason,index)=>{
         if(index)reasons.append(" · ");
@@ -1066,7 +1089,10 @@ async function setDraft(value, editor) {
   savedEditor(editor);
   selectedEvent=null;
   selectedArchive=null;
-  await chronology();
+  day=null;
+  // Rendering diagnostics may need more requests; the saved draft is already
+  // authoritative and the editor can close independently.
+  chronology().catch(error=>report(error.message));
 }
 async function addExisting(item, candidate=draft, replaceAt=null, editor=null) {
   const events=candidate.events.filter((event,index)=>event.existing_id!==item.id && index!==replaceAt);
@@ -1377,6 +1403,7 @@ function eventEditor(index, newKind="event") {
     const preview=await draftStructure(definitions());
     if(current===previewVersion)structure.replaceChildren(preview);
   }),action("Abbrechen",cancel),action("Im Entwurf speichern",async()=>{
+    report("Entwurf wird geprüft und gespeichert …");
     const events=[...draft.events];
     const items=definitions();
     if(index!==undefined)events[index]=items[0];

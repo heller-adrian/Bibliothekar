@@ -7943,7 +7943,14 @@ FOLDER_LAYOUT_JS = r"""
       saved?.layout ? "custom" : defaultMode;
     const custom=el("div"),tree=el("div"),exportSelect=el("select");
     custom.className="bk-event-layout-fields";
-    const exportLabel=el("label","Exportordner");exportLabel.append(exportSelect);
+    const exportHeading=el("div");exportHeading.className="bk-event-export-heading";
+    const exportLabel=el("span","Exportordner");
+    exportSelect.setAttribute("aria-label",translate("Exportordner"));
+    const exportHelp=el("details");exportHelp.className="bk-event-export-help";
+    const helpTrigger=el("summary","?");
+    helpTrigger.setAttribute("aria-label",translate("Hilfe zum Exportordner"));
+    exportHelp.append(helpTrigger,el("p","Lege bearbeitete oder exportierte Aufnahmen im Exportordner ab. Mit dem Namenszusatz _Export vor der Dateiendung kann Bibliothekar sie dem passenden Original zuordnen."));
+    exportHeading.append(exportLabel,exportHelp);
     const state=structuredClone(saved?.layout?saved:defaults||{structure_enabled:true,input_path:"",layout:{version:2,nodes:[]}});
     const radioName="event-folder-layout-"+bkNodeId();
     let initializing=true;
@@ -7958,7 +7965,8 @@ FOLDER_LAYOUT_JS = r"""
       update();
     });
     type.addEventListener("change",()=>{update();notify();});
-    custom.append(tree,add,exportLabel);
+    const exportField=el("div");exportField.append(exportHeading,exportSelect);
+    custom.append(tree,add,exportField);
     panel.append(el("summary","Unterordnerstruktur"),type,custom);
     update();initializing=false;
     function value(){
@@ -8014,6 +8022,11 @@ _EVENT_LAYOUT_CSS = """
 .bk-event-layout-fields{display:grid;gap:10px;margin-top:10px}
 .bk-event-layout-fields[hidden]{display:none}
 .bk-event-layout-fields > button{justify-self:start}
+.bk-event-export-heading{display:flex;align-items:center;gap:8px;margin-block-end:6px}
+.bk-event-export-help{position:relative}
+.bk-event-export-help summary{list-style:none;cursor:pointer;border:1px solid var(--bk-line);border-radius:50%;width:1.4em;height:1.4em;text-align:center;padding:0;line-height:1.3}
+.bk-event-export-help summary::-webkit-details-marker{display:none}
+.bk-event-export-help p{position:absolute;inset-inline-start:-6em;z-index:3;width:min(19rem,calc(100vw - 100px));margin:5px 0 0;padding:10px 12px;background:var(--bk-surface);border:1px solid var(--bk-line);border-radius:8px;box-shadow:var(--bk-shadow)}
 .bk-event-layout-fields .bk-folder-input-root{padding-block:5px;margin-block-end:6px}
 .bk-subevent-name-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center}
 .bk-subevent-name-row > label:last-child{display:flex;align-items:center;gap:6px;margin:0}

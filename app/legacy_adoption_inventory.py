@@ -144,9 +144,10 @@ def inventory_families(
                            OR (:day = '' AND review_required))
                     ORDER BY family_key LIMIT :limit
                )
-               SELECT inventory.* FROM legacy_adoption_inventory AS inventory
-               JOIN page USING (family_key)
-               WHERE job_id = :job ORDER BY family_key, relative_path""",
+               SELECT inventory.* FROM page
+               CROSS JOIN legacy_adoption_inventory AS inventory INDEXED BY legacy_adoption_inventory_family
+                  ON inventory.job_id = :job AND inventory.family_key = page.family_key
+               ORDER BY inventory.family_key, inventory.relative_path""",
             {"job": job_id, "after": after, "limit": max(1, min(limit, 200)), "day": day},
         )
         result = []

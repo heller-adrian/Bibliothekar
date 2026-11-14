@@ -1136,6 +1136,7 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     from app import legacy_adoption_review as review
     from app import legacy_adoption_host as host
     from app.database import get_job
+    from app.source_filter import LEGACY_REVIEW_PRIVATE_STAGING, LEGACY_REVIEW_STAGING
     from app.metadata_correction import execute_metadata_correction, metadata_area_paths, scan_metadata_area
     from tests.backend.test_legacy_adoption_host import _macos_rename
 
@@ -1150,7 +1151,9 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
         (source / f"photo-{i:03}.jpg").write_bytes(f"synthetic {i}".encode())
     (source / "photo-001.raf").write_bytes(b"raw data")
     (source / "photo-001.raf.xmp").write_bytes(b"sidecar data")
-    Image.new("RGB", (8, 8), "green").save(source / "photo-000.jpg")
+    exif = Image.Exif()
+    exif[271] = "Synthetic RC11 Camera"
+    Image.new("RGB", (8, 8), "green").save(source / "photo-000.jpg", exif=exif)
     originals = {p.name: p.read_bytes() for p in source.iterdir()}
     monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
     monkeypatch.setattr(main, "DATABASE_INITIALIZATION_ERROR", None)
@@ -1190,6 +1193,17 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     assert any(file["metadata"]["selected_capture_source"] for file in page[1]["files"])
 
     general = metadata_area_paths(area="general", workspace_root=workspace, library_id="main", create=False)["root"]
+    # RC10 leaves this empty directory behind when inheritance broadens mkdir(0700).
+    legacy_staging = general / LEGACY_REVIEW_STAGING
+    legacy_staging.mkdir(mode=0o750)
+    legacy_staging.chmod(0o750)
+    private_staging = general / LEGACY_REVIEW_PRIVATE_STAGING
+    private_staging.symlink_to(legacy_staging, target_is_directory=True)
+    _json(reopened, "POST", job + "/review/batch", status=202, json={"family_keys": available})
+    assert _json(reopened, "GET", job + "/review/batch")["failed"] == len(available)
+    assert private_staging.is_symlink() and not list(legacy_staging.iterdir())
+    assert not list(general.glob("legacy-*"))
+    private_staging.unlink()
     publish = review._publish_copy
     entered, release = Event(), Event()
 
@@ -1246,6 +1260,8 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     page = _json(browser, "GET", job + "/review")
     remaining = _json(browser, "GET", job + "/review", params={"after": page[-1]["family_key"]})
     assert len(remaining) == 1 and remaining[0]["state"] == "copied"
+    assert private_staging.stat().st_mode & 0o777 == 0o700
+    assert legacy_staging.stat().st_mode & 0o777 == 0o750
     assert not _json(browser, "GET", job + "/review/selection")
     assert len(list(general.glob("legacy-*"))) == 61
 
@@ -1264,6 +1280,9 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     }
     relative = page[0]["target_relative"] + "/photo-000.jpg"
     assert relative in relatives
+    assert (general / relative).read_bytes() == originals["photo-000.jpg"]
+    with Image.open(general / relative) as image:
+        assert image.getexif()[271] == "Synthetic RC11 Camera"
     stamp = "2026-07-19T17:51:50+02:00"
     correction = execute_metadata_correction(db, area="general", relative_path=relative,
         proposed_datetime=stamp, workspace_root=workspace, library_id="main")

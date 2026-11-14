@@ -1,11 +1,12 @@
 """Review cases and verified working copies in the existing General intake."""
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import errno
 import hashlib
 import json
 import os
 from pathlib import Path
 import stat
+from uuid import uuid4
 
 from app import legacy_adoption_host as host
 from app.legacy_adoption_dataset import DatasetError
@@ -18,7 +19,16 @@ from app.legacy_adoption_paths import (
 from app.legacy_adoption_plan import _roots
 from app.metadata_correction import MetadataCorrectionError, metadata_area_paths
 from app.root_operations import RootOperationError, validate_active_roots
-from app.source_filter import LEGACY_REVIEW_STAGING
+from app.private_storage_security import PrivateStorageError, secure_working_directory
+from app.source_filter import LEGACY_REVIEW_PRIVATE_STAGING, LEGACY_REVIEW_STAGING
+
+
+class ReviewStagingError(AdoptionError):
+    pass
+
+
+STAGING_ERROR = ("Bibliothekar kann keinen privaten Arbeitsordner erstellen. "
+                 "Prüfe die Berechtigungen und ACLs des Workspace und versuche es erneut.")
 
 
 def _status(family, members, files, draft, copied, unassigned):
@@ -104,7 +114,7 @@ def _copyable_cases(connection, job_id, job, plan):
         """SELECT family.family_key """ + _REVIEW_FROM + " WHERE " + _REVIEW_WHERE + """
             AND (copy.state IS NULL OR copy.state = 'copying')
             AND NOT EXISTS (
-                SELECT 1 FROM legacy_adoption_inventory member
+                SELECT 1 FROM legacy_adoption_inventory member INDEXED BY legacy_adoption_inventory_family
                  WHERE member.job_id = family.job_id AND member.family_key = family.family_key
                    AND (member.sha256 IS NULL OR member.identity IS NULL OR member.error IS NOT NULL)
             )
@@ -138,8 +148,10 @@ def review_cases(library, job_id, *, after=""):
                 SELECT family.family_key """ + _REVIEW_FROM + " WHERE " + _REVIEW_WHERE + """
                   AND family.family_key > :after ORDER BY family.family_key LIMIT 60
             )
-            SELECT inventory.* FROM cases JOIN legacy_adoption_inventory inventory USING (family_key)
-             WHERE inventory.job_id = :job ORDER BY family_key, relative_path""",
+            SELECT inventory.* FROM cases
+             CROSS JOIN legacy_adoption_inventory inventory INDEXED BY legacy_adoption_inventory_family
+                ON inventory.job_id = :job AND inventory.family_key = cases.family_key
+             ORDER BY inventory.family_key, inventory.relative_path""",
             {"job": job_id, "after": after, "plan": plan["id"] if plan else None},
         )
         result = []
@@ -155,10 +167,16 @@ def review_cases(library, job_id, *, after=""):
             case["can_copy"] = (case["can_copy"] and not assigned and _copy_allowed(job, plan)
                                 and (plan is not None or not _confirmed(draft, key)))
             failure = connection.execute(
-                "SELECT error FROM legacy_adoption_review_batch WHERE job_id = ? AND family_key = ?",
+                "SELECT state, error FROM legacy_adoption_review_batch WHERE job_id = ? AND family_key = ?",
                 (job_id, key),
             ).fetchone()
-            case["copy_error"] = failure["error"] if failure and case["state"] != "copied" else None
+            case["copy_error"] = None
+            if failure and case["state"] != "copied":
+                case["copy_error"] = failure["error"]
+                if failure["state"] == "failed":
+                    case["state"] = "failed"
+                elif failure["state"] == "pending" and case["state"] != "copying":
+                    case["state"] = "queued"
             result.append(case)
         return result
 
@@ -172,17 +190,52 @@ def _assigned(connection, job_id, plan_id, key):
     ).fetchone()
 
 
+@contextmanager
 def _new_directory(parent, name):
     try:
-        os.mkdir(name, 0o700, dir_fd=parent)
-    except FileExistsError:
-        pass
-    else:
-        os.fsync(parent)
-    info = os.stat(name, dir_fd=parent, follow_symlinks=False)
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
-        raise AdoptionError("Der interne Ordner für Prüffallkopien ist nicht privat: " + name)
-    return bound_child_directory(parent, name, directory_identity(info))
+        info = host.info_at(parent, name)
+        if info is None:
+            temporary = ".prepare-" + uuid4().hex
+            os.mkdir(temporary, 0o700, dir_fd=parent)
+            info = os.stat(temporary, dir_fd=parent, follow_symlinks=False)
+            identity = directory_identity(info)
+            try:
+                with bound_child_directory(parent, temporary, identity) as descriptor:
+                    secure_working_directory(descriptor, name, created=True)
+                host.rename_noreplace(parent, temporary, parent, name)
+                os.fsync(parent)
+            finally:
+                pending = host.info_at(parent, temporary)
+                if pending is not None and directory_identity(pending) == identity:
+                    os.rmdir(temporary, dir_fd=parent)
+        with bound_child_directory(parent, name, directory_identity(info)) as descriptor:
+            secure_working_directory(descriptor, name)
+            yield descriptor
+    except (PrivateStorageError, PermissionError) as error:
+        raise ReviewStagingError(STAGING_ERROR) from error
+
+
+def _staging(stack, root):
+    # Reuse a private RC10 directory so interrupted families can resume. Existing
+    # directories with wider permissions are not modified or used for new media.
+    if host.info_at(root, LEGACY_REVIEW_PRIVATE_STAGING) is None:
+        try:
+            return stack.enter_context(_new_directory(root, LEGACY_REVIEW_STAGING))
+        except ReviewStagingError as error:
+            if getattr(error.__cause__, "code", "") != "private_acl_untrusted_write":
+                raise
+    return stack.enter_context(_new_directory(root, LEGACY_REVIEW_PRIVATE_STAGING))
+
+
+def _general(library):
+    return metadata_area_paths(area="general", workspace_root=library.workspace_root,
+                               library_id=library.library_id, create=False)["root"]
+
+
+def check_review_staging(library):
+    with ExitStack() as stack:
+        root = stack.enter_context(bound_directory(_general(library)))
+        _staging(stack, root)
 
 
 def _member_proof(directory, name, member):
@@ -223,11 +276,9 @@ def _check_capacity(stage, remaining):
 
 
 def _publish_copy(library, job, members, destination):
-    general = metadata_area_paths(area="general", workspace_root=library.workspace_root,
-                                  library_id=library.library_id, create=False)["root"]
     with ExitStack() as stack:
         source, _ = _roots(stack, library, job)
-        root = stack.enter_context(bound_directory(general))
+        root = stack.enter_context(bound_directory(_general(library)))
         existing = host.info_at(root, destination)
         if existing is not None:
             with bound_child_directory(root, destination, directory_identity(existing)) as ready:
@@ -236,12 +287,13 @@ def _publish_copy(library, job, members, destination):
                 for name, member in members:
                     _member_proof(ready, name, member)
             os.fsync(root)
-            previous_stage = host.info_at(root, LEGACY_REVIEW_STAGING)
-            if previous_stage is not None:
-                with bound_child_directory(root, LEGACY_REVIEW_STAGING, directory_identity(previous_stage)) as stage:
-                    os.fsync(stage)
+            for name in (LEGACY_REVIEW_STAGING, LEGACY_REVIEW_PRIVATE_STAGING):
+                previous_stage = host.info_at(root, name)
+                if previous_stage is not None:
+                    with bound_child_directory(root, name, directory_identity(previous_stage)) as stage:
+                        os.fsync(stage)
             return
-        staging = stack.enter_context(_new_directory(root, LEGACY_REVIEW_STAGING))
+        staging = _staging(stack, root)
         with _new_directory(staging, destination) as stage:
             remaining = []
             for index, (name, member) in enumerate(members):
@@ -256,6 +308,8 @@ def _publish_copy(library, job, members, destination):
                 _copy_member(source, stage, name, temporary, member)
             if set(os.listdir(stage)) != {name for name, _ in members}:
                 raise AdoptionError("Die vorbereitete Arbeitskopie enthält unerwartete Dateien.")
+            secure_working_directory(stage, destination)
+        secure_working_directory(staging, "review staging")
         validate_active_roots()
         host.rename_noreplace(staging, destination, root, destination)
         os.fsync(staging)
@@ -362,6 +416,9 @@ def run_review_batch(library, job_id, *, copy_family):
         key = row["family_key"]
         try:
             copy_family(key)
+        except ReviewStagingError as error:
+            fail_pending_review_batch(library, job_id, str(error))
+            return
         except OSError as error:
             message = str(error)
             if error.errno == errno.ENOSPC:
@@ -376,3 +433,12 @@ def run_review_batch(library, job_id, *, copy_family):
                     WHERE job_id = ? AND family_key = ?""",
                 ("failed" if message else "copied", message[:2000] if message else None, job_id, key),
             )
+
+
+def fail_pending_review_batch(library, job_id, message):
+    with database_connection(library.database_path) as connection:
+        connection.execute(
+            """UPDATE legacy_adoption_review_batch SET state = 'failed', error = ?
+                WHERE job_id = ? AND state = 'pending'""",
+            (message[:2000], job_id),
+        )

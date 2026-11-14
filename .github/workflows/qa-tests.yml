@@ -130,6 +130,7 @@ jobs:
             "tests/backend/test_legacy_adoption_plan.py",
             "tests/backend/test_legacy_adoption_integration.py",
             "tests/backend/test_rc2_archive_finish_recovery.py",
+            "tests/backend/test_rc11_bootstrap.py::test_new_working_directory_replaces_inherited_native_acl_and_reads_it_back",
             "tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.hash_chunk]",
             "tests/backend/test_f12_no_clobber.py::test_real_sigkill_around_atomic_publication_and_three_startups[import.publish_before]"
           ]

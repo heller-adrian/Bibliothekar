@@ -311,7 +311,17 @@ async function finishManualAdoption(page){
     await childNode.waitFor();
     assert.equal(await childNode.evaluate(node=>node.parentElement.querySelector('ul')),null);
     await capture(page,'editor');
+    // Optional diagnostics must never keep an already committed draft open.
+    const familiesRoute='**/api/legacy-adoption/jobs/*/families?*';
+    const holdDiagnostics=async route=>{
+      await editor.waitFor({state:'hidden',timeout:3000});
+      await route.continue();
+    };
+    await page.route(familiesRoute,holdDiagnostics);
+    await page.locator('#family-diagnostics').evaluate(details=>{details.open=true;});
     await editor.getByRole('button',{name:'Save in draft'}).click();
+    await editor.waitFor({state:'hidden'});
+    await page.unroute(familiesRoute,holdDiagnostics);
     await page.getByText('Lan Test',{exact:true}).waitFor();
     await page.getByText('One media family is still unassigned.',{exact:true}).waitFor();
     assert.equal(await cards.count(),1);

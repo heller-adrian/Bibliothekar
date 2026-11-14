@@ -1569,6 +1569,11 @@ UI_PATTERNS[:0]=RC14_PATTERNS
 
 from app.ui_pre import TRANSLATIONS as PRE_TRANSLATIONS, PATTERNS as PRE_PATTERNS
 UI_TRANSLATIONS.update(PRE_TRANSLATIONS)
+UI_TRANSLATIONS.update({
+    "Hilfe zum Exportordner": "Export folder help",
+    "Lege bearbeitete oder exportierte Aufnahmen im Exportordner ab. Mit dem Namenszusatz _Export vor der Dateiendung kann Bibliothekar sie dem passenden Original zuordnen.":
+        "Save edited or exported photos in the export folder. Add _Export before the file extension so Bibliothekar can match them to the corresponding original.",
+})
 UI_PATTERNS[:0]=PRE_PATTERNS
 
 _I18N_UI_TEMPLATE = r"""

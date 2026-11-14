@@ -4,6 +4,15 @@ import re
 
 
 TRANSLATIONS = {
+    "Bibliothekar kann keinen privaten Arbeitsordner erstellen. Prüfe die Berechtigungen und ACLs des Workspace und versuche es erneut.":
+        "Bibliothekar could not create a private working folder. Check the workspace permissions and ACLs, then try again.",
+    "Prüfe die Hinweise bei den betroffenen Dateifamilien. Fehlgeschlagene Fälle kannst du erneut auswählen.":
+        "Check the message on each affected file family. You can select failed cases again.",
+    "Arbeitskopie begonnen": "Working copy started",
+    "Zum Kopieren vorgemerkt": "Queued for copying",
+    "Kopieren fehlgeschlagen": "Copy failed",
+    "Kopiert": "Copied",
+    "Entwurf wird geprüft und gespeichert …": "Checking and saving draft …",
     "Schließe den Kopierauftrag zuerst ab.": "Finish the copy job first.",
     "Setze zuerst den unterbrochenen Kopierauftrag fort.": "Resume the interrupted copy job first.",
     "Keine geeigneten Prüffälle ausgewählt.": "Select at least one eligible review case.",

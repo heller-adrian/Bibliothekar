@@ -37,7 +37,8 @@ from app.legacy_adoption_mode import (
 from app.legacy_adoption_plan import MAX_PLAN_ITEMS, create_plan, plan_directories, plan_moves, plan_status
 from app.legacy_adoption_registration import finalize_adoption
 from app.legacy_adoption_review import (
-    begin_review_batch, copy_review, review_batch_status, review_cases, review_count, review_selection, run_review_batch,
+    begin_review_batch, check_review_staging, copy_review, fail_pending_review_batch,
+    review_batch_status, review_cases, review_count, review_selection, run_review_batch, STAGING_ERROR,
 )
 from app.legacy_adoption_verify import plan_issues, reopen_plan
 from app.library_registry import LibraryRegistryError, list_libraries
@@ -212,6 +213,13 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
 
         try:
             with adoption_execution_access(registry):
+                with admission(library):
+                    try:
+                        check_review_staging(library)
+                    except (AdoptionError, OSError, RootOperationError) as error:
+                        logging.getLogger(__name__).warning("Legacy review staging %s: %r", job_id, error.__cause__ or error)
+                        fail_pending_review_batch(library, job_id, STAGING_ERROR)
+                        return
                 run_review_batch(library, job_id, copy_family=copy_family)
         except Exception:
             logging.getLogger(__name__).exception("Legacy review batch interrupted for job %s", job_id)
