@@ -38,6 +38,22 @@ EOF
 chmod 755 /opt/rc13-lab/bin/zfs
 install -d -o rc13lab -g rc13lab /var/lib/rc13-lab/tmp
 chown rc13lab:rc13lab /mnt/rc13-workspace /mnt/rc13-media
+# TCG emulation can take more than 15 seconds to finish the deferred startup.
+# Allow the test to observe real recovery completion without changing app code.
+cat > /opt/rc13-lab/bin/rc14_lab_timeouts.py <<'EOF'
+from threading import Thread
+
+
+def pytest_configure(config):
+    join = Thread.join
+
+    def wait_for_emulated_startup(thread, timeout=None):
+        if thread.name == "bibliothekar-adoption-startup" and timeout == 15:
+            timeout = 90
+        return join(thread, timeout)
+
+    Thread.join = wait_for_emulated_startup
+EOF
 cd /opt/bibliothekar
-runuser -u rc13lab -- env PATH=/opt/rc13-lab/bin:/opt/rc13-venv/bin:$PATH PYTHONPATH=/opt/bibliothekar PYTHONDONTWRITEBYTECODE=1     TMPDIR=/var/lib/rc13-lab/tmp ADOPTION_NFSV4_ROOT=/mnt/rc13-workspace ADOPTION_ZFS_ROOT=/mnt/rc13-media     KAMERA_WORKSPACE=/var/lib/rc13-lab/workspace KAMERA_ARCHIVE_ROOT=/var/lib/rc13-lab/archive     KAMERA_DATABASE_DIR=/var/lib/rc13-lab/db     /opt/rc13-venv/bin/python -m pytest -q -rA -p no:cacheprovider --tb=short     'tests/backend/test_legacy_adoption_integration.py::test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy[review-unlinked]'     'tests/backend/test_legacy_adoption_integration.py::test_review_metadata_stages_distinct_times_and_adopts_into_existing_draft[metadata-zfs]'     'tests/backend/test_legacy_adoption_integration.py::test_cancel_review_batch_rolls_back_only_its_files_and_resumes[cancel-unlinked]'
+runuser -u rc13lab -- env PATH=/opt/rc13-lab/bin:/opt/rc13-venv/bin:$PATH PYTHONPATH=/opt/bibliothekar:/opt/rc13-lab/bin PYTHONDONTWRITEBYTECODE=1     TMPDIR=/var/lib/rc13-lab/tmp ADOPTION_NFSV4_ROOT=/mnt/rc13-workspace ADOPTION_ZFS_ROOT=/mnt/rc13-media     KAMERA_WORKSPACE=/var/lib/rc13-lab/workspace KAMERA_ARCHIVE_ROOT=/var/lib/rc13-lab/archive     KAMERA_DATABASE_DIR=/var/lib/rc13-lab/db     /opt/rc13-venv/bin/python -m pytest -q -rA -p rc14_lab_timeouts -p no:cacheprovider --tb=short     'tests/backend/test_legacy_adoption_integration.py::test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy[review-unlinked]'     'tests/backend/test_legacy_adoption_integration.py::test_review_metadata_stages_distinct_times_and_adopts_into_existing_draft[metadata-zfs]'     'tests/backend/test_legacy_adoption_integration.py::test_cancel_review_batch_rolls_back_only_its_files_and_resumes[cancel-unlinked]'
 zpool destroy rc13qa
