@@ -193,7 +193,42 @@ def test_upgrades_1_0_0_catalogue_and_registry_without_touching_existing_rows(tm
         library_registry.register_source_backup(
             registry, backup_id="historic", source_kind="import", source_identity="old", backup_path="/synthetic",
         )
-    assert initialize_database(db)["newly_applied_versions"] == [56, 57, 58, 59, 60, 61, 62, 63, 64, 65]
+    assert initialize_database(db)["newly_applied_versions"] == [56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]
     assert library_registry.initialize_library_registry(registry)["newly_applied_versions"] == [4, 5, 6, 7, 8]
     assert library_registry.read_library_identity(db) == "historic"
     assert library_registry.get_source_backup(registry, "historic")["source_identity"] == "old"
+
+
+def test_rc12_review_batch_upgrade_preserves_finished_and_pending_copies(tmp_path, monkeypatch):
+    from app import database
+
+    db = tmp_path / "rc12.db"
+    previous = [migration for migration in database.available_migrations() if migration[0] <= 65]
+    with monkeypatch.context() as rc12:
+        rc12.setattr(database, "available_migrations", lambda: previous)
+        initialize_database(db)
+        ensure_library_identity(db, "historic")
+        with database.database_connection(db) as connection:
+            connection.execute(
+                """INSERT INTO legacy_adoption_jobs (
+                       id, library_id, source_root, source_device, source_inode,
+                       archive_root, archive_device, archive_inode, state
+                   ) VALUES ('job', 'historic', '/test/source', 1, 2, '/test/archive', 1, 3, 'inventoried')"""
+            )
+            connection.executemany(
+                """INSERT INTO legacy_adoption_inventory
+                       (job_id, relative_path, family_key, size_bytes, seen_generation)
+                   VALUES ('job', ?, ?, ?, 0)""",
+                [("ready.jpg", "ready", 200), ("pending.raf", "pending", 400)],
+            )
+            connection.executemany(
+                "INSERT INTO legacy_adoption_review_batch (job_id, family_key, state) VALUES ('job', ?, ?)",
+                [("ready", "copied"), ("pending", "pending")],
+            )
+    assert initialize_database(db)["newly_applied_versions"] == [66]
+    with database.database_connection(db) as connection:
+        rows = connection.execute(
+            """SELECT family_key, state, bytes_total, bytes_verified FROM legacy_adoption_review_batch
+               ORDER BY family_key""",
+        )
+        assert [tuple(row) for row in rows] == [("pending", "pending", 400, 0), ("ready", "copied", 200, 200)]
