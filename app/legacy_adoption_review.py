@@ -6,11 +6,12 @@ import json
 import logging
 import os
 from pathlib import Path
-import shutil
 import stat
 from uuid import uuid4
 
 from app import legacy_adoption_host as host
+from app import legacy_adoption_flat_copy as flat
+from app import legacy_adoption_review_progress as progress
 from app.legacy_adoption_dataset import DatasetError
 from app.database import database_connection
 from app.legacy_adoption_inventory import _inventory_groups, _job
@@ -208,6 +209,9 @@ def review_cases(library, job_id, *, after=""):
                 (job_id, key),
             ).fetchone()
             case["copy_error"] = None
+            case["target_files"] = flat.target_files(connection, job_id, key) if copied else []
+            if case["target_files"]:
+                case["target_relative"] = None
             if failure and case["state"] != "copied":
                 case["copy_error"] = failure["error"]
                 if failure["state"] == "failed":
@@ -270,11 +274,11 @@ def _staging(stack, root):
     # directories with wider permissions are not modified or used for new media.
     if host.info_at(root, LEGACY_REVIEW_PRIVATE_STAGING) is None:
         try:
-            return stack.enter_context(_new_directory(root, LEGACY_REVIEW_STAGING))
+            return stack.enter_context(_new_directory(root, LEGACY_REVIEW_STAGING)), LEGACY_REVIEW_STAGING
         except ReviewStagingError as error:
             if getattr(error.__cause__, "code", "") != "private_acl_untrusted_write":
                 raise
-    return stack.enter_context(_new_directory(root, LEGACY_REVIEW_PRIVATE_STAGING))
+    return stack.enter_context(_new_directory(root, LEGACY_REVIEW_PRIVATE_STAGING)), LEGACY_REVIEW_PRIVATE_STAGING
 
 
 def _general(library):
@@ -339,14 +343,6 @@ def check_review_staging(library):
                 _staging(stack, root)
 
 
-def _member_proof(directory, name, member, *, require_owner=False):
-    with bound_file(directory, name) as (descriptor, info):
-        if ((require_owner and info.st_uid != os.geteuid())
-                or info.st_nlink != 1 or info.st_size != member["size_bytes"]
-                or bound_sha256(descriptor) != member["sha256"]):
-            raise AdoptionError("Die vorhandene Arbeitskopie weicht von der Inventur ab: " + name)
-
-
 def _discard_partial(stage, temporary):
     pending = host.info_at(stage, temporary)
     if pending is not None:
@@ -359,8 +355,9 @@ def _write_member(source, output, member):
     validate_active_roots()
     with relative_parent(source, member["relative_path"]) as (original, original_name):
         with bound_file(original, original_name, tuple(json.loads(member["identity"]))) as (reader, _):
-            with os.fdopen(reader, "rb", closefd=False) as input_stream:
-                shutil.copyfileobj(input_stream, output, 1024 * 1024)
+            while block := os.read(reader, 1024 * 1024):
+                output.write(block)
+                progress.wrote(len(block))
             output.flush()
             os.fsync(output.fileno())
 
@@ -369,9 +366,10 @@ def _copy_member(source, stage, name, temporary, member):
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666, dir_fd=stage)
     with os.fdopen(fd, "wb") as output:
         _write_member(source, output, member)
-    _member_proof(stage, temporary, member)
+    flat.member_proof(stage, temporary, member)
     host.rename_noreplace(stage, temporary, stage, name)
     os.fsync(stage)
+    progress.checkpoint(member["size_bytes"])
 
 
 def _copy_unnamed_member(source, stage, name, member):
@@ -392,6 +390,7 @@ def _copy_unnamed_member(source, stage, name, member):
             raise ReviewStagingError("linkat verified inode", error) from error
         os.fsync(fd)
         os.fsync(stage)
+        progress.checkpoint(member["size_bytes"])
 
 
 def _verify_family(directory, members, *, require_owner=False, allow_missing=False):
@@ -401,27 +400,34 @@ def _verify_family(directory, members, *, require_owner=False, allow_missing=Fal
         raise AdoptionError("Die vorbereitete Arbeitskopie enthält unerwartete Dateien.")
     for name, member in members:
         if name in names:
-            _member_proof(directory, name, member, require_owner=require_owner)
+            flat.member_proof(directory, name, member, require_owner=require_owner)
     return [(name, member) for name, member in members if name not in names]
 
 
-def _publish_native_copy(stack, source, root, members, destination):
-    staging = stack.enter_context(_verified_directory(root, LEGACY_REVIEW_VERIFIED_STAGING))
-    with _verified_directory(staging, destination) as stage:
-        identity = directory_identity(os.fstat(stage))
-        remaining = _verify_family(stage, members, require_owner=True, allow_missing=True)
-        _check_capacity(stage, (member for _, member in remaining))
-        for name, member in remaining:
-            _copy_unnamed_member(source, stage, name, member)
-        _verify_family(stage, members, require_owner=True)
-    validate_active_roots()
-    with _staging_operation("rename verified family"):
-        host.rename_noreplace(staging, destination, root, destination)
-    with bound_child_directory(root, destination, identity) as ready:
-        _verify_family(ready, members, require_owner=True)
-        os.fsync(ready)
-    os.fsync(staging)
-    os.fsync(root)
+def _prepare_native_copy(source, stage, members):
+    remaining = _verify_family(stage, members, require_owner=True, allow_missing=True)
+    progress.checkpoint(sum(member["size_bytes"] for _, member in members)
+                        - sum(member["size_bytes"] for _, member in remaining), recovered=True)
+    _check_capacity(stage, (member for _, member in remaining))
+    for name, member in remaining:
+        _copy_unnamed_member(source, stage, name, member)
+
+
+def _prepare_private_copy(source, stage, members):
+    remaining = []
+    for index, (name, member) in enumerate(members):
+        temporary = ".copy-" + str(index)
+        if host.info_at(stage, name) is None:
+            _discard_partial(stage, temporary)
+            remaining.append((name, temporary, member))
+        else:
+            flat.member_proof(stage, name, member)
+    _check_capacity(stage, (member for _, _, member in remaining))
+    progress.checkpoint(sum(member["size_bytes"] for _, member in members)
+                        - sum(member["size_bytes"] for _, _, member in remaining), recovered=True)
+    for name, temporary, member in remaining:
+        _copy_member(source, stage, name, temporary, member)
+    secure_working_directory(stage, "review staging")
 
 
 def _check_capacity(stage, remaining):
@@ -432,9 +438,16 @@ def _check_capacity(stage, remaining):
 
 
 def _publish_copy(library, job, members, destination):
+    database = library.database_path
+    key = members[0][1]["family_key"]
     with ExitStack() as stack:
         source, _ = _roots(stack, library, job)
         root = stack.enter_context(bound_directory(_general(library)))
+        with database_connection(database) as connection:
+            receipt = flat.receipt(connection, job["id"], key)
+        if receipt:
+            _resume_publication(database, root, job, key, destination, receipt)
+            return
         existing = host.info_at(root, destination)
         if existing is not None:
             with bound_child_directory(root, destination, directory_identity(existing)) as ready:
@@ -446,30 +459,69 @@ def _publish_copy(library, job, members, destination):
                     with bound_child_directory(root, name, directory_identity(previous_stage)) as stage:
                         os.fsync(stage)
             return
-        if _use_unnamed_staging(root):
-            _publish_native_copy(stack, source, root, members, destination)
+        if flat.reuse_completed(database, root, job, key, destination, members):
             return
-        staging = _staging(stack, root)
-        with _new_directory(staging, destination) as stage:
-            remaining = []
-            for index, (name, member) in enumerate(members):
-                temporary = ".copy-" + str(index)
-                if host.info_at(stage, name) is None:
-                    _discard_partial(stage, temporary)
-                    remaining.append((name, temporary, member))
-                else:
-                    _member_proof(stage, name, member)
-            _check_capacity(stage, (member for _, _, member in remaining))
-            for name, temporary, member in remaining:
-                _copy_member(source, stage, name, temporary, member)
+        if _use_unnamed_staging(root):
+            stage_name = LEGACY_REVIEW_VERIFIED_STAGING
+            staging = stack.enter_context(_verified_directory(root, stage_name))
+            open_stage, prepare = _verified_directory, _prepare_native_copy
+        else:
+            staging, stage_name = _staging(stack, root)
+            open_stage, prepare = _new_directory, _prepare_private_copy
+        with open_stage(staging, destination) as stage:
+            identity = directory_identity(os.fstat(stage))
+            prepare(source, stage, members)
             if set(os.listdir(stage)) != {name for name, _ in members}:
                 raise AdoptionError("Die vorbereitete Arbeitskopie enthält unerwartete Dateien.")
-            secure_working_directory(stage, destination)
-        secure_working_directory(staging, "review staging")
-        validate_active_roots()
-        host.rename_noreplace(staging, destination, root, destination)
-        os.fsync(staging)
-        os.fsync(root)
+            manifest = flat.reserve(database, root, stage, job, key, destination, stage_name, members)
+            flat.publish(database, stage, root, job["id"], key, manifest)
+        _complete_publication(database, staging, job["id"], key, destination, identity)
+
+
+def _complete_publication(database, staging, job_id, key, destination, identity):
+    if directory_identity(os.stat(destination, dir_fd=staging, follow_symlinks=False)) != identity:
+        raise AdoptionError("Der interne Arbeitsordner wurde ausgetauscht.")
+    os.rmdir(destination, dir_fd=staging)
+    os.fsync(staging)
+    flat.finish(database, job_id, key)
+
+
+def _resume_publication(database, root, job, key, destination, receipt):
+    if (receipt["fingerprint"] != destination
+            or tuple(json.loads(receipt["workspace_identity"])) != directory_identity(os.fstat(root))):
+        raise AdoptionError("Inventur oder Workspace der unterbrochenen Arbeitskopie haben sich geändert.")
+    manifest = json.loads(receipt["members_json"])
+    if receipt["state"] == "copied":
+        flat.verify_published(root, manifest)
+        return
+    stage_name = receipt["stage_name"]
+    if stage_name not in {LEGACY_REVIEW_STAGING, LEGACY_REVIEW_PRIVATE_STAGING, LEGACY_REVIEW_VERIFIED_STAGING}:
+        raise AdoptionError("Der interne Arbeitsordner ist ungültig.")
+    info = host.info_at(root, stage_name)
+    if info is not None:
+        with bound_child_directory(root, stage_name, directory_identity(info)) as staging:
+            info = host.info_at(staging, destination)
+            if info is not None:
+                identity = directory_identity(info)
+                with bound_child_directory(staging, destination, identity) as stage:
+                    if stage_name != LEGACY_REVIEW_VERIFIED_STAGING:
+                        secure_working_directory(staging, stage_name)
+                        secure_working_directory(stage, destination)
+                    flat.publish(database, stage, root, job["id"], key, manifest)
+                _complete_publication(database, staging, job["id"], key, destination, identity)
+                return
+            os.fsync(staging)
+    flat.verify_published(root, manifest)
+    os.fsync(root)
+    flat.finish(database, job["id"], key)
+
+
+def _copy_response(connection, row):
+    result = dict(row)
+    result["target_files"] = flat.target_files(connection, row["job_id"], row["family_key"])
+    if result["target_files"]:
+        result["target_relative"] = None
+    return result
 
 
 def copy_review(library, job_id, key):
@@ -490,14 +542,14 @@ def copy_review(library, job_id, key):
             "SELECT * FROM legacy_adoption_review_copies WHERE job_id = ? AND family_key = ?", (job_id, key),
         ).fetchone()
         if previous and previous["state"] == "copied":
-            return dict(previous)
+            return _copy_response(connection, previous)
         draft = json.loads(job["draft_json"])
         if key in draft.get("metadata_review_pending", {}):
             raise AdoptionError("Entferne zuerst die vorgemerkte Metadatenquelle.")
         if not plan and not previous and _confirmed(draft, key):
             raise AdoptionError("Diese Familie ist kein ausstehender Prüffall.")
         members = [(Path(item["relative_path"]).name, dict(item)) for item in connection.execute(
-            """SELECT relative_path, size_bytes, identity, sha256, error FROM legacy_adoption_inventory
+            """SELECT relative_path, family_key, size_bytes, identity, sha256, error FROM legacy_adoption_inventory
                 WHERE job_id = ? AND family_key = ? ORDER BY relative_path""",
             (job_id, key),
         )]
@@ -527,7 +579,7 @@ def copy_review(library, job_id, key):
                 WHERE job_id = ? AND family_key = ?""",
             (destination, len(members), sum(item["size_bytes"] for _, item in members), job_id, key),
         )
-        return dict(connection.execute(
+        return _copy_response(connection, connection.execute(
             "SELECT * FROM legacy_adoption_review_copies WHERE job_id = ? AND family_key = ?", (job_id, key),
         ).fetchone())
 
@@ -556,8 +608,10 @@ def begin_review_batch(library, job_id, keys):
             raise AdoptionError("Keine geeigneten Prüffälle ausgewählt.")
         connection.execute("DELETE FROM legacy_adoption_review_batch WHERE job_id = ?", (job_id,))
         connection.executemany(
-            "INSERT INTO legacy_adoption_review_batch (job_id, family_key) VALUES (?, ?)",
-            ((job_id, key) for key in eligible),
+            """INSERT INTO legacy_adoption_review_batch (job_id, family_key, bytes_total)
+               SELECT ?, ?, coalesce(sum(size_bytes), 0) FROM legacy_adoption_inventory
+               WHERE job_id = ? AND family_key = ?""",
+            ((job_id, key, job_id, key) for key in eligible),
         )
 
 
@@ -573,7 +627,8 @@ def run_review_batch(library, job_id, *, copy_family):
             return
         key = row["family_key"]
         try:
-            copy_family(key)
+            with progress.track(library.database_path, job_id, key):
+                copy_family(key)
         except ReviewStagingError as error:
             logger.warning("Legacy review staging %s: %s (%s)", job_id, error.operation, error.code)
             fail_pending_review_batch(library, job_id, str(error))
@@ -588,9 +643,10 @@ def run_review_batch(library, job_id, *, copy_family):
             message = None
         with database_connection(library.database_path) as connection:
             connection.execute(
-                """UPDATE legacy_adoption_review_batch SET state = ?, error = ?
+                """UPDATE legacy_adoption_review_batch SET state = ?, error = ?,
+                       bytes_verified = CASE WHEN ? THEN bytes_verified ELSE bytes_total END
                     WHERE job_id = ? AND family_key = ?""",
-                ("failed" if message else "copied", message[:2000] if message else None, job_id, key),
+                ("failed" if message else "copied", message[:2000] if message else None, bool(message), job_id, key),
             )
 
 

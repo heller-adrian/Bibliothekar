@@ -104,6 +104,9 @@ _PAGE = r"""<!doctype html>
 @media(max-width:700px){.adoption-review-row:has(.adoption-metadata-source){grid-template-columns:auto minmax(0,1fr)}.adoption-review-row .adoption-metadata-source{grid-column:2}}
 .legacy-adoption .adoption-review-row>input[type=checkbox]{margin-top:12px}
 .adoption-review-row summary{overflow-wrap:anywhere}
+.adoption-review-family-progress{grid-column:2/-1;display:flex;align-items:center;flex-wrap:wrap;gap:8px;color:var(--bk-muted);font-size:.875rem}
+.adoption-review-family-progress:empty{display:none}
+.adoption-review-family-progress progress{width:min(14rem,100%);accent-color:var(--bk-blue)}
 .adoption-review-error{color:var(--bk-danger);font-size:.875rem}
 .legacy-adoption .adoption-review-status{align-items:center}
 .legacy-adoption .adoption-review-help summary{display:grid;place-items:center;border:1px solid var(--bk-line);border-radius:50%;width:1.65rem;height:1.65rem;padding:0;list-style:none}
@@ -540,7 +543,7 @@ async function refresh() {
   clearTimeout(scriptTimer);
   if (!jobId) return;
   const requested=jobId;
-  const [state, batch]=await Promise.all([api(jobPath()),api(jobPath("/review/batch"))]);
+  const [state, batch]=await Promise.all([api(jobPath()),api(jobPath("/review/batch?details=true"))]);
   if (requested!==jobId) return;
   requireSaved();
   job=state;reviewBatch=batch;
@@ -876,12 +879,48 @@ function reviewHelp(){
   });
   return help;
 }
+function reviewBytes(value){
+  const units=["B","kB","MB","GB","TB"];
+  const scale=Math.min(units.length-1,Math.floor(Math.log(Math.max(1,value))/Math.log(1000)));
+  const number=new Intl.NumberFormat(window.BibliothekarI18n.getLocale(),{maximumFractionDigits:1});
+  return number.format(value / 1000**scale)+" "+units[scale];
+}
+function reviewByteProgress(item, label){
+  const row=node("span",undefined,"inline");
+  const amount=reviewBytes(item.bytes_written)+" / "+reviewBytes(item.bytes_total);
+  const bar=node("progress");
+  bar.max=Math.max(1,item.bytes_total);bar.value=item.bytes_written;
+  bar.setAttribute("aria-label",t(label));
+  bar.setAttribute("aria-valuetext",amount);
+  row.append(bar,node("span",amount));
+  return row;
+}
+function renderReviewRows(){
+  const {active,recent}=reviewBatch;
+  for(const row of document.querySelectorAll(".adoption-review-row")){
+    const key=row.dataset.familyKey;
+    const meter=row.querySelector(".adoption-review-family-progress");
+    const state=row.querySelector(".adoption-review-case-state");
+    meter.replaceChildren();
+    if(recent?.[key]==="copied"){
+      row.dataset.copied="";state.textContent="Kopiert";state.className="adoption-review-case-state adoption-review-copied";
+    }else if(active?.family_key===key){
+      state.textContent="Arbeitskopie begonnen";
+      meter.append(reviewByteProgress(active,"Kopierfortschritt der Dateifamilie"));
+      if(active.bytes_written===active.bytes_total && active.bytes_verified<active.bytes_total){
+        meter.append(node("span","SHA-256 wird geprüft"));
+      }
+    }else if(recent?.[key]==="failed"){
+      state.textContent="Kopieren fehlgeschlagen";
+    }
+  }
+}
 function renderReviewProgress(){
   const target=$("review-progress");
   if(!target)return;
   target.replaceChildren();
   delete target.dataset.result;
-  const {total,copied,failed,pending,running}=reviewBatch;
+  const {total,copied,failed,pending,running,bytes_total,bytes_written,estimated_seconds}=reviewBatch;
   if(!total && !reviewSubmitting)return;
   const active=running || reviewSubmitting;
   const title=active?"Arbeitskopien werden erstellt …":pending?"Kopierauftrag unterbrochen":
@@ -889,13 +928,18 @@ function renderReviewProgress(){
   const status=node("div",undefined,"inline adoption-review-status");
   status.append(node("strong",title),reviewHelp());
   target.append(status);
-  if(active){
-    const bar=node("progress");bar.setAttribute("aria-label","Kopierfortschritt");
-    if(total && !reviewSubmitting){bar.max=total;bar.value=total-pending;}
-    target.append(bar);
-  }else{
+  if(active && bytes_total!==undefined){
+    target.append(reviewByteProgress({bytes_total,bytes_written},"Kopierfortschritt"));
+    if(estimated_seconds!=null){
+      const minutes=Math.max(1,Math.ceil(estimated_seconds/60));
+      target.append(line(t("Geschätzte verbleibende Kopierzeit")+" · "+
+        new Intl.NumberFormat(window.BibliothekarI18n.getLocale(),{style:"unit",unit:"minute"}).format(minutes)));
+    }
+  }else if(!active){
     target.dataset.result=failed || pending?"error":"success";
+    if(bytes_total!==undefined)target.append(line(reviewBytes(bytes_written)+" / "+reviewBytes(bytes_total)));
   }
+  renderReviewRows();
   if(total && !reviewSubmitting)target.append(line(copied+" kopiert · "+failed+" fehlgeschlagen · "+pending+" ausstehend"));
   if(failed && !active)target.append(line("Prüfe die Hinweise bei den betroffenen Dateifamilien. Fehlgeschlagene Fälle kannst du erneut auswählen."));
   if(pending && !running && !recoveryOnly)target.append(action("Kopierauftrag fortsetzen",async()=>{
@@ -908,7 +952,7 @@ function scheduleReviewPoll(){
   const requested=jobId;
   reviewTimer=setTimeout(async()=>{
     try{
-      const status=await api(jobPath("/review/batch"));
+      const status=await api(jobPath("/review/batch?details=true"));
       if(requested!==jobId)return;
       reviewBatch=status;
       if(!status.running && !dirty.size){
@@ -1022,10 +1066,10 @@ function showReview(target) {
     dialog.setAttribute("aria-labelledby",heading.id);
     const source=node("select");
     const choices=Object.entries(result.sources);
-    for(const [value,count] of choices)source.append(metadataOption(value,metadataSourceLabel(value)+" · "+count+"/"+result.selected));
+    for(const [value] of choices)source.append(metadataOption(value,metadataSourceLabel(value)));
     const label=node("label","Metadatenquelle");label.append(source);
     const affected=node("p");
-    const refreshCount=()=>{affected.textContent=t("Vormerken")+" "+(result.sources[source.value] || 0)+"/"+result.selected;};
+    const refreshCount=()=>{affected.textContent=t("Verfügbar für")+" "+(result.sources[source.value] || 0)+"/"+result.selected;};
     source.addEventListener("change",refreshCount);refreshCount();
     const buttons=node("div",undefined,"inline editor-actions");
     const confirm=action("Vormerken",async()=>{
@@ -1094,6 +1138,7 @@ function showReview(target) {
     more.remove();
     for(const item of rows){
       const entry=node("div",undefined,"row adoption-review-row");
+      entry.dataset.familyKey=item.family_key;
       const checkbox=node("input");checkbox.type="checkbox";checkbox.value=item.family_key;
       checkbox.setAttribute("aria-label","Dateifamilie auswählen: "+item.family_key);
       if(item.can_copy || item.metadata_choices?.length)checkbox.dataset.selectable="yes";
@@ -1113,7 +1158,8 @@ function showReview(target) {
       const name=node("strong",item.family_key);name.dataset.bkPreserveLanguage="";
       const copied=item.state==="copied";
       if(copied)entry.dataset.copied="";
-      summary.append(name," · ",node("span",reviewStates[item.state],copied?"adoption-review-copied":"subtle"));
+      summary.append(name," · ",node("span",reviewStates[item.state],
+        "adoption-review-case-state "+(copied?"adoption-review-copied":"subtle")));
       const reasons=node("small");
       item.reasons.forEach((reason,index)=>{
         if(index)reasons.append(" · ");
@@ -1132,6 +1178,13 @@ function showReview(target) {
         appendCaptureEvidence(row,file.metadata);
       }
       if(item.target_relative && item.state==="copied")row.append(line("Arbeitsordner in General · "+item.target_relative));
+      if(item.target_files?.length){
+        const files=node("ul");
+        for(const name of item.target_files){
+          const entry=node("li",name);entry.dataset.bkPreserveLanguage="";files.append(entry);
+        }
+        row.append(line("Arbeitskopien in General"),files);
+      }
       summary.append(node("br"),reasons);
       entry.append(checkbox,row);
       if(editable && item.metadata_choices?.length){
@@ -1139,15 +1192,18 @@ function showReview(target) {
         source.setAttribute("aria-label",t("Metadatenquelle")+" · "+item.family_key);
         source.append(metadataOption("",t("Metadatenquelle wählen")));
         for(const choice of item.metadata_choices){
-          source.append(metadataOption(choice.source,metadataSourceLabel(choice.source)+" · "+choice.time));
+          const caution=choice.source.endsWith(":FileModifyDate")?" · "+t("Aufnahmezeit unsicher"):"";
+          source.append(metadataOption(choice.source,metadataSourceLabel(choice.source)+" · "+choice.time+caution));
         }
         source.addEventListener("change",()=>stage([item.family_key],source.value || null,true).catch(error=>report(error.message)));
         metadataControls.set(item.family_key,source);entry.append(source);
       }
+      entry.append(node("div",undefined,"adoption-review-family-progress"));
       list.append(entry);
     }
     if(rows.length===60){cursor=rows.at(-1).family_key;list.append(more);}
     syncSelection();
+    renderReviewRows();
   }
   syncSelection();
   load().catch(error=>report(error.message));

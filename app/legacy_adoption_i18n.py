@@ -4,8 +4,14 @@ import re
 
 
 TRANSLATIONS = {
+    "Arbeitskopien in General": "Working copies in General",
+    "Kopierfortschritt der Dateifamilie": "File family copy progress",
+    "SHA-256 wird geprüft": "Verifying SHA-256",
+    "Geschätzte verbleibende Kopierzeit": "Estimated remaining copy time",
     "EXIF-Daten übernehmen": "Accept EXIF Data",
     "Vormerken": "Accept",
+    "Verfügbar für": "Available for",
+    "Aufnahmezeit unsicher": "Capture time uncertain",
     "Änderungen anwenden": "Apply changes",
     "Metadatenquelle": "Metadata source",
     "Metadatenquelle wählen": "Choose metadata source",

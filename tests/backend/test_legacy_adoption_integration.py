@@ -1097,19 +1097,28 @@ def test_review_family_is_copied_to_general_once_and_survives_discard(
     assert {item["relative_path"] for item in case["files"]} == set(originals) - {"good.jpg"}
     command = {"family_key": case["family_key"]}
     rename = host.rename_noreplace
+    general = metadata_area_paths(area="general", workspace_root=workspace, library_id="main", create=False)["root"]
+    (general / "bad.NEF").write_bytes(b"existing unrelated family")
 
     def interrupt_after_publication(src, src_name, dst, dst_name):
         rename(src, src_name, dst, dst_name)
-        if src_name.startswith("legacy-"):
+        if dst_name == "bad_1.jpg":
             raise OSError(errno.EIO, "synthetic interruption after workspace publication")
 
     with monkeypatch.context() as interrupted:
         interrupted.setattr(host, "rename_noreplace", interrupt_after_publication)
         _json(client, "POST", job + "/review/copy", status=409, json=command)
     assert _json(client, "GET", job + "/review")[0]["state"] == "copying"
+    assert (general / "bad_1.jpg").read_bytes() == originals["bad.jpg"]
+    _json(client, "DELETE", job, status=409)
+    (general / "bad_1.RAF").write_bytes(b"late foreign collision")
     copied = _json(client, "POST", job + "/review/copy", json=command)
     assert copied["file_count"] == 3
     assert copied["state"] == "copied"
+    assert set(copied["target_files"]) == {"bad_2.jpg", "bad_2.raf", "bad_2.raf.xmp"}
+    assert (general / "bad.NEF").read_bytes() == b"existing unrelated family"
+    assert (general / "bad_1.RAF").read_bytes() == b"late foreign collision"
+    assert not (general / "bad_1.jpg").exists()
     assert _json(client, "POST", job + "/review/copy", json=command) == copied
     assert _json(client, "GET", job + "/review")[0]["state"] == "copied"
     assert all((source / name).read_bytes() == data for name, data in originals.items())
@@ -1119,17 +1128,33 @@ def test_review_family_is_copied_to_general_once_and_survives_discard(
     _json(client, "POST", job + "/plan", json={"revision": draft["revision"]})
     assert [move["relative_path"] for move in _json(client, "GET", job + "/moves")] == ["good.jpg"]
     _json(client, "DELETE", job)
-    general = metadata_area_paths(area="general", workspace_root=workspace, library_id="main", create=False)["root"]
     assert not list((general / LEGACY_REVIEW_STAGING).iterdir())
-    family = general / copied["target_relative"]
-    assert {path.name: path.read_bytes() for path in family.iterdir()} == {
-        key: data for key, data in originals.items() if key != "good.jpg"
+    assert not list(general.glob("legacy-*"))
+    assert {name: (general / name).read_bytes() for name in copied["target_files"]} == {
+        "bad_2" + key[3:]: data for key, data in originals.items() if key != "good.jpg"
     }
     library = resolve_library_context(registry, "main")
     monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: [])
     scan = scan_metadata_area(area="general", workspace_root=workspace, library_id="main",
                               database_path=library.database_path)
-    assert {item["filename"] for item in scan["files"]} == set(originals) - {"good.jpg"}
+    assert {item["filename"] for item in scan["files"]} == set(copied["target_files"]) | {"bad.NEF", "bad_1.RAF"}
+
+    from hashlib import sha256
+
+    older = b"RC12 working copy"
+    (source / "older.jpg").write_bytes(older)
+    nested = general / ("legacy-" + sha256(host.json_bytes([("older.jpg", sha256(older).hexdigest())])).hexdigest())
+    nested.mkdir()
+    (nested / "older.jpg").write_bytes(older)
+    new_id = _json(client, "POST", api + "/jobs", status=201, json={"root": "nas"})["id"]
+    again = api + "/jobs/" + new_id
+    _json(client, "POST", again + "/scan", status=202)
+    assert _json(client, "POST", again + "/review/copy", json=command)["target_files"] == copied["target_files"]
+    legacy = _json(client, "POST", again + "/review/copy", json={"family_key": "older"})
+    assert legacy["state"] == "copied" and legacy["target_relative"] == nested.name
+    assert not (general / "older.jpg").exists()
+    assert (nested / "older.jpg").read_bytes() == older
+    assert not list(general.glob("bad_3*"))
 
 @pytest.mark.parametrize("fresh_main", [True, "review-unlinked"], indirect=True, ids=["review-zfs", "review-unlinked"])
 def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy(
@@ -1141,6 +1166,7 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     from PIL import Image
     from app import legacy_adoption_review as review
     from app import legacy_adoption_host as host
+    from app import legacy_adoption_review_progress as progress
     from app.database import get_job
     from app.source_filter import LEGACY_REVIEW_PRIVATE_STAGING, LEGACY_REVIEW_STAGING, LEGACY_REVIEW_VERIFIED_STAGING
     from app.metadata_correction import execute_metadata_correction, metadata_area_paths, scan_metadata_area
@@ -1157,7 +1183,7 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
         monkeypatch.setattr(host, "rename_noreplace", _macos_rename)
     for i in range(61):
         (source / f"photo-{i:03}.jpg").write_bytes(f"synthetic {i}".encode())
-    (source / "photo-001.raf").write_bytes(b"raw data")
+    (source / "photo-001.raf").write_bytes(b"raw data" + b"x" * (3 * 1024 * 1024))
     (source / "photo-001.raf.xmp").write_bytes(b"sidecar data")
     exif = Image.Exif()
     exif[271] = "Synthetic RC11 Camera"
@@ -1171,7 +1197,8 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
         reading.set()
         assert read_release.wait(10)
         dates = {b"raw data": "2026:07:20 10:00:00", b"synthetic 1": "2026:07:21 10:00:00"}
-        return {fd: ({"EXIF:ExifIFD:DateTimeOriginal": dates[data]} if data in dates else {})
+        return {fd: ({"EXIF:ExifIFD:DateTimeOriginal": dates[match]} if
+                     (match := (b"raw data" if data.startswith(b"raw data") else data)) in dates else {})
                 for fd in descriptors if (data := os.pread(fd, 13, 0))}
 
     monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
@@ -1258,6 +1285,15 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     unsafe.unlink()
     publish = review._publish_copy
     entered, release = Event(), Event()
+    writing, release_write = Event(), Event()
+
+    def measure_write(count):
+        wrote(count)
+        if count == 1024 * 1024 and not writing.is_set():
+            writing.set()
+            assert release_write.wait(20)
+
+    wrote = progress.wrote
 
     def interrupt(library, adoption, members, destination):
         if members[0][0] == "photo-001.jpg":
@@ -1290,11 +1326,19 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     responses = []
     with monkeypatch.context() as stopped:
         stopped.setattr(review, "_publish_copy", interrupt)
+        stopped.setattr(progress, "wrote", measure_write)
         copy = Thread(target=lambda: responses.append(reopened.post(job + "/review/batch", json={"family_keys": None})))
         copy.start()
         try:
-            assert entered.wait(20)
+            assert writing.wait(20)
             browser = TestClient(main.app, follow_redirects=False)
+            live = _json(browser, "GET", job + "/review/batch?details=true")
+            assert live["bytes_total"] == sum(map(len, originals.values()))
+            assert live["bytes_written"] > live["bytes_verified"]
+            assert live["active"]["family_key"] == "photo-001"
+            assert live["active"]["bytes_verified"] < live["active"]["bytes_written"] < live["active"]["bytes_total"]
+            release_write.set()
+            assert entered.wait(20)
             assert _json(browser, "GET", job + "/review/batch") == {
                 "total": 61, "copied": 1, "failed": 0, "pending": 60, "running": True,
             }
@@ -1302,6 +1346,7 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
             _json(browser, "POST", job + "/scan", status=409)
             _json(browser, "POST", job + "/review/batch", status=409, json={"family_keys": None})
         finally:
+            release_write.set()
             release.set()
             copy.join(20)
     assert [r.status_code for r in responses] == [202]
@@ -1311,6 +1356,8 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     assert _json(browser, "GET", job + "/review/batch") == {
         "total": 61, "copied": 1, "failed": 0, "pending": 60, "running": False,
     }
+    restarted = _json(browser, "GET", job + "/review/batch?details=true")
+    assert restarted["active"] is None and restarted["bytes_written"] == restarted["bytes_verified"] > 0
 
     def no_space(library, adoption, members, destination):
         if members[0][0] == "photo-002.jpg":
@@ -1341,7 +1388,8 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
         assert unsafe.stat().st_mode & 0o777 == 0o700
         assert legacy_staging.stat().st_mode & 0o777 == 0o750
     assert not _json(browser, "GET", job + "/review/selection")
-    assert len(list(general.glob("legacy-*"))) == 61
+    assert not list(general.glob("legacy-*"))
+    assert len([item for item in general.iterdir() if item.is_file()]) == 63
 
     _json(browser, "DELETE", job)
     _json(browser, "POST", "/api/setup/adoption", json={"decision": "skipped"})
@@ -1352,11 +1400,11 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     relatives = {f["relative_path"] for f in scan_metadata_area(
         area="general", workspace_root=workspace, library_id="main", database_path=db,
     )["files"]}
-    family = general / page[1]["target_relative"]
-    assert {p.name: p.read_bytes() for p in family.iterdir()} == {
+    assert {p: (general / p).read_bytes() for p in page[1]["target_files"]} == {
         filename: originals[filename] for filename in ("photo-001.jpg", "photo-001.raf", "photo-001.raf.xmp")
     }
-    relative = page[0]["target_relative"] + "/photo-000.jpg"
+    [relative] = page[0]["target_files"]
+    assert relative == "photo-000.jpg"
     assert relative in relatives
     assert (general / relative).read_bytes() == originals["photo-000.jpg"]
     with Image.open(general / relative) as image:

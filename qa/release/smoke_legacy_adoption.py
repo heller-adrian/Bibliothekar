@@ -175,6 +175,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
         api("/api/setup/adoption", method="POST", payload={"decision": "skipped"})
         working = api("/api/metadata-correction/scan?area=general")["files"]
         assert {file["filename"] for file in working} == set(originals)
+        assert {file["relative_path"] for file in working} == set(originals)
         assert {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in source.iterdir()} == originals
         assert not list(archive.iterdir())
         print("Review batch preserved a complete RAW/JPEG/XMP family and read-only originals on native ZFS.")

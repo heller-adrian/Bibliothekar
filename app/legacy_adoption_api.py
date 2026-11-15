@@ -20,6 +20,7 @@ from app.legacy_adoption_catalogue import prepare_documents
 from app.legacy_adoption_dataset import DatasetError, browsable_folders
 from app.legacy_adoption_execution import change_phase, complete_rollback, confirm_plan, verify_execution
 from app.legacy_adoption_export import directory_scaffold, event_documents, manifest_file
+from app.legacy_adoption_flat_copy import require_no_partial_publication
 from app.legacy_adoption_host import ExecutionError
 from app.legacy_adoption_history import completed_adoptions, history_html
 from app.legacy_adoption_inventory import (
@@ -41,6 +42,7 @@ from app.legacy_adoption_review import (
     review_batch_status, review_cases, review_count, review_selection, run_review_batch, ReviewStagingError, STAGING_ERROR,
 )
 from app.legacy_adoption_review_metadata import apply_metadata, metadata_sources, stage_metadata
+from app.legacy_adoption_review_progress import batch_details
 from app.legacy_adoption_verify import plan_issues, reopen_plan
 from app.library_registry import LibraryRegistryError, list_libraries
 from app.root_operations import RootOperationError, admission
@@ -203,10 +205,13 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             with running_lock:
                 running.pop(key(library, job_id), None)
 
-    def copy_status(library, job_id):
+    def copy_status(library, job_id, *, details=False):
         with database_connection(library.database_path) as connection:
+            connection.execute("BEGIN")
             _job(connection, library.library_id, job_id)
             result = review_batch_status(connection, job_id)
+            if details:
+                result.update(batch_details(connection, library.database_path, job_id))
         with running_lock:
             result["running"] = key(library, job_id) in review_running
         return result
@@ -398,6 +403,8 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             if status["state"] not in {"ready", "scanning", "inventoried"} or plan_status(library, job_id):
                 raise AdoptionError("Der Auftrag ist nicht zur Inventur verfügbar.")
             require_review_idle(library, job_id)
+            with database_connection(library.database_path) as connection:
+                require_no_partial_publication(connection, job_id)
             with running_lock:
                 if key(library, job_id) not in running:
                     pause = Event()
@@ -478,9 +485,9 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             return apply_metadata(library, job_id, revision=payload.revision, allow_existing=is_later(request))
 
     @router.get("/jobs/{job_id}/review/batch")
-    def review_progress(job_id: str):
+    def review_progress(job_id: str, details: bool = False):
         with _errors():
-            return copy_status(context(), job_id)
+            return copy_status(context(), job_id, details=details)
 
     @router.post("/jobs/{job_id}/review/batch", status_code=202)
     def copy_cases(job_id: str, payload: ReviewBatch, tasks: BackgroundTasks):
@@ -573,6 +580,8 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         with _errors(), admission(library):
             require_adoption(request, library)
             require_review_idle(library, job_id)
+            with database_connection(library.database_path) as connection:
+                require_no_partial_publication(connection, job_id)
             return create_plan(library, registry_path(), job_id, draft_revision=draft.revision,
                                allow_existing=is_later(request))
 
@@ -764,6 +773,8 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         with _errors(), adoption_execution_access(registry_path()), admission(library):
             if copy_status(library, job_id)["running"]:
                 raise AdoptionError("Schließe den Kopierauftrag zuerst ab.")
+            with database_connection(library.database_path) as connection:
+                require_no_partial_publication(connection, job_id)
             discard_job(library, job_id)
         return {"discarded": True}
 
