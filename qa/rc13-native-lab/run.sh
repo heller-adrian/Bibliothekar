@@ -54,7 +54,7 @@ initrd="$scratch/initrd"
 mkdir -p "$initrd"/{bin,dev,proc,sys,newroot} "$initrd/lib/modules/$kernel"
 sudo install -m 755 "$fs/usr/bin/busybox" "$initrd/bin/busybox"
 sudo install -m 755 "$lab/boot.sh" "$initrd/init"
-for module in virtio_pci virtio_blk ext4; do
+for module in virtio_pci virtio_blk crc32c_generic ext4; do
     sudo chroot "$fs" modprobe --set-version "$kernel" --show-depends "$module" |
         while read -r command path _; do
             if [[ "$command" == insmod ]]; then

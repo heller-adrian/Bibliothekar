@@ -7,6 +7,7 @@ mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev
 modprobe virtio_pci
 modprobe virtio_blk
+modprobe crc32c_generic
 modprobe ext4
 for second in 1 2 3 4 5 6 7 8 9 10; do
     test ! -b /dev/vda || break
