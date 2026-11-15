@@ -35,9 +35,15 @@ def fresh_main(tmp_path, monkeypatch, request):
     native = os.environ.get("ADOPTION_ZFS_ROOT")
     case = tmp_path.resolve() / "first-install"
     workspace, private = case / "workspace", case / "database"
+    variant = getattr(request, "param", False)
+    if variant == "review-unlinked":
+        if sys.platform != "linux":
+            pytest.skip("O_TMPFILE and descriptor linking require Linux")
+        if acl_root := os.environ.get("ADOPTION_NFSV4_ROOT"):
+            workspace = Path(acl_root).resolve(strict=True) / tmp_path.name / "workspace"
     # Only the media pair belongs on synthetic ZFS. The legacy private
     # catalogue and operation records require a supported native ACL backend.
-    native_media = native and getattr(request, "param", False)
+    native_media = native and variant
     media_root = Path(native) / tmp_path.name if native_media else case
     archive = media_root / "archive"
     for path in (workspace, private, archive):
@@ -1125,9 +1131,9 @@ def test_review_family_is_copied_to_general_once_and_survives_discard(
                               database_path=library.database_path)
     assert {item["filename"] for item in scan["files"]} == set(originals) - {"good.jpg"}
 
-@pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["review-zfs"])
+@pytest.mark.parametrize("fresh_main", [True, "review-unlinked"], indirect=True, ids=["review-zfs", "review-unlinked"])
 def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy(
-    fresh_main, monkeypatch, synthetic_dataset,
+    fresh_main, monkeypatch, synthetic_dataset, request,
 ):
     import errno
     from threading import Event, Thread
@@ -1136,10 +1142,12 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     from app import legacy_adoption_review as review
     from app import legacy_adoption_host as host
     from app.database import get_job
-    from app.source_filter import LEGACY_REVIEW_PRIVATE_STAGING, LEGACY_REVIEW_STAGING
+    from app.source_filter import LEGACY_REVIEW_PRIVATE_STAGING, LEGACY_REVIEW_STAGING, LEGACY_REVIEW_VERIFIED_STAGING
     from app.metadata_correction import execute_metadata_correction, metadata_area_paths, scan_metadata_area
     from tests.backend.test_legacy_adoption_host import _macos_rename
 
+    unlinked = request.node.callspec.id == "review-unlinked"
+    native_acl = unlinked and os.environ.get("ADOPTION_NFSV4_ROOT")
     workspace, db, registry, archive = fresh_main
     source = archive.parent / "legacy-review-source"
     source.mkdir()
@@ -1193,23 +1201,87 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     assert any(file["metadata"]["selected_capture_source"] for file in page[1]["files"])
 
     general = metadata_area_paths(area="general", workspace_root=workspace, library_id="main", create=False)["root"]
+    if unlinked:
+        from app.private_storage_security import NFS4
+        verified_root = general / LEGACY_REVIEW_VERIFIED_STAGING
+        if native_acl:
+            import struct
+            import subprocess
+
+            dataset = subprocess.check_output(["findmnt", "-n", "-o", "SOURCE", "-T", general], text=True).strip()
+            assert os.geteuid() != 0
+            properties = subprocess.check_output(
+                ["zfs", "get", "-Hp", "-o", "value", "acltype,aclmode,aclinherit", dataset], text=True,
+            ).splitlines()
+            assert properties == ["nfsv4", "restricted", "passthrough"]
+            inherited = struct.pack("!II10I", 0, 2,
+                0, 0x03, 1, 0x1f01ff, 1,  # owner@, inherited by files and directories
+                0, 0x43, 0, 0x1301ff, 65531,  # another group with inherited modify access
+            )
+            os.setxattr(general, NFS4[0], inherited)
+            original_acl = os.getxattr(general, NFS4[0])
+            with review.bound_directory(general) as descriptor:
+                assert review._native_staging(descriptor)
+            verified_root.mkdir()
+            from app.private_storage_security import _native_entries
+
+            acl = os.getxattr(verified_root, NFS4[0])
+            assert any(kind == 0 and not special and who == 65531 and flags & 0x80 and mask & 0x2
+                       for _, kind, flags, special, mask, who in _native_entries(acl, str(verified_root)))
+            with pytest.raises(PermissionError) as restricted_chmod:
+                verified_root.chmod(0o700)
+            assert restricted_chmod.value.errno == errno.EPERM
+            verified_root.rmdir()
+        else:
+            # Ubuntu's upstream OpenZFS can exercise the real Linux opening,
+            # linking, restart and publication syscalls on a local filesystem.
+            monkeypatch.setattr(review, "_native_staging", lambda _fd: True)
+
+        def refuse_acl_write(*_args, **_kwargs):
+            raise PermissionError(errno.EPERM, "application has no WRITE_ACL capability")
+
+        monkeypatch.setattr(os, "setxattr", refuse_acl_write)
+        unsafe = verified_root
+    else:
+        unsafe = general / LEGACY_REVIEW_PRIVATE_STAGING
+
     # RC10 leaves this empty directory behind when inheritance broadens mkdir(0700).
     legacy_staging = general / LEGACY_REVIEW_STAGING
     legacy_staging.mkdir(mode=0o750)
-    legacy_staging.chmod(0o750)
-    private_staging = general / LEGACY_REVIEW_PRIVATE_STAGING
-    private_staging.symlink_to(legacy_staging, target_is_directory=True)
+    if not native_acl:
+        legacy_staging.chmod(0o750)
+    unsafe.symlink_to(legacy_staging, target_is_directory=True)
     _json(reopened, "POST", job + "/review/batch", status=202, json={"family_keys": available})
     assert _json(reopened, "GET", job + "/review/batch")["failed"] == len(available)
-    assert private_staging.is_symlink() and not list(legacy_staging.iterdir())
+    assert unsafe.is_symlink() and not list(legacy_staging.iterdir())
     assert not list(general.glob("legacy-*"))
-    private_staging.unlink()
+    unsafe.unlink()
     publish = review._publish_copy
     entered, release = Event(), Event()
 
     def interrupt(library, adoption, members, destination):
         if members[0][0] == "photo-001.jpg":
-            publish(library, adoption, members, destination)
+            if unlinked:
+                link = os.link
+
+                def interrupt_partial(source, name, **kwargs):
+                    assert os.fstat(int(source.rsplit("/", 1)[-1])).st_nlink == 0
+                    if name == "photo-001.raf":
+                        raise RuntimeError("simulate loss before linking a verified inode")
+                    return link(source, name, **kwargs)
+
+                with monkeypatch.context() as interrupted:
+                    interrupted.setattr(os, "link", interrupt_partial)
+                    with pytest.raises(RuntimeError, match="simulate loss before linking"):
+                        publish(library, adoption, members, destination)
+                linked = verified_root / destination
+                assert {file.name: file.read_bytes() for file in linked.iterdir()} == {
+                    "photo-001.jpg": originals["photo-001.jpg"],
+                }
+                from app.source_filter import should_ignore_source_path
+                assert should_ignore_source_path(general, linked / "photo-001.jpg")
+            else:
+                publish(library, adoption, members, destination)
             entered.set()
             assert release.wait(10)
             raise RuntimeError("simulate process loss after atomic family publication")
@@ -1260,8 +1332,14 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     page = _json(browser, "GET", job + "/review")
     remaining = _json(browser, "GET", job + "/review", params={"after": page[-1]["family_key"]})
     assert len(remaining) == 1 and remaining[0]["state"] == "copied"
-    assert private_staging.stat().st_mode & 0o777 == 0o700
-    assert legacy_staging.stat().st_mode & 0o777 == 0o750
+    if unlinked:
+        assert not list(verified_root.iterdir())
+        assert not list(legacy_staging.iterdir())
+        if native_acl:
+            assert os.getxattr(general, NFS4[0]) == original_acl
+    else:
+        assert unsafe.stat().st_mode & 0o777 == 0o700
+        assert legacy_staging.stat().st_mode & 0o777 == 0o750
     assert not _json(browser, "GET", job + "/review/selection")
     assert len(list(general.glob("legacy-*"))) == 61
 
@@ -1305,13 +1383,32 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     assert not list(archive.iterdir())
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="O_TMPFILE requires Linux")
+def test_review_never_links_an_unverified_inode(tmp_path, monkeypatch):
+    from app import legacy_adoption_review as review
+
+    directory = tmp_path.resolve()
+    member = {"size_bytes": 4, "sha256": "incorrect-digest"}
+
+    def write_bad_copy(_source, output, _member):
+        output.write(b"test")
+        output.flush()
+        assert os.fstat(output.fileno()).st_nlink == 0
+        assert not list(directory.iterdir())
+
+    monkeypatch.setattr(review, "_write_member", write_bad_copy)
+    with review.bound_directory(directory) as stage:
+        with pytest.raises(review.AdoptionError, match="weicht von der Inventur ab"):
+            review._copy_unnamed_member(None, stage, "photo.jpg", member)
+    assert not list(directory.iterdir())
+
+
 def test_review_capacity_gate_accounts_for_entire_family(monkeypatch):
     from types import SimpleNamespace
     from app.legacy_adoption_paths import AdoptionError
     from app.legacy_adoption_review import _check_capacity
 
-    members = [("photo.raf", ".copy-0", {"size_bytes": 8192}),
-               ("photo.raf.xmp", ".copy-1", {"size_bytes": 2048})]
+    members = [{"size_bytes": 8192}, {"size_bytes": 2048}]
     monkeypatch.setattr(os, "fstatvfs", lambda _descriptor: SimpleNamespace(f_bavail=4, f_frsize=4096))
     with pytest.raises(AdoptionError, match="nicht genug Speicherplatz"):
         _check_capacity(0, members)

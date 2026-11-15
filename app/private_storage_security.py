@@ -159,7 +159,12 @@ def secure_working_directory(fd, name, *, created=False):
             # TrueNAS aclmode=restricted rejects chmod on nontrivial inherited ACLs.
             # Set a protected owner-only ACL on this new descriptor and read it back.
             owner_acl = struct.pack('!IIIIIII', 0x2, 1, 0, 0, 1, 0x1f01ff, 1)
-            os.setxattr(fd, NFS4[0], owner_acl, os.XATTR_REPLACE)
+            try:
+                os.setxattr(fd, NFS4[0], owner_acl, os.XATTR_REPLACE)
+            except OSError as error:
+                raise PrivateStorageError(
+                    'private_acl_replace_failed', name, f'fsetxattr({NFS4[0]}): errno={error.errno}',
+                ) from error
         os.fsync(fd)
         native = acl()
     if not private(native):

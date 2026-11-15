@@ -38,7 +38,7 @@ from app.legacy_adoption_plan import MAX_PLAN_ITEMS, create_plan, plan_directori
 from app.legacy_adoption_registration import finalize_adoption
 from app.legacy_adoption_review import (
     begin_review_batch, check_review_staging, copy_review, fail_pending_review_batch,
-    review_batch_status, review_cases, review_count, review_selection, run_review_batch, STAGING_ERROR,
+    review_batch_status, review_cases, review_count, review_selection, run_review_batch, ReviewStagingError, STAGING_ERROR,
 )
 from app.legacy_adoption_verify import plan_issues, reopen_plan
 from app.library_registry import LibraryRegistryError, list_libraries
@@ -216,6 +216,12 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 with admission(library):
                     try:
                         check_review_staging(library)
+                    except ReviewStagingError as error:
+                        logging.getLogger(__name__).warning(
+                            "Legacy review staging %s: %s (%s)", job_id, error.operation, error.code,
+                        )
+                        fail_pending_review_batch(library, job_id, str(error))
+                        return
                     except (AdoptionError, OSError, RootOperationError) as error:
                         logging.getLogger(__name__).warning("Legacy review staging %s: %r", job_id, error.__cause__ or error)
                         fail_pending_review_batch(library, job_id, STAGING_ERROR)

@@ -3,8 +3,10 @@ from contextlib import ExitStack, contextmanager
 import errno
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
+import shutil
 import stat
 from uuid import uuid4
 
@@ -19,12 +21,20 @@ from app.legacy_adoption_paths import (
 from app.legacy_adoption_plan import _roots
 from app.metadata_correction import MetadataCorrectionError, metadata_area_paths
 from app.root_operations import RootOperationError, validate_active_roots
-from app.private_storage_security import PrivateStorageError, secure_working_directory
-from app.source_filter import LEGACY_REVIEW_PRIVATE_STAGING, LEGACY_REVIEW_STAGING
+from app.private_storage_security import NFS4, PrivateStorageError, attributes, filesystem, secure_working_directory
+from app.source_filter import LEGACY_REVIEW_PRIVATE_STAGING, LEGACY_REVIEW_STAGING, LEGACY_REVIEW_VERIFIED_STAGING
+
+logger = logging.getLogger(__name__)
 
 
 class ReviewStagingError(AdoptionError):
-    pass
+    def __init__(self, operation, error):
+        super().__init__(STAGING_ERROR)
+        self.operation = operation
+        self.code = getattr(error, "errno", None) or getattr(error, "code", type(error).__name__)
+        if self.code == "private_acl_replace_failed":
+            self.operation = "fsetxattr system.nfs4_acl_xdr"
+            self.code = error.__cause__.errno
 
 
 STAGING_ERROR = ("Bibliothekar kann keinen privaten Arbeitsordner erstellen. "
@@ -191,28 +201,41 @@ def _assigned(connection, job_id, plan_id, key):
 
 
 @contextmanager
-def _new_directory(parent, name):
+def _staging_operation(operation):
     try:
+        yield
+    except (AdoptionError, OSError, PrivateStorageError) as error:
+        if isinstance(error, ReviewStagingError) or getattr(error, "errno", None) == errno.ENOSPC:
+            raise
+        raise ReviewStagingError(operation, error) from error
+
+
+@contextmanager
+def _new_directory(parent, name):
+    with _staging_operation("inspect private staging"):
         info = host.info_at(parent, name)
-        if info is None:
-            temporary = ".prepare-" + uuid4().hex
+    if info is None:
+        temporary = ".prepare-" + uuid4().hex
+        with _staging_operation("mkdir private staging"):
             os.mkdir(temporary, 0o700, dir_fd=parent)
             info = os.stat(temporary, dir_fd=parent, follow_symlinks=False)
-            identity = directory_identity(info)
-            try:
+        identity = directory_identity(info)
+        try:
+            with _staging_operation("qualify private staging ACL"):
                 with bound_child_directory(parent, temporary, identity) as descriptor:
                     secure_working_directory(descriptor, name, created=True)
+            with _staging_operation("rename private staging"):
                 host.rename_noreplace(parent, temporary, parent, name)
+            with _staging_operation("fsync private staging parent"):
                 os.fsync(parent)
-            finally:
-                pending = host.info_at(parent, temporary)
-                if pending is not None and directory_identity(pending) == identity:
-                    os.rmdir(temporary, dir_fd=parent)
-        with bound_child_directory(parent, name, directory_identity(info)) as descriptor:
+        finally:
+            pending = host.info_at(parent, temporary)
+            if pending is not None and directory_identity(pending) == identity:
+                os.rmdir(temporary, dir_fd=parent)
+    with bound_child_directory(parent, name, directory_identity(info)) as descriptor:
+        with _staging_operation("validate private staging ACL"):
             secure_working_directory(descriptor, name)
-            yield descriptor
-    except (PrivateStorageError, PermissionError) as error:
-        raise ReviewStagingError(STAGING_ERROR) from error
+        yield descriptor
 
 
 def _staging(stack, root):
@@ -232,15 +255,67 @@ def _general(library):
                                library_id=library.library_id, create=False)["root"]
 
 
+def _native_staging(root):
+    with _staging_operation("read Workspace ACL backend"):
+        return filesystem(root) == "zfs" and NFS4[0] in attributes(root, allow_zfs_posix=True)
+
+
+def _use_unnamed_staging(root):
+    if not _native_staging(root):
+        return False
+    try:
+        os.close(_open_unnamed(root))
+    except ReviewStagingError as error:
+        if error.code in {errno.EOPNOTSUPP, errno.EINVAL, errno.ENOSYS}:
+            return False  # Older kernels can still use ACL-qualified staging.
+        raise
+    return True
+
+
+@contextmanager
+def _verified_directory(parent, name):
+    # This namespace may inherit Workspace access. Only verified inodes can
+    # be linked here. A retry never adopts, removes or replaces unknown files.
+    with _staging_operation("mkdir verified staging"):
+        validate_active_roots()
+        try:
+            os.mkdir(name, 0o770, dir_fd=parent)
+        except FileExistsError:
+            pass
+        info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+            raise PrivateStorageError("private_owner_untrusted", name, "application-owned directory required")
+        os.fsync(parent)
+    with bound_child_directory(parent, name, directory_identity(info)) as descriptor:
+        yield descriptor
+
+
+def _open_unnamed(directory):
+    with _staging_operation("openat O_TMPFILE"):
+        fd = os.open(".", os.O_TMPFILE | os.O_RDWR, 0o666, dir_fd=directory)
+        try:
+            if os.fstat(fd).st_nlink != 0:
+                raise AdoptionError("Der Workspace stellt keine unbenannte Arbeitsdatei bereit.")
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd
+
+
 def check_review_staging(library):
-    with ExitStack() as stack:
-        root = stack.enter_context(bound_directory(_general(library)))
-        _staging(stack, root)
+    with _staging_operation("open and validate Workspace staging"):
+        with ExitStack() as stack:
+            root = stack.enter_context(bound_directory(_general(library)))
+            if _use_unnamed_staging(root):
+                stack.enter_context(_verified_directory(root, LEGACY_REVIEW_VERIFIED_STAGING))
+            else:
+                _staging(stack, root)
 
 
-def _member_proof(directory, name, member):
+def _member_proof(directory, name, member, *, require_owner=False):
     with bound_file(directory, name) as (descriptor, info):
-        if (info.st_nlink != 1 or info.st_size != member["size_bytes"]
+        if ((require_owner and info.st_uid != os.geteuid())
+                or info.st_nlink != 1 or info.st_size != member["size_bytes"]
                 or bound_sha256(descriptor) != member["sha256"]):
             raise AdoptionError("Die vorhandene Arbeitskopie weicht von der Inventur ab: " + name)
 
@@ -253,24 +328,78 @@ def _discard_partial(stage, temporary):
         os.unlink(temporary, dir_fd=stage)
 
 
-def _copy_member(source, stage, name, temporary, member):
+def _write_member(source, output, member):
     validate_active_roots()
     with relative_parent(source, member["relative_path"]) as (original, original_name):
         with bound_file(original, original_name, tuple(json.loads(member["identity"]))) as (reader, _):
-            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666, dir_fd=stage)
-            with os.fdopen(fd, "wb") as output:
-                while data := os.read(reader, 1024 * 1024):
-                    output.write(data)
-                output.flush()
-                os.fsync(output.fileno())
+            with os.fdopen(reader, "rb", closefd=False) as input_stream:
+                shutil.copyfileobj(input_stream, output, 1024 * 1024)
+            output.flush()
+            os.fsync(output.fileno())
+
+
+def _copy_member(source, stage, name, temporary, member):
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666, dir_fd=stage)
+    with os.fdopen(fd, "wb") as output:
+        _write_member(source, output, member)
     _member_proof(stage, temporary, member)
     host.rename_noreplace(stage, temporary, stage, name)
     os.fsync(stage)
 
 
+def _copy_unnamed_member(source, stage, name, member):
+    # ZFS creates an unlinked inode. Inherited Workspace ACLs cannot expose
+    # it through a path, and closing the descriptor discards an interrupted copy.
+    with os.fdopen(_open_unnamed(stage), "w+b") as output:
+        _write_member(source, output, member)
+        fd = output.fileno()
+        info = os.fstat(fd)
+        if info.st_nlink != 0 or info.st_size != member["size_bytes"] or bound_sha256(fd) != member["sha256"]:
+            raise AdoptionError("Die vorhandene Arbeitskopie weicht von der Inventur ab: " + name)
+        validate_active_roots()
+        # linkat follows this descriptor symlink without CAP_DAC_READ_SEARCH.
+        # The destination name is created exclusively; no existing file is replaced.
+        try:
+            os.link(f"/proc/self/fd/{fd}", name, dst_dir_fd=stage)
+        except PermissionError as error:
+            raise ReviewStagingError("linkat verified inode", error) from error
+        os.fsync(fd)
+        os.fsync(stage)
+
+
+def _verify_family(directory, members, *, require_owner=False, allow_missing=False):
+    names = set(os.listdir(directory))
+    expected = {name for name, _ in members}
+    if names - expected or (not allow_missing and names != expected):
+        raise AdoptionError("Die vorbereitete Arbeitskopie enthält unerwartete Dateien.")
+    for name, member in members:
+        if name in names:
+            _member_proof(directory, name, member, require_owner=require_owner)
+    return [(name, member) for name, member in members if name not in names]
+
+
+def _publish_native_copy(stack, source, root, members, destination):
+    staging = stack.enter_context(_verified_directory(root, LEGACY_REVIEW_VERIFIED_STAGING))
+    with _verified_directory(staging, destination) as stage:
+        identity = directory_identity(os.fstat(stage))
+        remaining = _verify_family(stage, members, require_owner=True, allow_missing=True)
+        _check_capacity(stage, (member for _, member in remaining))
+        for name, member in remaining:
+            _copy_unnamed_member(source, stage, name, member)
+        _verify_family(stage, members, require_owner=True)
+    validate_active_roots()
+    with _staging_operation("rename verified family"):
+        host.rename_noreplace(staging, destination, root, destination)
+    with bound_child_directory(root, destination, identity) as ready:
+        _verify_family(ready, members, require_owner=True)
+        os.fsync(ready)
+    os.fsync(staging)
+    os.fsync(root)
+
+
 def _check_capacity(stage, remaining):
     space = os.fstatvfs(stage)
-    required = sum(member["size_bytes"] + space.f_frsize for _, _, member in remaining)
+    required = sum(member["size_bytes"] + space.f_frsize for member in remaining)
     if space.f_bavail * space.f_frsize < required:
         raise AdoptionError("Im Workspace ist nicht genug Speicherplatz für die vollständige Dateifamilie.")
 
@@ -282,16 +411,16 @@ def _publish_copy(library, job, members, destination):
         existing = host.info_at(root, destination)
         if existing is not None:
             with bound_child_directory(root, destination, directory_identity(existing)) as ready:
-                if set(os.listdir(ready)) != {name for name, _ in members}:
-                    raise AdoptionError("Der Zielordner enthält andere Dateien: " + destination)
-                for name, member in members:
-                    _member_proof(ready, name, member)
+                _verify_family(ready, members)
             os.fsync(root)
-            for name in (LEGACY_REVIEW_STAGING, LEGACY_REVIEW_PRIVATE_STAGING):
+            for name in (LEGACY_REVIEW_STAGING, LEGACY_REVIEW_PRIVATE_STAGING, LEGACY_REVIEW_VERIFIED_STAGING):
                 previous_stage = host.info_at(root, name)
                 if previous_stage is not None:
                     with bound_child_directory(root, name, directory_identity(previous_stage)) as stage:
                         os.fsync(stage)
+            return
+        if _use_unnamed_staging(root):
+            _publish_native_copy(stack, source, root, members, destination)
             return
         staging = _staging(stack, root)
         with _new_directory(staging, destination) as stage:
@@ -303,7 +432,7 @@ def _publish_copy(library, job, members, destination):
                     remaining.append((name, temporary, member))
                 else:
                     _member_proof(stage, name, member)
-            _check_capacity(stage, remaining)
+            _check_capacity(stage, (member for _, _, member in remaining))
             for name, temporary, member in remaining:
                 _copy_member(source, stage, name, temporary, member)
             if set(os.listdir(stage)) != {name for name, _ in members}:
@@ -417,6 +546,7 @@ def run_review_batch(library, job_id, *, copy_family):
         try:
             copy_family(key)
         except ReviewStagingError as error:
+            logger.warning("Legacy review staging %s: %s (%s)", job_id, error.operation, error.code)
             fail_pending_review_batch(library, job_id, str(error))
             return
         except OSError as error:

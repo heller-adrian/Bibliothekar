@@ -370,6 +370,18 @@ def test_new_working_directory_replaces_inherited_native_acl_and_reads_it_back(t
         with pytest.raises(security.PrivateStorageError, match="owner-only"):
             security.secure_working_directory(fd, "staging")
         assert stages[security.NFS4[0]] == inherited
+        with monkeypatch.context() as restricted:
+            import errno
+            from app.legacy_adoption_review import ReviewStagingError, _staging_operation
+
+            def refuse_replace(*_args):
+                raise PermissionError(errno.EPERM, os.strerror(errno.EPERM))
+
+            restricted.setattr(os, "setxattr", refuse_replace)
+            with pytest.raises(ReviewStagingError) as failure, _staging_operation("qualify"):
+                security.secure_working_directory(fd, "staging", created=True)
+            assert (failure.value.operation, failure.value.code) == ("fsetxattr system.nfs4_acl_xdr", errno.EPERM)
+            assert stages[security.NFS4[0]] == inherited
         security.secure_working_directory(fd, "staging", created=True)
         security.secure_working_directory(fd, "staging")
         # A broad native allow can still be present in a mode-0700 directory.
