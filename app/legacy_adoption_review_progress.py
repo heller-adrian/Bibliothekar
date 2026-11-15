@@ -7,6 +7,7 @@ from threading import Lock
 from time import monotonic
 
 from app.database import database_connection
+from app.legacy_adoption_review_cancel import cancellation_check
 
 
 @dataclass
@@ -15,6 +16,7 @@ class Transfer:
     job: str
     family: str
     started: float
+    batch: str | None = None
     initial: int = 0
     written: int = 0
     verified: int = 0
@@ -26,8 +28,9 @@ _lock = Lock()
 
 
 @contextmanager
-def track(database, job_id, family):
-    transfer = Transfer(database, job_id, family, monotonic())
+def track(database, job_id, family, batch=None):
+    transfer = Transfer(database, job_id, family, monotonic(), batch)
+    transfer.check = cancellation_check(database, job_id, batch)
     key = (database, job_id)
     with _lock:
         _active[key] = transfer
@@ -46,6 +49,16 @@ def wrote(count):
     if transfer is not None:
         with _lock:
             transfer.written += count
+
+
+def transfer():
+    return _current.get()
+
+
+def check(*, force=False):
+    current = transfer()
+    if current is not None:
+        current.check(force=force)
 
 
 def checkpoint(count, *, recovered=False):

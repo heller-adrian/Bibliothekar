@@ -97,6 +97,7 @@ _PAGE = r"""<!doctype html>
 .adoption-review-progress[data-result]{border-inline-start:4px solid currentColor;background:var(--bk-surface-2);padding:12px 16px;border-radius:8px}
 .adoption-review-progress[data-result=success],.adoption-review-copied{color:var(--bk-green)}
 .adoption-review-progress[data-result=error]{color:var(--bk-danger)}
+.adoption-review-progress .adoption-review-cancel{justify-self:end}
 .adoption-review-row[data-copied] strong{color:var(--bk-muted)}
 .adoption-review-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:start}
 .adoption-review-row:has(.adoption-metadata-source){grid-template-columns:auto minmax(0,1fr) minmax(10rem,16rem)}
@@ -162,6 +163,24 @@ border-radius:10px;background:var(--bk-surface);color:var(--bk-ink);box-shadow:v
 .legacy-adoption .adoption-toolbar :is(button,summary.adoption-control){box-sizing:border-box;min-height:36px;padding:6px 12px;font-size:.875rem;font-weight:600}
 .legacy-adoption summary.adoption-control{display:inline-flex;align-items:center;border-radius:11px}
 #periods:not(:empty){display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 10px}
+.adoption-plan-tools,.adoption-review-tools:not(:empty){position:sticky;top:0;z-index:3;background:var(--bk-surface);padding-block:8px;border-bottom:1px solid var(--bk-line)}
+.adoption-plan-tools:has(#event-actions[hidden]){position:static;padding:0;border:0}
+.adoption-plan-tools #periods{margin-bottom:0}
+.adoption-plan-tools:has(#event-actions[hidden]) #periods{margin-bottom:10px}
+.adoption-review-tools:empty{display:none}
+.adoption-plan-inspector{position:sticky;top:var(--adoption-plan-tools-height,0px);align-self:start;
+max-height:calc(100dvh - var(--adoption-plan-tools-height,0px) - 16px);overflow:auto;background:var(--bk-surface);padding:8px 4px}
+#dated-media :focus-visible,.adoption-review-list :focus-visible{scroll-margin-top:calc(var(--adoption-plan-tools-height,0px) + 1rem)}
+@media(max-width:900px){
+  .adoption-plan-inspector{position:static;max-height:none}
+  .adoption-plan-inspector:has(#planning-preview:not(:empty)){position:sticky;order:-1;z-index:2;max-height:24dvh}
+  #dated-media:has(~ .adoption-plan-inspector #planning-preview:not(:empty)) :focus-visible{scroll-margin-top:calc(var(--adoption-plan-tools-height,0px) + 24dvh + 1rem)}
+}
+@media(max-width:640px){
+  .legacy-adoption :is(.adoption-plan-tools,.adoption-review-tools) .inline,.legacy-adoption .adoption-review-tools{gap:6px}
+  .legacy-adoption .adoption-review-tools button{min-height:36px;padding:6px 10px;font-size:.875rem}
+}
+@media(max-height:420px){.adoption-plan-tools,.adoption-review-tools:not(:empty),.adoption-plan-inspector:has(#planning-preview:not(:empty)){position:static;max-height:none}}
 .legacy-adoption :is(input:not([type=checkbox],[type=radio]),select,textarea){min-height:38px;padding:7px 10px;background:var(--bk-surface-2);color:var(--bk-ink);border:1px solid var(--bk-line);border-radius:8px;font:inherit}
 .legacy-adoption input[type=checkbox]{accent-color:var(--bk-blue)}
 .legacy-adoption .adoption-command{width:100%;font: .85rem/1.4 ui-monospace,monospace;overflow-wrap:anywhere}
@@ -270,7 +289,7 @@ if(later) {
 }
 let job = null, draft = {}, draftRevision = 0, year = "", day = null;
 let familyCursor = "", moveCursor = "", timer = 0, scriptTimer = 0, reviewTimer = 0;
-let reviewSelection = new Set(), reviewOpened = new Set(), reviewBatch = {}, reviewSubmitting = false;
+let reviewSelection = new Set(), reviewOpened = new Set(), reviewBatch = {}, reviewSubmitting = false, reviewCancelling = false;
 let reviewMetadataSaving=false, reviewMetadataFeedback=null;
 let reviewSelectionVersion=0;
 let selectedSource = null, browsedSource = null, browseVersion = 0;
@@ -614,6 +633,11 @@ function inventoryCounts() {
   return [t(phase),job.files+" "+t("Dateien"),job.families+" "+t("Familien"),
     job.errors+" "+t("Pfadfehler")].join(" · ");
 }
+const planningToolsObserver=new ResizeObserver(entries=>{
+  for(const {target} of entries){
+    target.parentElement?.style.setProperty("--adoption-plan-tools-height",target.offsetHeight+"px");
+  }
+});
 function render() {
   const phase=job.plan.execution?.phase;
   const terminal=job.state==="discarded" || job.plan.state==="completed";
@@ -656,7 +680,7 @@ function render() {
       await startInventory();
     },true));
   }
-  if (!terminal && !job.plan.execution && !job.scan_running && !inventoryStarting && !reviewBatch.running && !reviewSubmitting) { const discard=action("Änderungen verwerfen",async()=>{
+  if (!terminal && !job.plan.execution && !job.scan_running && !inventoryStarting && !reviewBusy()) { const discard=action("Änderungen verwerfen",async()=>{
     if (!confirm(t("Auftrag und Entwurf verwerfen? Originale und fertige Arbeitskopien in General bleiben erhalten."))) return;
     await api(jobPath(),"DELETE");
     dirty.clear();
@@ -667,6 +691,7 @@ function render() {
     $("inventory-errors").replaceChildren(...rows.map(row=>line(row.relative_path+" · "+t(row.error))));
   }));
   status.append(buttons,slot("inventory-errors"));
+  planningToolsObserver.disconnect();
   host.replaceChildren();
   const progress=slot("review-progress");
   progress.className="adoption-review-progress";
@@ -703,7 +728,9 @@ function renderDraft(host) {
       selectedDays.clear();day=null;selectedEvent=null;selectedArchive=null;renderDays();renderPlanSelection();return showDay();
     }),
     slot("selection-count","span"));
-  panel.append(toolbar,slot("periods"),slot("planning-review"));
+  const tools=node("div",undefined,"adoption-plan-tools");
+  tools.append(toolbar,slot("periods"));
+  panel.append(tools,slot("planning-review"));
   const grid=node("div",undefined,"grid adoption-planning");
   grid.id="dated-planning";
   const chronologyPane=node("div");chronologyPane.append(slot("draft-events"),slot("archive-segments"),slot("days"));
@@ -711,15 +738,16 @@ function renderDraft(host) {
   diagnostic.append(node("summary","Dateifamilien und Aufnahmezeiten prüfen"),slot("families"));
   diagnostic.addEventListener("toggle",()=>{if(diagnostic.open && !$("families").childElementCount)showFamilies().catch(error=>report(error.message));});
   chronologyPane.append(diagnostic);chronologyPane.id="dated-media";
-  const formPane=node("div");
+  const formPane=node("div",undefined,"adoption-plan-inspector");
   formPane.append(node("h3","Vorschau"),slot("draft-coverage"),slot("planning-preview"),slot("matches"));
   const editor=slot("event-editor","dialog");
   editor.setAttribute("aria-labelledby","event-editor-title");
   grid.append(chronologyPane,formPane);panel.append(grid,editor);host.append(panel);
+  planningToolsObserver.observe(tools);
   showDraftEvents();
   renderPlanSelection();
 }
-async function chronology() {
+async function chronology(focusPeriod=false) {
   const periodCounts=new Map();
   for(const segment of [...freeSegments,...archiveSegments]){
     const period=segment.day_key.slice(0,4);
@@ -735,21 +763,28 @@ async function chronology() {
   if(job.review_count)periodCounts.set("review",job.review_count);
   const periods=[...periodCounts].sort(([a],[b])=>a.localeCompare(b));
   if(!periodCounts.has(year))year=periods.find(([period])=>period!=="review")?.[0] || periods[0]?.[0] || "";
+  const periodsSlot=$("periods");
+  const restorePeriodFocus=focusPeriod || periodsSlot.contains(document.activeElement);
+  let selectedPeriodButton;
   const buttons=node("div",undefined,"inline");
   for(const [period,count] of periods){
     const button=action(period==="review" ? "Ohne gesichertes Datum ("+count+")" : period+(count?" ("+count+")":""),async()=>{
       requireSaved($("families"));
       year=period;day=null;selectedEvent=null;selectedArchive=null;dayPage=60;
       sessionStorage.setItem("bk-adoption-period:"+jobId,period);
-      await chronology();
+      await chronology(true);
     });
     button.setAttribute("aria-pressed",String(period===year));buttons.append(button);
+    if(period===year)selectedPeriodButton=button;
   }
-  $("periods").replaceChildren(buttons);
+  periodsSlot.replaceChildren(buttons);
+  if(restorePeriodFocus)selectedPeriodButton?.focus({preventScroll:true});
   const reviewing=year==="review";
   for(const id of ["planning-instruction","event-actions","dated-planning"])$(id).hidden=reviewing;
   const cases=$("planning-review");
   cases.hidden=!reviewing;
+  const reviewTools=cases.querySelector(".adoption-review-tools");
+  if(reviewTools)planningToolsObserver.unobserve(reviewTools);
   const diagnostic=$("family-diagnostics");
   $("dated-media").append(diagnostic);
   if(reviewing){
@@ -862,7 +897,8 @@ const reviewStates={
   copied:"Kopiert"
 };
 function reviewBusy(){
-  return reviewSubmitting || reviewMetadataSaving || reviewBatch.running || reviewBatch.pending>0;
+  return reviewSubmitting || reviewCancelling || reviewMetadataSaving || reviewBatch.running || reviewBatch.pending>0 ||
+    ["active","cancelling"].includes(reviewBatch.state);
 }
 function reviewHelp(){
   const help=node("details",undefined,"adoption-source-help adoption-review-help");
@@ -918,31 +954,57 @@ function renderReviewRows(){
 function renderReviewProgress(){
   const target=$("review-progress");
   if(!target)return;
+  const restoreFocus=target.contains(document.activeElement) && document.activeElement.id==="review-cancel";
   target.replaceChildren();
   delete target.dataset.result;
-  const {total,copied,failed,pending,running,bytes_total,bytes_written,estimated_seconds}=reviewBatch;
-  if(!total && !reviewSubmitting)return;
+  const {total,copied,failed,pending,running,bytes_total,bytes_written,estimated_seconds,batch_id,state,cancel_error}=reviewBatch;
+  if(state==="cancelled"){
+    target.dataset.result="success";
+    target.append(node("strong","Kopierauftrag abgebrochen"),line("Die Arbeitskopien dieses Auftrags wurden entfernt."));
+    return;
+  }
+  const cancelling=state==="cancelling" || reviewCancelling;
+  if(!total && !reviewSubmitting && !cancelling)return;
   const active=running || reviewSubmitting;
-  const title=active?"Arbeitskopien werden erstellt …":pending?"Kopierauftrag unterbrochen":
+  const title=cancelling?(active || reviewCancelling?"Abbruch angefordert. Arbeitskopien werden bereinigt …":"Bereinigung des Kopierauftrags unterbrochen"):
+    active?"Arbeitskopien werden erstellt …":pending || state==="active"?"Kopierauftrag unterbrochen":
     failed?"Kopierauftrag mit Fehlern beendet":"Für die Metadatenkorrektur kopiert";
   const status=node("div",undefined,"inline adoption-review-status");
   status.append(node("strong",title),reviewHelp());
   target.append(status);
-  if(active && bytes_total!==undefined){
+  if(active && !cancelling && bytes_total!==undefined){
     target.append(reviewByteProgress({bytes_total,bytes_written},"Kopierfortschritt"));
     if(estimated_seconds!=null){
       const minutes=Math.max(1,Math.ceil(estimated_seconds/60));
       target.append(line(t("Geschätzte verbleibende Kopierzeit")+" · "+
         new Intl.NumberFormat(window.BibliothekarI18n.getLocale(),{style:"unit",unit:"minute"}).format(minutes)));
     }
-  }else if(!active){
+  }else if(!active && !cancelling){
     target.dataset.result=failed || pending?"error":"success";
     if(bytes_total!==undefined)target.append(line(reviewBytes(bytes_written)+" / "+reviewBytes(bytes_total)));
   }
+  if(cancel_error){target.dataset.result="error";target.append(line(cancel_error));}
+  if(!recoveryOnly && batch_id && !reviewCancelling && (state==="active" || (state==="cancelling" && !running))){
+    const button=action(state==="cancelling"?"Bereinigung fortsetzen":"Kopieren abbrechen",async()=>{
+      const requested=jobId;
+      reviewCancelling=true;renderReviewProgress();
+      try{
+        await api(jobPath("/review/batch/cancel"),"POST",{batch_id});
+      }finally{
+        reviewCancelling=false;
+        if(requested===jobId)await refreshReviewView();
+      }
+    });
+    button.id="review-cancel";
+    button.classList.add("danger-button","adoption-review-cancel");
+    target.append(button);
+    if(restoreFocus)button.focus({preventScroll:true});
+  }
+  if(cancelling)return;
   renderReviewRows();
   if(total && !reviewSubmitting)target.append(line(copied+" kopiert · "+failed+" fehlgeschlagen · "+pending+" ausstehend"));
   if(failed && !active)target.append(line("Prüfe die Hinweise bei den betroffenen Dateifamilien. Fehlgeschlagene Fälle kannst du erneut auswählen."));
-  if(pending && !running && !recoveryOnly)target.append(action("Kopierauftrag fortsetzen",async()=>{
+  if((pending || state==="active") && !running && !recoveryOnly)target.append(action("Kopierauftrag fortsetzen",async()=>{
     await api(jobPath("/review/batch/resume"),"POST");await refreshReviewView();
   },true));
 }
@@ -1011,8 +1073,9 @@ function metadataFeedback(target,result){
 }
 function showReview(target) {
   let cursor="";
-  const toolbar=node("div",undefined,"inline");
-  const list=node("div");
+  const planning=target.id==="planning-review";
+  const toolbar=node("div",undefined,planning?"inline adoption-review-tools":"inline");
+  const list=node("div",undefined,"adoption-review-list");
   const feedback=node("div");
   const metadataControls=new Map();
   const editable=!job.plan.id && !recoveryOnly && job.state==="inventoried";
@@ -1130,6 +1193,7 @@ function showReview(target) {
   target.replaceChildren(node("h3","Prüffälle"),
     line("Ungeklärte Dateifamilien bleiben an der Quelle. Fertige Arbeitskopien in General bleiben auch nach dem Verwerfen erhalten."),
     toolbar,feedback,list);
+  if(planning)planningToolsObserver.observe(toolbar);
   metadataFeedback(feedback,reviewMetadataFeedback);
   const more=action("Weitere Prüffälle",load);
   async function load(){

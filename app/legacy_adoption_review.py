@@ -1,5 +1,6 @@
 """Review cases and verified working copies in the existing General intake."""
 from contextlib import ExitStack, contextmanager
+from functools import partial
 import errno
 import hashlib
 import json
@@ -11,6 +12,7 @@ from uuid import uuid4
 
 from app import legacy_adoption_host as host
 from app import legacy_adoption_flat_copy as flat
+from app import legacy_adoption_review_cancel as cancel
 from app import legacy_adoption_review_progress as progress
 from app.legacy_adoption_dataset import DatasetError
 from app.database import database_connection
@@ -355,36 +357,44 @@ def _write_member(source, output, member):
     validate_active_roots()
     with relative_parent(source, member["relative_path"]) as (original, original_name):
         with bound_file(original, original_name, tuple(json.loads(member["identity"]))) as (reader, _):
-            while block := os.read(reader, 1024 * 1024):
+            while True:
+                progress.check()
+                block = os.read(reader, 1024 * 1024)
+                if not block:
+                    break
                 output.write(block)
                 progress.wrote(len(block))
             output.flush()
             os.fsync(output.fileno())
 
 
-def _copy_member(source, stage, name, temporary, member):
+def _copy_member(source, stage, name, temporary, member, record):
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666, dir_fd=stage)
     with os.fdopen(fd, "wb") as output:
+        if record:
+            record(name, temporary, fd)
         _write_member(source, output, member)
-    flat.member_proof(stage, temporary, member)
+    flat.member_proof(stage, temporary, member, check=progress.check)
     host.rename_noreplace(stage, temporary, stage, name)
     os.fsync(stage)
     progress.checkpoint(member["size_bytes"])
 
 
-def _copy_unnamed_member(source, stage, name, member):
+def _copy_unnamed_member(source, stage, name, member, record=None):
     # ZFS creates an unlinked inode. Inherited Workspace ACLs cannot expose
     # it through a path, and closing the descriptor discards an interrupted copy.
     with os.fdopen(_open_unnamed(stage), "w+b") as output:
         _write_member(source, output, member)
         fd = output.fileno()
         info = os.fstat(fd)
-        if info.st_nlink != 0 or info.st_size != member["size_bytes"] or bound_sha256(fd) != member["sha256"]:
+        if info.st_nlink != 0 or info.st_size != member["size_bytes"] or bound_sha256(fd, progress.check) != member["sha256"]:
             raise AdoptionError("Die vorhandene Arbeitskopie weicht von der Inventur ab: " + name)
         validate_active_roots()
         # linkat follows this descriptor symlink without CAP_DAC_READ_SEARCH.
         # The destination name is created exclusively; no existing file is replaced.
         try:
+            if record:
+                record(name, None, fd)
             os.link(f"/proc/self/fd/{fd}", name, dst_dir_fd=stage)
         except PermissionError as error:
             raise ReviewStagingError("linkat verified inode", error) from error
@@ -400,20 +410,20 @@ def _verify_family(directory, members, *, require_owner=False, allow_missing=Fal
         raise AdoptionError("Die vorbereitete Arbeitskopie enthält unerwartete Dateien.")
     for name, member in members:
         if name in names:
-            flat.member_proof(directory, name, member, require_owner=require_owner)
+            flat.member_proof(directory, name, member, require_owner=require_owner, check=progress.check)
     return [(name, member) for name, member in members if name not in names]
 
 
-def _prepare_native_copy(source, stage, members):
+def _prepare_native_copy(source, stage, members, record):
     remaining = _verify_family(stage, members, require_owner=True, allow_missing=True)
     progress.checkpoint(sum(member["size_bytes"] for _, member in members)
                         - sum(member["size_bytes"] for _, member in remaining), recovered=True)
     _check_capacity(stage, (member for _, member in remaining))
     for name, member in remaining:
-        _copy_unnamed_member(source, stage, name, member)
+        _copy_unnamed_member(source, stage, name, member, record)
 
 
-def _prepare_private_copy(source, stage, members):
+def _prepare_private_copy(source, stage, members, record):
     remaining = []
     for index, (name, member) in enumerate(members):
         temporary = ".copy-" + str(index)
@@ -421,12 +431,12 @@ def _prepare_private_copy(source, stage, members):
             _discard_partial(stage, temporary)
             remaining.append((name, temporary, member))
         else:
-            flat.member_proof(stage, name, member)
+            flat.member_proof(stage, name, member, check=progress.check)
     _check_capacity(stage, (member for _, _, member in remaining))
     progress.checkpoint(sum(member["size_bytes"] for _, member in members)
                         - sum(member["size_bytes"] for _, _, member in remaining), recovered=True)
     for name, temporary, member in remaining:
-        _copy_member(source, stage, name, temporary, member)
+        _copy_member(source, stage, name, temporary, member, record)
     secure_working_directory(stage, "review staging")
 
 
@@ -440,13 +450,16 @@ def _check_capacity(stage, remaining):
 def _publish_copy(library, job, members, destination):
     database = library.database_path
     key = members[0][1]["family_key"]
+    transfer = progress.transfer()
+    batch = transfer.batch if transfer else None
     with ExitStack() as stack:
         source, _ = _roots(stack, library, job)
         root = stack.enter_context(bound_directory(_general(library)))
         with database_connection(database) as connection:
             receipt = flat.receipt(connection, job["id"], key)
+            journal = cancel.journal(connection, job["id"], key)
         if receipt:
-            _resume_publication(database, root, job, key, destination, receipt)
+            _resume_publication(database, root, job, key, destination, receipt, journal)
             return
         existing = host.info_at(root, destination)
         if existing is not None:
@@ -459,23 +472,42 @@ def _publish_copy(library, job, members, destination):
                     with bound_child_directory(root, name, directory_identity(previous_stage)) as stage:
                         os.fsync(stage)
             return
-        if flat.reuse_completed(database, root, job, key, destination, members):
+        if not journal and flat.reuse_completed(database, root, job, key, destination, members, batch=batch, check=progress.check):
             return
-        if _use_unnamed_staging(root):
+        if journal:
+            if journal["fingerprint"] != destination or journal["parent_name"] not in cancel.STAGE_PARENTS:
+                raise AdoptionError(cancel.UNPROVEN)
+            if directory_identity(os.fstat(root)) != tuple(json.loads(journal["workspace_identity"])):
+                raise AdoptionError(cancel.UNPROVEN)
+            stage_name = journal["parent_name"]
+            staging = stack.enter_context(bound_child_directory(root, stage_name, tuple(json.loads(journal["parent_identity"]))))
+            if stage_name != LEGACY_REVIEW_VERIFIED_STAGING:
+                secure_working_directory(staging, stage_name)
+        elif _use_unnamed_staging(root):
             stage_name = LEGACY_REVIEW_VERIFIED_STAGING
             staging = stack.enter_context(_verified_directory(root, stage_name))
-            open_stage, prepare = _verified_directory, _prepare_native_copy
         else:
             staging, stage_name = _staging(stack, root)
+        if stage_name == LEGACY_REVIEW_VERIFIED_STAGING:
+            open_stage, prepare = _verified_directory, _prepare_native_copy
+        else:
             open_stage, prepare = _new_directory, _prepare_private_copy
-        with open_stage(staging, destination) as stage:
+        if batch and not journal:
+            journal = cancel.write_journal(database, job["id"], key, batch, destination, root, stage_name, staging)
+        folder = cancel.folder_name(journal) if journal else destination
+        with open_stage(staging, folder) as stage:
             identity = directory_identity(os.fstat(stage))
-            prepare(source, stage, members)
+            if journal:
+                cancel.record_directory(database, journal, stage)
+                cancel.verify_stage(stage, journal)
+            record = partial(cancel.record_inode, database, job["id"], key) if journal else None
+            prepare(source, stage, members, record)
             if set(os.listdir(stage)) != {name for name, _ in members}:
                 raise AdoptionError("Die vorbereitete Arbeitskopie enthält unerwartete Dateien.")
-            manifest = flat.reserve(database, root, stage, job, key, destination, stage_name, members)
-            flat.publish(database, stage, root, job["id"], key, manifest)
-        _complete_publication(database, staging, job["id"], key, destination, identity)
+            manifest = flat.reserve(database, root, stage, job, key, destination, stage_name, members,
+                                    batch=journal["batch_id"] if journal else None)
+            flat.publish(database, stage, root, job["id"], key, manifest, check=progress.check)
+        _complete_publication(database, staging, job["id"], key, folder, identity)
 
 
 def _complete_publication(database, staging, job_id, key, destination, identity):
@@ -486,32 +518,36 @@ def _complete_publication(database, staging, job_id, key, destination, identity)
     flat.finish(database, job_id, key)
 
 
-def _resume_publication(database, root, job, key, destination, receipt):
+def _resume_publication(database, root, job, key, destination, receipt, journal):
     if (receipt["fingerprint"] != destination
             or tuple(json.loads(receipt["workspace_identity"])) != directory_identity(os.fstat(root))):
         raise AdoptionError("Inventur oder Workspace der unterbrochenen Arbeitskopie haben sich geändert.")
+    if receipt["owns_files"] and (not journal or receipt["batch_id"] != journal["batch_id"]):
+        raise AdoptionError(cancel.UNPROVEN)
     manifest = json.loads(receipt["members_json"])
     if receipt["state"] == "copied":
-        flat.verify_published(root, manifest)
+        flat.verify_published(root, manifest, progress.check)
         return
     stage_name = receipt["stage_name"]
     if stage_name not in {LEGACY_REVIEW_STAGING, LEGACY_REVIEW_PRIVATE_STAGING, LEGACY_REVIEW_VERIFIED_STAGING}:
         raise AdoptionError("Der interne Arbeitsordner ist ungültig.")
+    folder = cancel.folder_name(journal) if journal else destination
     info = host.info_at(root, stage_name)
     if info is not None:
-        with bound_child_directory(root, stage_name, directory_identity(info)) as staging:
-            info = host.info_at(staging, destination)
+        parent_identity = tuple(json.loads(journal["parent_identity"])) if journal else directory_identity(info)
+        with bound_child_directory(root, stage_name, parent_identity) as staging:
+            info = host.info_at(staging, folder)
             if info is not None:
-                identity = directory_identity(info)
-                with bound_child_directory(staging, destination, identity) as stage:
+                identity = tuple(json.loads(journal["stage_identity"])) if journal else directory_identity(info)
+                with bound_child_directory(staging, folder, identity) as stage:
                     if stage_name != LEGACY_REVIEW_VERIFIED_STAGING:
                         secure_working_directory(staging, stage_name)
-                        secure_working_directory(stage, destination)
-                    flat.publish(database, stage, root, job["id"], key, manifest)
-                _complete_publication(database, staging, job["id"], key, destination, identity)
+                        secure_working_directory(stage, folder)
+                    flat.publish(database, stage, root, job["id"], key, manifest, check=progress.check)
+                _complete_publication(database, staging, job["id"], key, folder, identity)
                 return
             os.fsync(staging)
-    flat.verify_published(root, manifest)
+    flat.verify_published(root, manifest, progress.check)
     os.fsync(root)
     flat.finish(database, job["id"], key)
 
@@ -525,6 +561,9 @@ def _copy_response(connection, row):
 
 
 def copy_review(library, job_id, key):
+    transfer = progress.transfer()
+    batch = transfer.batch if transfer else None
+    progress.check(force=True)
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         job = dict(_job(connection, library.library_id, job_id))
@@ -567,9 +606,9 @@ def copy_review(library, job_id, key):
         destination = "legacy-" + fingerprint
         connection.execute(
             """INSERT OR IGNORE INTO legacy_adoption_review_copies
-                (job_id, family_key, state, target_relative, file_count, size_bytes)
-                VALUES (?, ?, 'copying', ?, ?, ?)""",
-            (job_id, key, destination, len(members), sum(item["size_bytes"] for _, item in members)),
+                (job_id, family_key, state, target_relative, file_count, size_bytes, batch_id)
+                VALUES (?, ?, 'copying', ?, ?, ?, ?)""",
+            (job_id, key, destination, len(members), sum(item["size_bytes"] for _, item in members), batch),
         )
     _publish_copy(library, job, members, destination)
     with database_connection(library.database_path) as connection:
@@ -585,20 +624,25 @@ def copy_review(library, job_id, key):
 
 
 def review_batch_status(connection, job_id):
-    return dict(connection.execute(
+    result = dict(connection.execute(
         """SELECT count(*) AS total, count(*) FILTER (WHERE state = 'pending') AS pending,
                   count(*) FILTER (WHERE state = 'copied') AS copied,
                   count(*) FILTER (WHERE state = 'failed') AS failed
              FROM legacy_adoption_review_batch WHERE job_id = ?""",
         (job_id,),
     ).fetchone())
+    current = cancel.run(connection, job_id)
+    if current:
+        result.update(batch_id=current["id"], state=current["state"], cancel_error=current["error"])
+    return result
 
 
 def begin_review_batch(library, job_id, keys):
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         job = _job(connection, library.library_id, job_id)
-        if review_batch_status(connection, job_id)["pending"]:
+        status = review_batch_status(connection, job_id)
+        if status["pending"] or status.get("state") in {"active", "cancelling"}:
             raise AdoptionError("Setze zuerst den unterbrochenen Kopierauftrag fort.")
         eligible = _copyable_cases(connection, job_id, job, _plan_for(connection, job_id))
         if keys is not None:
@@ -613,26 +657,39 @@ def begin_review_batch(library, job_id, keys):
                WHERE job_id = ? AND family_key = ?""",
             ((job_id, key, job_id, key) for key in eligible),
         )
+        return cancel.start(connection, job_id)
 
 
 def run_review_batch(library, job_id, *, copy_family):
     while True:
         with database_connection(library.database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = cancel.run(connection, job_id)
+            if current and current["state"] != "active":
+                return
+            batch = current["id"] if current else None
             row = connection.execute(
                 """SELECT family_key FROM legacy_adoption_review_batch
                     WHERE job_id = ? AND state = 'pending' ORDER BY family_key LIMIT 1""",
                 (job_id,),
             ).fetchone()
-        if row is None:
-            return
+            if row is None:
+                if batch:
+                    connection.execute(
+                        "UPDATE legacy_adoption_review_runs SET state = 'finished' WHERE job_id = ? AND id = ?",
+                        (job_id, batch),
+                    )
+                return
         key = row["family_key"]
         try:
-            with progress.track(library.database_path, job_id, key):
+            with progress.track(library.database_path, job_id, key, batch):
                 copy_family(key)
+        except cancel.CancelRequested:
+            return
         except ReviewStagingError as error:
             logger.warning("Legacy review staging %s: %s (%s)", job_id, error.operation, error.code)
             fail_pending_review_batch(library, job_id, str(error))
-            return
+            continue
         except OSError as error:
             message = str(error)
             if error.errno == errno.ENOSPC:
@@ -652,8 +709,113 @@ def run_review_batch(library, job_id, *, copy_family):
 
 def fail_pending_review_batch(library, job_id, message):
     with database_connection(library.database_path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        current = cancel.run(connection, job_id)
+        if current and current["state"] != "active":
+            return
         connection.execute(
             """UPDATE legacy_adoption_review_batch SET state = 'failed', error = ?
                 WHERE job_id = ? AND state = 'pending'""",
             (message[:2000], job_id),
         )
+        if current:
+            connection.execute("UPDATE legacy_adoption_review_runs SET state = 'finished' WHERE job_id = ?", (job_id,))
+
+
+def _cancel_stage(database, root, entry, receipt):
+    name = entry["parent_name"]
+    if (name not in cancel.STAGE_PARENTS
+            or directory_identity(os.fstat(root)) != tuple(json.loads(entry["workspace_identity"]))):
+        raise AdoptionError(cancel.UNPROVEN)
+    folder = cancel.folder_name(entry)
+    members = json.loads(entry["members_json"])
+    if receipt and (receipt["batch_id"] != entry["batch_id"] or not receipt["owns_files"]):
+        raise AdoptionError(cancel.UNPROVEN)
+    published = {member["name"]: member for member in json.loads(receipt["members_json"])} if receipt else {}
+    with ExitStack() as stack:
+        parent = stack.enter_context(bound_child_directory(root, name, tuple(json.loads(entry["parent_identity"]))))
+        private = name != LEGACY_REVIEW_VERIFIED_STAGING
+        if private:
+            secure_working_directory(parent, name)
+        stage = None
+        if host.info_at(parent, folder) is not None:
+            if entry["stage_identity"] is None:
+                raise AdoptionError(cancel.UNPROVEN)
+            stage = stack.enter_context(bound_child_directory(parent, folder, tuple(json.loads(entry["stage_identity"]))))
+            if private:
+                secure_working_directory(stage, folder)
+            cancel.verify_stage(stage, entry)
+        for member, record in members.items():
+            if record.get("removed"):
+                continue
+            proof = published.get(member)
+            qname = ".cancel-" + hashlib.sha256(host.json_bytes([entry["job_id"], entry["family_key"], folder, member])).hexdigest()
+            positions = [member, record["temporary"]] if record["temporary"] else [member]
+            for index, position in enumerate(positions):
+                quarantine = qname + str(index)
+                if host.info_at(parent, quarantine) is not None or (stage is not None and host.info_at(stage, position) is not None):
+                    if stage is None:
+                        raise AdoptionError(cancel.UNPROVEN)
+                    cancel.remove_owned(stage, position, parent, quarantine, record["identity"])
+                    break
+            else:
+                if proof:
+                    if tuple(proof["identity"]) != tuple(record["identity"]):
+                        raise AdoptionError(cancel.UNPROVEN)
+                    cancel.remove_owned(root, proof["target"], parent, qname,
+                                        record["identity"], lambda fd, path: flat.member_proof(fd, path, proof,
+                                            require_owner=True, identity=record["identity"]))
+            record["removed"] = True
+            with database_connection(database) as connection:
+                connection.execute(
+                    "UPDATE legacy_adoption_review_stages SET members_json = ? WHERE job_id = ? AND family_key = ?",
+                    (json.dumps(members), entry["job_id"], entry["family_key"]),
+                )
+        if stage is not None:
+            if os.listdir(stage):
+                raise AdoptionError(cancel.UNPROVEN)
+            os.fsync(stage)
+    with bound_child_directory(root, name, tuple(json.loads(entry["parent_identity"]))) as parent:
+        if stage is not None:
+            if directory_identity(os.stat(folder, dir_fd=parent, follow_symlinks=False)) != tuple(json.loads(entry["stage_identity"])):
+                raise AdoptionError(cancel.UNPROVEN)
+            validate_active_roots()
+            os.rmdir(folder, dir_fd=parent)
+            os.fsync(parent)
+
+
+def finish_review_cancellation(library, job_id):
+    database = library.database_path
+    with database_connection(database) as connection:
+        current = cancel.run(connection, job_id)
+        if not current or current["state"] != "cancelling":
+            return
+        batch = current["id"]
+        entries = connection.execute(
+            "SELECT * FROM legacy_adoption_review_stages WHERE job_id = ? AND batch_id = ? ORDER BY family_key",
+            (job_id, batch),
+        ).fetchall()
+    try:
+        if entries:
+            with bound_directory(_general(library)) as root:
+                for entry in entries:
+                    with database_connection(database) as connection:
+                        receipt = flat.receipt(connection, job_id, entry["family_key"])
+                    _cancel_stage(database, root, entry, receipt)
+        with database_connection(database) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            parameters = (job_id, batch)
+            for table in ("legacy_adoption_flat_review_copies", "legacy_adoption_review_copies", "legacy_adoption_review_stages"):
+                connection.execute(f"DELETE FROM {table} WHERE job_id = ? AND batch_id = ?", parameters)
+            connection.execute("DELETE FROM legacy_adoption_review_batch WHERE job_id = ?", (job_id,))
+            connection.execute(
+                "UPDATE legacy_adoption_review_runs SET state = 'cancelled', error = NULL WHERE job_id = ? AND id = ?",
+                parameters,
+            )
+    except (AdoptionError, OSError, host.ExecutionError, RootOperationError, PrivateStorageError) as error:
+        logger.warning("Legacy review cancellation %s: %s", job_id, error)
+        with database_connection(database) as connection:
+            connection.execute(
+                "UPDATE legacy_adoption_review_runs SET error = ? WHERE job_id = ? AND id = ?",
+                (cancel.UNPROVEN, job_id, batch),
+            )

@@ -41,6 +41,8 @@ def fresh_main(tmp_path, monkeypatch, request):
             pytest.skip("O_TMPFILE and descriptor linking require Linux")
         if acl_root := os.environ.get("ADOPTION_NFSV4_ROOT"):
             workspace = Path(acl_root).resolve(strict=True) / tmp_path.name / "workspace"
+    elif variant == "cancel-zfs" and (workspace_dataset := os.environ.get("ADOPTION_ZFS_OTHER")):
+        workspace = Path(workspace_dataset).resolve(strict=True) / tmp_path.name / "workspace"
     # Only the media pair belongs on synthetic ZFS. The legacy private
     # catalogue and operation records require a supported native ACL backend.
     native_media = native and variant
@@ -1165,6 +1167,7 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
 
     from PIL import Image
     from app import legacy_adoption_review as review
+    from app import legacy_adoption_review_cancel as cancellation
     from app import legacy_adoption_host as host
     from app import legacy_adoption_review_progress as progress
     from app.database import get_job
@@ -1310,7 +1313,9 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
                     interrupted.setattr(os, "link", interrupt_partial)
                     with pytest.raises(RuntimeError, match="simulate loss before linking"):
                         publish(library, adoption, members, destination)
-                linked = verified_root / destination
+                with database_connection(db) as connection:
+                    stage = cancellation.journal(connection, job_id, "photo-001")
+                linked = verified_root / cancellation.folder_name(stage)
                 assert {file.name: file.read_bytes() for file in linked.iterdir()} == {
                     "photo-001.jpg": originals["photo-001.jpg"],
                 }
@@ -1341,6 +1346,7 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
             assert entered.wait(20)
             assert _json(browser, "GET", job + "/review/batch") == {
                 "total": 61, "copied": 1, "failed": 0, "pending": 60, "running": True,
+                "batch_id": live["batch_id"], "state": "active", "cancel_error": None,
             }
             _json(browser, "DELETE", job, status=409)
             _json(browser, "POST", job + "/scan", status=409)
@@ -1352,9 +1358,12 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
     assert [r.status_code for r in responses] == [202]
     main.startup_database()
     assert main.DATABASE_INITIALIZATION_ERROR is None
+    if main.ADOPTION_STARTUP_THREAD:
+        main.ADOPTION_STARTUP_THREAD.join(timeout=15)
     browser = TestClient(main.app, follow_redirects=False)
     assert _json(browser, "GET", job + "/review/batch") == {
         "total": 61, "copied": 1, "failed": 0, "pending": 60, "running": False,
+        "batch_id": live["batch_id"], "state": "active", "cancel_error": None,
     }
     restarted = _json(browser, "GET", job + "/review/batch?details=true")
     assert restarted["active"] is None and restarted["bytes_written"] == restarted["bytes_verified"] > 0
@@ -1369,6 +1378,7 @@ def test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy
         _json(browser, "POST", job + "/review/batch/resume", status=202)
     assert _json(browser, "GET", job + "/review/batch") == {
         "total": 61, "copied": 60, "failed": 1, "pending": 0, "running": False,
+        "batch_id": live["batch_id"], "state": "finished", "cancel_error": None,
     }
     page = _json(browser, "GET", job + "/review")
     assert page[2]["can_copy"] and "nicht genug Speicherplatz" in page[2]["copy_error"]
@@ -1826,3 +1836,177 @@ def test_review_metadata_stages_distinct_times_and_adopts_into_existing_draft(
         assert dict(rows) == {name: create if name == "second.jpg" else tag for name in originals
                               if name.startswith("first.") or name == "second.jpg"}
     assert (archive / event_root_relative(parent) / "event.json").is_file()
+
+
+@pytest.mark.parametrize("fresh_main", ["cancel-zfs", "review-unlinked"], indirect=True, ids=["cancel-zfs", "cancel-unlinked"])
+def test_cancel_review_batch_rolls_back_only_its_files_and_resumes(fresh_main, monkeypatch, synthetic_dataset, request):
+    from hashlib import sha256
+    from threading import Event, Thread
+
+    from app import legacy_adoption_host as host
+    from app import legacy_adoption_review as review
+    from app import legacy_adoption_review_cancel as cancellation
+    from app import legacy_adoption_review_progress as progress
+    from tests.backend.test_legacy_adoption_host import _macos_rename
+
+    unlinked = request.node.callspec.id == "cancel-unlinked"
+    native_acl = unlinked and os.environ.get("ADOPTION_NFSV4_ROOT")
+    workspace, db, _, archive = fresh_main
+    source = archive.parent / "legacy-cancel-source"
+    source.mkdir()
+    originals = {
+        "a-jpeg.jpg": b"source jpeg", "b-raw.jpg": b"family jpeg", "b-raw.raf": b"family raw",
+        "b-raw.raf.xmp": b"family sidecar", "c-video.mp4": b"video" * (4 * 1024 * 1024),
+        "older.jpg": b"previous copy", "z-last.jpg": b"last", "valid.jpg": b"metadata source",
+    }
+    for name, content in originals.items():
+        (source / name).write_bytes(content)
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+    monkeypatch.setattr(main, "DATABASE_INITIALIZATION_ERROR", None)
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", lambda descriptors, _check: {
+        fd: {
+            "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+            "EXIF:ExifIFD:CreateDate": "2026:07:22 12:00:00",
+        } if os.pread(fd, 8, 0) == b"metadata" else {} for fd in descriptors
+    })
+    if os.environ.get("ADOPTION_ZFS_ROOT"):
+        monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
+    if sys.platform == "darwin":
+        monkeypatch.setattr(host, "rename_noreplace", _macos_rename)
+    client = _onboard(fresh_main)
+    _adopt(client)
+    api = "/api/legacy-adoption"
+
+    def new_job():
+        job_id = _json(client, "POST", api + "/jobs", status=201, json={"root": "nas"})["id"]
+        job = api + "/jobs/" + job_id
+        _json(client, "POST", job + "/scan", status=202)
+        return job_id, job
+
+    _, old_job = new_job()
+    general = review._general(resolve_library_context(fresh_main[2], "main"))
+    if native_acl:
+        import struct
+        from app.private_storage_security import NFS4
+
+        acl = struct.pack("!II10I", 0, 2, 0, 0x03, 1, 0x1f01ff, 1, 0, 0x43, 0, 0x1301ff, 65531)
+        os.setxattr(general, NFS4[0], acl)
+        with review.bound_directory(general) as descriptor:
+            assert review._native_staging(descriptor)
+    elif unlinked:
+        monkeypatch.setattr(review, "_native_staging", lambda _fd: True)
+
+    _json(client, "POST", old_job + "/review/batch", status=202, json={"family_keys": ["older"]})
+    assert (general / "older.jpg").read_bytes() == originals["older.jpg"]
+    _json(client, "DELETE", old_job)
+    (general / "a-jpeg.jpg").write_bytes(b"unrelated preexisting file")
+    preserved = {item.name: sha256(item.read_bytes()).hexdigest() for item in general.iterdir() if item.is_file()}
+    job_id, job = new_job()
+    draft = _json(client, "PUT", job + "/draft", json={"revision": 0, "events": [{
+        "name": "Plan survives cancel", "start_date": "2026-07-21", "end_date": "2026-07-21",
+    }]})
+    staged = _json(client, "PUT", job + "/review/metadata", json={
+        "revision": draft["revision"], "family_keys": ["valid"], "source": "@detected", "individual": True,
+    })
+    assert staged["staged"] == 1
+    original_draft = _json(client, "GET", job)["draft"]
+    endpoint = job + "/review/batch"
+    members = ["a-jpeg", "b-raw", "c-video", "older", "z-last"]
+    publish, wrote = review._publish_copy, progress.wrote
+
+    for phase in ("before", "video", "last"):
+        entered, release = Event(), Event()
+        responses = []
+
+        def stop():
+            entered.set()
+            assert release.wait(20)
+            progress.check(force=True)
+
+        def pause_publication(library, adoption, files, destination):
+            if phase == "before" and files[0][0] == "a-jpeg.jpg":
+                stop()
+            publish(library, adoption, files, destination)
+            if phase == "last" and files[0][0] == "z-last.jpg":
+                stop()
+
+        def pause_video(count):
+            wrote(count)
+            if phase == "video" and progress.transfer().family == "c-video" and not entered.is_set():
+                stop()
+
+        with monkeypatch.context() as hooks:
+            hooks.setattr(review, "_publish_copy", pause_publication)
+            hooks.setattr(progress, "wrote", pause_video)
+            transfer = Thread(target=lambda: responses.append(client.post(endpoint, json={"family_keys": members})))
+            transfer.start()
+            try:
+                assert entered.wait(20)
+                browser = TestClient(main.app, follow_redirects=False)
+                active = _json(browser, "GET", endpoint + "?details=true")
+                assert active["state"] == "active" and active["running"]
+                assert active["copied"] == {"before": 0, "video": 2, "last": 4}[phase]
+                assert active["active"]["family_key"] == {"before": "a-jpeg", "video": "c-video", "last": "z-last"}[phase]
+                batch = {"batch_id": active["batch_id"]}
+                _json(browser, "POST", endpoint + "/cancel", status=202, json=batch)
+                _json(browser, "POST", endpoint + "/cancel", status=202, json=batch)
+                assert _json(TestClient(main.app), "GET", endpoint)["state"] == "cancelling"
+                _json(browser, "DELETE", job, status=409)
+                if phase == "video":
+                    rename = host.rename_noreplace
+
+                    def interrupt_cleanup(src, filename, dst, target):
+                        rename(src, filename, dst, target)
+                        if target.startswith(".cancel-"):
+                            raise RuntimeError("process lost after moving an owned inode")
+
+                    hooks.setattr(host, "rename_noreplace", interrupt_cleanup)
+                if phase == "last":
+                    owned = general / "a-jpeg_1.jpg"
+                    parked = general / "user-moved-original-work-copy"
+                    owned.rename(parked)
+                    owned.write_bytes(originals["a-jpeg.jpg"])  # same checksum, unrelated inode
+            finally:
+                release.set()
+                transfer.join(25)
+        assert [response.status_code for response in responses] == [202]
+        if phase in {"video", "last"}:
+            interrupted = _json(client, "GET", endpoint)
+            assert interrupted["state"] == "cancelling" and not interrupted["running"]
+            if phase == "last":
+                assert interrupted["cancel_error"] == cancellation.UNPROVEN
+                assert owned.read_bytes() == parked.read_bytes() == originals["a-jpeg.jpg"]
+                owned.rename(general / "user replacement")
+                parked.rename(owned)
+                (general / "user replacement").unlink()
+            else:
+                assert any(item.name.startswith(".cancel-") for item in general.glob("*/*"))
+            main.startup_database()
+            assert main.DATABASE_INITIALIZATION_ERROR is None
+            if main.ADOPTION_STARTUP_THREAD:
+                main.ADOPTION_STARTUP_THREAD.join(timeout=15)
+            _json(TestClient(main.app), "POST", endpoint + "/cancel", status=202, json=batch)
+
+        cancelled = _json(client, "GET", endpoint + "?details=true")
+        assert cancelled["state"] == "cancelled" and cancelled["copied"] == cancelled["pending"] == 0
+        assert cancelled["failed"] == 0 and cancelled["active"] is None
+        assert cancelled["bytes_written"] == cancelled["bytes_verified"] == 0
+        _json(client, "POST", endpoint + "/cancel", status=202, json=batch)
+        assert _json(client, "GET", job)["draft"] == original_draft
+        assert set(_json(client, "GET", job + "/review/selection")) == set(members)
+        assert {item.name: sha256(item.read_bytes()).hexdigest() for item in general.iterdir() if item.is_file()} == preserved
+        assert all(not list(item.iterdir()) for item in general.iterdir() if item.is_dir())
+        with database_connection(db) as connection:
+            assert not connection.execute("SELECT 1 FROM legacy_adoption_review_copies WHERE job_id = ?", (job_id,)).fetchone()
+            assert not connection.execute("SELECT 1 FROM legacy_adoption_flat_review_copies WHERE job_id = ?", (job_id,)).fetchone()
+
+    completed = _json(client, "POST", endpoint, status=202, json={"family_keys": members})
+    _json(client, "POST", endpoint + "/cancel", status=409, json=batch)
+    _json(client, "POST", endpoint + "/cancel", status=409, json={"batch_id": completed["batch_id"]})
+    result = _json(client, "GET", endpoint)
+    assert result["state"] == "finished" and result["copied"] == len(members)
+    assert (general / "a-jpeg_1.jpg").read_bytes() == originals["a-jpeg.jpg"]
+    assert {item.name: sha256(item.read_bytes()).hexdigest() for item in source.iterdir()} == {
+        name: sha256(content).hexdigest() for name, content in originals.items()
+    }
+    assert not list(archive.iterdir())

@@ -248,3 +248,30 @@ def test_discovery_bootstrap_uses_bound_package_and_executes_only_verified_bytes
         rejected = subprocess.run(command, text=True, capture_output=True)
         assert rejected.returncode == 1 and "Approved AppData package not found" in rejected.stderr
         assert "tampered helper was executed" not in rejected.stderr
+
+
+def test_review_cancel_returns_a_file_replaced_during_detachment(tmp_path, monkeypatch):
+    from app import legacy_adoption_review_cancel as cancel
+    from app.legacy_adoption_paths import AdoptionError, bound_directory, directory_identity
+
+    general = tmp_path / "General"
+    holding = general / "staging"
+    holding.mkdir(parents=True)
+    target = general / "photo.jpg"
+    target.write_bytes(b"the working copy")
+    identity = directory_identity(target.stat())
+    original_rename = _macos_rename if sys.platform == "darwin" else host.rename_noreplace
+
+    def replace_at_rename(source, name, destination, new_name):
+        if new_name == ".cancel-proof":
+            target.rename(general / "externally moved")
+            target.write_bytes(b"another user's file")
+        return original_rename(source, name, destination, new_name)
+
+    monkeypatch.setattr(host, "rename_noreplace", replace_at_rename)
+    with bound_directory(general.resolve()) as root, bound_directory(holding.resolve()) as quarantine:
+        with pytest.raises(AdoptionError, match="Arbeitskopie"):
+            cancel.remove_owned(root, target.name, quarantine, ".cancel-proof", identity)
+    assert target.read_bytes() == b"another user's file"
+    assert (general / "externally moved").read_bytes() == b"the working copy"
+    assert not list(holding.iterdir())

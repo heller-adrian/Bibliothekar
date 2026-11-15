@@ -4,6 +4,15 @@ import re
 
 
 TRANSLATIONS = {
+    "Kopieren abbrechen": "Cancel Copy",
+    "Abbruch angefordert. Arbeitskopien werden bereinigt …": "Cancellation requested. Removing working copies …",
+    "Kopierauftrag abgebrochen": "Copy job cancelled",
+    "Die Arbeitskopien dieses Auftrags wurden entfernt.": "The working copies created by this job were removed.",
+    "Bereinigung des Kopierauftrags unterbrochen": "Copy job cleanup interrupted",
+    "Bereinigung fortsetzen": "Resume cleanup",
+    "Dieser Kopierauftrag ist bereits beendet oder wurde ersetzt.": "This copy job has finished or has been replaced.",
+    "Eine Arbeitskopie oder ihr Ordner wurde verändert. Die Bereinigung wartet auf eine sichere Wiederherstellung.":
+        "A working copy or its folder changed. Cleanup is paused until it can safely resume.",
     "Arbeitskopien in General": "Working copies in General",
     "Kopierfortschritt der Dateifamilie": "File family copy progress",
     "SHA-256 wird geprüft": "Verifying SHA-256",

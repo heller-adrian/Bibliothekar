@@ -38,9 +38,10 @@ from app.legacy_adoption_mode import (
 from app.legacy_adoption_plan import MAX_PLAN_ITEMS, create_plan, plan_directories, plan_moves, plan_status
 from app.legacy_adoption_registration import finalize_adoption
 from app.legacy_adoption_review import (
-    begin_review_batch, check_review_staging, copy_review, fail_pending_review_batch,
+    begin_review_batch, check_review_staging, copy_review, fail_pending_review_batch, finish_review_cancellation,
     review_batch_status, review_cases, review_count, review_selection, run_review_batch, ReviewStagingError, STAGING_ERROR,
 )
+from app.legacy_adoption_review_cancel import request as request_review_cancel
 from app.legacy_adoption_review_metadata import apply_metadata, metadata_sources, stage_metadata
 from app.legacy_adoption_review_progress import batch_details
 from app.legacy_adoption_verify import plan_issues, reopen_plan
@@ -134,6 +135,10 @@ class ReviewBatch(BaseModel):
     family_keys: list[str] | None = Field(min_length=1)
 
 
+class CancelReviewBatch(BaseModel):
+    batch_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
 class ScriptHost(PlanCommand):
     appdata: str | None = Field(default=None, min_length=1, max_length=4096)
     source: str | None = Field(default=None, min_length=1, max_length=4096)
@@ -218,7 +223,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
 
     def require_review_idle(library, job_id):
         status = copy_status(library, job_id)
-        if status["running"] or status["pending"]:
+        if status["running"] or status["pending"] or status.get("state") in {"active", "cancelling"}:
             raise AdoptionError("Schließe den Kopierauftrag zuerst ab.")
 
     def run_copies(library, job_id, registry):
@@ -230,18 +235,19 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             with adoption_execution_access(registry):
                 with admission(library):
                     try:
-                        check_review_staging(library)
+                        if copy_status(library, job_id).get("state") != "cancelling":
+                            check_review_staging(library)
                     except ReviewStagingError as error:
                         logging.getLogger(__name__).warning(
                             "Legacy review staging %s: %s (%s)", job_id, error.operation, error.code,
                         )
                         fail_pending_review_batch(library, job_id, str(error))
-                        return
                     except (AdoptionError, OSError, RootOperationError) as error:
                         logging.getLogger(__name__).warning("Legacy review staging %s: %r", job_id, error.__cause__ or error)
                         fail_pending_review_batch(library, job_id, STAGING_ERROR)
-                        return
                 run_review_batch(library, job_id, copy_family=copy_family)
+                with admission(library):
+                    finish_review_cancellation(library, job_id)
         except Exception:
             logging.getLogger(__name__).exception("Legacy review batch interrupted for job %s", job_id)
         finally:
@@ -255,7 +261,10 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
 
     def schedule_copies(library, job_id, tasks, registry):
         with running_lock:
-            review_running.add(key(library, job_id))
+            run_key = key(library, job_id)
+            if run_key in review_running:
+                return
+            review_running.add(run_key)
         tasks.add_task(run_copies, library, job_id, registry)
 
     @app.get("/setup/adoption", response_class=HTMLResponse, include_in_schema=False)
@@ -495,7 +504,20 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         with _errors(), adoption_execution_access(registry), admission(library):
             require_review_idle(library, job_id)
             require_inventory_idle(library, job_id)
-            begin_review_batch(library, job_id, payload.family_keys)
+            batch_id = begin_review_batch(library, job_id, payload.family_keys)
+            schedule_copies(library, job_id, tasks, registry)
+        return {"accepted": True, "batch_id": batch_id}
+
+    @router.post("/jobs/{job_id}/review/batch/cancel", status_code=202)
+    def cancel_copies(job_id: str, payload: CancelReviewBatch, tasks: BackgroundTasks):
+        library, registry = context(), registry_path()
+        # The worker owns the disk-operation locks. This request only records
+        # intent and can run while a member is being copied or hashed.
+        with _errors(), database_connection(library.database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            _job(connection, library.library_id, job_id)
+            pending = request_review_cancel(connection, job_id, payload.batch_id)
+        if pending:
             schedule_copies(library, job_id, tasks, registry)
         return {"accepted": True}
 
@@ -505,7 +527,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         with _errors(), adoption_execution_access(registry), admission(library):
             require_inventory_idle(library, job_id)
             status = copy_status(library, job_id)
-            if status["pending"] and not status["running"]:
+            if (status["pending"] or status.get("state") == "active") and not status["running"]:
                 schedule_copies(library, job_id, tasks, registry)
         return {"accepted": True}
 

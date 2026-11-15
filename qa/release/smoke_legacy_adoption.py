@@ -161,7 +161,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             time.sleep(1)
         assert state["review_count"] == 1 and state["files"] == 3
         assert api(job + "/review/selection") == ["undated"]
-        api(job + "/review/batch", method="POST", expected=202, payload={"family_keys": ["undated"]})
+        batch = api(job + "/review/batch", method="POST", expected=202, payload={"family_keys": ["undated"]})
         for attempt in range(60):
             result = api(job + "/review/batch")
             if not result["running"]:
@@ -169,7 +169,8 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             if attempt == 59:
                 raise AssertionError(result)
             time.sleep(1)
-        assert result == {"total": 1, "pending": 0, "copied": 1, "failed": 0, "running": False}, result
+        assert result == {"total": 1, "pending": 0, "copied": 1, "failed": 0, "running": False,
+                          "batch_id": batch["batch_id"], "state": "finished", "cancel_error": None}, result
         assert not api(job + "/review/selection")
         api(job, method="DELETE")
         api("/api/setup/adoption", method="POST", payload={"decision": "skipped"})

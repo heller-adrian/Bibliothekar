@@ -10,12 +10,13 @@ from app.legacy_adoption_paths import AdoptionError, bound_file, bound_sha256, d
 from app.root_operations import validate_active_roots
 
 
-def member_proof(directory, name, member, *, require_owner=False, identity=None):
+def member_proof(directory, name, member, *, require_owner=False, identity=None, check=None):
     with bound_file(directory, name) as (descriptor, info):
         actual = directory_identity(info)
         if ((require_owner and info.st_uid != os.geteuid()) or (identity is not None and actual != tuple(identity))
                 or info.st_nlink != 1 or info.st_size != member["size_bytes"]
-                or bound_sha256(descriptor) != member["sha256"]):
+                or info.st_mtime_ns != member.get("mtime_ns", info.st_mtime_ns)
+                or bound_sha256(descriptor, check) != member["sha256"]):
             raise AdoptionError("Die vorhandene Arbeitskopie weicht von der Inventur ab: " + name)
         return actual
 
@@ -66,37 +67,40 @@ def _choose_names(root, family_key, originals, reserved=()):
     raise AdoptionError("Für die Dateifamilie konnte kein freier Name in General ermittelt werden.")
 
 
-def verify_published(root, plan):
+def verify_published(root, plan, check=None):
     for entry in plan:
-        member_proof(root, entry["target"], entry, require_owner=True, identity=entry["identity"])
+        member_proof(root, entry["target"], entry, require_owner=True, identity=entry["identity"], check=check)
 
 
-def reuse_completed(database, root, job, key, fingerprint, members):
+def reuse_completed(database, root, job, key, fingerprint, members, *, batch=None, check=None):
     with database_connection(database) as connection:
         candidates = connection.execute(
             """SELECT * FROM legacy_adoption_flat_review_copies
                WHERE fingerprint = ? AND workspace_identity = ? AND state = 'copied'""",
             (fingerprint, _workspace_identity(root)),
         ).fetchall()
-        for row in candidates:
-            plan = json.loads(row["members_json"])
-            try:
-                verify_published(root, plan)
-            except (AdoptionError, OSError):
-                continue
+    for row in candidates:
+        plan = json.loads(row["members_json"])
+        try:
+            verify_published(root, plan, check)
+        except (AdoptionError, OSError):
+            continue
+        with database_connection(database) as connection:
             sources = {name: member["relative_path"] for name, member in members}
             for entry in plan:
                 entry["source"] = sources[entry["name"]]
             connection.execute(
-                """INSERT INTO legacy_adoption_flat_review_copies VALUES (?, ?, ?, ?, ?, ?, ?, 'copied')""",
+                """INSERT INTO legacy_adoption_flat_review_copies
+                   (job_id, family_key, source_root, fingerprint, workspace_identity, stage_name, members_json, state, batch_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'copied', ?)""",
                 (job["id"], key, job["source_root"], fingerprint, row["workspace_identity"], row["stage_name"],
-                 json.dumps(plan)),
+                 json.dumps(plan), batch),
             )
             return True
     return False
 
 
-def reserve(database, root, stage, job, key, fingerprint, stage_name, members):
+def reserve(database, root, stage, job, key, fingerprint, stage_name, members, *, batch=None):
     with database_connection(database) as connection:
         connection.execute("BEGIN IMMEDIATE")
         identity = _workspace_identity(root)
@@ -107,36 +111,37 @@ def reserve(database, root, stage, job, key, fingerprint, stage_name, members):
             ) for path in json.loads(row[0])
         ]
         targets = _choose_names(root, key, [name for name, _ in members], reserved)
-        plan = [
-            {"name": name, "target": target, "source": member["relative_path"], "sha256": member["sha256"],
-             "size_bytes": member["size_bytes"],
-             "identity": directory_identity(os.stat(name, dir_fd=stage, follow_symlinks=False))}
-            for (name, member), target in zip(members, targets, strict=True)
-        ]
+        plan = []
+        for (name, member), target in zip(members, targets, strict=True):
+            info = os.stat(name, dir_fd=stage, follow_symlinks=False)
+            plan.append({"name": name, "target": target, "source": member["relative_path"], "sha256": member["sha256"],
+                         "size_bytes": member["size_bytes"], "identity": directory_identity(info), "mtime_ns": info.st_mtime_ns})
         connection.execute(
-            """INSERT INTO legacy_adoption_flat_review_copies VALUES (?, ?, ?, ?, ?, ?, ?, 'publishing')""",
-            (job["id"], key, job["source_root"], fingerprint, identity, stage_name, json.dumps(plan)),
+            """INSERT INTO legacy_adoption_flat_review_copies
+               (job_id, family_key, source_root, fingerprint, workspace_identity, stage_name, members_json, state, batch_id, owns_files)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'publishing', ?, ?)""",
+            (job["id"], key, job["source_root"], fingerprint, identity, stage_name, json.dumps(plan), batch, bool(batch)),
         )
     return plan
 
 
-def _moved(stage, root, plan):
+def _moved(stage, root, plan, check):
     moved = []
     for entry in plan:
         name, target = entry["name"], entry["target"]
         if host.info_at(stage, name) is None:
-            member_proof(root, target, entry, require_owner=True, identity=entry["identity"])
+            member_proof(root, target, entry, require_owner=True, identity=entry["identity"], check=check)
             moved.append(entry)
         else:
-            member_proof(stage, name, entry, require_owner=True, identity=entry["identity"])
+            member_proof(stage, name, entry, require_owner=True, identity=entry["identity"], check=check)
     return moved
 
 
-def publish(database, stage, root, job_id, key, plan):
+def publish(database, stage, root, job_id, key, plan, *, check=None):
     # Moving each verified inode keeps both the no-clobber property and a
     # restart-proof identity. The adoption lease keeps normal consumers closed
     # until the whole family has been verified and the receipt is complete.
-    moved = _moved(stage, root, plan)
+    moved = _moved(stage, root, plan, check)
     remaining = [entry for entry in plan if entry not in moved]
     owned = {entry["target"] for entry in moved}
     names = set(os.listdir(root)) - owned
@@ -157,11 +162,13 @@ def publish(database, stage, root, job_id, key, plan):
             )
         remaining = plan
     for entry in remaining:
+        if check:
+            check()
         validate_active_roots()
         host.rename_noreplace(stage, entry["name"], root, entry["target"])
     os.fsync(stage)
     os.fsync(root)
-    verify_published(root, plan)
+    verify_published(root, plan, check)
 
 
 def finish(database, job_id, key):
