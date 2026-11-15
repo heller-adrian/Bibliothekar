@@ -12,8 +12,8 @@ fs="$scratch/guest"
 mkdir "$scratch/debs"
 printf 'product=%s\nrunner=%s\n' "$QUALIFIED_SOURCE" "$GITHUB_SHA" > "$evidence/source.txt"
 sudo apt-get update -qq
-sudo apt-get install -y -q --no-install-recommends debootstrap qemu-system-x86
-sudo debootstrap --variant=minbase --include=initramfs-tools,linux-base,kmod,iproute2,ca-certificates,python3-venv,libimage-exiftool-perl,libssl3t64,libtirpc3t64,libblkid1,libuuid1,libudev1,liblz4-1,libzstd1,zlib1g,zstd,busybox     trixie "$fs" https://deb.debian.org/debian > "$evidence/guest-install.log" 2>&1
+sudo apt-get install -y -q --no-install-recommends debootstrap qemu-system-x86 cpio
+sudo debootstrap --variant=minbase --include=linux-base,kmod,iproute2,ca-certificates,python3-venv,libimage-exiftool-perl,libssl3t64,libtirpc3t64,libblkid1,libuuid1,libudev1,liblz4-1,libzstd1,zlib1g,zstd,busybox-static     trixie "$fs" https://deb.debian.org/debian > "$evidence/guest-install.log" 2>&1
 
 base=https://download.truenas.com/TrueNAS-SCALE-Goldeye/25.10.0/packages
 python3 - "$base" "$scratch/debs" <<'PY'
@@ -50,12 +50,20 @@ done
 kernel=6.12.33-production+truenas
 sudo chroot "$fs" depmod "$kernel"
 sudo chroot "$fs" ldconfig
-printf 'virtio_pci\nvirtio_blk\next4\n' | sudo tee -a "$fs/etc/initramfs-tools/modules" >/dev/null
-sudo unshare --mount --propagation private bash -euc '
-    mount -t proc proc "$1/proc"
-    mount -t sysfs sysfs "$1/sys"
-    chroot "$1" update-initramfs -v -c -k "$2"
-' _ "$fs" "$kernel" >> "$evidence/guest-install.log" 2>&1
+initrd="$scratch/initrd"
+mkdir -p "$initrd"/{bin,dev,proc,sys,newroot} "$initrd/lib/modules/$kernel"
+sudo install -m 755 "$fs/usr/bin/busybox" "$initrd/bin/busybox"
+sudo install -m 755 "$lab/boot.sh" "$initrd/init"
+for module in virtio_pci virtio_blk ext4; do
+    sudo chroot "$fs" modprobe --set-version "$kernel" --show-depends "$module" |
+        while read -r command path _; do
+            if [[ "$command" == insmod ]]; then
+                sudo install -D -m 644 "$fs$path" "$initrd$path"
+            fi
+        done
+done
+sudo cp "$fs/lib/modules/$kernel"/modules.* "$initrd/lib/modules/$kernel/"
+(cd "$initrd" && find . -print0 | cpio --null --create --format=newc --owner=0:0 --quiet | gzip) > "$scratch/initrd.img"
 sudo install -m 755 "$lab/guest.sh" "$fs/rc13-native-init"
 sudo mkdir -p "$fs/opt/bibliothekar"
 git -C product archive "$QUALIFIED_SOURCE" | sudo tar -xf - -C "$fs/opt/bibliothekar"
@@ -73,5 +81,5 @@ accelerator=(-accel tcg -cpu max)
 if [[ -c /dev/kvm && -r /dev/kvm && -w /dev/kvm ]]; then
     accelerator=(-accel kvm -cpu host)
 fi
-timeout 15m qemu-system-x86_64 "${accelerator[@]}" -smp 2 -m 4096 -nographic -no-reboot -nic none     -kernel "$fs/boot/vmlinuz-$kernel" -initrd "$fs/boot/initrd.img-$kernel"     -append "root=/dev/vda rw console=ttyS0 init=/rc13-native-init panic=1"     -drive "file=$disk,format=raw,if=virtio" -drive "file=$vdev,format=raw,if=virtio"     2>&1 | tee "$evidence/console.log"
+timeout 15m qemu-system-x86_64 "${accelerator[@]}" -smp 2 -m 4096 -nographic -no-reboot -nic none     -kernel "$fs/boot/vmlinuz-$kernel" -initrd "$scratch/initrd.img"     -append "root=/dev/vda rw console=ttyS0 init=/rc13-native-init panic=1"     -drive "file=$disk,format=raw,if=virtio" -drive "file=$vdev,format=raw,if=virtio"     2>&1 | tee "$evidence/console.log"
 grep -Eq '^RC13_NATIVE_EXIT=0[[:space:]]*$' "$evidence/console.log"
