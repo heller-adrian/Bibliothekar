@@ -1,4 +1,4 @@
-name: RC13 native TrueNAS NFSv4 qualification
+name: RC14 native TrueNAS NFSv4 qualification
 on:
   workflow_dispatch:
     inputs:
@@ -11,11 +11,11 @@ permissions:
   contents: read
 jobs:
   native-truenas:
-    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/codex/rc13-native-nfsv4' && !inputs.full_backend
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/codex/rc14-native-nfsv4' && !inputs.full_backend
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      QUALIFIED_SOURCE: d6c2ca49013af0e4122298f324a94f6cd141159c
+      QUALIFIED_SOURCE: 7138797dc233770b46b381392b67dd37f40c38d5
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: rc13-native-truenas-evidence
+          name: rc14-native-truenas-evidence
           path: |
             ${{ runner.temp }}/rc13-native-evidence/
           if-no-files-found: error
