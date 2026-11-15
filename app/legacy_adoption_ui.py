@@ -99,6 +99,9 @@ _PAGE = r"""<!doctype html>
 .adoption-review-progress[data-result=error]{color:var(--bk-danger)}
 .adoption-review-row[data-copied] strong{color:var(--bk-muted)}
 .adoption-review-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:start}
+.adoption-review-row:has(.adoption-metadata-source){grid-template-columns:auto minmax(0,1fr) minmax(10rem,16rem)}
+.adoption-metadata-source{min-width:0;width:100%}
+@media(max-width:700px){.adoption-review-row:has(.adoption-metadata-source){grid-template-columns:auto minmax(0,1fr)}.adoption-review-row .adoption-metadata-source{grid-column:2}}
 .legacy-adoption .adoption-review-row>input[type=checkbox]{margin-top:12px}
 .adoption-review-row summary{overflow-wrap:anywhere}
 .adoption-review-error{color:var(--bk-danger);font-size:.875rem}
@@ -265,6 +268,7 @@ if(later) {
 let job = null, draft = {}, draftRevision = 0, year = "", day = null;
 let familyCursor = "", moveCursor = "", timer = 0, scriptTimer = 0, reviewTimer = 0;
 let reviewSelection = new Set(), reviewOpened = new Set(), reviewBatch = {}, reviewSubmitting = false;
+let reviewMetadataSaving=false, reviewMetadataFeedback=null;
 let reviewSelectionVersion=0;
 let selectedSource = null, browsedSource = null, browseVersion = 0;
 let draftPage = 40;
@@ -391,7 +395,7 @@ function node(tag, content, className) {
   return el;
 }
 function report(message="") {
-  const editorMessage=document.querySelector("#event-editor[open] #editor-message");
+  const editorMessage=document.querySelector("#event-editor[open] #editor-message, dialog[open] #review-metadata-message");
   (editorMessage || $("message")).textContent=message;
 }
 function detail(value) {
@@ -500,7 +504,7 @@ function openJob(id) {
   requireSaved();
   jobId=id;
   year="";day=null;familyCursor="";moveCursor="";draftPage=40;
-  reviewSelection.clear();reviewOpened.clear();reviewBatch={};
+  reviewSelection.clear();reviewOpened.clear();reviewBatch={};reviewMetadataFeedback=null;
   const url=new URL(location.href);
   url.searchParams.set("job",id);
   url.searchParams.set("library",library);
@@ -855,7 +859,7 @@ const reviewStates={
   copied:"Kopiert"
 };
 function reviewBusy(){
-  return reviewSubmitting || reviewBatch.running || reviewBatch.pending>0;
+  return reviewSubmitting || reviewMetadataSaving || reviewBatch.running || reviewBatch.pending>0;
 }
 function reviewHelp(){
   const help=node("details",undefined,"adoption-source-help adoption-review-help");
@@ -930,14 +934,48 @@ function appendCaptureEvidence(target, metadata){
     target.append(line([candidate.technical_tag,candidate.normalized_datetime || candidate.raw_value].filter(Boolean).join(" · ")));
   }
 }
+function metadataSourceLabel(tag){
+  if(tag==="@detected")return t("Ermittelte Aufnahmezeit");
+  const labels={DateTimeOriginal:"Aufnahmedatum",CreateDate:"Erstellungsdatum",
+    CreationDate:"Aufnahme- oder Erstellungsdatum",MediaCreateDate:"Medien-Erstellungsdatum",
+    TrackCreateDate:"Spur-Erstellungsdatum",ModifyDate:"Änderungsdatum",
+    FileCreateDate:"Datei-Erstellungsdatum",FileModifyDate:"Dateiänderungsdatum"};
+  const name=labels[tag.split(":").at(-1)];
+  return (name?t(name)+" · ":"")+tag;
+}
+function metadataOption(value,label){
+  const option=node("option",label);option.value=value;
+  return option;
+}
+function metadataFeedback(target,result){
+  target.replaceChildren();
+  if(!result)return;
+  const rejected=Object.entries(result.rejected || {});
+  if(!rejected.length)return;
+  const reasons={unavailable:"Dateifamilie nicht verfügbar",source_changed:"Quelldatei oder Metadaten seit der Inventur geändert",
+    source_unavailable:"Quelle fehlt, ist ungültig oder in der Familie mehrdeutig",
+    already_selected:"Bereits individuell ausgewählt"};
+  const details=node("details");
+  details.open=true;
+  details.append(node("summary",rejected.length+" · "+t("Übersprungene Prüffälle")));
+  const list=node("ul");
+  for(const [key,reason] of rejected){
+    const item=node("li",key+" · "+t(reasons[reason] || reason));item.dataset.bkPreserveLanguage="";
+    list.append(item);
+  }
+  details.append(list);target.append(details);
+}
 function showReview(target) {
   let cursor="";
   const toolbar=node("div",undefined,"inline");
   const list=node("div");
+  const feedback=node("div");
+  const metadataControls=new Map();
+  const editable=!job.plan.id && !recoveryOnly && job.state==="inventoried";
   const selectionCount=slot("review-selection","span");
   const selectAll=action("Alle auswählen",async()=>{
     const version=++reviewSelectionVersion;
-    const keys=await api(jobPath("/review/selection"));
+    const keys=await api(jobPath("/review/selection?metadata="+editable));
     if(version===reviewSelectionVersion && target.isConnected && !reviewBusy()){
       reviewSelection=new Set(keys);
       syncSelection();
@@ -959,25 +997,96 @@ function showReview(target) {
       await refreshReviewView();
     }
   },true,()=>syncSelection());
+  async function stage(keys, source, individual=false){
+    requireSaved();
+    reviewMetadataSaving=true;syncSelection();
+    try{
+      const result=await api(jobPath("/review/metadata"),"PUT",{revision:draftRevision,family_keys:keys,source,individual});
+      draftRevision=result.revision;
+      const pending=draft.metadata_review_pending ||= {};
+      for(const key of keys)if(!Object.hasOwn(result.rejected,key)){
+        if(source)pending[key]={source};
+        else delete pending[key];
+      }
+      reviewMetadataFeedback=result;
+      metadataFeedback(feedback,result);
+    }finally{reviewMetadataSaving=false;syncSelection();}
+  }
+  const accept=action("EXIF-Daten übernehmen",async()=>{
+    requireSaved();
+    const keys=[...reviewSelection];
+    const result=await api(jobPath("/review/metadata/sources"),"POST",{revision:draftRevision,family_keys:keys});
+    if(!target.isConnected)return;
+    const dialog=node("dialog");
+    const heading=node("h3","EXIF-Daten übernehmen");heading.id="review-source-title";
+    dialog.setAttribute("aria-labelledby",heading.id);
+    const source=node("select");
+    const choices=Object.entries(result.sources);
+    for(const [value,count] of choices)source.append(metadataOption(value,metadataSourceLabel(value)+" · "+count+"/"+result.selected));
+    const label=node("label","Metadatenquelle");label.append(source);
+    const affected=node("p");
+    const refreshCount=()=>{affected.textContent=t("Vormerken")+" "+(result.sources[source.value] || 0)+"/"+result.selected;};
+    source.addEventListener("change",refreshCount);refreshCount();
+    const buttons=node("div",undefined,"inline editor-actions");
+    const confirm=action("Vormerken",async()=>{
+      await stage(keys,source.value);
+      dialog.close();
+    },true);
+    confirm.disabled=!choices.length;
+    buttons.append(action("Abbrechen",()=>dialog.close()),confirm);
+    const message=slot("review-metadata-message","p");message.setAttribute("role","alert");
+    dialog.append(heading,line("Jede Familie behält ihren eigenen Zeitwert aus dieser Quelle. Bereits gewählte Quellen bleiben erhalten."),
+      line("Dateiänderungsdaten können vom ursprünglichen Aufnahmedatum abweichen."),
+      ...(choices.length?[label,affected]:[line("Keine gemeinsame Metadatenquelle zum Vormerken verfügbar.")]),message,buttons);
+    dialog.addEventListener("close",()=>dialog.remove(),{once:true});
+    target.append(dialog);dialog.showModal();
+  },false,()=>syncSelection());
+  const apply=action("Änderungen anwenden",async()=>{
+    requireSaved();
+    reviewMetadataSaving=true;syncSelection();
+    try{
+      const result=await api(jobPath("/review/metadata/apply"),"POST",{revision:draftRevision});
+      reviewMetadataFeedback=result;
+      for(const key of Object.keys(draft.metadata_review_pending || {})){
+        if(!Object.hasOwn(result.rejected,key))reviewSelection.delete(key);
+      }
+      previewRevision=-1;
+      reviewMetadataSaving=false;
+      await refreshReviewView();
+    }finally{reviewMetadataSaving=false;}
+  },true,()=>syncSelection());
   function syncSelection(){
     const blocked=reviewBusy() || recoveryOnly || job.state!=="inventoried" || job.plan.execution;
     selectAll.disabled=Boolean(blocked);
     clearSelection.disabled=Boolean(blocked || !reviewSelection.size);
-    copy.disabled=Boolean(blocked || !reviewSelection.size);
+    const pending=draft.metadata_review_pending || {};
+    copy.disabled=Boolean(blocked || ![...reviewSelection].some(key=>!Object.hasOwn(pending,key)));
+    accept.disabled=Boolean(blocked || !reviewSelection.size);
+    apply.hidden=!Object.keys(pending).length;
+    apply.disabled=Boolean(blocked);
     selectionCount.textContent=reviewSelection.size+" ausgewählt";
     for(const checkbox of list.querySelectorAll("input[type=checkbox]")){
       checkbox.checked=reviewSelection.has(checkbox.value);
-      checkbox.disabled=Boolean(blocked || !checkbox.dataset.copyable);
+      checkbox.disabled=Boolean(blocked || !checkbox.dataset.selectable);
+    }
+    for(const [key,select] of metadataControls){
+      select.value=pending[key]?.source || "";
+      select.disabled=Boolean(blocked);
     }
   }
   if(!recoveryOnly && job.state==="inventoried" && !job.plan.execution){
     toolbar.append(selectAll,clearSelection,copy,selectionCount);
+    if(editable){
+      toolbar.insertBefore(accept,selectionCount);
+      toolbar.insertBefore(apply,selectionCount);
+    }
     if(!reviewBatch.total)toolbar.append(reviewHelp());
   }
   target.className="adoption-review-cases";
   target.replaceChildren(node("h3","Prüffälle"),
     line("Ungeklärte Dateifamilien bleiben an der Quelle. Fertige Arbeitskopien in General bleiben auch nach dem Verwerfen erhalten."),
-    toolbar,list);
+    toolbar,feedback,list);
+  metadataFeedback(feedback,reviewMetadataFeedback);
   const more=action("Weitere Prüffälle",load);
   async function load(){
     const rows=await api(jobPath("/review?"+new URLSearchParams({after:cursor})));
@@ -987,7 +1096,7 @@ function showReview(target) {
       const entry=node("div",undefined,"row adoption-review-row");
       const checkbox=node("input");checkbox.type="checkbox";checkbox.value=item.family_key;
       checkbox.setAttribute("aria-label","Dateifamilie auswählen: "+item.family_key);
-      if(item.can_copy)checkbox.dataset.copyable="yes";
+      if(item.can_copy || item.metadata_choices?.length)checkbox.dataset.selectable="yes";
       else reviewSelection.delete(item.family_key);
       checkbox.addEventListener("change",()=>{
         reviewSelectionVersion++;
@@ -1024,7 +1133,18 @@ function showReview(target) {
       }
       if(item.target_relative && item.state==="copied")row.append(line("Arbeitsordner in General · "+item.target_relative));
       summary.append(node("br"),reasons);
-      entry.append(checkbox,row);list.append(entry);
+      entry.append(checkbox,row);
+      if(editable && item.metadata_choices?.length){
+        const source=node("select",undefined,"adoption-metadata-source");
+        source.setAttribute("aria-label",t("Metadatenquelle")+" · "+item.family_key);
+        source.append(metadataOption("",t("Metadatenquelle wählen")));
+        for(const choice of item.metadata_choices){
+          source.append(metadataOption(choice.source,metadataSourceLabel(choice.source)+" · "+choice.time));
+        }
+        source.addEventListener("change",()=>stage([item.family_key],source.value || null,true).catch(error=>report(error.message)));
+        metadataControls.set(item.family_key,source);entry.append(source);
+      }
+      list.append(entry);
     }
     if(rows.length===60){cursor=rows.at(-1).family_key;list.append(more);}
     syncSelection();

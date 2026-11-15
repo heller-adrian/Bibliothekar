@@ -112,9 +112,8 @@ def _store_event(connection, job_id, event, now):
     register_source_jobs(connection, event_id, [job_id], created_at=now)
 
 
-def _store_file(connection, job_id, family_id, row, record, capture, manually_reviewed, now):
+def _store_file(connection, job_id, family_id, row, record, capture, manually_reviewed, source, now):
     confidence = "high" if manually_reviewed else record["capture_time_confidence"]
-    source = "manual_legacy_adoption" if manually_reviewed else record["selected_capture_source"]
     selected_time = capture if manually_reviewed else record["selected_capture_time"]
     result = connection.execute(
         """INSERT INTO files (
@@ -134,7 +133,10 @@ def _store_file(connection, job_id, family_id, row, record, capture, manually_re
                confidence, is_selected, conflicts_with_selected
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         ((file_id, item["metadata_group"], item["tag_name"], item["raw_value"], item["normalized_datetime"],
-          item["priority"], item["confidence"], int(item["is_selected"] and not manually_reviewed),
+          item["priority"], item["confidence"], int(
+              item["tag_name"] == source and item["normalized_datetime"] == capture
+              if manually_reviewed else item["is_selected"]
+          ),
           int(item["conflicts_with_selected"])) for item in record["metadata_candidates"]),
     )
     return file_id
@@ -234,7 +236,9 @@ def write_catalogue(connection, library, job, plan, events, now):
     job_id = _store_job(connection, library, job, plan, now)
     by_id = {event["id"]: event for event in events}
     prefixes = {event["id"]: event_root_relative(event) for event in events}
-    overrides = json.loads(plan["draft_json"]).get("capture_overrides", {})
+    draft = json.loads(plan["draft_json"])
+    overrides = draft.get("capture_overrides", {})
+    metadata = draft.get("metadata_review_applied", {})
     for event in events:
         _existing_inventory(connection, plan["id"], event, now)
         _store_event(connection, job_id, event, now)
@@ -261,14 +265,24 @@ def write_catalogue(connection, library, job, plan, events, now):
                VALUES (?, ?, ?, ?)""", (assigned, family_id, "manual" if manually_reviewed else "date_range", now),
         )
         anchor_job = by_id[parent].get("job_id", job_id)
+        decision = metadata.get(key)
+        tags = {item["tag"] for item in decision["evidence"]} if decision else set()
         for row, record in zip(rows, records):
-            file_id = _store_file(connection, job_id, family_id, row, record, capture, manually_reviewed, now)
+            capture_source = record["selected_capture_source"]
+            if manually_reviewed:
+                if not decision:
+                    capture_source = "manual_legacy_adoption"
+                else:
+                    capture_source = next((item["tag"] for item in decision["evidence"]
+                                           if item["path"] == row["relative_path"]),
+                                          next(iter(tags)) if len(tags) == 1 else "legacy_adoption_detected")
+            file_id = _store_file(connection, job_id, family_id, row, record, capture, manually_reviewed, capture_source, now)
             path = row["target_path"]
             relative = Path(path).relative_to(prefixes[parent]).as_posix()
             _inventory_file(connection, parent, anchor_job, path, relative, row, {
                 "asset_kind": "camera_original", "known_file_id": file_id, "family_id": family_id,
                 "selected_capture_time": capture if manually_reviewed else record["selected_capture_time"],
-                "selected_capture_source": "manual_legacy_adoption" if manually_reviewed else record["selected_capture_source"],
+                "selected_capture_source": capture_source,
                 "capture_time_confidence": "high" if manually_reviewed else record["capture_time_confidence"],
             }, now)
             record_verified_file_location(connection, parent, family_id, file_id, path, now)

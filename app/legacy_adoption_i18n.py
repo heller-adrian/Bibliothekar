@@ -4,6 +4,31 @@ import re
 
 
 TRANSLATIONS = {
+    "EXIF-Daten übernehmen": "Accept EXIF Data",
+    "Vormerken": "Accept",
+    "Änderungen anwenden": "Apply changes",
+    "Metadatenquelle": "Metadata source",
+    "Metadatenquelle wählen": "Choose metadata source",
+    "Jede Familie behält ihren eigenen Zeitwert aus dieser Quelle. Bereits gewählte Quellen bleiben erhalten.":
+        "Each family uses its own time from this source. Existing choices are kept.",
+    "Dateiänderungsdaten können vom ursprünglichen Aufnahmedatum abweichen.":
+        "File modification dates may differ from the original capture date.",
+    "Keine gemeinsame Metadatenquelle zum Vormerken verfügbar.": "No metadata source is available to stage.",
+    "Übersprungene Prüffälle": "Skipped review cases",
+    "Dateifamilie nicht verfügbar": "File family unavailable",
+    "Quelldatei oder Metadaten seit der Inventur geändert": "Source file or metadata changed since inventory",
+    "Quelle fehlt, ist ungültig oder in der Familie mehrdeutig": "Source missing, invalid or ambiguous within the family",
+    "Bereits individuell ausgewählt": "An individual choice is already saved",
+    "Entferne zuerst die vorgemerkte Metadatenquelle.": "Clear the staged metadata source first.",
+    "Wähle genau eine Dateifamilie.": "Select exactly one file family.",
+    "Aufnahmedatum": "Capture date",
+    "Erstellungsdatum": "Creation date",
+    "Aufnahme- oder Erstellungsdatum": "Capture or creation date",
+    "Medien-Erstellungsdatum": "Media creation date",
+    "Spur-Erstellungsdatum": "Track creation date",
+    "Änderungsdatum": "Modification date",
+    "Datei-Erstellungsdatum": "File creation date",
+    "Dateiänderungsdatum": "File modification date",
     "Bibliothekar kann keinen privaten Arbeitsordner erstellen. Prüfe die Berechtigungen und ACLs des Workspace und versuche es erneut.":
         "Bibliothekar could not create a private working folder. Check the workspace permissions and ACLs, then try again.",
     "Prüfe die Hinweise bei den betroffenen Dateifamilien. Fehlgeschlagene Fälle kannst du erneut auswählen.":

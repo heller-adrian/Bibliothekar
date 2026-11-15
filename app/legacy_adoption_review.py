@@ -19,6 +19,7 @@ from app.legacy_adoption_paths import (
     directory_identity, relative_parent, target_key, validate_target,
 )
 from app.legacy_adoption_plan import _roots
+from app.legacy_adoption_review_metadata import capture_choices
 from app.metadata_correction import MetadataCorrectionError, metadata_area_paths
 from app.root_operations import RootOperationError, validate_active_roots
 from app.private_storage_security import NFS4, PrivateStorageError, attributes, filesystem, secure_working_directory
@@ -86,6 +87,7 @@ _REVIEW_WHERE = """
              )
           )
        )
+       AND family.family_key NOT IN (SELECT key FROM json_each(:accepted))
 """
 _REVIEW_FROM = """
     FROM legacy_adoption_families family
@@ -102,9 +104,13 @@ def _plan_for(connection, job_id):
 
 
 def review_count(connection, job_id, plan_id):
+    plan = _plan_for(connection, job_id)
+    draft = json.loads(plan["draft_json"] if plan else connection.execute(
+        "SELECT draft_json FROM legacy_adoption_jobs WHERE id = ?", (job_id,),
+    ).fetchone()[0])
     return connection.execute(
         "SELECT count(*) " + _REVIEW_FROM + " WHERE " + _REVIEW_WHERE,
-        {"job": job_id, "plan": plan_id},
+        {"job": job_id, "plan": plan_id, "accepted": json.dumps(draft.get("metadata_review_applied", {}))},
     ).fetchone()[0]
 
 
@@ -134,17 +140,31 @@ def _copyable_cases(connection, job_id, job, plan):
                  WHERE member.job_id = family.job_id AND member.family_key = family.family_key
             )
             ORDER BY family.family_key""",
-        {"job": job_id, "plan": plan["id"] if plan else None},
+        {"job": job_id, "plan": plan["id"] if plan else None,
+         "accepted": json.dumps(draft.get("metadata_review_applied", {}))},
     )
     confirmed = draft.get("capture_overrides", {}).keys() - set(draft.get("exclude_families", []))
-    return [row[0] for row in rows if plan or row[0] not in confirmed]
+    pending = draft.get("metadata_review_pending", {})
+    return [row[0] for row in rows if row[0] not in pending and (plan or row[0] not in confirmed)]
 
 
-def review_selection(library, job_id):
+def review_selection(library, job_id, *, include_metadata=False):
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN")
         job = _job(connection, library.library_id, job_id)
-        return _copyable_cases(connection, job_id, job, _plan_for(connection, job_id))
+        plan = _plan_for(connection, job_id)
+        selected = _copyable_cases(connection, job_id, job, plan)
+        if include_metadata and not plan:
+            from app.legacy_adoption_review_metadata import _decision_rows
+
+            draft = json.loads(job["draft_json"])
+            reviewed = draft.get("capture_overrides", {})
+            keys = [row[0] for row in connection.execute(
+                "SELECT family_key FROM legacy_adoption_families WHERE job_id = ? AND review_required", (job_id,),
+            ) if row[0] not in reviewed]
+            selected = sorted(set(selected) | {key for key, members in _decision_rows(connection, job, keys)
+                                               if capture_choices(members)})
+        return selected
 
 
 def review_cases(library, job_id, *, after=""):
@@ -162,7 +182,8 @@ def review_cases(library, job_id, *, after=""):
              CROSS JOIN legacy_adoption_inventory inventory INDEXED BY legacy_adoption_inventory_family
                 ON inventory.job_id = :job AND inventory.family_key = cases.family_key
              ORDER BY inventory.family_key, inventory.relative_path""",
-            {"job": job_id, "after": after, "plan": plan["id"] if plan else None},
+            {"job": job_id, "after": after, "plan": plan["id"] if plan else None,
+             "accepted": json.dumps(draft.get("metadata_review_applied", {}))},
         )
         result = []
         for family, members, files in _inventory_groups(rows, Path(job["source_root"])):
@@ -174,7 +195,13 @@ def review_cases(library, job_id, *, after=""):
             case = _status(family, members, files, draft, copied,
                            bool(plan and not assigned and family.get("selected_capture_time")
                                 and key not in draft.get("exclude_families", []) and not copied))
-            case["can_copy"] = (case["can_copy"] and not assigned and _copy_allowed(job, plan)
+            pending = draft.get("metadata_review_pending", {}).get(key)
+            case["pending_metadata"] = pending
+            case["metadata_choices"] = (
+                [{"source": source, "time": choice["time"]} for source, choice in capture_choices(members).items()]
+                if not (plan or copied or _confirmed(draft, key)) and _copy_allowed(job, plan) else []
+            )
+            case["can_copy"] = (case["can_copy"] and not pending and not assigned and _copy_allowed(job, plan)
                                 and (plan is not None or not _confirmed(draft, key)))
             failure = connection.execute(
                 "SELECT state, error FROM legacy_adoption_review_batch WHERE job_id = ? AND family_key = ?",
@@ -465,6 +492,8 @@ def copy_review(library, job_id, key):
         if previous and previous["state"] == "copied":
             return dict(previous)
         draft = json.loads(job["draft_json"])
+        if key in draft.get("metadata_review_pending", {}):
+            raise AdoptionError("Entferne zuerst die vorgemerkte Metadatenquelle.")
         if not plan and not previous and _confirmed(draft, key):
             raise AdoptionError("Diese Familie ist kein ausstehender Prüffall.")
         members = [(Path(item["relative_path"]).name, dict(item)) for item in connection.execute(

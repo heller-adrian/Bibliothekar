@@ -1667,3 +1667,114 @@ def test_container_repeat_finalize_preserves_recovery_fences(monkeypatch, failur
         assert waits == ([0.25] * 120 if failure == "timeout" else [])
         expected_inspections = 0 if failure == "unknown" or failure.startswith("response_") else 1
         assert len(diagnostics) == (120 if failure == "timeout" else expected_inspections)
+
+
+@pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["metadata-zfs"])
+def test_review_metadata_stages_distinct_times_and_adopts_into_existing_draft(
+    fresh_main, monkeypatch, synthetic_dataset,
+):
+    from hashlib import sha256
+    from io import BytesIO
+    from app.event_inventory import event_root_relative
+
+    workspace, database, registry, archive = fresh_main
+    source = archive.parent / "legacy-review-metadata"
+    source.mkdir()
+    if os.environ.get("ADOPTION_ZFS_ROOT"):
+        monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
+    names = ["first.jpg", "first.raf", "first.raf.xmp", "second.jpg", "changed.jpg", "invalid.jpg", "invalid.raf"]
+    originals = {name: name.encode() for name in names}
+    for name, content in originals.items():
+        (source / name).write_bytes(content)
+    captured = {
+        "first.jpg": "13:05:00", "first.raf": "13:05:00",
+        "second.jpg": "14:07:00", "changed.jpg": "14:09:00",
+        "invalid.jpg": "13:15:00", "invalid.raf": "13:17:00",
+    }
+    tag = "EXIF:ExifIFD:DateTimeOriginal"
+    create = "EXIF:ExifIFD:CreateDate"
+
+    def metadata(descriptors, _cancel):
+        records = {}
+        for fd in descriptors:
+            name = os.pread(fd, 80, 0).decode()
+            clock = captured.get(name)
+            records[fd] = {tag: "2026:07:21 " + clock + "+02:00",
+                           create: "2026:07:21 15:30:00+02:00"} if clock else {}
+        return records
+
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+    monkeypatch.setattr(main, "DATABASE_INITIALIZATION_ERROR", None)
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    client = _onboard(fresh_main)
+    _adopt(client)
+    jobs = "/api/legacy-adoption/jobs"
+    job = jobs + "/" + _json(client, "POST", jobs, status=201, json={"root": "nas"})["id"]
+    _json(client, "POST", job + "/scan", status=202)
+    assert _json(client, "GET", job)["review_count"] == 4
+    day = "2026-07-21"
+    event = {"name": "Afternoon", "start_date": day, "end_date": day,
+             "start_time": "13:00", "end_time": "18:00", "children": [
+                 {"name": "Early", "start_datetime": day + "T13:00", "end_datetime": day + "T14:00"},
+             ]}
+    metadata_path = job + "/review/metadata"
+    rev = _json(client, "PUT", job + "/draft", json={"events": [event], "revision": 0})["revision"]
+    first = _json(client, "PUT", metadata_path, json={
+        "revision": rev, "family_keys": ["second"], "source": create, "individual": True,
+    })
+    assert first["staged"] == 1
+    keys = _json(client, "GET", job + "/review/selection?metadata=true")
+    assert set(keys) == {"first", "second", "invalid", "changed"}
+    options = _json(client, "POST", metadata_path + "/sources", json={
+        "revision": first["revision"], "family_keys": keys,
+    })
+    assert options["sources"][tag] == 2
+    batch = _json(client, "PUT", metadata_path, json={
+        "revision": first["revision"], "family_keys": keys, "source": tag,
+    })
+    assert batch["staged"] == 2
+    assert batch["rejected"] == {"invalid": "source_unavailable", "second": "already_selected"}
+    reopened = TestClient(main.app, follow_redirects=False)
+    state = _json(reopened, "GET", job)
+    pending = state["draft"]["metadata_review_pending"]
+    assert pending["first"]["time"] == day + "T13:05:00+02:00"
+    assert pending["second"]["source"] == create
+    assert state["draft"].get("capture_overrides") == {} and state["review_count"] == 4
+    assert _json(reopened, "GET", job + "/families?day=" + day) == []
+    _json(reopened, "POST", metadata_path + "/apply", status=409, json={"revision": first["revision"]})
+    (source / "changed.jpg").write_bytes(b"changed since the scan")
+    applied = _json(reopened, "POST", metadata_path + "/apply", json={"revision": batch["revision"]})
+    assert applied["applied"] == 2 and applied["rejected"] == {"changed": "source_changed"}
+    state = _json(reopened, "GET", job)
+    assert state["review_count"] == 2
+    assert all((source / n).read_bytes() == originals[n] for n in originals if n != "changed.jpg")
+    assert {f["family_key"] for f in _json(reopened, "GET", job + "/families?day=" + day)} == {"first","second"}
+    assert _json(reopened, "GET", job + "/chronology?year=2026") == [{"period": day, "families": 2, "review": 0}]
+    checked = _json(reopened, "POST", job + "/draft/check", json=state["draft"])
+    assert checked["events"][0]["families"] == 2 and checked["events"][0]["files"] == 4
+    plan = _json(reopened, "POST", job + "/plan", json={"revision": applied["revision"]})
+    moves = _json(reopened, "GET", job + "/moves")
+    parent, = plan["events"]
+    child, = parent["children"]
+    assert {move["relative_path"] for move in moves} == {"first.jpg", "first.raf", "first.raf.xmp", "second.jpg"}
+    assert all(child["folder_name"] in move["target_path"] for move in moves if move["relative_path"].startswith("first."))
+    command = {"plan_id": plan["id"]}
+    _json(reopened, "POST", job + "/documents")
+    _json(reopened, "POST", job + "/confirm", json={**command, "method": "manual", "acknowledged": True})
+    for item in ("folders", "documents"):
+        response = reopened.get(job + "/download/" + item)
+        assert response.status_code == 200
+        with ZipFile(BytesIO(response.content)) as package:
+            package.extractall(archive)
+    for move in moves:
+        Path(move["source"]).rename(move["target"])
+    assert _json(reopened, "POST", job + "/verify", json=command)["state"] == "verified"
+    assert _json(reopened, "POST", job + "/finalize", json=command)["state"] == "completed"
+    for move in moves:
+        name = move["relative_path"]
+        assert sha256(Path(move["target"]).read_bytes()).digest() == sha256(originals[name]).digest()
+    with database_connection(database) as connection:
+        rows = connection.execute("SELECT original_filename, selected_capture_source FROM files").fetchall()
+        assert dict(rows) == {name: create if name == "second.jpg" else tag for name in originals
+                              if name.startswith("first.") or name == "second.jpg"}
+    assert (archive / event_root_relative(parent) / "event.json").is_file()

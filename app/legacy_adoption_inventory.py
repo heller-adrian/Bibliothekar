@@ -1,5 +1,6 @@
 """Persist resumable legacy inventory in the selected library's catalogue."""
 from contextlib import ExitStack
+import hashlib
 from itertools import groupby
 import json
 import os
@@ -108,6 +109,20 @@ def _inventory_groups(rows, source):
         yield family, members, files
 
 
+def inventory_fingerprint(members):
+    """Bind a metadata decision to the exact inventoried family."""
+    contents = sorted((row["relative_path"], row["identity"], row["sha256"]) for row in members)
+    return hashlib.sha256(json.dumps(contents, ensure_ascii=True).encode("ascii")).hexdigest()
+
+
+def _capture_projection(job):
+    # Applied decisions share the planner's capture overrides; the read-only
+    # inventory remains the evidence for the detected time and its candidates.
+    draft = json.loads(job["draft_json"])
+    return json.dumps({key: draft["capture_overrides"][key] for key in draft.get("metadata_review_applied", {})
+                       if key in draft.get("capture_overrides", {})})
+
+
 def inventory_chronology(library: LibraryContext, job_id: str, *, year: str = ""):
     if year and (len(year) != 4 or not year.isascii() or not year.isdigit()):
         raise AdoptionError("Ungültiges Jahr.")
@@ -117,12 +132,13 @@ def inventory_chronology(library: LibraryContext, job_id: str, *, year: str = ""
         if job["state"] != "inventoried":
             raise AdoptionError("Die Inventur muss zuerst abgeschlossen werden.")
         counts = connection.execute(
-            """SELECT substr(capture_time, 1, :length) AS period, count(*) AS families,
-                      sum(review_required) AS review
-                 FROM legacy_adoption_families
-                WHERE job_id = :job AND (:year = '' OR capture_time LIKE :year || '-%')
+            """SELECT substr(coalesce(override.value, capture_time), 1, :length) AS period, count(*) AS families,
+                      sum(review_required AND override.key IS NULL) AS review
+                 FROM legacy_adoption_families AS family
+                 LEFT JOIN json_each(:accepted) AS override ON override.key = family.family_key
+                WHERE job_id = :job AND (:year = '' OR coalesce(override.value, capture_time) LIKE :year || '-%')
                 GROUP BY period ORDER BY period""",
-            {"job": job_id, "length": 10 if year else 4, "year": year},
+            {"job": job_id, "length": 10 if year else 4, "year": year, "accepted": _capture_projection(job)},
         )
         return [dict(row) for row in counts]
 
@@ -138,21 +154,26 @@ def inventory_families(
             raise AdoptionError("Die Inventur muss zuerst abgeschlossen werden.")
         rows = connection.execute(
             """WITH page AS (
-                   SELECT family_key FROM legacy_adoption_families
+                   SELECT family_key, override.value AS accepted FROM legacy_adoption_families AS family
+                    LEFT JOIN json_each(:accepted) AS override ON override.key = family.family_key
                     WHERE job_id = :job AND family_key > :after
-                      AND (:day IS NULL OR (NOT review_required AND substr(capture_time, 1, 10) = :day)
-                           OR (:day = '' AND review_required))
+                      AND (:day IS NULL OR ((NOT review_required OR override.key IS NOT NULL)
+                           AND substr(coalesce(override.value, capture_time), 1, 10) = :day)
+                           OR (:day = '' AND review_required AND override.key IS NULL))
                     ORDER BY family_key LIMIT :limit
                )
-               SELECT inventory.* FROM page
+               SELECT inventory.*, page.accepted FROM page
                CROSS JOIN legacy_adoption_inventory AS inventory INDEXED BY legacy_adoption_inventory_family
                   ON inventory.job_id = :job AND inventory.family_key = page.family_key
                ORDER BY inventory.family_key, inventory.relative_path""",
-            {"job": job_id, "after": after, "limit": max(1, min(limit, 200)), "day": day},
+            {"job": job_id, "after": after, "limit": max(1, min(limit, 200)), "day": day,
+             "accepted": _capture_projection(job)},
         )
         result = []
         for family, members, files in _inventory_groups(rows, Path(job["source_root"])):
             errors = [row for row in members if row["error"]]
+            if members[0]["accepted"]:
+                family.update(selected_capture_time=members[0]["accepted"], status="complete")
             result.append({
                 **family,
                 "files": files,
@@ -400,14 +421,39 @@ def scan_inventory(library: LibraryContext, job_id: str, *, cancellation_callbac
                     WHERE job_id = ? AND family_key IS NOT NULL ORDER BY family_key, relative_path""",
                 (job_id,),
             )
+            draft = json.loads(_job(connection, library.library_id, job_id)["draft_json"])
+            pending = draft.get("metadata_review_pending", {})
+            applied = draft.get("metadata_review_applied", {})
+            decisions = len(pending) + len(applied)
+            unchanged = set()
+
+            def families():
+                for family, members, _ in _inventory_groups(rows, source):
+                    key = family["family_key"]
+                    if key in pending or key in applied:
+                        unchanged.add(key)
+                        fingerprint = inventory_fingerprint(members)
+                        if key in pending and pending[key]["fingerprint"] != fingerprint:
+                            del pending[key]
+                        if key in applied and applied[key]["fingerprint"] != fingerprint:
+                            del applied[key]
+                            draft["capture_overrides"].pop(key, None)
+                    yield job_id, key, family.get("selected_capture_time"), family["status"] == "review_required"
+
             connection.executemany(
                 """INSERT INTO legacy_adoption_families (job_id, family_key, capture_time, review_required)
                    VALUES (?, ?, ?, ?)""",
-                ((job_id, family["family_key"], family.get("selected_capture_time"),
-                  family["status"] == "review_required")
-                 for family, _, _ in _inventory_groups(rows, source)),
+                families(),
             )
-            connection.execute("UPDATE legacy_adoption_jobs SET state = 'inventoried' WHERE id = ?", (job_id,))
+            for key in pending.keys() - unchanged:
+                del pending[key]
+            for key in applied.keys() - unchanged:
+                del applied[key]
+                draft["capture_overrides"].pop(key, None)
+            connection.execute(
+                "UPDATE legacy_adoption_jobs SET state = 'inventoried', draft_json = ?, draft_revision = draft_revision + ? WHERE id = ?",
+                (json.dumps(draft), int(len(pending) + len(applied) != decisions), job_id),
+            )
     except Exception as error:
         with database_connection(library.database_path) as connection:
             connection.execute(

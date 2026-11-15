@@ -40,6 +40,7 @@ from app.legacy_adoption_review import (
     begin_review_batch, check_review_staging, copy_review, fail_pending_review_batch,
     review_batch_status, review_cases, review_count, review_selection, run_review_batch, ReviewStagingError, STAGING_ERROR,
 )
+from app.legacy_adoption_review_metadata import apply_metadata, metadata_sources, stage_metadata
 from app.legacy_adoption_verify import plan_issues, reopen_plan
 from app.library_registry import LibraryRegistryError, list_libraries
 from app.root_operations import RootOperationError, admission
@@ -99,6 +100,15 @@ class SaveDraft(Draft):
 
 class Freeze(BaseModel):
     revision: int = Field(ge=0)
+
+
+class SelectedMetadata(Freeze):
+    family_keys: list[str] = Field(min_length=1, max_length=10000)
+
+
+class StageMetadata(SelectedMetadata):
+    source: str | None = Field(max_length=240)
+    individual: StrictBool = False
 
 
 class PlanCommand(BaseModel):
@@ -435,9 +445,37 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             return copy_review(library, job_id, payload.family_key)
 
     @router.get("/jobs/{job_id}/review/selection")
-    def select_review_cases(job_id: str):
+    def select_review_cases(job_id: str, metadata: bool = False):
         with _errors():
-            return review_selection(context(), job_id)
+            return review_selection(context(), job_id, include_metadata=metadata)
+
+    @router.post("/jobs/{job_id}/review/metadata/sources")
+    def sources_for_review(job_id: str, payload: SelectedMetadata, request: Request):
+        library = context()
+        with _errors():
+            require_adoption(request, library)
+            return metadata_sources(library, job_id, revision=payload.revision, keys=payload.family_keys)
+
+    @router.put("/jobs/{job_id}/review/metadata")
+    def set_review_metadata(job_id: str, payload: StageMetadata, request: Request):
+        library = context()
+        with _errors(), admission(library):
+            require_adoption(request, library)
+            require_inventory_idle(library, job_id)
+            require_review_idle(library, job_id)
+            if (payload.individual and len(payload.family_keys) != 1) or (payload.source is None and not payload.individual):
+                raise AdoptionError("Wähle genau eine Dateifamilie.")
+            return stage_metadata(library, job_id, revision=payload.revision, keys=payload.family_keys,
+                                  source=payload.source, individual=payload.individual)
+
+    @router.post("/jobs/{job_id}/review/metadata/apply")
+    def apply_review_metadata(job_id: str, payload: Freeze, request: Request):
+        library = context()
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
+            require_adoption(request, library)
+            require_inventory_idle(library, job_id)
+            require_review_idle(library, job_id)
+            return apply_metadata(library, job_id, revision=payload.revision, allow_existing=is_later(request))
 
     @router.get("/jobs/{job_id}/review/batch")
     def review_progress(job_id: str):
@@ -513,9 +551,19 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             if item["draft_revision"] != draft.revision:
                 raise AdoptionError("Der Entwurf wurde in einer anderen Sitzung geändert. Lade ihn erneut.")
             revision = draft.revision + 1
+            previous = json.loads(item["draft_json"])
+            saved = draft.model_dump(exclude_none=True, exclude={"revision"})
+            saved["metadata_review_pending"] = {
+                key: choice for key, choice in previous.get("metadata_review_pending", {}).items()
+                if key not in saved["capture_overrides"]
+            }
+            saved["metadata_review_applied"] = {
+                key: choice for key, choice in previous.get("metadata_review_applied", {}).items()
+                if saved["capture_overrides"].get(key) == choice["time"]
+            }
             connection.execute(
                 "UPDATE legacy_adoption_jobs SET draft_json = ?, draft_revision = ? WHERE id = ?",
-                (draft.model_dump_json(exclude_none=True, exclude={"revision"}), revision, job_id),
+                (json.dumps(saved), revision, job_id),
             )
         return {"saved": True, "revision": revision}
 
