@@ -5,7 +5,7 @@ finish() {
     trap - EXIT
     printf '\nRC13_NATIVE_EXIT=%s\n' "$result"
     sync
-    /sbin/poweroff -f
+    busybox poweroff -f
 }
 trap finish EXIT
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin

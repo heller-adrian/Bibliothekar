@@ -13,7 +13,7 @@ mkdir "$scratch/debs"
 printf 'product=%s\nrunner=%s\n' "$QUALIFIED_SOURCE" "$GITHUB_SHA" > "$evidence/source.txt"
 sudo apt-get update -qq
 sudo apt-get install -y -q --no-install-recommends debootstrap qemu-system-x86
-sudo debootstrap --variant=minbase --include=initramfs-tools,linux-base,kmod,iproute2,ca-certificates,python3-venv,libimage-exiftool-perl,libssl3t64,libtirpc3t64,libblkid1,libuuid1,libudev1,liblz4-1,libzstd1,zlib1g     trixie "$fs" https://deb.debian.org/debian > "$evidence/guest-install.log" 2>&1
+sudo debootstrap --variant=minbase --include=initramfs-tools,linux-base,kmod,iproute2,ca-certificates,python3-venv,libimage-exiftool-perl,libssl3t64,libtirpc3t64,libblkid1,libuuid1,libudev1,liblz4-1,libzstd1,zlib1g,zstd,busybox     trixie "$fs" https://deb.debian.org/debian > "$evidence/guest-install.log" 2>&1
 
 base=https://download.truenas.com/TrueNAS-SCALE-Goldeye/25.10.0/packages
 python3 - "$base" "$scratch/debs" <<'PY'
@@ -51,7 +51,11 @@ kernel=6.12.33-production+truenas
 sudo chroot "$fs" depmod "$kernel"
 sudo chroot "$fs" ldconfig
 printf 'virtio_pci\nvirtio_blk\next4\n' | sudo tee -a "$fs/etc/initramfs-tools/modules" >/dev/null
-sudo chroot "$fs" update-initramfs -c -k "$kernel" >> "$evidence/guest-install.log" 2>&1
+sudo unshare --mount --propagation private bash -euc '
+    mount -t proc proc "$1/proc"
+    mount -t sysfs sysfs "$1/sys"
+    chroot "$1" update-initramfs -v -c -k "$2"
+' _ "$fs" "$kernel" >> "$evidence/guest-install.log" 2>&1
 sudo install -m 755 "$lab/guest.sh" "$fs/rc13-native-init"
 sudo mkdir -p "$fs/opt/bibliothekar"
 git -C product archive "$QUALIFIED_SOURCE" | sudo tar -xf - -C "$fs/opt/bibliothekar"
