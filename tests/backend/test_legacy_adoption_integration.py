@@ -2016,8 +2016,9 @@ def test_cancel_review_batch_rolls_back_only_its_files_and_resumes(fresh_main, m
 
 
 @pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["year-boundary"])
+@pytest.mark.parametrize("execution", ["manual", "script"])
 def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle(
-    fresh_main, monkeypatch, synthetic_dataset,
+    fresh_main, monkeypatch, synthetic_dataset, execution,
 ):
     from hashlib import sha256
     from io import BytesIO
@@ -2034,6 +2035,15 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
 
     workspace, database, registry, archive = fresh_main
     source = archive.parent / "legacy-source"
+    from app import legacy_adoption_host as host, legacy_adoption_package as package
+    from tests.backend.test_legacy_adoption_host import _macos_rename
+
+    appdata = database.parent / "script-appdata"
+    appdata.mkdir()
+    monkeypatch.setattr(package, "appdata_root", lambda: appdata)
+    if sys.platform == "darwin":
+        monkeypatch.setattr(host, "mount_id", lambda _fd: 1)
+        monkeypatch.setattr(host, "rename_noreplace", _macos_rename)
     if os.environ.get("ADOPTION_ZFS_ROOT"):
         monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
     monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
@@ -2047,10 +2057,10 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
     extensions = (".RAF", ".JPG", ".RAF.xmp")
     source_data = {}
 
-    def photos(folder, date_time):
+    def photos(folder, date_time, stem="DSCF0763"):
         (source / folder).mkdir(parents=True)
         for extension in extensions:
-            relative = f"{folder}/DSCF0763{extension}"
+            relative = f"{folder}/{stem}{extension}"
             content = (date_time + " " + relative).encode()
             (source / relative).write_bytes(content)
             source_data[relative] = content
@@ -2069,15 +2079,49 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
         assert all(str(Path(move["target_path"]).parent) in directories for move in moves)
         _json(client, "POST", job + "/documents")
         command = {"plan_id": plan["id"]}
-        _json(client, "POST", job + "/confirm", json={**command, "acknowledged": True, "method": "manual"})
-        for item in ("folders", "documents"):
-            result = client.get(job + "/download/" + item)
+        renamed = _json(client, "GET", job + "/moves?renamed=true")
+        assert [row["relative_path"] for row in renamed] == [
+            row["relative_path"] for row in moves if Path(row["source"]).name != Path(row["target"]).name
+        ]
+        if execution == "manual":
+            _json(client, "POST", job + "/confirm", json={**command, "acknowledged": True, "method": "manual"})
+            result = client.get(job + "/download/manual-setup")
             assert result.status_code == 200, result.text
             with ZipFile(BytesIO(result.content)) as bundle:
                 bundle.extractall(archive)
-        for move in moves:
-            assert not Path(move["target"]).exists()
-            Path(move["source"]).rename(move["target"])
+            for move in moves:
+                assert not Path(move["target"]).exists()
+                if move in renamed and not later and move["relative_path"].endswith(".JPG"):
+                    observed = Path(move["target"]).with_name("DSCF0763 copy.JPG")
+                    Path(move["source"]).rename(observed)
+                    work = _json(client, "GET", job + "/manual-work?check=true")
+                    [hint] = [item for step in work["steps"] for item in step["items"] if "observed_archive_path" in item]
+                    assert not work["ready"]
+                    assert hint["observed_archive_path"] == str(observed.relative_to(archive))
+                    assert hint["expected_archive_path"] == move["target_path"]
+                    assert _json(client, "POST", job + "/verify", json=command)["execution"]["phase"] == "repair"
+                    observed.rename(move["target"])
+                else:
+                    Path(move["source"]).rename(move["target"])
+        else:
+            probe = _json(client, "POST", job + "/script/probe", json={
+                **command, "appdata": str(appdata), "source": str(source), "archive": str(archive),
+            })
+            package_path = Path(probe["host"]["package"])
+            device, inode = host.inode(package_path.stat())
+            options = ["--package", str(package_path), "--source", str(source), "--archive", str(archive),
+                       "--package-device", str(device), "--package-inode", str(inode)]
+            assert host.main(["probe", *options, "--sha256", probe["sha256"]]) == 0
+            _json(client, "POST", job + "/confirm", json={
+                **command, "acknowledged": True, "method": "script", "probe_sha256": probe["sha256"],
+            })
+            _json(client, "POST", job + "/script/release", json=command)
+            released = json.loads((package_path / "permission.json").read_text())
+            manifest = json.loads((package_path / "manifest.json").read_text())
+            assert {(row["source"], row["target"], row["sha256"]) for row in manifest["moves"]} == {
+                (row["relative_path"], row["target_path"], row["sha256"]) for row in moves
+            }
+            assert host.main(["apply", *options, "--sha256", released["manifest"]]) == 0
         assert _json(client, "POST", job + "/verify", json=command)["state"] == "verified"
         assert _json(client, "POST", job + "/finalize", json=command)["state"] == "completed"
         return plan, {move["relative_path"]: move["target_path"] for move in moves}
@@ -2105,12 +2149,12 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
     assert original == {target: source_data[relative] for relative, target in paths.items()}
 
     # Later adoption shares the same input folder, including already resolved names.
-    photos("extension", "2026:01:01 11:00:00")
+    photos("extension", "2026:01:01 11:00:00", stem="dscf0763")
     assert _json(client, "GET", "/api/legacy-adoption/eligibility") == {"eligible": True, "blockers": []}
     extension, new_paths = adopt({"events": [{"existing_id": event_id}]}, later=True)
     assert extension["events"][0]["id"] == event_id
     assert {Path(target).name for target in new_paths.values()} == {
-        "DSCF0763_Adopted_002" + suffix for suffix in extensions
+        "dscf0763_Adopted_002" + suffix for suffix in extensions
     }
     paths.update(new_paths)
     assert all((archive / path).read_bytes() == data for path, data in original.items())

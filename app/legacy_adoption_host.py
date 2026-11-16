@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import stat
 import sys
+from unicodedata import normalize
 from uuid import uuid4
 
 if __package__:
@@ -125,11 +126,15 @@ def hash_fd(descriptor):
     return hasher.hexdigest()
 
 
-def verify_file(parent, name, expected, *, renamed=False):
+def verify_file(parent, name, expected, *, allow_ctime_change=False):
     with file_at(parent, name) as (fd, info):
         actual = stamp(info)
-        if actual[:4] != expected["stamp"][:4] or (not renamed and actual != expected["stamp"]):
-            raise ExecutionError("File identity differs from the approved plan: " + name)
+        fields = ("device", "inode", "size", "mtime_ns", "ctime_ns")
+        compared = 4 if allow_ctime_change else len(fields)
+        if actual[:compared] != expected["stamp"][:compared]:
+            differences = ", ".join(field for field, value, approved in
+                                    zip(fields[:compared], actual, expected["stamp"]) if value != approved)
+            raise ExecutionError(f"File identity differs from the approved plan: {name} ({differences})")
         if hash_fd(fd) != expected["sha256"]:
             raise ExecutionError("File checksum differs from the approved plan: " + name)
     return actual
@@ -260,13 +265,17 @@ def move(journal, operation, source, source_path, target, target_path, expected,
     """Reconcile the two names against the last durable intent before any rename."""
     intent, done = ("reverse_intent", "reverse_done") if reverse else ("forward_intent", "forward_done")
     previous = journal.latest.get(operation)
+    # Filesystem metadata may change ctime between approval and execution.
+    # Media still needs the original inode, mtime, size and full SHA-256.
+    # file_at and the pre-rename stat retain ctime as a concurrent-change fence.
+    media = operation.startswith("media:")
     if reverse and previous is None:
         return
     if reverse and previous == "forward_intent":
         with relative_parent(target, target_path) as (parent, name, _):
             # A forward intent may have been logged before the actual rename.
             if info_at(parent, name) is not None:
-                verify_file(parent, name, expected)
+                verify_file(parent, name, expected, allow_ctime_change=media)
                 with relative_parent(source, source_path) as (other, other_name, _):
                     if info_at(other, other_name) is not None:
                         raise ExecutionError("Both names are present after an interrupted operation: " + target_path)
@@ -277,7 +286,7 @@ def move(journal, operation, source, source_path, target, target_path, expected,
         old = info_at(left, original)
         new = info_at(right, destination)
         if old is None and new is not None and previous in {intent, done}:
-            verify_file(right, destination, expected, renamed=True)
+            verify_file(right, destination, expected, allow_ctime_change=True)
             os.fsync(left)
             os.fsync(right)
             if previous != done:
@@ -285,9 +294,13 @@ def move(journal, operation, source, source_path, target, target_path, expected,
             return
         if old is None or new is not None or previous == done:
             raise ExecutionError("Unexpected file state for " + source_path + " → " + target_path)
-        actual = verify_file(left, original, expected, renamed=reverse)
+        actual = verify_file(left, original, expected, allow_ctime_change=reverse or media)
         if previous != intent:
             journal.append(operation, intent)
+        if media:
+            canonical = normalize("NFC", destination).casefold()
+            if any(normalize("NFC", name).casefold() == canonical for name in os.listdir(right)):
+                raise ExecutionError("A filename already occupies the approved destination: " + target_path)
         check_roots()
         check_left()
         check_right()
@@ -297,7 +310,7 @@ def move(journal, operation, source, source_path, target, target_path, expected,
         rename_noreplace(left, original, right, destination)
         os.fsync(left)
         os.fsync(right)
-        verify_file(right, destination, expected, renamed=True)
+        verify_file(right, destination, expected, allow_ctime_change=True)
         if info_at(left, original) is not None:
             raise ExecutionError("The source path reappeared after rename: " + source_path)
         journal.append(operation, done)
@@ -336,7 +349,7 @@ def apply_document(journal, item, archive, holding, prefix, index, check_roots, 
     if reverse:
         if journal.latest.get(install) is not None:
             if journal.latest.get(save) in {"reverse_intent", "reverse_done"}:
-                verify_file(holding, ready_name, proof, renamed=True)
+                verify_file(holding, ready_name, proof, allow_ctime_change=True)
             else:
                 move(journal, install, archive, current, archive, ready,
                      proof, check_roots, reverse=True)
@@ -358,7 +371,7 @@ def apply_document(journal, item, archive, holding, prefix, index, check_roots, 
         journal.append(stage, "document_staged", proof=proof)
     if item["original"]:
         if journal.latest.get(install) is not None:
-            verify_file(holding, f"original-{index}.json", item["original"], renamed=True)
+            verify_file(holding, f"original-{index}.json", item["original"], allow_ctime_change=True)
         else:
             move(journal, save, archive, current, archive, saved, item["original"], check_roots)
     move(journal, install, archive, ready, archive, current, proof, check_roots)

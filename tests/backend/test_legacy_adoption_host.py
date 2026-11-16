@@ -6,6 +6,7 @@ import json
 import os
 import signal
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -30,10 +31,13 @@ def _macos_rename(source, source_name, target, target_name):
 
 
 @pytest.fixture
-def package(tmp_path, monkeypatch):
+def package(tmp_path, monkeypatch, request):
     private = tmp_path / "appdata"
-    source = tmp_path / "source"
-    archive = tmp_path / "archive"
+    native = os.environ.get("ADOPTION_ZFS_ROOT") if getattr(request, "param", None) else None
+    media = Path(native) / tmp_path.name if native else tmp_path
+    media.mkdir(exist_ok=True)
+    source = media / "source"
+    archive = media / "archive"
     for directory in (private, source, archive, archive / "event"):
         directory.mkdir()
     for name in ("execution.lock", "journal.jsonl"):
@@ -43,14 +47,21 @@ def package(tmp_path, monkeypatch):
     old_document = archive / "event/event.json"
     old_document.write_bytes(b'{"old":true}')
     new_document = b'{"new":true}'
-    monkeypatch.setattr(host, "revalidate", lambda *args: None)
+    evidence = {"dataset": "fixture/media"}
+    if native:
+        from app.legacy_adoption_dataset import prove
+        with host.directory(str(source), host.inode(source.stat())) as left, \
+                host.directory(str(archive), host.inode(archive.stat())) as right:
+            evidence = prove(source, archive, left, right)
+    else:
+        monkeypatch.setattr(host, "revalidate", lambda *args: None)
     if sys.platform == "darwin":
         monkeypatch.setattr(host, "mount_id", lambda _fd: 1)
         monkeypatch.setattr(host, "rename_noreplace", _macos_rename)
     plan = {
         "format": 1,
         "plan_id": "b" * 32, "job_id": "a" * 32, "library_id": "secondary",
-        "dataset": {"dataset": "fixture/media"},
+        "dataset": evidence,
         "source_inode": host.inode(source.stat()), "archive_inode": host.inode(archive.stat()),
         "host": {"package": str(private), "source": str(source), "archive": str(archive)},
         "directories": ["event/all"],
@@ -140,6 +151,61 @@ def test_real_sigkill_during_media_move_resumes_from_journal(package, point):
     assert not (source / "photo.raf").exists()
 
 
+@pytest.mark.parametrize("package", [True], indirect=True, ids=["native-zfs"])
+def test_metadata_only_identity_change_resumes_after_partial_move(package, monkeypatch):
+    private, source, archive, plan, _ = package
+    untouched = source / "photo.raf.xmp"
+    expected = plan["moves"][1]
+    rename = host.rename_noreplace
+
+    def interrupt(src, src_name, dst, dst_name):
+        rename(src, src_name, dst, dst_name)
+        raise KeyboardInterrupt
+
+    _permit(package, "apply")
+    with monkeypatch.context() as interrupted:
+        interrupted.setattr(host, "rename_noreplace", interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            host.main(_command(package, "apply"))
+    moved = archive / "event/all/photo.raf"
+    assert moved.read_bytes() == b"raw"
+    existing_inode = moved.stat().st_ino
+    untouched.chmod(untouched.stat().st_mode ^ 0o100)
+    assert host.stamp(untouched.stat())[:4] == expected["stamp"][:4]
+    assert host.stamp(untouched.stat())[4] != expected["stamp"][4]
+    assert host.main(_command(package, "apply")) == 0
+    assert moved.stat().st_ino == existing_inode
+    assert (archive / "event/all/photo.raf.xmp").read_bytes() == b"sidecar"
+    assert json.loads((private / "status.json").read_bytes())["state"] == "completed"
+
+    _permit(package, "rollback")
+    assert host.main(_command(package, "rollback")) == 0
+    assert (source / "photo.raf").stat().st_ino == existing_inode
+    assert untouched.read_bytes() == b"sidecar"
+    assert not list((archive / "event/all").iterdir())
+
+
+@pytest.mark.parametrize("replacement", [False, True])
+def test_rejects_changed_content_even_with_original_size_and_mtime(package, replacement):
+    private, source, archive, plan, _ = package
+    original = source / "photo.raf"
+    stamp = plan["moves"][0]["stamp"]
+    if replacement:
+        substitute = source / "substitute"
+        substitute.write_bytes(b"raw")
+        substitute.replace(original)
+    else:
+        original.write_bytes(b"bad")
+    os.utime(original, ns=(original.stat().st_atime_ns, stamp[3]))
+    assert original.stat().st_size == stamp[2]
+    _permit(package, "apply")
+    assert host.main(_command(package, "apply")) == 1
+    status = json.loads((private / "status.json").read_bytes())
+    assert ("inode" if replacement else "checksum") in status["error"]
+    assert not (archive / "event/all/photo.raf").exists()
+    assert original.exists()
+
+
 def test_script_rechecks_dataset_permissions_and_source_identity(package, monkeypatch):
     private, source, archive, _, _ = package
     _permit(package, "apply")
@@ -181,6 +247,33 @@ def test_conflicting_file_and_cross_mount_error_do_not_replace_or_copy(package, 
     assert not existing.exists()
     assert (source / "photo.raf").read_bytes() == b"raw"
     assert json.loads((private / "status.json").read_bytes())["state"] == "attention_required"
+
+
+def test_recognized_runner_refresh_preserves_manifest_and_durable_progress(package, monkeypatch):
+    from app import legacy_adoption_package as app_package
+    from app.legacy_adoption_paths import AdoptionError
+
+    private, _, _, plan, binding = package
+    old = {name: ("old bundled " + name).encode() for name in (*app_package.RUNNER_FILES, app_package.DISCOVERY_FILE)}
+    for name, content in old.items():
+        (private / name).write_bytes(content)
+    monkeypatch.setattr(app_package, "_RC17_RUNNER_DIGESTS", {name: _sha(data) for name, data in old.items()})
+    with host.directory(str(private), host.inode(private.stat())) as descriptor, host.package_lock(descriptor):
+        with host.Journal(descriptor, binding) as journal:
+            journal.append("media:photo.raf", "forward_done")
+        log = (private / "journal.jsonl").read_bytes()
+        sealed = (private / "manifest.json").read_bytes()
+        script = {"manifest_sha256": binding, "host_json": json.dumps(plan["host"])}
+        discovery = private / app_package.DISCOVERY_FILE
+        discovery.write_bytes(b"unrecognized")
+        with pytest.raises(AdoptionError, match="Skriptdateien"):
+            app_package.permit(descriptor, script, "apply")
+        assert (private / app_package.RUNNER_FILES[0]).read_bytes() == old[app_package.RUNNER_FILES[0]]
+        discovery.write_bytes(old[app_package.DISCOVERY_FILE])
+        assert " apply " in app_package.permit(descriptor, script, "apply")
+        assert not app_package._runner_differences(descriptor)
+        assert (private / "manifest.json").read_bytes() == sealed
+        assert (private / "journal.jsonl").read_bytes() == log
 
 
 def test_manifest_binding_and_interprocess_lock(package):

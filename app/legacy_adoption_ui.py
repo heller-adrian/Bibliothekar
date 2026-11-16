@@ -1798,6 +1798,13 @@ function renderPlan(host) {
     }
   });
   panel.append(directoryPreview);
+  const renames=node("details",undefined,"adoption-target-preview");
+  renames.append(node("summary","Geplante Dateiumbenennungen"),slot("rename-preview"));
+  renames.addEventListener("toggle",()=>{
+    const target=renames.querySelector("#rename-preview");
+    if(renames.open && !target.childElementCount)showRenames(target).catch(error=>report(error.message,"error"));
+  });
+  panel.append(renames);
   if(!recoveryOnly && !phase && plan.documents_at && viewStep==="execution")renderConfirmation(panel,command);
   if (manualPhase(plan) && viewStep==="execute"){
     const guide=node("div",undefined,"stack adoption-manual-guide");
@@ -1885,7 +1892,7 @@ function renderManualWork(work) {
         const value=node("dd");value.append(workCode(path));paths.append(node("dt",name),value);
       }
       body.append(paths);
-      if(step.state!=="done")body.append(line("Verschiebe nur Dateien mit dem Status Ausstehend. Stehen zwei Namen in einer Zeile, verwende am Ziel den zweiten Namen."));
+      if(step.state!=="done")body.append(line("Verschiebe nur Dateien mit dem Status Ausstehend. Bei einer geplanten Umbenennung gib der Datei vor dem Verschieben den Zielnamen. Überspringe die Datei, falls dieser Name bereits belegt ist."));
     } else if(step.kind==="prepare"){
       body.append(line("Entpacke das Paket getrennt. Lege die fehlenden Ordner an und kopiere die vorbereiteten Ereignisdokumente an die aufgeführten Pfade. Sichere vorhandene Ereignisdokumente vor dem Ersetzen."),
         workCode(work.archive_root));
@@ -1909,6 +1916,16 @@ function renderManualWork(work) {
         const path=item.path ? workPath(step.kind==="restore_source"?work.source_root:work.archive_root,item.path) :
           item.from===item.to?item.from:item.from+" → "+item.to;
         row.append(workCode(path));
+        if(!item.path && item.from!==item.to && item.state!=="done"){
+          row.append(document.createTextNode(" "),node("strong","Umbenennung erforderlich"));
+        }
+        if(item.observed_archive_path){
+          const note=node("div",undefined,"stack");
+          note.append(line("Die Originaldatei wurde unter einem anderen Namen gefunden. Stelle im Archiv den geplanten Namen her und aktualisiere die Prüfung."),
+                      workCode(workPath(work.archive_root,item.observed_archive_path)),
+                      workCode("→ "+workPath(work.archive_root,item.expected_archive_path)));
+          row.append(note);
+        }
         if(item.problem)row.append(document.createTextNode(" · "),node("small",label(item.problem)));
         if(step.kind==="restore_documents" && item.state==="pending")
           row.append(document.createTextNode(" · "+t(item.operation==="restore"?"Original wiederherstellen":"Vorbereitetes Dokument entfernen")));
@@ -2137,6 +2154,19 @@ async function showDirectories(tree,controls,after="") {
   tree.add(rows);
   controls.replaceChildren();
   if(rows.length===100)controls.append(action("Weitere Zielordner",()=>showDirectories(tree,controls,rows.at(-1))));
+}
+async function showRenames(host, after="") {
+  host.querySelector(".more")?.remove();
+  const rows=await api(jobPath("/moves?"+new URLSearchParams({after,renamed:"true"})));
+  if(!after && !rows.length)host.append(line("Der Plan enthält keine Dateiumbenennungen."));
+  for(const move of rows){
+    const row=node("div",undefined,"row paths");
+    row.append(workCode(move.source),node("br"),workCode("→ "+move.target));host.append(row);
+  }
+  if(rows.length===100){
+    const more=action("Weitere Verschiebungen",()=>showRenames(host,rows.at(-1).relative_path));
+    more.classList.add("more");host.append(more);
+  }
 }
 async function showMoves(reset=false) {
   const target=$("moves");

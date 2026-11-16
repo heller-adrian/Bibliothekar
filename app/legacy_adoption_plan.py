@@ -29,7 +29,7 @@ from app.legacy_adoption_inventory import _job, _legacy_family_key
 from app.legacy_adoption_mode import require_no_managed_data
 from app.legacy_adoption_paths import (
     AdoptionError, bound_directory, bound_file, bound_sha256, file_identity, relative_parent,
-    target_key, validate_target, walk_bound_files,
+    target_key, validate_target, verify_inventory_identity, walk_bound_files,
 )
 from app.metadata import LOCAL_TIMEZONE
 from app.operation_health import read_session
@@ -471,7 +471,7 @@ def _snapshot_existing_event(connection, plan_id, root_fd, prefix, event_id):
         raise AdoptionError("Das bestehende Ereignisdokument fehlt: " + doc)
 
 
-def _archive_probe(root_fd):
+def _archive_probe(root_fd, *, registered=None):
     @lru_cache(maxsize=32)
     def names(parent):
         try:
@@ -485,13 +485,17 @@ def _archive_probe(root_fd):
 
     def lookup(relative):
         prefix = PurePosixPath()
-        for part in PurePosixPath(relative).parts:
+        parts = PurePosixPath(relative).parts
+        for index, part in enumerate(parts):
             aliases = names(str(prefix)).get(target_key(part), [])
             if aliases and aliases != [part]:
-                raise AdoptionError("Zielkollision durch Schreibweise: " + str(prefix / part))
+                if (registered is None or index != len(parts) - 1 or len(aliases) != 1
+                        or str(prefix / aliases[0]) not in registered):
+                    raise AdoptionError("Zielkollision durch Schreibweise: " + str(prefix / part))
+                part = aliases[0]
             prefix /= part
         try:
-            with relative_parent(root_fd, relative) as (directory, name):
+            with relative_parent(root_fd, str(prefix)) as (directory, name):
                 return os.stat(name, dir_fd=directory, follow_symlinks=False)
         except FileNotFoundError:
             return None
@@ -570,7 +574,7 @@ def _family_targets(folder, key, family, override, archive_entry, registered, us
         validate_target(path)
         entry = archive_entry(path)
         if entry is not None:
-            if override is not None or path not in registered or not stat.S_ISREG(entry.st_mode):
+            if override is not None or target_key(path) not in registered or not stat.S_ISREG(entry.st_mode):
                 raise AdoptionError("Zieldatei existiert bereits: " + path)
             occupied = True
 
@@ -604,8 +608,8 @@ def _family_targets(folder, key, family, override, archive_entry, registered, us
 
 
 def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, source_fd, archive_fd):
-    archive_entry = _archive_probe(archive_fd)
     registered = set()
+    archive_entry = _archive_probe(archive_fd, registered=registered)
     for event in events:
         prefix = event_root_relative(event)
         validate_target(str(prefix))
@@ -625,6 +629,7 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
     target_counts = Counter()
     planned_directories = set()
     used_stems = {target_key(_legacy_family_key(Path(), path)) for path in registered}
+    registered_keys = {target_key(path) for path in registered}
     filename_sequences = Counter()
     rows = connection.execute(
         """SELECT inventory.*, families.capture_time, families.review_required, copy.state AS review_copy
@@ -663,15 +668,15 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
         new_family = not all(duplicate)
         targets = _family_targets(
             leaf / (layout["input_path"] if layout["structure_enabled"] else ""), key, family,
-            target_stems.get(key), archive_entry, registered, used_stems, filename_sequences,
+            target_stems.get(key), archive_entry, registered_keys, used_stems, filename_sequences,
         ) if new_family else [None] * len(family)
         for member, target in zip(family, targets, strict=True):
             source = member["relative_path"]
             if source.strip() != source or "\\" in source:
                 raise AdoptionError("Der Quellpfad ist für die globale Registry ungeeignet: " + source)
             with relative_parent(source_fd, source) as (directory, name):
-                with bound_file(directory, name, tuple(json.loads(member["identity"]))):
-                    pass
+                with bound_file(directory, name) as (fd, info):
+                    verify_inventory_identity(fd, info, json.loads(member["identity"]), member["sha256"])
             if target is not None:
                 source_dir = PurePosixPath(source).parent
                 target_dir = str(PurePosixPath(target).parent)
@@ -829,7 +834,7 @@ def plan_directories(library, job_id, *, after=""):
         )]
 
 
-def plan_moves(library, job_id: str, *, after: str = "", limit: int = 100):
+def plan_moves(library, job_id: str, *, after: str = "", limit: int = 100, renamed: bool = False):
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN")
         job = _job(connection, library.library_id, job_id)
@@ -840,8 +845,10 @@ def plan_moves(library, job_id: str, *, after: str = "", limit: int = 100):
                  JOIN legacy_adoption_inventory inventory ON inventory.job_id = plan.job_id
                       AND inventory.relative_path = move.relative_path
                 WHERE plan.job_id = ? AND move.relative_path > ?
+                  AND (NOT ? OR substr(move.target_path, -1 - length(json_extract(inventory.metadata_json, '$.filename')))
+                      != '/' || json_extract(inventory.metadata_json, '$.filename'))
                 ORDER BY move.relative_path LIMIT ?""",
-            (job_id, after, max(1, min(limit, 200))),
+            (job_id, after, renamed, max(1, min(limit, 200))),
         )
         return [{
             **dict(row), "source": str(Path(job["source_root"]) / row["relative_path"]),

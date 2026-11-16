@@ -1,16 +1,19 @@
 """Live, read-only SMB instructions for the frozen adoption plan."""
 from contextlib import ExitStack
+from functools import lru_cache
 import json
 import os
 from pathlib import PurePosixPath
 import stat
+from unicodedata import normalize
 
 from app.database import database_connection
 from app.event_inventory import event_root_relative
+from app.filename_collisions import collision_alias_stems
 from app.legacy_adoption_inventory import _job
 from app.legacy_adoption_paths import AdoptionError, relative_parent
 from app.legacy_adoption_plan import _archive_probe, _roots
-from app.legacy_adoption_verify import _matches, _plan, _verify_move, move_rows
+from app.legacy_adoption_verify import _entry, _matches, _plan, _verify_move, move_rows
 from app.manual_file_operations import group_file_operations
 
 MANUAL_PHASES = frozenset({"manual", "verifying", "repair", "registration_pending", "rolling_back"})
@@ -79,6 +82,41 @@ def _move_state(source, archive, archive_entry, row, reverse):
     except (OSError, AdoptionError):
         return "attention", "unsafe"
 
+
+
+def _rename_diagnostics(source, archive, reserved):
+    @lru_cache(maxsize=32)
+    def names(folder):
+        try:
+            with relative_parent(archive, str(folder / ".directory")) as (parent, _):
+                return os.listdir(parent)
+        except (OSError, AdoptionError):
+            return []
+
+    def observed(row, original, target):
+        # An SMB collision name is useful as a hint only. Never approve a
+        # different path, copy or unrelated file with a lookalike name.
+        try:
+            if _entry(source, str(original)) is not None:
+                return None
+            names_to_match = {normalize("NFC", path.stem).casefold() for path in (original, target)}
+            matches = []
+            for name in names(target.parent):
+                candidate = target.parent / name
+                path = str(candidate)
+                if path in reserved or candidate.suffix.casefold() != target.suffix.casefold():
+                    continue
+                aliases = collision_alias_stems(normalize("NFC", candidate.stem), allow_plain_number=True)
+                if names_to_match.intersection(aliases) and _matches(
+                    archive, path, row["size_bytes"], row["sha256"],
+                    expected_inode=tuple(json.loads(row["identity"])[:2]),
+                ):
+                    matches.append(path)
+            return matches[0] if len(matches) == 1 else None
+        except (OSError, AdoptionError):
+            return None
+
+    return observed
 
 def _summary(items):
     states = {item["state"] for item in items}
@@ -164,12 +202,22 @@ def manual_work(library, job_id, *, check=False):
         reverse = execution["phase"] == "rolling_back"
         source, archive = _roots(stack, library, job)
         lookup = _archive_probe(archive)
+        reserved = {row[0] for row in connection.execute(
+            "SELECT target_path FROM legacy_adoption_moves WHERE plan_id = ? AND target_path IS NOT NULL",
+            (plan_id,),
+        )} if check else set()
+        observed_rename = _rename_diagnostics(source, archive, reserved)
+
         def file_operations():
             for row in move_rows(connection, job_id, plan_id):
                 original, target = PurePosixPath(row["relative_path"]), PurePosixPath(row["target_path"])
                 state, problem = _move_state(source, archive, lookup, row, reverse) if check else ("unchecked", None)
                 start, end = (target, original) if reverse else (original, target)
-                yield start, end, {"from": start.name, "to": end.name, "state": state, "problem": problem}
+                item = {"from": start.name, "to": end.name, "state": state, "problem": problem}
+                if state == "attention" and (observed := observed_rename(row, original, target)):
+                    item["observed_archive_path"] = observed
+                    item["expected_archive_path"] = str(target)
+                yield start, end, item
 
         groups = group_file_operations(file_operations())
         documents = _documents(connection, archive, lookup, plan_id, reverse, check)

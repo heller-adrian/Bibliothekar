@@ -19,8 +19,13 @@ TRANSLATIONS = {
     "Ursprüngliche Quellordner bereitstellen": "Restore source folders",
     "Dateien zurückverschieben": "Move files back",
     "Dateien verschieben": "Move files",
-    "Verschiebe nur Dateien mit dem Status Ausstehend. Stehen zwei Namen in einer Zeile, verwende am Ziel den zweiten Namen.":
-        "Move only files marked Pending. When two names are shown, use the second name at the destination.",
+    "Geplante Dateiumbenennungen": "Planned filename changes",
+    "Der Plan enthält keine Dateiumbenennungen.": "The plan contains no filename changes.",
+    "Umbenennung erforderlich": "Rename required",
+    "Die Originaldatei wurde unter einem anderen Namen gefunden. Stelle im Archiv den geplanten Namen her und aktualisiere die Prüfung.":
+        "The original was found under another name. Rename it to the planned filename in the archive and refresh the check.",
+    "Verschiebe nur Dateien mit dem Status Ausstehend. Bei einer geplanten Umbenennung gib der Datei vor dem Verschieben den Zielnamen. Überspringe die Datei, falls dieser Name bereits belegt ist.":
+        "Move only files marked Pending. Apply any planned filename change before moving that file. Skip it if the name is occupied.",
     "Ereignisdokumente wiederherstellen": "Restore event documents",
     "Leere angelegte Archivordner entfernen": "Remove empty folders created in the archive",
     "Ordnergerüst mit Ereignisdokumenten (ZIP)": "Folder scaffold with event documents (ZIP)",

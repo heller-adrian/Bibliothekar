@@ -614,9 +614,9 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             return plan_directories(context(), job_id, after=after)
 
     @router.get("/jobs/{job_id}/moves")
-    def moves(job_id: str, after: str = ""):
+    def moves(job_id: str, after: str = "", renamed: bool = False):
         with _errors():
-            return plan_moves(context(), job_id, after=after)
+            return plan_moves(context(), job_id, after=after, renamed=renamed)
 
     @router.get("/jobs/{job_id}/issues")
     def issues(job_id: str):

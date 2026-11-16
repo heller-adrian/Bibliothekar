@@ -26,6 +26,14 @@ def file_identity(info):
     return (*directory_identity(info), info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
+
+def verify_inventory_identity(descriptor, info, expected, checksum, *, hash_required=False):
+    actual = file_identity(info)
+    if actual[:4] != tuple(expected[:4]):
+        raise AdoptionError("Die Dateiidentität weicht von der Inventur ab.")
+    if (hash_required or actual[4] != expected[4]) and bound_sha256(descriptor) != checksum:
+        raise AdoptionError("Dateiinhalt weicht vom freigegebenen Plan ab.")
+
 def absolute_root(value: Path) -> Path:
     path = Path(value)
     if path.anchor != "/" or ".." in path.parts:

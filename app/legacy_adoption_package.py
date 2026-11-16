@@ -14,15 +14,22 @@ from app.appdata import root as appdata_root
 from app.database import database_connection
 from app.legacy_adoption_dataset import DatasetError, mount_id, mount_table
 from app.legacy_adoption_inventory import _job
-from app.legacy_adoption_paths import AdoptionError, bound_file, bound_sha256, relative_parent
+from app.legacy_adoption_paths import AdoptionError, bound_file, bound_sha256, relative_parent, verify_inventory_identity
 from app.legacy_adoption_plan import _roots
-from app.legacy_adoption_verify import _plan
+from app.legacy_adoption_verify import _plan, move_rows
 from app.private_storage_security import qualified
 
 
 PACKAGE_ROOT = "legacy-adoption"
 RUNNER_FILES = ("legacy_adoption_host.py", "legacy_adoption_dataset.py")
 DISCOVERY_FILE = "legacy_adoption_discover.py"
+# Bytes shipped in RC17. Only the recognized executor and bootstrap may be
+# refreshed under the package lock. The manifest and journal stay bound.
+_RC17_RUNNER_DIGESTS = {
+    "legacy_adoption_host.py": "cdbb9ad9ea8e9a891ba9f4e686cc593b4789ddf510cccafb7c81bc14ad4e6e04",
+    "legacy_adoption_dataset.py": "a96557670afa37aaed905749f3c469f731752a321ead216a50ff04e64459bd65",
+    DISCOVERY_FILE: "3e283d3291ef222e7eb111fb23c0f55f89eb9baa9bfca391573e35bc11474cd2",
+}
 
 
 def _sha(data):
@@ -244,10 +251,12 @@ def _approved_host(descriptor, library, job, plan_id, probe_digest):
     return {**probe, "host": paths}
 
 
-def _bound_proof(root, path, size, expected):
+def _bound_proof(root, path, size, expected, *, inventory_identity=None):
     with relative_parent(root, path) as (parent, name):
         with bound_file(parent, name) as (fd, info):
-            if info.st_size != size or bound_sha256(fd) != expected:
+            if inventory_identity is not None:
+                verify_inventory_identity(fd, info, inventory_identity, expected, hash_required=True)
+            elif info.st_size != size or bound_sha256(fd) != expected:
                 raise AdoptionError("Dateiinhalt weicht vom freigegebenen Plan ab: " + path)
             return {"stamp": host.stamp(info), "sha256": expected}
 
@@ -266,16 +275,13 @@ def prepare_manifest(connection, library, job, plan, probe_digest):
             (plan_id,),
         )]
         moves = []
-        for row in connection.execute(
-            """SELECT move.relative_path, move.target_path, inventory.size_bytes, move.sha256
-                 FROM legacy_adoption_moves move JOIN legacy_adoption_inventory inventory
-                   ON inventory.job_id = ? AND inventory.relative_path = move.relative_path
-                WHERE move.plan_id = ? AND move.target_path IS NOT NULL ORDER BY move.relative_path""",
-            (job["id"], plan_id),
-        ):
-            original, target, size, digest = row
-            moves.append({"source": original, "target": target,
-                          **_bound_proof(source, original, size, digest)})
+        for row in move_rows(connection, job["id"], plan_id):
+            original = row["relative_path"]
+            moves.append({
+                "source": original, "target": row["target_path"],
+                **_bound_proof(source, original, row["size_bytes"], row["sha256"],
+                               inventory_identity=json.loads(row["identity"])),
+            })
         documents = []
         for row in connection.execute(
             """SELECT new.relative_path, new.content, new.sha256, old.size_bytes, old.sha256
@@ -330,14 +336,29 @@ def locked_script(library, job_id, plan_id):
         yield descriptor, script
 
 
+def _runner_differences(descriptor):
+    expected = {name: Path(__file__).with_name(name).read_bytes() for name in RUNNER_FILES}
+    if host.info_at(descriptor, DISCOVERY_FILE) is not None:
+        expected[DISCOVERY_FILE] = _discovery_script()
+    differences = {}
+    for name, current in expected.items():
+        previous = host.read_bytes(descriptor, name)
+        if previous != current:
+            if _sha(previous) != _RC17_RUNNER_DIGESTS[name]:
+                raise AdoptionError("Die Skriptdateien stimmen nicht mit dieser Bibliothekar-Version überein.")
+            differences[name] = current
+    return differences
+
+
 def permit(descriptor, script, mode):
     digest = script["manifest_sha256"]
     if mode is not None:
         if _sha(host.read_bytes(descriptor, "manifest.json")) != digest:
             raise AdoptionError("Das Skriptmanifest stimmt nicht mit dem bestätigten Auftrag überein.")
-        for name in RUNNER_FILES:
-            if host.read_bytes(descriptor, name) != Path(__file__).with_name(name).read_bytes():
-                raise AdoptionError("Die Skriptdateien stimmen nicht mit dieser Bibliothekar-Version überein.")
+        # Verify every file before writing any of them. Old and new bootstrap
+        # commands both reject an interrupted refresh until it is completed.
+        for name, data in _runner_differences(descriptor).items():
+            host.write_atomic(descriptor, name, data)
     _put_json(descriptor, "permission.json", {"manifest": digest, "mode": mode})
     return _command(mode, descriptor, json.loads(script["host_json"]), digest) if mode else None
 
@@ -363,7 +384,7 @@ def script_details(library, job_id, plan_id):
         result = {"status": status, "running": running, "host": json.loads(script["host_json"])}
         allowed = _read_json(descriptor, "permission.json")
         if (allowed and allowed.get("manifest") == script["manifest_sha256"]
-                and allowed.get("mode") in {"apply", "rollback"}):
+                and allowed.get("mode") in {"apply", "rollback"} and not _runner_differences(descriptor)):
             result["command"] = _command(allowed["mode"], descriptor, result["host"], script["manifest_sha256"])
         return result
 

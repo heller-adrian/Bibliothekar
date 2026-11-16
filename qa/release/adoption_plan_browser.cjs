@@ -238,6 +238,9 @@ async function checkManual(browser, language, width) {
         move_bytes:700,library_name:"Main Library",source_root:"/sources/photos",archive_root:"/main-library",
         dataset:{dataset:"test/media"},events:[{existing:false}],counts:{pending:2},issues:0}}});
     if (key==="/review/batch")return route.fulfill({json:inactive});
+    if (key==="/moves" && url.searchParams.get("renamed")==="true")
+      return route.fulfill({json:[{source:"/sources/photos/old/a.raf",target:"/main-library/new/a_Adopted_001.raf",
+        relative_path:"old/a.raf"}]});
     if (key==="/confirm") {
       assert.deepEqual(route.request().postDataJSON(),{plan_id:planId,method:"manual",acknowledged:true});
       await new Promise(resolve=>{releaseConfirm=resolve;confirmStarted();});
@@ -250,7 +253,7 @@ async function checkManual(browser, language, width) {
       const state=checked?(ready?"done":"pending"):"unchecked";
       return route.fulfill({json:{plan_id:planId,reverse,checked,ready,source_root:"/sources/photos",archive_root:"/main-library",steps:[
         {kind:reverse?"restore_source":"prepare",state,items:[{path:reverse?"old":"new/event.json",state}]},
-        {kind:"move",state,from:reverse?"new":"old",to:reverse?"old":"new",items:[{from:"a.raf",to:"a.raf",state}]},
+        {kind:"move",state,from:reverse?"new":"old",to:reverse?"old":"new",items:[{from:reverse?"a_Adopted_001.raf":"a.raf",to:reverse?"a.raf":"a_Adopted_001.raf",state}]},
       ]}});
     }
     if (key==="/verify"){
@@ -271,6 +274,8 @@ async function checkManual(browser, language, width) {
   await page.goto(origin+"/legacy-adoption?job="+jobId+"&step=execution");
   const submit=page.getByRole("button",{name:l("Durchführung verbindlich starten","Confirm and start")});
   assert.ok(await submit.isDisabled());
+  await page.getByText(l("Geplante Dateiumbenennungen","Planned filename changes"),{exact:true}).click();
+  await page.locator("#rename-preview").getByText("→ /main-library/new/a_Adopted_001.raf",{exact:true}).waitFor();
   await page.locator(".adoption-ack input").check();
   await submit.click();
   await pendingConfirmation;
@@ -289,7 +294,8 @@ async function checkManual(browser, language, width) {
   await page.keyboard.press("Enter");
   await move.getByText("/sources/photos/old",{exact:true}).waitFor();
   await move.getByText("/main-library/new",{exact:true}).waitFor();
-  await move.getByText("a.raf",{exact:true}).waitFor();
+  await move.getByText("a.raf → a_Adopted_001.raf",{exact:true}).waitFor();
+  await move.getByText(l("Umbenennung erforderlich","Rename required"),{exact:true}).waitFor();
   done=true;
   await refresh.click();
   await move.locator("summary [data-state=done]").waitFor();
