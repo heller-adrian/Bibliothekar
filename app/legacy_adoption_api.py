@@ -23,6 +23,7 @@ from app.legacy_adoption_export import directory_scaffold, event_documents, mani
 from app.legacy_adoption_flat_copy import require_no_partial_publication
 from app.legacy_adoption_host import ExecutionError
 from app.legacy_adoption_history import completed_adoptions, history_html
+from app.legacy_adoption_manual import manual_work
 from app.legacy_adoption_inventory import (
     _job, create_job, discard_job, inventory_chronology, inventory_errors, inventory_families,
     inventory_status, qualify_source, scan_inventory,
@@ -628,19 +629,33 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         with _errors(), admission(library):
             return prepare_documents(library, job_id)
 
+    @router.get("/jobs/{job_id}/manual-work")
+    def manual_steps(job_id: str, check: bool = False):
+        with _errors():
+            return manual_work(context(), job_id, check=check)
+
     @router.get("/jobs/{job_id}/download/{artifact}")
-    def download(job_id: str, artifact: Literal["folders", "documents", "original-documents", "manifest"]):
+    def download(job_id: str, artifact: Literal[
+        "folders", "documents", "original-documents", "manifest", "manual-setup", "original-folders",
+    ]):
         library = context()
         if artifact == "manifest":
             return _download(lambda: manifest_file(library, job_id), "bestandsuebernahme.jsonl",
                              media_type="application/x-ndjson")
         with _errors():
             execution = plan_status(library, job_id).get("execution")
-            allowed = {"manual"} if artifact != "original-documents" else {"manual", "repair", "rolling_back"}
+            allowed = {
+                "original-documents": {"manual", "repair", "rolling_back"},
+                "original-folders": {"rolling_back"},
+            }.get(artifact, {"manual"})
             if not execution or execution["method"] != "manual" or execution["phase"] not in allowed:
                 raise AdoptionError("Diese Unterlagen sind für den aktuellen Ausführungsschritt gesperrt.")
-        if artifact == "folders":
-            return _download(lambda: directory_scaffold(library, job_id), "archiv-ordnergeruest.zip")
+        if artifact in {"folders", "manual-setup", "original-folders"}:
+            return _download(
+                lambda: directory_scaffold(library, job_id, documents=artifact == "manual-setup",
+                                           original=artifact == "original-folders"),
+                "quellordnergeruest.zip" if artifact == "original-folders" else "archiv-ordnergeruest.zip",
+            )
         return _download(lambda: event_documents(library, job_id, originals=artifact == "original-documents"),
                          "urspruengliche-ereignisdokumente.zip" if artifact == "original-documents"
                          else "ereignisdokumente.zip")

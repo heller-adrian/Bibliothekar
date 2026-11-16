@@ -17,15 +17,11 @@ from app.archive_release_stock import describe_archive_release_stock
 from app.workspace_layout import shared_work_root
 
 
+from app.manual_file_operations import group_file_operations, parent_directory as _parent_dir
+
+
 class ArchiveChangeAssistantError(RuntimeError):
     pass
-
-
-def _parent_dir(value: Any) -> str:
-    raw = str(value or "").replace("\\", "/").strip("/")
-    if not raw:
-        return ""
-    return PurePosixPath(raw).parent.as_posix()
 
 
 def _tree_lines(root: str, directories: list[str]) -> list[str]:
@@ -436,15 +432,12 @@ def build_archive_change_assistant(
                 int(row["id"]),
             ) not in covered_workspace_rows
         ]
-        grouped_workspace: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        for row in remaining_workspace:
-            source = _parent_dir(
-                row.get("workspace_staging_path")
-                or f"{staging_name}/{row.get('new_path') or ''}"
-            )
-            target = _parent_dir(row.get("new_path"))
-            grouped_workspace.setdefault((source, target), []).append(row)
-        for (source, target), members in sorted(grouped_workspace.items()):
+        grouped_workspace = group_file_operations(
+            (row.get("workspace_staging_path") or f"{staging_name}/{row.get('new_path') or ''}",
+             row.get("new_path"), row)
+            for row in remaining_workspace
+        )
+        for (source, target), members in grouped_workspace:
             state = None
             pending_members = members
             if scan_live:
@@ -505,13 +498,11 @@ def build_archive_change_assistant(
                 "state": document_state,
             })
 
-        grouped_archive: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        for row in archive_rows:
-            source = _parent_dir(row.get("old_path"))
-            target = _parent_dir(row.get("new_path"))
-            grouped_archive.setdefault((source, target), []).append(row)
+        grouped_archive = group_file_operations(
+            (row.get("old_path"), row.get("new_path"), row) for row in archive_rows
+        )
 
-        for (planned_source, target), members in sorted(grouped_archive.items()):
+        for (planned_source, target), members in grouped_archive:
             state = None
             shown_members = members
             source_dirs = [planned_source]

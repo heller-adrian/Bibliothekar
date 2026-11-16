@@ -253,13 +253,24 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
         ] == "legacy_adoption_active"
         moves = api(job + "/moves")
         if execution == "manual":
-            for artifact in ("folders", "documents"):
-                with ZipFile(BytesIO(request(job + "/download/" + artifact))) as package:
-                    package.extractall(archive)
-            for move in moves:
+            assert not api(job + "/manual-work?check=true")["ready"]
+            with ZipFile(BytesIO(request(job + "/download/manual-setup"))) as package:
+                assert any(path.endswith("/event.json") for path in package.namelist())
+                package.extractall(archive)
+            for index, move in enumerate(moves):
                 original = source / Path(move["source"]).relative_to("/sources/nas")
                 target = archive / Path(move["target"]).relative_to("/main-library")
                 original.rename(target)
+                if index == 0:
+                    subprocess.run(["docker", "restart", container], check=True)
+                    base = address()
+                    wait_ready()
+                    login()
+                    partial = api(job + "/manual-work?check=true")
+                    assert not partial["ready"] and partial["steps"][0]["state"] == "done"
+                    assert {item["state"] for item in partial["steps"][1]["items"]} == {"done", "pending"}
+            assert api(job + "/manual-work?check=true")["ready"]
+            print("Grouped manual SMB work verified the combined ZIP and resumed partial moves after a container restart on native ZFS.")
         else:
             shell = api(job + "/script/release", method="POST", payload=command)["command"]
             if rollback:

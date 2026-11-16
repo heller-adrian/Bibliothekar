@@ -4,6 +4,7 @@ import json
 from app.database import database_connection
 from app.legacy_adoption_dataset import DatasetError
 from app.legacy_adoption_inventory import _job
+from app.legacy_adoption_manual import assert_directories_restored, record_missing_directories
 from app.legacy_adoption_paths import AdoptionError
 from app.legacy_adoption_plan import plan_status
 from app.legacy_adoption_verify import _catalogue_unchanged, _plan, assert_original_layout, verify_locked
@@ -40,7 +41,9 @@ def confirm_plan(library, job_id, plan_id, method, *, acknowledged, probe_digest
                 "INSERT INTO legacy_adoption_execution (plan_id, method, phase) VALUES (?, ?, ?)",
                 (plan_id, method, "manual" if method == "manual" else "script_prepared"),
             )
-            if method == "script":
+            if method == "manual":
+                record_missing_directories(connection, library, job, plan)
+            else:
                 from app.legacy_adoption_package import prepare_manifest
                 prepare_manifest(connection, library, job, plan, probe_digest)
         elif existing["method"] != method:
@@ -87,6 +90,8 @@ def complete_rollback(library, job_id, plan_id, *, before_commit=None):
             raise AdoptionError("Starte zuerst den vorgesehenen Wiederherstellungsweg.")
         _catalogue_unchanged(connection, job_id, json.loads(plan["events_json"]))
         assert_original_layout(connection, library, job, plan)
+        if execution["method"] == "manual":
+            assert_directories_restored(connection, library, job, plan)
         if before_commit:
             before_commit()
         set_phase(connection, plan_id, "rolled_back")

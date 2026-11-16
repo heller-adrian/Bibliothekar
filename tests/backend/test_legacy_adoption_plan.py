@@ -419,6 +419,10 @@ def test_confirmed_rollback_keeps_plan_and_requires_restored_bytes(inventory):
     with pytest.raises(AdoptionError, match="Quelldatei fehlt oder stimmt nicht"):
         complete_rollback(context, job, plan_id)
     original.write_bytes(b"original photo")
+    with pytest.raises(AdoptionError, match="angelegter Archivordner ist noch vorhanden"):
+        complete_rollback(context, job, plan_id)
+    target.parent.rmdir()
+    target.parent.parent.rmdir()
     restored = complete_rollback(context, job, plan_id)
     assert restored["id"] == plan_id
     assert restored["execution"]["phase"] == "rolled_back"

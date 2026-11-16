@@ -48,15 +48,23 @@ async function check(browser, width, height, theme, language) {
   }, {theme, language});
   let batch = inactive;
   let cancelCount = 0;
+  let releaseSave;
+  let notifySaveStarted;
+  let savedRevision=1;
   let pending = {"review-0": {source: "EXIF:ExifIFD:DateTimeOriginal"}};
-  await page.route(origin + "/**", route => {
+  await page.route(origin + "/**", async route => {
     const url = new URL(route.request().url());
     const key = url.pathname.split("/" + jobId).at(-1);
     if (url.pathname === "/legacy-adoption") return route.fulfill({body: html, contentType: "text/html"});
     if (key === "") return route.fulfill({json: {plan: {}, state: "inventoried",
       draft: {events: [{name: "Existing test event", start_date: "2025-01-01", end_date: "2025-01-01",
-        folder_layout: customLayout}], metadata_review_pending: pending}, draft_revision: 1,
+        folder_layout: customLayout}], metadata_review_pending: pending}, draft_revision: savedRevision,
       files: 100, families: 95, errors: 0, review_count: cases.length, source_root: "/synthetic/source"}});
+    if (key === "/draft" && route.request().method() === "PUT") {
+      await new Promise(resolve => { releaseSave=resolve; notifySaveStarted(); });
+      savedRevision++;
+      return route.fulfill({json:{revision:savedRevision}});
+    }
     if (key === "/draft/check") return route.fulfill({json: {valid: true, free_segments: segments, coverage: {unassigned: 25},
       events: [{name: "Existing test event", start: "2025-01-01T01:00:00", end: "2025-01-01T02:00:00", families: 1, files: 1}]}});
     if (key === "/draft/structure") return route.fulfill({json: {directories: ["2025/Existing test event/Photos"]}});
@@ -85,6 +93,14 @@ async function check(browser, width, height, theme, language) {
   await page.locator("#days [data-day]").nth(59).waitFor();
   const tools = page.locator(".adoption-plan-tools");
   assert.ok((await tools.boundingBox()).y > 120, "the event tools start in document flow");
+  await tools.scrollIntoViewIfNeeded();
+  const cardBox = await page.locator(".adoption-event-card").boundingBox();
+  const toolsBox = await tools.boundingBox();
+  assert.ok(cardBox.y - toolsBox.y - toolsBox.height >= 10, "saved cards clear the year divider");
+  const flatControls = await page.locator("main button, .bk-setup-banner button").evaluateAll(buttons =>
+    buttons.every(button => getComputedStyle(button).boxShadow === "none" &&
+      ["solid", "none"].includes(getComputedStyle(button).borderTopStyle)));
+  assert.ok(flatControls, "wizard and header controls are flat");
   const start = await geometry(page, ".adoption-plan-tools", 160);
   assert.ok(Math.abs(start.top) < 2 && start.containerBottom >= start.bottom && start.background !== "rgba(0, 0, 0, 0)");
   await page.locator(".adoption-event-card summary").focus();
@@ -126,6 +142,14 @@ async function check(browser, width, height, theme, language) {
   page.once("dialog", confirmation => confirmation.accept());
   await page.keyboard.press("Escape");
   await dialog.waitFor({state: "hidden"});
+  await page.locator(".adoption-event-card").getByRole("button", {name:german?"Bearbeiten":"Edit"}).click();
+  const saveStarted=new Promise(resolve=>{notifySaveStarted=resolve;});
+  await dialog.getByRole("button", {name:german?"Im Entwurf speichern":"Save in draft"}).click();
+  await dialog.locator("#editor-message[data-result=busy].bk-loading-status").waitFor();
+  await page.waitForFunction(() => document.getElementById("editor-message").textContent.length > 0);
+  await saveStarted;
+  releaseSave();
+  await page.locator("#message[data-result=success]").waitFor();
   const last = page.locator("#days [data-day]").nth(59);
   await last.focus();
   await page.keyboard.press("Space");
@@ -188,12 +212,119 @@ async function check(browser, width, height, theme, language) {
   await page.close();
 }
 
+async function checkManual(browser, language, width) {
+  const page=await browser.newPage({viewport:{width,height:900},reducedMotion:"reduce"});
+  page.setDefaultTimeout(10000);
+  const german=language==="de";
+  const l=(de,en)=>german?de:en;
+  const planId="c".repeat(32);
+  let execution=null, done=false, restored=false, releaseConfirm;
+  let confirmStarted;
+  const pendingConfirmation=new Promise(resolve=>{confirmStarted=resolve;});
+  const errors=[];
+  page.on("pageerror",error=>errors.push(error.message));
+  await page.addInitScript(language=>{
+    localStorage.setItem("bibliothekar-language",language);
+    localStorage.setItem("bibliothekar-theme",language==="de"?"dark":"light");
+  },language);
+  await page.route(origin+"/**",async route=>{
+    const url=new URL(route.request().url());
+    const key=url.pathname.split("/"+jobId).at(-1);
+    if (url.pathname==="/legacy-adoption")return route.fulfill({body:html,contentType:"text/html"});
+    if (url.pathname==="/setup/adoption")return route.fulfill({body:"Synthetic setup choice"});
+    if (!key)return route.fulfill({json:{state:"inventoried",files:2,families:1,errors:0,review_count:0,
+      draft_revision:1,draft:{},source_root:"/sources/photos",plan:{id:planId,documents_at:"set",execution,
+        state:execution?.phase==="registration_pending"?"verified":"prepared",move_files:2,move_families:1,
+        move_bytes:700,library_name:"Main Library",source_root:"/sources/photos",archive_root:"/main-library",
+        dataset:{dataset:"test/media"},events:[{existing:false}],counts:{pending:2},issues:0}}});
+    if (key==="/review/batch")return route.fulfill({json:inactive});
+    if (key==="/confirm") {
+      assert.deepEqual(route.request().postDataJSON(),{plan_id:planId,method:"manual",acknowledged:true});
+      await new Promise(resolve=>{releaseConfirm=resolve;confirmStarted();});
+      execution={method:"manual",phase:"manual"};return route.fulfill({json:{execution}});
+    }
+    if (key==="/manual-work") {
+      const checked=url.searchParams.get("check")==="true";
+      const reverse=execution.phase==="rolling_back";
+      const ready=checked && (reverse?restored:done);
+      const state=checked?(ready?"done":"pending"):"unchecked";
+      return route.fulfill({json:{plan_id:planId,reverse,checked,ready,source_root:"/sources/photos",archive_root:"/main-library",steps:[
+        {kind:reverse?"restore_source":"prepare",state,items:[{path:reverse?"old":"new/event.json",state}]},
+        {kind:"move",state,from:reverse?"new":"old",to:reverse?"old":"new",items:[{from:"a.raf",to:"a.raf",state}]},
+      ]}});
+    }
+    if (key==="/verify"){
+      assert.ok(done);execution={method:"manual",phase:"registration_pending"};
+      return route.fulfill({json:{execution,state:"verified"}});
+    }
+    if (key==="/rollback/start"){
+      execution={method:"manual",phase:"rolling_back"};return route.fulfill({json:{execution}});
+    }
+    if (key==="/rollback/check"){
+      assert.ok(restored);execution={method:"manual",phase:"rolled_back"};return route.fulfill({json:{execution}});
+    }
+    if (key==="/assets/bibliothekar-logo-v3.svg")
+      return route.fulfill({path:path.join(__dirname,"../../app/bibliothekar-logo-v3.svg")});
+    if (key==="/auth/client.js" || key==="/favicon.ico")return route.fulfill({body:""});
+    throw Error("Unmocked manual wizard request "+url.pathname);
+  });
+  await page.goto(origin+"/legacy-adoption?job="+jobId+"&step=execution");
+  const submit=page.getByRole("button",{name:l("Durchführung verbindlich starten","Confirm and start")});
+  assert.ok(await submit.isDisabled());
+  await page.locator(".adoption-ack input").check();
+  await submit.click();
+  await pendingConfirmation;
+  assert.equal(await submit.getAttribute("aria-busy"),"true");
+  assert.ok(await submit.evaluate(button=>getComputedStyle(button,"::after").animationName==="none"));
+  await page.locator("#message.bk-loading-status").waitFor();
+  releaseConfirm();
+  await page.getByRole("link",{name:l("Ordnergerüst mit Ereignisdokumenten (ZIP)","Folder scaffold with event documents (ZIP)")}).waitFor();
+  const advance=page.getByRole("button",{name:l("Weiter: Archiv prüfen","Next: Verify archive")});
+  assert.ok(await advance.isDisabled());
+  const refresh=page.locator("#manual-refresh");
+  await refresh.click();
+  await page.locator(".adoption-manual-step [data-state=pending]").first().waitFor();
+  const move=page.locator(".adoption-manual-step").nth(1);
+  await move.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await move.getByText("/sources/photos/old",{exact:true}).waitFor();
+  await move.getByText("/main-library/new",{exact:true}).waitFor();
+  await move.getByText("a.raf",{exact:true}).waitFor();
+  done=true;
+  await refresh.click();
+  await move.locator("summary [data-state=done]").waitFor();
+  assert.ok(await move.evaluate(card=>card.open));
+  if(process.env.BIBLIOTHEKAR_BROWSER_SCREENSHOTS)
+    await page.screenshot({path:process.env.BIBLIOTHEKAR_BROWSER_SCREENSHOTS+"/manual-"+language+".png"});
+  await page.reload();
+  assert.ok(await advance.isDisabled());
+  await refresh.click();
+  await advance.click();
+  await page.getByRole("button",{name:l("Übernahme registrieren","Register adoption")}).waitFor();
+  page.once("dialog",confirmation=>confirmation.accept());
+  await page.locator("#top-actions .danger-button").click();
+  await page.getByRole("link",{name:l("Ursprüngliches Ordnergerüst (ZIP)","Original folder scaffold (ZIP)")}).waitFor();
+  const finish=page.getByRole("button",{name:l("Wiederherstellung prüfen und Auftrag beenden","Verify rollback and end job")});
+  await finish.waitFor();
+  assert.ok(await finish.isDisabled());
+  restored=true;
+  await refresh.click();
+  await finish.click();
+  await page.waitForURL("**/setup/adoption");
+  assert.deepEqual(errors,[]);
+  await page.close();
+}
+
 (async () => {
   const browser = await chromium.launch({executablePath: process.env.CHROMIUM_EXECUTABLE || undefined});
   try {
     for (const variant of [[1400, 880, "light", "en"], [1024, 680, "dark", "de"], [768, 1024, "light", "en"], [390, 780, "dark", "de"]]) {
       await check(browser, ...variant);
       console.log("Passed", ...variant);
+    }
+    for(const [language,width] of [["de",390],["en",1100]]){
+      await checkManual(browser,language,width);
+      console.log("Passed manual work",language,width);
     }
   } finally {
     await browser.close();

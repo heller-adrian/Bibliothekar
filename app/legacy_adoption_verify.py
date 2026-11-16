@@ -27,6 +27,16 @@ def _entry(root, relative):
         return None
 
 
+def move_rows(connection, job_id, plan_id, *, include_duplicates=False):
+    return connection.execute(
+        """SELECT move.*, inventory.size_bytes, inventory.identity FROM legacy_adoption_moves move
+           JOIN legacy_adoption_inventory inventory ON inventory.job_id = ?
+                AND inventory.relative_path = move.relative_path
+           WHERE move.plan_id = ? AND (? OR target_path IS NOT NULL) ORDER BY move.relative_path""",
+        (job_id, plan_id, include_duplicates),
+    )
+
+
 def _verify_move(source, archive, row, stamp):
     try:
         original = _entry(source, row["relative_path"])
@@ -112,14 +122,7 @@ def verify_locked(connection, library, job, plan, *, keep_stamps=False):
     with ExitStack() as stack:
         source, archive = _roots(stack, library, job)
         archive_entry = _archive_probe(archive)
-        moves = connection.execute(
-            """SELECT move.*, inventory.size_bytes, inventory.identity FROM legacy_adoption_moves move
-               JOIN legacy_adoption_inventory inventory ON inventory.job_id = ? AND
-                    inventory.relative_path = move.relative_path
-               WHERE move.plan_id = ? AND target_path IS NOT NULL ORDER BY move.relative_path""",
-            (job_id, plan_id),
-        )
-        for row in moves:
+        for row in move_rows(connection, job_id, plan_id):
             try:
                 archive_entry(row["target_path"])
                 status = _verify_move(source, archive, row, stamp)
@@ -226,13 +229,7 @@ def assert_original_layout(connection, library, job, plan):
     with ExitStack() as stack:
         source, archive = _roots(stack, library, job)
         lookup = _archive_probe(archive)
-        for row in connection.execute(
-            """SELECT move.*, inventory.size_bytes, inventory.identity FROM legacy_adoption_moves move
-                 JOIN legacy_adoption_inventory inventory ON inventory.job_id = ?
-                  AND inventory.relative_path = move.relative_path
-                WHERE move.plan_id = ?""",
-            (job["id"], plan_id),
-        ):
+        for row in move_rows(connection, job["id"], plan_id, include_duplicates=True):
             if row["target_path"] and lookup(row["target_path"]) is not None:
                 raise AdoptionError("Das Verschiebeziel ist noch belegt: " + row["target_path"])
             if not _matches(source, row["relative_path"], row["size_bytes"], row["sha256"],

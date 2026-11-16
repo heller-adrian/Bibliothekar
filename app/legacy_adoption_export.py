@@ -1,30 +1,45 @@
 """Build portable instructions and directory scaffolding for manual transfer."""
 from contextlib import contextmanager
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from tempfile import SpooledTemporaryFile
 from zipfile import ZipFile
 
 from app.database import database_connection
 from app.legacy_adoption_inventory import _job
 from app.legacy_adoption_paths import AdoptionError
-from app.legacy_adoption_verify import _plan
+from app.legacy_adoption_verify import _plan, move_rows
+
+
+def _archive_directories(connection, plan):
+    return (row[0] for row in connection.execute(
+        "SELECT relative_path FROM legacy_adoption_directories WHERE plan_id = ? ORDER BY relative_path",
+        (plan["id"],),
+    ))
+
+
+def _original_directories(connection, plan):
+    directories = set()
+    for row in move_rows(connection, plan["job_id"], plan["id"]):
+        directories.update(parent.as_posix() for parent in PurePosixPath(row["relative_path"]).parents if parent.parts)
+    return sorted(directories)
 
 
 @contextmanager
-def directory_scaffold(library, job_id: str):
+def directory_scaffold(library, job_id: str, *, documents=False, original=False):
     with SpooledTemporaryFile(max_size=2 * 1024 * 1024) as output:
         with database_connection(library.database_path) as connection, ZipFile(output, "w") as archive:
             connection.execute("BEGIN")
             _job(connection, library.library_id, job_id)
             plan = _plan(connection, job_id)
-            for row in connection.execute(
-                "SELECT relative_path FROM legacy_adoption_directories WHERE plan_id = ? ORDER BY relative_path",
-                (plan["id"],),
-            ):
-                archive.mkdir(row["relative_path"] + "/")
+            directories = _original_directories if original else _archive_directories
+            for path in directories(connection, plan):
+                archive.mkdir(path + "/")
+            if documents:
+                _write_documents(connection, archive, plan)
         output.seek(0)
         yield output
+
 
 
 def manual_manifest(library, job_id: str):
@@ -66,27 +81,29 @@ def manual_manifest(library, job_id: str):
             }, ensure_ascii=False) + "\n"
 
 
+def _write_documents(connection, archive, plan, *, originals=False):
+    if plan["documents_at"] is None:
+        raise AdoptionError("Die Ereignisdokumente müssen zuerst vorbereitet werden.")
+    query = (
+        """SELECT relative_path, document FROM legacy_adoption_baseline
+           WHERE plan_id = ? AND document IS NOT NULL ORDER BY relative_path"""
+        if originals else
+        """SELECT relative_path, content FROM legacy_adoption_documents
+           WHERE plan_id = ? ORDER BY relative_path"""
+    )
+    for path, content in connection.execute(query, (plan["id"],)):
+        archive.writestr(path, content)
+
+
 @contextmanager
 def event_documents(library, job_id: str, *, originals: bool = False):
     with SpooledTemporaryFile(max_size=2 * 1024 * 1024) as output:
         with database_connection(library.database_path) as connection, ZipFile(output, "w") as archive:
             connection.execute("BEGIN")
             _job(connection, library.library_id, job_id)
-            plan = _plan(connection, job_id)
-            if plan["documents_at"] is None:
-                raise AdoptionError("Die Ereignisdokumente müssen zuerst vorbereitet werden.")
-            query = (
-                """SELECT relative_path, document FROM legacy_adoption_baseline
-                   WHERE plan_id = ? AND document IS NOT NULL ORDER BY relative_path"""
-                if originals else
-                """SELECT relative_path, content FROM legacy_adoption_documents
-                   WHERE plan_id = ? ORDER BY relative_path"""
-            )
-            for path, content in connection.execute(query, (plan["id"],)):
-                archive.writestr(path, content)
+            _write_documents(connection, archive, _plan(connection, job_id), originals=originals)
         output.seek(0)
         yield output
-
 
 
 @contextmanager

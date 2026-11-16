@@ -4,6 +4,42 @@ import re
 
 
 TRANSLATIONS = {
+    "Aktualisieren": "Refresh",
+    "Erledigt": "Done",
+    "Ausstehend": "Pending",
+    "Noch nicht leer": "Not empty yet",
+    "Original an der Quelle fehlt oder stimmt nicht überein": "Original missing or changed at the source",
+    "Von": "From",
+    "Nach": "To",
+    "Manuelle Wiederherstellung": "Manual recovery",
+    "Manuelle Arbeit über SMB": "Manual work over SMB",
+    "Manuelle Arbeitsschritte": "Manual work steps",
+    "Bibliothekar prüft den aktuellen Dateibestand …": "Bibliothekar is checking the current files …",
+    "Zielordner und Ereignisdokumente vorbereiten": "Prepare destination folders and event documents",
+    "Ursprüngliche Quellordner bereitstellen": "Restore source folders",
+    "Dateien zurückverschieben": "Move files back",
+    "Dateien verschieben": "Move files",
+    "Verschiebe nur Dateien mit dem Status Ausstehend. Stehen zwei Namen in einer Zeile, verwende am Ziel den zweiten Namen.":
+        "Move only files marked Pending. When two names are shown, use the second name at the destination.",
+    "Ereignisdokumente wiederherstellen": "Restore event documents",
+    "Leere angelegte Archivordner entfernen": "Remove empty folders created in the archive",
+    "Ordnergerüst mit Ereignisdokumenten (ZIP)": "Folder scaffold with event documents (ZIP)",
+    "Ursprüngliches Ordnergerüst (ZIP)": "Original folder scaffold (ZIP)",
+    "Original wiederherstellen": "Restore the original",
+    "Vorbereitetes Dokument entfernen": "Remove the prepared document",
+    "Manuelle Arbeit ist in dieser Phase nicht verfügbar.": "Manual work is unavailable at this stage.",
+    "Verwende die entsprechenden SMB-Freigaben für die angezeigten Ordner. Prüfe vor jedem Schritt die Dateinamen und ersetze keine unbekannten Dateien.":
+        "Use the corresponding SMB shares for the folders shown. Check the filenames before each step and preserve any unfamiliar files.",
+    "Entpacke das Paket getrennt. Lege die fehlenden Ordner an und kopiere die vorbereiteten Ereignisdokumente an die aufgeführten Pfade. Sichere vorhandene Ereignisdokumente vor dem Ersetzen.":
+        "Extract the package separately. Create the missing folders and copy the prepared event documents to the paths listed. Back up any existing event documents before replacing them.",
+    "Entpacke die fehlenden Ordner an der Quelle. Lasse vorhandene Ordner und Dateien bestehen.":
+        "Restore the missing folders in the source share. Keep its existing folders and files.",
+    "Ersetze nur die angezeigten vorbereiteten Dokumente durch die gesicherten Originale. Entferne nur die als neu und geprüft gekennzeichneten Ereignisdokumente.":
+        "Restore the backup only for the prepared documents listed. Remove event documents only where they are listed as new and verified.",
+    "Entferne nur die als ausstehend markierten leeren Ordner. Aktualisiere nach jedem Entfernen. Ordner mit Inhalt bleiben bestehen.":
+        "Remove only the empty folders marked Pending. Refresh after each removal. Keep folders that still hold content.",
+    "Dateien oder Ordner weichen vom Plan ab. Prüfe die gekennzeichneten Pfade vor jeder weiteren Dateioperation.":
+        "Files or folders differ from the plan. Review the marked paths before making any further changes.",
     "Kopieren abbrechen": "Cancel Copy",
     "Abbruch angefordert. Arbeitskopien werden bereinigt …": "Cancellation requested. Removing working copies …",
     "Kopierauftrag abgebrochen": "Copy job cancelled",

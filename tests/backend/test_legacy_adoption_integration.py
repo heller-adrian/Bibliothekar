@@ -284,6 +284,9 @@ def test_rc1_registry_upgrade_keeps_active_job_for_recovery_only(
         plan = create_plan(library, registry, job_id, _draft())
         prepare_documents(library, job_id)
         confirm_plan(library, job_id, plan["id"], "manual", acknowledged=True)
+        # RC1 jobs have no record of which directories were created.
+        with database_connection(library.database_path) as connection:
+            connection.execute("DELETE FROM legacy_adoption_manual_directories WHERE plan_id=?", (plan["id"],))
         target = Path(plan_moves(library, job_id)[0]["target"])
         target.parent.mkdir(parents=True)
         original.rename(target)
@@ -2224,3 +2227,166 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
     assert {(archive / row["current_relative_path"]).name for row in refiled} == {
         Path(target).name for target in paths.values()
     }
+
+
+@pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["native"])
+@pytest.mark.parametrize("finish", ["register", "restore", "restore-unstarted"])
+def test_manual_adoption_steps_follow_smb_changes_and_require_verification(
+    fresh_main, monkeypatch, synthetic_dataset, finish,
+):
+    from io import BytesIO
+
+    _, database, _, archive = fresh_main
+    source = archive.parent / "legacy-source"
+    for directory in ("first", "second"):
+        (source / directory).mkdir(parents=True)
+    if os.environ.get("ADOPTION_ZFS_ROOT"):
+        monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", lambda descriptors, _cancel: {
+        fd: {"EXIF:ExifIFD:DateTimeOriginal": "2026:01:01 12:30:00"} for fd in descriptors
+    })
+    originals = {"first/one.jpg": b"camera JPEG", "first/one.raf": b"camera RAW", "second/two.jpg": b"second photo"}
+    for path, content in originals.items():
+        (source / path).write_bytes(content)
+
+    client = _onboard(fresh_main)
+    _adopt(client)
+    root = "/api/legacy-adoption/jobs"
+    job_id = _json(client, "POST", root, status=201, json={"root": "nas"})["id"]
+    job = f"{root}/{job_id}"
+    _json(client, "POST", job + "/scan", status=202)
+    draft = {"events": [{"name": "SMB test", "start_date": "2026-01-01", "end_date": "2026-01-01"}]}
+    saved = _json(client, "PUT", job + "/draft", json={**draft, "revision": 0})
+    plan = _json(client, "POST", job + "/plan", json={"revision": saved["revision"]})
+    command = {"plan_id": plan["id"]}
+    _json(client, "POST", job + "/documents")
+    _json(client, "GET", job + "/manual-work", status=409)
+    _json(client, "POST", job + "/confirm", json={**command, "method": "manual", "acknowledged": True})
+
+    def work(check=True):
+        return _json(client, "GET", job + "/manual-work" + ("?check=true" if check else ""))
+
+    def extract(item, destination):
+        download = client.get(job + "/download/" + item)
+        assert download.status_code == 200, download.text
+        with ZipFile(BytesIO(download.content)) as bundle:
+            bundle.extractall(destination)
+            return bundle.namelist()
+
+    first = work(False)
+    assert first["checked"] is False and first["ready"] is False
+    assert [step["kind"] for step in first["steps"]] == ["prepare", "move", "move"]
+    assert all(step["state"] == "unchecked" for step in first["steps"])
+    prepared, first_files, second_files = work()["steps"]
+    assert prepared["state"] == first_files["state"] == second_files["state"] == "pending"
+    assert first_files["from"] == "first" and second_files["from"] == "second"
+    assert {item["from"] for item in first_files["items"]} == {"one.jpg", "one.raf"}
+
+    if finish == "restore-unstarted":
+        assert _json(client, "POST", job + "/rollback/start", json=command)["execution"]["phase"] == "rolling_back"
+        assert work()["ready"]
+        assert _json(client, "POST", job + "/rollback/check", json=command)["execution"]["phase"] == "rolled_back"
+        assert {path: (source / path).read_bytes() for path in originals} == originals
+        assert not list(archive.iterdir())
+        return
+
+    paths = extract("manual-setup", archive)
+    [event_document] = [path for path in paths if path.endswith("/event.json")]
+    assert any(path.endswith("/") for path in paths)
+    assert work()["steps"][0]["state"] == "done"
+
+    moves = {row["relative_path"]: Path(row["target"]) for row in _json(client, "GET", job + "/moves")}
+    for path in ("first/one.jpg", "first/one.raf"):
+        (source / path).rename(moves[path])
+    states = work()
+    assert not states["ready"]
+    assert [step["state"] for step in states["steps"]] == ["done", "done", "pending"]
+
+    # An actual duplicate at the old location must never get a green badge.
+    (source / "first/one.jpg").write_bytes(originals["first/one.jpg"])
+    assert work()["steps"][1]["state"] == "attention"
+    (source / "first/one.jpg").unlink()
+
+    assert main.DATABASE_INITIALIZATION_ERROR is None
+    main.startup_database()
+    client = TestClient(main.app, follow_redirects=False)
+    assert work()["steps"][1]["state"] == "done"
+    assert client.get(f"/legacy-adoption?job={job_id}&library=main&step=execute").status_code == 200
+
+    if finish == "register":
+        early = _json(client, "POST", job + "/verify", json=command)
+        assert early["execution"]["phase"] == "repair"
+        _json(client, "POST", job + "/finalize", status=409, json=command)
+        (source / "second/two.jpg").rename(moves["second/two.jpg"])
+        assert work()["ready"]
+        assert _json(client, "POST", job + "/verify", json=command)["state"] == "verified"
+        assert _json(client, "POST", job + "/finalize", json=command)["state"] == "completed"
+        [event] = plan["events"]
+        with database_connection(database) as connection:
+            files = event_file_rows(connection, event["id"])
+        assert len(files) == 3
+        assert all(file["current_root_kind"] == "camera_archive" for file in files)
+        assert {path: target.read_bytes() for path, target in moves.items()} == originals
+
+        # A later adoption replaces an existing event document only with the
+        # prepared version. Reversal must recover the original document bytes.
+        original_document = (archive / event_document).read_bytes()
+        extra = source / "first/later.raf"
+        extra.write_bytes(b"unmoved additional photo")
+        later_id = _json(client, "POST", root + "?mode=library", status=201, json={"root": "nas"})["id"]
+        job = f"{root}/{later_id}"
+        _json(client, "POST", job + "/scan", status=202)
+        later = _json(client, "PUT", job + "/draft", json={"revision": 0, "events": [{"existing_id": event["id"]}]})
+        extension = _json(client, "POST", job + "/plan", json={"revision": later["revision"]})
+        command = {"plan_id": extension["id"]}
+        _json(client, "POST", job + "/documents")
+        _json(client, "POST", job + "/confirm", json={**command, "method": "manual", "acknowledged": True})
+        extract("manual-setup", archive)
+        assert (archive / event_document).read_bytes() != original_document
+        _json(client, "POST", job + "/rollback/start", json=command)
+        restore = next(step for step in work()["steps"] if step["kind"] == "restore_documents")
+        assert restore["items"] == [{"path": event_document, "state": "pending", "operation": "restore"}]
+        _json(client, "POST", job + "/rollback/check", status=409, json=command)
+        extract("original-documents", archive)
+        assert work()["ready"]
+        _json(client, "POST", job + "/rollback/check", json=command)
+        assert extra.read_bytes() == b"unmoved additional photo"
+        assert (archive / event_document).read_bytes() == original_document
+        assert {path: target.read_bytes() for path, target in moves.items()} == originals
+        return
+
+    (source / "first").rmdir()
+    _json(client, "POST", job + "/rollback/start", json=command)
+    reversal = work()
+    assert reversal["reverse"] and not reversal["ready"]
+    assert [step["state"] for step in reversal["steps"][:3]] == ["pending", "pending", "done"]
+    assert reversal["steps"][1]["to"] == "first"
+    assert "first/" in extract("original-folders", source)
+    for path in ("first/one.jpg", "first/one.raf"):
+        moves[path].rename(source / path)
+    assert [step["state"] for step in work()["steps"][:4]] == ["done", "done", "done", "pending"]
+    (archive / event_document).unlink()
+    guard = moves["first/one.jpg"].parent / "unrelated.dat"
+    guard.write_bytes(b"must stay")
+    cleanup = work()["steps"][-1]
+    assert cleanup["kind"] == "remove_directories"
+    assert not any(item["state"] == "pending" and (archive / item["path"]) == guard.parent for item in cleanup["items"])
+    _json(client, "POST", job + "/rollback/check", status=409, json=command)
+    assert guard.read_bytes() == b"must stay"
+    # The synthetic external owner moves the unrelated file elsewhere.
+    guard.rename(archive / "unrelated.dat")
+    # Remove only currently empty, planned directories, from the leaves up.
+    for _ in range(6):
+        cleanup = work()["steps"][-1]
+        if cleanup["state"] == "done":
+            break
+        for item in cleanup["items"]:
+            if item["state"] == "pending":
+                (archive / item["path"]).rmdir()
+    assert work()["ready"]
+    assert _json(client, "POST", job + "/rollback/check", json=command)["execution"]["phase"] == "rolled_back"
+    assert {path: (source / path).read_bytes() for path in originals} == originals
+    assert (archive / "unrelated.dat").read_bytes() == b"must stay"
+    with database_connection(database) as connection:
+        assert connection.execute("SELECT count(*) FROM events").fetchone()[0] == 0

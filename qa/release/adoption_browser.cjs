@@ -123,13 +123,11 @@ async function finishManualAdoption(page){
   await capture(page,'execution');
   await page.getByLabel(/I confirm the safety conditions|Ich bestätige die Sicherheitsbedingungen/).check();
   await page.getByRole('button',{name:/Confirm and start|Durchführung verbindlich starten/}).click();
-  for (const [name,file] of [[/Empty folder structure|Leeres Ordnergerüst/,'folders.zip'],
-                            [/^Event documents$|^Ereignisdokumente$/,'documents.zip']]) {
-    const [download]=await Promise.all([page.waitForEvent('download'),page.getByRole('link',{name}).click()]);
-    const zip=path.join(fixture,file);
-    await download.saveAs(zip);
-    execFileSync('unzip',['-oq',zip,'-d',archivePath]);
-  }
+  const downloadLink=page.getByRole('link',{name:/Folder scaffold with event documents|Ordnergerüst mit Ereignisdokumenten/});
+  const [download]=await Promise.all([page.waitForEvent('download'),downloadLink.click()]);
+  const zip=path.join(fixture,'manual-setup.zip');
+  await download.saveAs(zip);
+  execFileSync('unzip',['-oq',zip,'-d',archivePath]);
   const moves=await page.evaluate(async()=>{
     const job=new URL(location.href).searchParams.get('job');
     const response=await fetch(`/api/legacy-adoption/jobs/${job}/moves`);
@@ -142,8 +140,8 @@ async function finishManualAdoption(page){
     assert.ok((await fs.realpath(path.dirname(target))).startsWith(archivePath+path.sep));
     await fs.rename(source,target);
   }
+  await page.getByRole('button',{name:/Refresh|Aktualisieren/,exact:true}).click();
   await page.getByRole('button',{name:/Next: Verify archive|Weiter: Archiv prüfen/}).click();
-  await page.getByRole('button',{name:/^Verify archive$|^Archiv prüfen$/}).click();
   await page.locator('#wizard-navigation').getByRole('button',{name:/Register adoption|Übernahme registrieren/}).click();
   await page.getByRole('heading',{name:/Collection adoption complete|Bestandsübernahme abgeschlossen/}).waitFor();
   assert.ok(await page.locator('main.adoption-complete h1').evaluate(heading=>heading.scrollWidth<=heading.clientWidth));

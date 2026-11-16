@@ -133,6 +133,29 @@ _PAGE = r"""<!doctype html>
 .legacy-adoption :is(small,.subtle){color:var(--bk-muted)}
 .legacy-adoption :is(#message,#safety){border-left:4px solid var(--bk-yellow);padding:12px 16px;background:var(--bk-surface-2);border-radius:8px}
 .legacy-adoption #message:empty{display:none}
+.legacy-adoption #message[data-result=success]{border-color:var(--bk-green)}
+.legacy-adoption #message[data-result=error]{border-color:var(--bk-danger)}
+.legacy-adoption [data-result=success]:is(#message,#editor-message){
+  color:color-mix(in srgb,var(--bk-green) 52%,var(--bk-ink));
+}
+.legacy-adoption [data-result=error]:is(#message,#editor-message){color:var(--bk-danger)}
+.legacy-adoption :is(#message,#editor-message)[data-result=busy]{color:var(--bk-ink)}
+body[data-bk-setup]:has(.legacy-adoption) :is(button,.adoption-back,summary.adoption-control){
+  appearance:none;box-shadow:none;border-style:solid;border-radius:8px;
+  transition:transform .12s ease;
+}
+body[data-bk-setup]:has(.legacy-adoption) :is(button:not(:disabled),.adoption-back,summary.adoption-control):active{
+  transform:scale(.97);
+}
+body[data-bk-setup]:has(.legacy-adoption) :is(button,.adoption-back,summary.adoption-control):focus-visible{
+  outline:2px solid var(--bk-blue);outline-offset:3px;
+}
+@media(prefers-reduced-motion:reduce){
+  body[data-bk-setup]:has(.legacy-adoption) :is(button,.adoption-back,summary.adoption-control){
+    transition:none;transform:none;
+  }
+  .legacy-adoption .bk-loading-status::before,.legacy-adoption button.bk-busy::after{animation:none}
+}
 .legacy-adoption #dirty{color:var(--bk-danger);font-weight:600}
 .legacy-adoption [hidden]{display:none!important}
 .legacy-adoption summary{cursor:pointer;padding:8px 0}
@@ -195,6 +218,7 @@ max-height:calc(100dvh - var(--adoption-plan-tools-height,0px) - 16px);overflow:
 #archive-segments .day-card{grid-template-columns:minmax(0,1fr)}
 #archive-segments .subtle{grid-column:1}
 .legacy-adoption .day-card.selected{border-color:var(--bk-blue);background:color-mix(in srgb,var(--bk-blue) 16%,var(--bk-surface))}
+#draft-events:not(:empty){padding-block-start:12px}
 .adoption-event-card{max-width:24rem;border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:6px 12px;margin-bottom:8px}
 .adoption-event-card summary{display:block;list-style:none;cursor:pointer;overflow-wrap:anywhere}
 .adoption-event-card summary::-webkit-details-marker{display:none}
@@ -213,6 +237,21 @@ background:color-mix(in srgb,var(--bk-blue) 17%,var(--bk-surface))}
 .adoption-card.adoption-compact:not([open]){padding-block:8px}
 .adoption-compact:not([open]) > summary{margin:0}
 .adoption-target-preview{margin-block:12px 20px}
+.adoption-manual-guide > :is(h3,p),.adoption-manual-step .stack > p{margin:0}
+.adoption-manual-steps{display:grid;gap:8px}
+.adoption-manual-step{background:var(--bk-surface-2);border:1px solid var(--bk-line);border-radius:8px;padding:0 12px}
+.adoption-manual-step summary{display:flex;gap:10px;align-items:center;justify-content:space-between}
+.adoption-manual-step summary::before{content:"▸";flex:none}
+.adoption-manual-step[open] summary::before{content:"▾"}
+.adoption-manual-step summary strong{margin-inline-end:auto}
+.adoption-manual-step .stack{padding-block:6px 12px}
+.adoption-manual-step dl,.adoption-manual-step ul{margin:0}
+.adoption-manual-step dd{margin:0 0 7px}
+.adoption-manual-step li{margin-block:5px}
+.adoption-manual-badge{font-size:.82rem;font-weight:650;flex:none;padding:3px 8px;border-radius:6px;
+  background:color-mix(in srgb,var(--bk-yellow) 20%,var(--bk-surface));color:var(--bk-ink)}
+.adoption-manual-badge[data-state=done]{background:color-mix(in srgb,var(--bk-green) 18%,var(--bk-surface));color:color-mix(in srgb,var(--bk-green) 52%,var(--bk-ink))}
+.adoption-manual-badge[data-state=attention]{background:color-mix(in srgb,var(--bk-danger) 12%,var(--bk-surface));color:var(--bk-danger)}
 .legacy-adoption .adoption-methods{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:12px;margin-block:12px}
 .legacy-adoption .adoption-methods label{display:grid;grid-template-columns:auto minmax(0,1fr);align-content:start;align-items:start;
 border:1px solid var(--bk-line);border-radius:10px;padding:14px;background:var(--bk-surface-2);cursor:pointer}
@@ -234,11 +273,14 @@ min-height:38px;margin-block:5px 8px;gap:8px}
 #event-editor .adoption-interval{margin:-6px 0 4px}
 #wizard-navigation{justify-content:space-between;align-items:center}
 #wizard-navigation .primary{margin-inline-start:auto}
+.legacy-adoption .adoption-manual-actions{margin-inline-start:auto;justify-content:flex-end;align-items:center}
+#wizard-navigation .adoption-manual-actions .primary{margin-inline-start:0}
 .legacy-adoption dialog{width:min(760px,calc(100% - 24px));max-height:calc(100% - 24px);box-sizing:border-box;padding:clamp(16px,3vw,28px);border:1px solid var(--bk-line);border-radius:var(--bk-radius);background:var(--bk-surface);color:var(--bk-ink);box-shadow:var(--bk-shadow)}
 .legacy-adoption dialog::backdrop{background:rgb(5 12 18 / .65)}
 .legacy-adoption dialog .inline>label{flex:1 1 10rem}
-.legacy-adoption dialog [role=alert]{color:var(--bk-danger);white-space:pre-wrap}
-.legacy-adoption dialog [role=alert]:empty{display:none}
+.legacy-adoption dialog :is([role=alert],#editor-message){white-space:pre-wrap}
+.legacy-adoption dialog [role=alert]{color:var(--bk-danger)}
+.legacy-adoption dialog :is([role=alert],#editor-message):empty{display:none}
 .legacy-adoption dialog .editor-actions{justify-content:flex-end}
 @media(max-width:900px){.adoption-planning{grid-template-columns:minmax(0,1fr)!important}.adoption-heading{flex-wrap:wrap;margin-bottom:12px}}
 </style>
@@ -296,6 +338,11 @@ let selectedSource = null, browsedSource = null, browseVersion = 0;
 let draftPage = 40;
 let inventoryStarting = false;
 let viewStep=currentUrl.searchParams.get("step") || "";
+let manualSnapshot=null;
+const recoveryPhases=["manual","script_prepared","operations_done","verifying","repair","registration_pending"];
+function manualPhase(plan) {
+  return plan?.execution?.method==="manual" && [...recoveryPhases,"rolling_back"].includes(plan.execution.phase);
+}
 /* SHARED_EVENT_TIME_JS */
 let freeSegments=[], archiveSegments=[], selectedEvent=null, selectedArchive=null;
 let selectedDays=new Set(), dayRows=[], selectionAnchor="", dayPage=60, selectedDaysJob="", draftStats=[], draftCoverage=null, previewRevision=-1;
@@ -312,6 +359,7 @@ function allowedSteps(){
   const phase=job.plan.execution.phase;
   if(phase==="rolling_back")return ["execute"];
   if(job.plan.state==="completed" || phase==="registering")return ["verify"];
+  if(manualPhase(job.plan) && phase!=="registration_pending")return ["execute"];
   return ["execute","verify"];
 }
 function rememberView(step,push=false){
@@ -344,7 +392,7 @@ function navigation(){
     nav.append(action("Übernahme registrieren",()=>mutate("/finalize","POST",{plan_id:job.plan.id}),true));
     return;
   }
-  if(recoveryOnly)return;
+  if(recoveryOnly && !(viewStep==="execute" && manualPhase(job.plan)))return;
   const previous={plan:"inventory",review:job.plan.execution?null:"plan",execution:"review",verify:job.plan.state==="completed"?null:"execute"}[viewStep];
   if(previous)nav.append(action("Zurück",()=>goStep(previous)));
   if(viewStep==="inventory" && job.state==="inventoried")nav.append(action("Weiter: Ereignisse planen",()=>goStep("plan"),true));
@@ -356,7 +404,28 @@ function navigation(){
     if(!job.plan.documents_at)await mutate("/documents");
     await goStep("execution");
   },true));
-  if(viewStep==="execute" && phase!=="rolling_back")nav.append(action("Weiter: Archiv prüfen",()=>goStep("verify"),true));
+  if(viewStep==="execute" && manualPhase(job.plan)){
+    const reverse=phase==="rolling_back";
+    const verify=action(reverse?"Wiederherstellung prüfen und Auftrag beenden":"Weiter: Archiv prüfen",async()=>{
+      if(!manualSnapshot?.ready) return;
+      await mutate(reverse?"/rollback/check":"/verify","POST",{plan_id:job.plan.id});
+    },true);
+    const refreshButton=action("Aktualisieren",async()=>{
+      verify.disabled=true;
+      manualSnapshot=null;
+      report("Bibliothekar prüft den aktuellen Dateibestand …","busy");
+      await loadManualWork(true);
+      report();
+    },false,()=>{
+      verify.disabled=!manualSnapshot?.ready || Boolean(recoveryOnly && !reverse);
+    });
+    refreshButton.id="manual-refresh";
+    verify.disabled=!manualSnapshot?.ready || Boolean(recoveryOnly && !reverse);
+    const actions=node("div",undefined,"inline adoption-manual-actions");
+    actions.append(refreshButton);
+    if(reverse || !recoveryOnly)actions.append(verify);
+    nav.append(actions);
+  } else if(viewStep==="execute" && phase!=="rolling_back")nav.append(action("Weiter: Archiv prüfen",()=>goStep("verify"),true));
 }
 window.addEventListener("bk-language-changed",()=>{
   navigation();
@@ -369,7 +438,7 @@ window.addEventListener("popstate",()=>{
   if(dirty.size){rememberView(viewStep);report("Speichere deine Eingaben zuerst.");return;}
   $("introduction").open=false;
   viewStep=new URL(location.href).searchParams.get("step")||"";
-  refresh().catch(error=>report(error.message));
+  refresh().catch(error=>report(error.message,"error"));
 });
 const base = "/api/legacy-adoption";
 const dirty = new Set();
@@ -405,6 +474,7 @@ const labels = {
  rolling_back:"Wiederherstellung läuft", rolled_back:"Wiederherstellung geprüft",
  media_verified:"Medien geprüft", verified:"Medien und Ereignisdokumente geprüft", completed:"Registriert",
  pending:"Ausstehend", duplicate:"Duplikat bleibt an der Quelle", missing:"Zieldatei fehlt", unsafe:"Unsicherer Pfad",
+ source_unverified:"Original an der Quelle fehlt oder stimmt nicht überein",
  size_mismatch:"Dateigröße weicht ab", sha256_mismatch:"Prüfsumme weicht ab", source_present:"Datei auch an der Quelle",
  identity_mismatch:"Die Zieldatei hat eine andere Dateiidentität als das Original"
 };
@@ -416,9 +486,12 @@ function node(tag, content, className) {
   if (className) el.className = className;
   return el;
 }
-function report(message="") {
+function report(message="", result="") {
   const editorMessage=document.querySelector("#event-editor[open] #editor-message, dialog[open] #review-metadata-message");
-  (editorMessage || $("message")).textContent=message;
+  const status=editorMessage || $("message");
+  status.dataset.result=result;
+  status.classList.toggle("bk-loading-status",result==="busy");
+  status.textContent=message;
 }
 function detail(value) {
   if (typeof value === "string") return value.split("\n").map(t).join("\n");
@@ -446,7 +519,7 @@ function action(text, handler, primary=false, settled) {
   button.addEventListener("click", async () => {
     button.disabled = true;
     report();
-    try { await handler(); } catch (error) { report(error.message); }
+    try { await handler(); } catch (error) { report(error.message,"error"); }
     finally { button.disabled = false; settled?.(); }
   });
   return button;
@@ -566,6 +639,8 @@ async function refresh() {
   if (requested!==jobId) return;
   requireSaved();
   job=state;reviewBatch=batch;
+  if(manualSnapshot && (manualSnapshot.plan_id!==job.plan.id ||
+      manualSnapshot.reverse!==(job.plan.execution?.phase==="rolling_back"))) manualSnapshot=null;
   if(selectedDaysJob!==jobId){
     selectedDaysJob=jobId;
     year=sessionStorage.getItem("bk-adoption-period:"+jobId)||"";
@@ -584,11 +659,11 @@ async function refresh() {
   scheduleReviewPoll();
   if(checked && !checked.valid && $("event-editor"))showConflicts(checked,draft);
   if (job.scan_running) {
-    timer=setTimeout(()=>refresh().catch(error=>report(error.message)),2000);
+    timer=setTimeout(()=>refresh().catch(error=>report(error.message,"error")),2000);
   } else if (!job.plan.id && job.state==="inventoried" && viewStep==="plan") {
     await chronology();
   } else if (job.plan.id) {
-    if($("moves"))await showMoves(true);
+    if($("manual-steps") && !manualSnapshot)await loadManualWork(false);
     if (job.plan.execution?.method==="script" && !["completed","rolled_back"].includes(job.plan.execution.phase)) {
       await pollScript();
     }
@@ -596,7 +671,7 @@ async function refresh() {
 }
 async function mutate(path, method="POST", body) {
   requireSaved();
-  report("Bibliothekar verarbeitet den Auftrag …");
+  report("Bibliothekar verarbeitet den Auftrag …","busy");
   const checking=path==="/verify" || path==="/finalize";
   if (checking) $("safety").textContent="Bitte keine Dateien mehr verändern. Bibliothekar prüft und registriert gerade den übernommenen Archivbestand.";
   try {
@@ -609,7 +684,8 @@ async function mutate(path, method="POST", body) {
       location.replace(afterDiscard);
       return result;
     }
-    const target={"/plan":"review","/confirm":"execute","/verify":"verify","/finalize":"verify","/reopen":"plan","/scan":"inventory"}[path];
+    if(path==="/verify" || path==="/rollback/start")manualSnapshot=null;
+    const target={"/plan":"review","/confirm":"execute","/verify":"verify","/finalize":"verify","/reopen":"plan","/scan":"inventory","/rollback/start":"execute"}[path];
     if(target)rememberView(target);
     await refresh();
     report();
@@ -645,6 +721,21 @@ function render() {
   $("introduction").hidden=false;
   $("setup").hidden=viewStep!=="setup";
   $("top-actions").replaceChildren();
+  if(recoveryPhases.includes(phase)){
+    const recovery=action("Kontrollierte Wiederherstellung starten",async()=>{
+      if(!confirm(t("Möchtest du die Übernahme anhand des gespeicherten Plans rückgängig machen?")))return;
+      const command={plan_id:job.plan.id};
+      const manual=job.plan.execution.method==="manual";
+      await mutate("/rollback/start","POST",command);
+      if(manual){
+        report("Bibliothekar prüft den aktuellen Dateibestand …","busy");
+        await loadManualWork(true);
+        report();
+        if(manualSnapshot?.ready)await mutate("/rollback/check","POST",command);
+      }
+    });
+    recovery.classList.add("danger-button");$("top-actions").append(recovery);
+  }
   $("choice").hidden=true;
   $("safety").hidden=terminal;
   const warnings={
@@ -736,7 +827,7 @@ function renderDraft(host) {
   const chronologyPane=node("div");chronologyPane.append(slot("draft-events"),slot("archive-segments"),slot("days"));
   const diagnostic=node("details");diagnostic.id="family-diagnostics";
   diagnostic.append(node("summary","Dateifamilien und Aufnahmezeiten prüfen"),slot("families"));
-  diagnostic.addEventListener("toggle",()=>{if(diagnostic.open && !$("families").childElementCount)showFamilies().catch(error=>report(error.message));});
+  diagnostic.addEventListener("toggle",()=>{if(diagnostic.open && !$("families").childElementCount)showFamilies().catch(error=>report(error.message,"error"));});
   chronologyPane.append(diagnostic);chronologyPane.id="dated-media";
   const formPane=node("div",undefined,"adoption-plan-inspector");
   formPane.append(node("h3","Vorschau"),slot("draft-coverage"),slot("planning-preview"),slot("matches"));
@@ -841,11 +932,11 @@ function renderDays(){
       }else if(selectedDays.has(key))selectedDays.delete(key);
       else selectedDays.add(key);
       selectionAnchor=key;day=selectedDays.has(key)?item.day_key:null;selectedEvent=null;selectedArchive=null;
-      renderDays();renderPlanSelection();showDay().catch(error=>report(error.message));
+      renderDays();renderPlanSelection();showDay().catch(error=>report(error.message,"error"));
       $("days").querySelector('[data-day="'+key+'"]')?.focus();
     }
     card.addEventListener("mousedown",event=>{if(event.shiftKey)event.preventDefault();});
-    card.addEventListener("click",event=>{try{choose(event);}catch(error){report(error.message);}});
+    card.addEventListener("click",event=>{try{choose(event);}catch(error){report(error.message,"error");}});
     card.addEventListener("keydown",event=>{
       if(!["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(event.key))return;
       event.preventDefault();const cards=[...host.querySelectorAll("[data-day]")],at=cards.indexOf(card);
@@ -1023,7 +1114,7 @@ function scheduleReviewPoll(){
         renderReviewProgress();
         scheduleReviewPoll();
       }
-    }catch(error){report(error.message);scheduleReviewPoll();}
+    }catch(error){report(error.message,"error");scheduleReviewPoll();}
   },1200);
 }
 function appendCaptureEvidence(target, metadata){
@@ -1259,7 +1350,7 @@ function showReview(target) {
           const caution=choice.source.endsWith(":FileModifyDate")?" · "+t("Aufnahmezeit unsicher"):"";
           source.append(metadataOption(choice.source,metadataSourceLabel(choice.source)+" · "+choice.time+caution));
         }
-        source.addEventListener("change",()=>stage([item.family_key],source.value || null,true).catch(error=>report(error.message)));
+        source.addEventListener("change",()=>stage([item.family_key],source.value || null,true).catch(error=>report(error.message,"error")));
         metadataControls.set(item.family_key,source);entry.append(source);
       }
       entry.append(node("div",undefined,"adoption-review-family-progress"));
@@ -1270,7 +1361,7 @@ function showReview(target) {
     renderReviewRows();
   }
   syncSelection();
-  load().catch(error=>report(error.message));
+  load().catch(error=>report(error.message,"error"));
 }
 async function showFamilies() {
   const target=$("families");
@@ -1332,7 +1423,7 @@ async function setDraft(value, editor) {
   day=null;
   // Rendering diagnostics may need more requests; the saved draft is already
   // authoritative and the editor can close independently.
-  chronology().catch(error=>report(error.message));
+  chronology().catch(error=>report(error.message,"error"));
 }
 async function addExisting(item, candidate=draft, replaceAt=null, editor=null) {
   const events=candidate.events.filter((event,index)=>event.existing_id!==item.id && index!==replaceAt);
@@ -1390,7 +1481,7 @@ function renderPlanSelection() {
     }
     const structure=node("div",undefined,"adoption-structure-preview");target.append(structure);
     draftStructure([draft.events[selectedEvent]]).then(preview=>structure.replaceChildren(preview))
-      .catch(error=>{if(structure.isConnected)report(error.message);});
+      .catch(error=>{if(structure.isConnected)report(error.message,"error");});
     return;
   }
   const segment=selectedArchive || freeSegments.find(item=>segmentKey(item)===selectionAnchor && selectedDays.has(selectionAnchor));
@@ -1492,7 +1583,7 @@ function eventEditor(index, newKind="event") {
   const edited=()=>form.dispatchEvent(new Event("input"));
   const title=node("h3",index===undefined?(isEvent?"Neues Ereignis":"Sammelordner ohne Ereignis"):"Entwurf bearbeiten");
   title.id="event-editor-title";
-  const message=node("p");message.id="editor-message";message.setAttribute("role","alert");
+  const message=node("p");message.id="editor-message";message.setAttribute("role","status");
   form.append(title);
   if(isEvent)form.append(node("p","Das Ereignis belegt einen durchgehenden Zeitraum.","subtle adoption-interval"));
   form.append(message);
@@ -1643,14 +1734,14 @@ function eventEditor(index, newKind="event") {
     const preview=await draftStructure(definitions());
     if(current===previewVersion)structure.replaceChildren(preview);
   }),action("Abbrechen",cancel),action("Im Entwurf speichern",async()=>{
-    report("Entwurf wird geprüft und gespeichert …");
+    report("Entwurf wird geprüft und gespeichert …","busy");
     const events=[...draft.events];
     const items=definitions();
     if(index!==undefined)events[index]=items[0];
     else events.push(...items);
     await setDraft({...draft,events},form);
     dialog.close();
-    report("Entwurf gespeichert.");
+    report("Entwurf gespeichert.","success");
   },true));
   form.append(parentWrap,keepWrap,folders,controls,structure);
   dialog.replaceChildren(form);
@@ -1695,19 +1786,7 @@ function renderPlan(host) {
   if (!completed && phase!=="rolled_back") panel.append(line(
     "Vor größeren Dateiänderungen empfehlen wir, einen ZFS-Snapshot oder eine andere geeignete Sicherung anzulegen. Diese zusätzliche Sicherheitsmaßnahme ist freiwillig."
   ));
-  const files=node("div",undefined,"inline");
-  const manifest=link("Verschiebeplan mit Rückwegen",jobPath("/download/manifest"));
-  if(phase && plan.execution?.method==="manual") files.append(manifest);
-  else diagnostics.append(line(""),manifest);
-  if (phase==="manual") {
-    panel.append(line("Stelle die Ordner im Archiv über SMB bereit und verschiebe nur die aufgeführten Dateien. Sichere frühere Ereignisdokumente vor dem Ersetzen."));
-    files.append(link("Leeres Ordnergerüst",jobPath("/download/folders")),
-      link("Ereignisdokumente",jobPath("/download/documents")));
-  }
-  if (["manual","rolling_back","repair"].includes(phase)) {
-    files.append(link("Frühere Ereignisdokumente",jobPath("/download/original-documents")));
-  }
-  panel.append(files);
+  diagnostics.append(line(""),link("Verschiebeplan mit Rückwegen",jobPath("/download/manifest")));
   const directoryPreview=node("details",undefined,"adoption-target-preview");
   const tree=folderTree(), directoryControls=node("div",undefined,"inline");
   directoryPreview.append(node("summary","Vorschau der Zielordner"),tree.frame,directoryControls);
@@ -1715,19 +1794,18 @@ function renderPlan(host) {
   directoryPreview.addEventListener("toggle",()=>{
     if (directoryPreview.open && !loadedDirectories) {
       loadedDirectories=true;
-      showDirectories(tree,directoryControls).catch(error=>{loadedDirectories=false;report(error.message);});
+      showDirectories(tree,directoryControls).catch(error=>{loadedDirectories=false;report(error.message,"error");});
     }
   });
   panel.append(directoryPreview);
   if(!recoveryOnly && !phase && plan.documents_at && viewStep==="execution")renderConfirmation(panel,command);
-  if (plan.folder_moves.length && phase==="manual") {
-    const groups=node("details");
-    groups.append(node("summary","Tagesordner im Ganzen verschieben"));
-    groups.append(line("Diese Vorschläge sind Alternativen zu den Einzeloperationen. Lasse den jeweiligen Zielordner beim Bereitstellen des Gerüsts frei. Nutze die Sammelanweisung nur, wenn sich der Quellordner seit der Inventur nicht verändert hat."));
-    for (const move of plan.folder_moves) groups.append(line(
-      plan.source_root+"/"+move.source_path+" → "+plan.archive_root+"/"+move.target_path+" · "+move.file_count+" Dateien"
-    ));
-    panel.append(groups);
+  if (manualPhase(plan) && viewStep==="execute"){
+    const guide=node("div",undefined,"stack adoption-manual-guide");
+    guide.append(node("h3",phase==="rolling_back"?"Manuelle Wiederherstellung":"Manuelle Arbeit über SMB"),
+      line("Verwende die entsprechenden SMB-Freigaben für die angezeigten Ordner. Prüfe vor jedem Schritt die Dateinamen und ersetze keine unbekannten Dateien."));
+    const operations=slot("manual-steps");operations.className="adoption-manual-steps";
+    operations.setAttribute("aria-label",t("Manuelle Arbeitsschritte"));guide.append(operations);
+    panel.append(guide);
   }
   const controls=node("div",undefined,"inline");
   if (!recoveryOnly && !phase && !completed) {
@@ -1749,36 +1827,105 @@ function renderPlan(host) {
     scriptDetails=node("details",undefined,"adoption-stage adoption-card adoption-compact");
     scriptDetails.append(node("summary","Erweiterte Details zu Skript und Prüfung"),scriptLinks(true));
   }
-  if (!recoveryOnly && viewStep==="verify" && !scripted && ["manual","verifying","repair"].includes(phase)) {
-    controls.append(action("Archiv prüfen",()=>run("/verify"),true));
-  }
   if (!recoveryOnly && phase==="repair" && !scripted) controls.append(action("Manuelle Schritte fortsetzen",()=>run("/resume")));
-  let recovery=null;
-  if (["manual","script_prepared","operations_done","verifying","repair","registration_pending"].includes(phase)) {
-    recovery=node("details",undefined,"adoption-card adoption-stage adoption-compact");
-    const options=node("div",undefined,"stack");
-    options.append(line("Verwende die kontrollierte Rücknahme, wenn du die Übernahme beenden und bereits ausgeführte Verschiebungen rückgängig machen möchtest."),action("Kontrollierte Wiederherstellung starten",async()=>{
-      if (confirm("Möchtest du die Übernahme anhand des gespeicherten Plans rückgängig machen?")) {
-        await run("/rollback/start");
-      }
-    }));
-    recovery.append(node("summary","Wiederherstellungsoptionen"),options);
-  }
-  if (phase==="rolling_back") {
-    if (!scripted) panel.append(line("Bringe verschobene Dateien über SMB an ihre ursprünglichen Pfade zurück. Stelle frühere Ereignisdokumente wieder her und entferne ausschließlich die für diesen Auftrag neu bereitgestellten Ereignisdokumente."));
-    else controls.append(action("Befehl für die Skriptrücknahme bereitstellen",()=>run("/rollback/start")));
-    controls.append(action("Wiederherstellung prüfen und Auftrag beenden",()=>run("/rollback/check"),true));
+  if (phase==="rolling_back" && scripted) {
+    controls.append(action("Befehl für die Skriptrücknahme bereitstellen",()=>run("/rollback/start")),
+      action("Wiederherstellung prüfen und Auftrag beenden",()=>run("/rollback/check"),true));
   }
   if (plan.issues) controls.append(action("Prüfprobleme anzeigen",async()=>{
     const issues=await api(jobPath("/issues"));
     $("issues").replaceChildren(...issues.map(item=>line([item.relative_path,t(item.issue)].filter(Boolean).join(" · "))));
   }));
   const moves=node("details");moves.append(node("summary","Verschiebeplan anzeigen"),slot("moves"));
+  moves.addEventListener("toggle",()=>{
+    if(moves.open && !$("moves").childElementCount)showMoves(true).catch(error=>report(error.message,"error"));
+  });
   if(controls.childElementCount)panel.append(controls);
   if(scriptDetails)panel.append(scriptDetails);
-  if(recovery)panel.append(recovery);
   panel.append(slot("issues"),moves);
   host.append(panel);
+  if(manualSnapshot && $("manual-steps"))renderManualWork(manualSnapshot);
+}
+
+function badge(state) {
+  const text={done:"Erledigt",pending:"Ausstehend",waiting:"Noch nicht leer",attention:"Prüfen"}[state];
+  if(!text)return node("span");
+  const status=node("span",text,"adoption-manual-badge");status.dataset.state=state;
+  return status;
+}
+function workPath(root, relative) {
+  return relative==="." ? root : root+"/"+relative;
+}
+function workCode(value) {
+  const code=node("code",value);
+  code.dataset.bkPreserveLanguage="";
+  return code;
+}
+function renderManualWork(work) {
+  const host=$("manual-steps");
+  if(!host)return;
+  const open=new Set([...host.querySelectorAll("details[open]")].map(card=>card.dataset.step));
+  const first=!host.childElementCount;
+  const cards=[];
+  const start=work.reverse?work.archive_root:work.source_root;
+  const end=work.reverse?work.source_root:work.archive_root;
+  const titles={prepare:"Zielordner und Ereignisdokumente vorbereiten",
+    restore_source:"Ursprüngliche Quellordner bereitstellen",move:work.reverse?"Dateien zurückverschieben":"Dateien verschieben",
+    restore_documents:"Ereignisdokumente wiederherstellen",remove_directories:"Leere angelegte Archivordner entfernen"};
+  work.steps.forEach((step,index)=>{
+    const card=node("details",undefined,"adoption-manual-step");
+    card.dataset.step=String(index);
+    card.open=open.has(card.dataset.step) || (first && index===0);
+    const heading=node("summary");
+    heading.append(node("strong",(index+1)+". "+t(titles[step.kind])),badge(step.state));
+    const body=node("div",undefined,"stack");card.append(heading,body);
+    if(step.kind==="move"){
+      const paths=node("dl");
+      for(const [name,path] of [["Von",workPath(start,step.from)],["Nach",workPath(end,step.to)]]){
+        const value=node("dd");value.append(workCode(path));paths.append(node("dt",name),value);
+      }
+      body.append(paths);
+      if(step.state!=="done")body.append(line("Verschiebe nur Dateien mit dem Status Ausstehend. Stehen zwei Namen in einer Zeile, verwende am Ziel den zweiten Namen."));
+    } else if(step.kind==="prepare"){
+      body.append(line("Entpacke das Paket getrennt. Lege die fehlenden Ordner an und kopiere die vorbereiteten Ereignisdokumente an die aufgeführten Pfade. Sichere vorhandene Ereignisdokumente vor dem Ersetzen."),
+        workCode(work.archive_root));
+      if(job.plan.execution.phase==="manual" && !recoveryOnly && step.state!=="attention")body.append(link("Ordnergerüst mit Ereignisdokumenten (ZIP)",jobPath("/download/manual-setup")));
+    } else if(step.kind==="restore_source"){
+      if(step.state!=="done")body.append(line("Entpacke die fehlenden Ordner an der Quelle. Lasse vorhandene Ordner und Dateien bestehen."),
+        workCode(work.source_root),link("Ursprüngliches Ordnergerüst (ZIP)",jobPath("/download/original-folders")));
+    } else if(step.kind==="restore_documents"){
+      body.append(line("Ersetze nur die angezeigten vorbereiteten Dokumente durch die gesicherten Originale. Entferne nur die als neu und geprüft gekennzeichneten Ereignisdokumente."));
+      if(step.items.some(item=>item.operation==="restore" && item.state==="pending"))
+        body.append(link("Frühere Ereignisdokumente",jobPath("/download/original-documents")));
+    } else {
+      body.append(line("Entferne nur die als ausstehend markierten leeren Ordner. Aktualisiere nach jedem Entfernen. Ordner mit Inhalt bleiben bestehen."));
+    }
+    if(step.state==="attention")body.append(line("Dateien oder Ordner weichen vom Plan ab. Prüfe die gekennzeichneten Pfade vor jeder weiteren Dateioperation."));
+    const items=node("ul");
+    card.addEventListener("toggle",()=>{
+      if(!card.open || items.childElementCount || !step.items.length)return;
+      for(const item of step.items){
+        const row=node("li");
+        const path=item.path ? workPath(step.kind==="restore_source"?work.source_root:work.archive_root,item.path) :
+          item.from===item.to?item.from:item.from+" → "+item.to;
+        row.append(workCode(path));
+        if(item.problem)row.append(document.createTextNode(" · "),node("small",label(item.problem)));
+        if(step.kind==="restore_documents" && item.state==="pending")
+          row.append(document.createTextNode(" · "+t(item.operation==="restore"?"Original wiederherstellen":"Vorbereitetes Dokument entfernen")));
+        row.append(document.createTextNode(" "),badge(item.state));items.append(row);
+      }
+    });
+    body.append(items);cards.push(card);
+  });
+  host.replaceChildren(...cards);
+}
+async function loadManualWork(check){
+  const selected=job.plan.id;
+  const view=$("manual-steps");
+  const result=await api(jobPath("/manual-work"+(check?"?check=true":"")));
+  if(job.plan.id!==selected || view!==$("manual-steps"))return;
+  manualSnapshot=result;
+  renderManualWork(result);
 }
 
 function commandBox(command) {
@@ -1834,6 +1981,8 @@ function renderConfirmation(panel,command) {
     wrap.hidden=scripted && !probe?.verified;
     ack.disabled=busy || wrap.hidden;
     confirmButton.disabled=ack.disabled || !ack.checked;
+    confirmButton.classList.toggle("bk-busy",confirming);
+    confirmButton.setAttribute("aria-busy",String(confirming));
     prepareButton.disabled=busy;
     readButton.disabled=busy || (!probe?.command && !probe?.verified);
     fallbackButton.disabled=busy;
@@ -1920,7 +2069,7 @@ function renderConfirmation(panel,command) {
     placement.append(confirmButton);
     ack.checked=false;
     updateConfirmation();
-    if (!scripts.hidden && !probe && !checking) checkProbe().catch(error=>report(error.message));
+    if (!scripts.hidden && !probe && !checking) checkProbe().catch(error=>report(error.message,"error"));
   }
   choice.addEventListener("change",selectMethod);
   ack.addEventListener("change",updateConfirmation);
@@ -1979,7 +2128,7 @@ async function pollScript() {
     $("script-progress").classList.add("adoption-stage");
     $("script-progress").replaceChildren(...nodes);
   } catch (error) {
-    report(error.message);
+    report(error.message,"error");
   }
   if (target===$("script-state")) scriptTimer=setTimeout(pollScript,3000);
 }
@@ -2006,8 +2155,8 @@ async function showMoves(reset=false) {
     target.append(more);
   }
 }
-$("browse").addEventListener("click",()=>browse("").catch(error=>report(error.message)));
-$("source-root").addEventListener("change",()=>browse("").catch(error=>report(error.message)));
+$("browse").addEventListener("click",()=>browse("").catch(error=>report(error.message,"error")));
+$("source-root").addEventListener("change",()=>browse("").catch(error=>report(error.message,"error")));
 $("pick-source").addEventListener("click",()=>{
   if(!browsedSource?.dataset)return;
   selectedSource={root:browsedSource.root,relative:browsedSource.relative};
@@ -2050,7 +2199,7 @@ $("start").addEventListener("click",async()=>{
     openJob(created.id);
     await startInventory();
   } catch (error) {
-    report(error.message);
+    report(error.message,"error");
   } finally {
     $("source-notice").textContent="";
     button.disabled=false;
@@ -2064,7 +2213,7 @@ $("start").addEventListener("click",async()=>{
     if(!jobId){navigation();await setupSourceBrowser();}
     else{$("setup").hidden=true;await refresh();}
   }
-  catch(error) { report(error.message); }
+  catch(error) { report(error.message,"error"); }
 })();
 </script>
 </body></html>"""
