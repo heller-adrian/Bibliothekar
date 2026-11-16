@@ -10,6 +10,25 @@ from app.archive_transfer import verify_event_archive
 from app.database import create_planned_event, database_connection, initialize_database
 from app.workspace_layout import ensure_workspace_layout
 from tests.backend.test_0412_consistency_semantics import NOW, _event_preview, _seed_free_file
+from tests.backend.test_legacy_adoption_integration import _json, _onboard, fresh_main
+
+
+def _add_event(db, work, archive, index, *, corrupt=False, status="applied", resort=0):
+    name = f"Photo-{index}.JPG"
+    day = f"2026-10-{index:02}"
+    content = f"Camera bytes {index}".encode()
+    family_id, file_id, _ = _seed_free_file(db, family_key=name, filename=name, day=day, data=content)
+    event = create_planned_event(db, "J", _event_preview(family_id, day))["parent_event"]
+    relative = Path("2026", event["folder_name"], name)
+    for storage, data in ((work, content), (archive, b"x" * len(content) if corrupt else content)):
+        path = storage / relative
+        path.parent.mkdir(parents=True)
+        path.write_bytes(data)
+    with database_connection(db) as connection:
+        connection.execute("UPDATE events SET status=?,applied_at=?,updated_at=?,resort_required=? WHERE id=?",
+                           (status, NOW, NOW, resort, event["id"]))
+        connection.execute("UPDATE files SET current_relative_path=? WHERE id=?", (relative.as_posix(), file_id))
+    return event["id"], work / relative, archive / relative, content
 
 
 @pytest.fixture
@@ -23,22 +42,8 @@ def catalogue(tmp_path):
     initialize_database(db)
     work = Path(ensure_workspace_layout(workspace)["work_root"])
 
-    def add(index, *, corrupt=False, status="applied", resort=0):
-        name = f"Photo-{index}.JPG"
-        day = f"2026-10-{index:02}"
-        content = f"Camera bytes {index}".encode()
-        family_id, file_id, _ = _seed_free_file(db, family_key=name, filename=name, day=day, data=content)
-        event = create_planned_event(db, "J", _event_preview(family_id, day))["parent_event"]
-        relative = Path("2026", event["folder_name"], name)
-        for storage, data in ((work,content), (archive,b"x" * len(content) if corrupt else content)):
-            path = storage / relative
-            path.parent.mkdir(parents=True)
-            path.write_bytes(data)
-        with database_connection(db) as connection:
-            connection.execute("UPDATE events SET status=?,applied_at=?,updated_at=?,resort_required=? WHERE id=?",
-                               (status,NOW,NOW,resort,event["id"]))
-            connection.execute("UPDATE files SET current_relative_path=? WHERE id=?", (relative.as_posix(),file_id))
-        return event["id"], work / relative, archive / relative, content
+    def add(index, **options):
+        return _add_event(db, work, archive, index, **options)
 
     return db, workspace, archive, add
 
@@ -46,6 +51,37 @@ def catalogue(tmp_path):
 def _drain(db, workspace, archive):
     while archive_batches.process_next(db, lambda: workspace, archive):
         pass
+
+
+def test_archive_batch_api_uses_the_registered_background_worker(fresh_main, monkeypatch):
+    from app import main
+    from app.library_context import resolve_library_context
+
+    _, db, registry, archive = fresh_main
+    http = _onboard(fresh_main)
+    _json(http, "POST", "/api/setup/adoption", json={"decision": "skipped"})
+    if main.ADOPTION_STARTUP_THREAD:
+        main.ADOPTION_STARTUP_THREAD.join(timeout=15)
+    monkeypatch.setattr(main, "start_release_worker", lambda: None)
+    context = resolve_library_context(registry, "main")
+    first = _add_event(db, context.work_root, archive, 1)
+    second = _add_event(db, context.work_root, archive, 2, corrupt=True)
+    endpoint = "/api/archive/batch"
+    assert _json(http, "GET", endpoint)["candidate_count"] == 2
+    _json(http, "POST", endpoint + "/release", json={}, status=422)
+    proof = _json(http, "POST", endpoint + "/verify", json={}, status=202)
+    assert _json(http, "POST", endpoint + "/verify", json={}, status=202)["id"] == proof["id"]
+    assert main.process_background_release()
+    assert _json(http, "GET", endpoint)["batch"]["processed"] == 1
+    assert main.process_background_release() and not main.process_background_release()
+    state = _json(http, "GET", endpoint)
+    assert state["batch"]["status"] == "failed" and state["release_ready_count"] == 1
+    _json(http, "POST", endpoint + "/release", json={"verification_batch_id": "unrelated"}, status=409)
+    release = _json(http, "POST", endpoint + "/release", json={"verification_batch_id": proof["id"]}, status=202)
+    assert [item["event_id"] for item in release["items"]] == [first[0]]
+    activities = _json(http, "GET", "/api/background-activity")["operations"]
+    assert [item["kind"] for item in activities if item["active"]] == ["archive_batch"]
+    assert first[1].read_bytes() == first[3] and second[1].read_bytes() == second[3]
 
 
 def test_archive_verify_batch_filters_candidates_and_retains_individual_outcomes(catalogue):
