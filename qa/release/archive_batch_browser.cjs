@@ -15,7 +15,7 @@ async function check(browser, lang, width) {
   const errors = [];
   const requests = [];
   let dashboard = {batch: null, active: false, candidate_count: 1, release_ready_count: 0};
-  page.on("pageerror", error => errors.push(error.message));
+  page.on("pageerror", error => errors.push(error.stack));
   await page.addInitScript(({lang, width}) => {
     localStorage.setItem("bibliothekar-language", lang);
     localStorage.setItem("bibliothekar-theme", width < 600 ? "dark" : "light");
@@ -28,6 +28,8 @@ async function check(browser, lang, width) {
     if (pathname === "/archive") return route.fulfill({body: html, contentType: "text/html"});
     if (pathname === "/api/archive/summary") return route.fulfill({json: summary});
     if (pathname === "/api/archive/batch") return route.fulfill({json: dashboard});
+    if (pathname === "/api/operations/status")
+      return route.fulfill({json:{writes_allowed:true, workspace_writes_allowed:true, issues:[], reservations:[]}});
     if (pathname.endsWith("/api/archive/batch/verify")) {
       requests.push(["verify", request.postDataJSON()]);
       const batch = {id: proof, kind: "verify", status: "running", updated_at: "1",
@@ -80,14 +82,23 @@ async function check(browser, lang, width) {
   dashboard = {...dashboard, active: false, active_kind: null, candidate_count: 0, verification_batch_id: null,
     batch: {...dashboard.batch, status: "completed", updated_at: "4", processed: 1,
       items: [{...photo, status: "released"}]}};
-  await status.getByText(en ? /1 of 1 events processed/ : /1 von 1 Ereignissen verarbeitet/).waitFor();
-  await page.locator("#archive-batch-results summary").click();
-  await page.locator("#archive-batch-results li").getByText("Synthetic album", {exact: true}).waitFor();
+  const results = page.locator("#archive-batch-results");
+  await status.waitFor({state:"hidden"});
+  await results.waitFor({state:"hidden"});
+  await page.reload();
+  await status.waitFor({state:"hidden"});
+  await results.waitFor({state:"hidden"});
   const dock = page.locator(".bk-activity-list .bk-activity-item");
   await dock.getByText("100 %").waitFor({state: "attached"});
   assert.equal(await dock.count(), 1);
   assert.ok((await dock.locator("a").getAttribute("href")).includes("archive_batch=" + releaseId));
   assert.equal(await button.isDisabled(), true);
+  dashboard = {...dashboard, batch: {...dashboard.batch, status:"failed", updated_at:"5", total:2, processed:2,
+    items:[{...photo, status:"released"}, {event_name:"Needs attention", status:"failed"}]}};
+  await page.reload();
+  await status.getByText(en ? /Finished with errors/ : /Mit Fehlern beendet/).waitFor();
+  await results.locator("summary").click();
+  await results.getByText("Needs attention", {exact:true}).waitFor();
   assert.deepEqual(errors, []);
   await page.close();
 }

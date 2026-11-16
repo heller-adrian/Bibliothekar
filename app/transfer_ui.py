@@ -217,7 +217,14 @@ TRANSFER_HTML = r'''<!doctype html>
     archiveBatchAction.disabled=busy || !archiveReadable || !(release_ready_count || candidate_count || resume_batch_id);
     archiveBatchAction.classList.toggle('bk-busy',busy);
     archiveBatchAction.setAttribute('aria-busy',String(busy));
-    if(!batch)return;
+    const released=!active && !resume_batch_id && batch?.status==='completed'
+      && batch.total>0 && batch.items.length===batch.total && batch.items.every(item=>
+        item.status==='released' || (item.status==='verified' && item.workspace_released));
+    if(!batch || released){
+      archiveBatchStatus.hidden=!batchError;
+      archiveBatchResults.hidden=true;
+      return;
+    }
     const title=batchText(batch.kind==='release'?'Gemeinsame Arbeitsbereich-Freigabe':'Gemeinsame Archivprüfung');
     const count=batchText(`${batch.processed} von ${batch.total} Ereignissen verarbeitet`);
     const stateLabel=resume_batch_id || batch.status==='interrupted'?batchText('Unterbrochen'):

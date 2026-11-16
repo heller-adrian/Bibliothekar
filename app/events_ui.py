@@ -4545,6 +4545,7 @@ EVENTS_HTML = r"""<!doctype html>
         restore_from_ssd:"Restore files from SSD",
         move_back:"Move archive files to their original locations",
         remove_new_files:"Remove new archive files",
+        archive_conflict:"Archive paths with unverified ownership",
         remove_new_directories:"Remove newly created directories"
       }[String(op.kind || "")];
       return bk0511EventLabel(source,english || window.BibliothekarI18n?.t?.(source) || source);
@@ -4565,7 +4566,9 @@ EVENTS_HTML = r"""<!doctype html>
         move_back:
           "These files still exist in the archive and must be moved back to their original locations.",
         remove_new_files:
-          "These files did not belong to the original archive state. Keep the original SSD files.",
+          "These files were absent before the change and match the verified workspace copies. Keep those copies.",
+        archive_conflict:
+          "Keep these paths untouched. Bibliothekar cannot verify that they belong to this change request.",
         remove_new_directories:
           "After restoring file positions, remove the directories created by the discarded change."
       }[String(op.kind||"")];
@@ -4639,10 +4642,13 @@ EVENTS_HTML = r"""<!doctype html>
         html += `<section class="change-pane"><div class="change-pane-heading"><div><div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0">Finder-Rückarbeit</h3><button class="bk-help" type="button" aria-label="Hinweis zur Finder-Rückarbeit" data-help="Die App prüft den realen Archivzustand read-only. Noch vorhandene Dateien werden an ihren ursprünglichen Ort zurückverschoben; fehlende Originale kommen aus dem vorbereiteten SSD-Rückbestand.">?</button></div>${assistant.live_refreshed ? '<p class="success-text" style="margin-top:6px">✓ Aktueller Archivbestand wurde read-only geprüft.</p>' : ''}</div><button type="button" class="plan-button change-refresh-button" data-reversal-refresh>↻ Aktualisieren</button></div>`;
         html += `<div class="card"><strong>Ursprüngliches Ziel</strong><code style="display:block;margin-top:7px">${escapeHtml(reversalArchiveRoot)}/${escapeHtml(assistant.original_root || "")}</code><div class="muted" style="margin-top:7px">SSD-Rückbestand</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(assistant.original_stock_path || "")}</code></div>`;
         let number=1;
+        const hasConflict=(assistant.operations || []).some(operation=>operation.state==="blocked");
         for (const operation of assistant.operations || []) {
-          html += `<details class="card change-operation" ${number===1?"open":""}><summary><span>${number}. ${escapeHtml(bk0511OperationTitle(operation))}</span><span class="badge warning">Ausstehend</span></summary><div class="change-operation-body"><div>${escapeHtml(bk0511OperationDetail(operation))}</div>`;
+          const badge=operation.state==="blocked" ? bk0511EventLabel("Gesperrt","Blocked") : "Ausstehend";
+          html += `<details class="card change-operation" ${number===1?"open":""}><summary><span>${number}. ${escapeHtml(bk0511OperationTitle(operation))}</span><span class="badge warning">${escapeHtml(badge)}</span></summary><div class="change-operation-body"><div>${escapeHtml(bk0511OperationDetail(operation))}</div>`;
           if (operation.source) html += `<div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.source)}</code>`;
           if (operation.target) html += `<div class="muted">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
+          if ((operation.protected_paths || []).length) html += `<div class="muted">${bk0511EventLabel("GESCHÜTZTE PFADE","PROTECTED PATHS")}</div>${operation.protected_paths.map(path=>`<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
           if ((operation.paths || []).length) html += `<div class="muted">ZU ENTFERNEN</div>${operation.paths.map(path=>`<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
           if ((operation.items || []).length) html += `<details><summary>${operation.items.length} Element${operation.items.length===1?"":"e"} anzeigen</summary><div style="margin-top:7px">${operation.items.map(name=>`<code style="display:block">${escapeHtml(name)}</code>`).join("")}</div></details>`;
           html += "</div></details>";
@@ -4653,7 +4659,7 @@ EVENTS_HTML = r"""<!doctype html>
         }
         html += historical
           ? '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-return>'+bk0511EventLabel("Zum aktuellen Schritt","Return to current step")+'</button></div></section>'
-          : '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-finder-check>'+bk0511EventLabel("Rückarbeit prüfen · weiter","Check restoration · continue")+'</button></div></section>';
+          : '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-finder-check'+(hasConflict?' disabled':'')+'>'+bk0511EventLabel("Rückarbeit prüfen · weiter","Check restoration · continue")+'</button></div></section>';
       } else {
         html += '<section class="change-pane"><div class="change-pane-heading"><div><h3>Prüfen & Verwerfen</h3><p class="muted">Der ursprüngliche Archivzustand wird vollständig read-only nach Ordnern, Pfaden, Größen und SHA-256 geprüft.</p></div></div>';
         html += '<div id="reversal-verify-panel" class="card"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button type="button" class="plan-button" data-reversal-verify>Rückänderung prüfen</button><span class="muted" data-reversal-summary>Noch nicht geprüft.</span></div><div data-reversal-errors style="display:none;margin-top:10px"></div></div>';
@@ -5045,11 +5051,13 @@ EVENTS_HTML = r"""<!doctype html>
               html += `<details class="card change-disclosure"><summary><strong>${targetTitle}</strong></summary><p class="muted" style="margin-top:8px">${targetHint}</p><pre class="change-target-tree" style="margin-top:9px">${targetStructureDeleted ? escapeHtml(bk0511EventLabel("Ereignis wird vollständig aus der Kamerabibliothek entfernt.","The entire event will be removed from the archive.")) : escapeHtml(targetTree)}</pre></details>`;
             }
 
+            const hasConflict=(assistant.operations || []).some(operation=>operation.state==="blocked");
             for (const operation of assistant.operations || []) {
               const state = String(operation.state || "");
               const stateBadge =
                 state === "done" ? '<span class="badge success">'+bk0511EventLabel("Erledigt","Done")+'</span>'
                 : state === "pending" ? '<span class="badge warning">'+bk0511EventLabel("Ausstehend","Pending")+'</span>'
+                : state === "blocked" ? '<span class="badge danger">'+bk0511EventLabel("Gesperrt","Blocked")+'</span>'
                 : state === "attention" ? '<span class="badge danger">'+bk0511EventLabel("Prüfen","Review")+'</span>'
                 : "";
               html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary><span>${number}. ${escapeHtml(bk0511OperationTitle(operation))}</span>${stateBadge}</summary><div class="change-operation-body"><div>${escapeHtml(bk0511OperationDetail(operation))}</div>`;
@@ -5062,6 +5070,9 @@ EVENTS_HTML = r"""<!doctype html>
                 html += `<details><summary>${operation.items.length} Element${operation.items.length===1?"":"e"} anzeigen</summary><div style="margin-top:7px">${operation.items.map(name => `<code style="display:block">${escapeHtml(name)}</code>`).join("")}</div></details>`;
               }
               if (operation.target) html += `<div class="muted">${bk0511EventLabel("NACH","TO")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
+              if ((operation.protected_paths || []).length) {
+                html += `<div class="muted">${bk0511EventLabel("GESCHÜTZTE PFADE","PROTECTED PATHS")}</div>${operation.protected_paths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
+              }
               if ((operation.paths || []).length) {
                 html += `<div class="muted">${bk0511EventLabel("NOCH ZU ENTFERNEN","STILL TO REMOVE")}</div>${operation.paths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
               } else if (operation.kind === "remove_directories" && state === "done") {
@@ -5071,7 +5082,7 @@ EVENTS_HTML = r"""<!doctype html>
               number += 1;
             }
             html += renderTechnicalDetails();
-            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-finder-done>${bk0511EventLabel("Manuelle Arbeit prüfen · weiter","Check manual work · continue")}</button></div></section>`;
+            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-finder-done${hasConflict?" disabled":""}>${bk0511EventLabel("Manuelle Arbeit prüfen · weiter","Check manual work · continue")}</button></div></section>`;
           }
         }
 

@@ -45,14 +45,16 @@ def _retained_origins(registry, origins, *, verify_contents, progress_callback=N
                 f.current_relative_path,f.current_root_kind,j.working_path FROM files f
                 JOIN jobs j ON j.id=f.job_id WHERE j.state='completed' ''')]
         for row in rows:
-            digest = str(row['sha256_original'] or '')
-            if digest not in wanted:
+            original = str(row['sha256_original'] or '')
+            digest = str(row['sha256_current'] or original)
+            identities = {original, digest} & wanted
+            if not identities:
                 continue
             roots = {'camera_archive': [Path(library['archive_root'])],
                      'shared_workspace': [paths['backup_root'], Path(library['work_root'])],
                      'trash': [paths['trash_root']],
                      'job_root': [Path(row['working_path'])] if row['working_path'] else []}.get(row['current_root_kind'], [])
-            seen.add(digest)
+            seen.update(identities)
             relative = str(row['current_relative_path'] or '')
             if not roots or not relative or Path(relative).is_absolute() or any(p in ('', '.', '..') for p in relative.replace('\\','/').split('/')) or '\\' in relative:
                 raise PipelineError('Sicherungsort ist nicht eindeutig; erneute Sicherung bleibt gesperrt.')
@@ -76,9 +78,9 @@ def _retained_origins(registry, origins, *, verify_contents, progress_callback=N
                                 after=os.fstat(handle);bound=os.stat(name,dir_fd=fd,follow_symlinks=False)
                                 fields=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
                                 if (fields(before)!=fields(after) or fields(after)!=fields(bound)
-                                    or after.st_size!=int(row['size_bytes']) or (verify_contents and h.hexdigest()!=str(row['sha256_current'] or digest))):
+                                    or after.st_size!=int(row['size_bytes']) or (verify_contents and h.hexdigest()!=digest)):
                                     raise PipelineError('Vorhandene Sicherung ist verändert oder nicht integre; erneute Sicherung sicher gesperrt.')
-                                present.add(digest)
+                                present.update(identities)
                             finally:os.close(handle)
                     except FileNotFoundError:
                         pass

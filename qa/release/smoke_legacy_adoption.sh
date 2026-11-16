@@ -15,7 +15,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker pull "$image"
+case "$image" in
+  *'@sha256:'*) docker pull "$image" ;;
+  "bibliothekar-qa:$revision") ;; # Local image built by the synthetic QA job.
+  *) echo "Expected a qualified digest or the exact local QA image." >&2; exit 1 ;;
+esac
 test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$revision"
 export ADOPTION_SMOKE_PASSWORD=synthetic-legacy-adoption-smoke-password
 for method in manual script rollback skip review; do

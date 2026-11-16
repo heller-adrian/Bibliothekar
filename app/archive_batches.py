@@ -53,7 +53,10 @@ def _now():
 def _items(connection, batch_id):
     return [dict(row) for row in connection.execute(
         """SELECT item.*, proof.file_count, proof.verified_file_count,
-                  proof.missing_file_count, proof.mismatched_file_count
+                  proof.missing_file_count, proof.mismatched_file_count,
+                  EXISTS (SELECT 1 FROM event_ssd_releases release
+                          WHERE release.job_id=item.job_id AND release.event_id=item.event_id
+                            AND release.status='completed') AS workspace_released
            FROM archive_batch_items item LEFT JOIN event_archive_verifications proof
                 ON proof.id=item.verification_id
            WHERE item.batch_id=? ORDER BY item.position""", (batch_id,),

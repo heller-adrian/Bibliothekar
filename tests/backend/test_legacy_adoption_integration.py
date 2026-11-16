@@ -2491,3 +2491,112 @@ def test_manual_adoption_steps_follow_smb_changes_and_require_verification(
     assert (archive / "unrelated.dat").read_bytes() == b"must stay"
     with database_connection(database) as connection:
         assert connection.execute("SELECT count(*) FROM events").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["native-zfs"])
+def test_regular_import_recognizes_adopted_file_family_before_any_regular_import(
+    fresh_main, monkeypatch, synthetic_dataset,
+):
+    from hashlib import sha256
+    from io import BytesIO
+    import subprocess
+
+    from PIL import Image
+    from app.database import claim_next_job, get_job, list_imported_media_origins
+    from app.source_reimport import retained_origins
+
+    workspace, database, registry, archive = fresh_main
+    original = archive.parent / "old-collection"
+    original.mkdir()
+    legacy = original / "DSCF0763.JPG"
+    Image.new("RGB", (8, 8), "red").save(legacy)
+    subprocess.run(["exiftool", "-overwrite_original", "-DateTimeOriginal=2026:07:19 17:11:37",
+                    "-SubSecTimeOriginal=100", "-Make=FUJIFILM", "-Model=X-E5", str(legacy)],
+                   check=True, capture_output=True)
+    raw = legacy.with_suffix(".RAF")
+    raw.write_bytes(b"synthetic Fujifilm RAW paired with JPEG")
+    sidecar = legacy.with_suffix(".RAF.xmp")
+    sidecar.write_bytes(b"synthetic matching sidecar")
+    contents = {path.name: path.read_bytes() for path in (legacy, raw, sidecar)}
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", original)
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", lambda descriptors, _cancel: {
+        fd: {"EXIF:ExifIFD:DateTimeOriginal": "2026:07:19 17:11:37",
+             "EXIF:ExifIFD:SubSecTimeOriginal": "100"} for fd in descriptors
+    })
+    if os.environ.get("ADOPTION_ZFS_ROOT"):
+        monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
+
+    client = _onboard(fresh_main)
+    _adopt(client)
+    route = "/api/legacy-adoption/jobs"
+    job = route + "/" + _json(client, "POST", route, status=201, json={"root": "nas"})["id"]
+    _json(client, "POST", job + "/scan", status=202)
+    draft = {"events": [{"name": "Adopted", "start_date": "2026-07-19", "end_date": "2026-07-19"}]}
+    revision = _json(client, "PUT", job + "/draft", json={**draft, "revision": 0})["revision"]
+    plan = _json(client, "POST", job + "/plan", json={"revision": revision})
+    _json(client, "POST", job + "/documents")
+    command = {"plan_id": plan["id"]}
+    _json(client, "POST", job + "/confirm", json={**command, "method": "manual", "acknowledged": True})
+    with ZipFile(BytesIO(client.get(job + "/download/manual-setup").content)) as bundle:
+        bundle.extractall(archive)
+    for item in _json(client, "GET", job + "/moves"):
+        Path(item["source"]).rename(item["target"])
+    assert _json(client, "POST", job + "/finalize", json=command)["state"] == "completed"
+    if main.ADOPTION_STARTUP_THREAD:
+        main.ADOPTION_STARTUP_THREAD.join(15)
+
+    # Drive the real worker synchronously so the assertions can see both jobs.
+    from types import SimpleNamespace
+    monkeypatch.setattr(main, "WORKER_THREAD", SimpleNamespace(is_alive=lambda: True))
+    context = resolve_library_context(registry, "main")
+    source_root = original.parent / "import-source"
+    duplicates = source_root / "duplicates"
+    duplicates.mkdir(parents=True)
+    for name, data in contents.items():
+        (duplicates / name.replace("DSCF0763", "renamed-camera-original")).write_bytes(data)
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source_root)
+    main.CONFIG_PATH.write_text('{"storage": {"safety_reserve_gib": 0, "processing_buffer_percent": 0}}')
+    origins = list_imported_media_origins(database)
+    assert {row["job_id"] for row in origins} == {catalogue_job_id(plan)}
+    assert {row["sha256"] for row in retained_origins(registry, origins)} == {
+        sha256(data).hexdigest() for data in contents.values()
+    }
+
+    def process():
+        queued = claim_next_job(database)
+        assert queued is not None
+        main.process_claimed_job(queued, library_context=context)
+        completed = get_job(database, queued["id"])
+        assert completed["state"] == "completed", completed
+        return completed
+
+    import_route = "/api/jobs/folder-import"
+    payload = {"source_root_key": "nas", "source_relative_path": "duplicates", "source_mode": "folder"}
+    _json(client, "POST", import_route, status=202, json=payload)
+    assert process()["result"]["status"] == "already_backed_up"
+    assert claim_next_job(database) is None
+
+    mixed = source_root / "mixed"
+    mixed.mkdir()
+    for name, data in contents.items():
+        (mixed / name.replace("DSCF0763", "renamed-camera-original")).write_bytes(data)
+    new = mixed / "DSCF0763.JPG"
+    Image.new("RGB", (8, 8), "green").save(new)
+    subprocess.run(["exiftool", "-overwrite_original", "-DateTimeOriginal=2026:07:19 17:11:37",
+                    "-SubSecTimeOriginal=800", "-Make=FUJIFILM", "-Model=X-E5", str(new)],
+                   check=True, capture_output=True)
+    payload["source_relative_path"] = "mixed"
+    _json(client, "POST", import_route, status=202, json=payload)
+    assert process()["result"]["status"] == "import_queued"
+    regular = process()
+    assert regular["result"]["source"]["duplicate_file_count"] == len(contents)
+    with database_connection(database) as connection:
+        [file] = connection.execute("SELECT * FROM files WHERE job_id=?", (regular["id"],)).fetchall()
+        assert file["sha256_original"] == sha256(new.read_bytes()).hexdigest()
+        [event] = plan["events"]
+        archived = event_file_rows(connection, event["id"])
+        assert len({row["family_id"] for row in archived}) == 1
+        assert {row["sha256_original"] for row in archived} == {sha256(data).hexdigest() for data in contents.values()}
+        assert not connection.execute("PRAGMA foreign_key_check").fetchall()
+    assert {Path(row["current_relative_path"]).name: (archive / row["current_relative_path"]).read_bytes()
+            for row in archived} == contents

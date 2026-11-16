@@ -591,10 +591,10 @@ def build_archive_change_assistant(
 
     # Presentation only: keep the existing physical completion verification.
     if status != "aenderbar_vorschlagen" and not release_stock.get("required") and event_document:
-        from app.archive_reversal import _manifest_path, _read_json
+        from app.archive_reversal import _read_baseline
         from app.archive_rename_guidance import qualify_rename
         try:
-            baseline = _read_json(_manifest_path(workspace_path, cr_id))
+            baseline = _read_baseline(workspace_path, cr_id)
             compact = qualify_rename(
                 archive_root, rows, current_document=baseline.get("event_json"),
                 replacement=work_root / staging_name / str(event_document["target_relative_path"]),
@@ -606,6 +606,18 @@ def build_archive_change_assistant(
                 operations = compact
         except (OSError, ValueError, KeyError, RuntimeError):
             pass  # Missing/ambiguous evidence retains the detailed instructions.
+
+    if status == "aenderbar_bestaetigt":
+        from app.archive_reversal import incoming_archive_conflicts
+        conflicts = incoming_archive_conflicts(archive_root, workspace_path, cr_id, rows)
+        if conflicts:
+            operations = [{
+                "kind": "archive_conflict",
+                "title": "Archivdateien mit ungeklärter Herkunft",
+                "protected_paths": [archive_display_root + "/" + path for path in conflicts],
+                "detail": "Diese Pfade sind geschützt. Prüfe den Archivbestand vor einer erneuten Planung.",
+                "state": "blocked",
+            }]
 
     if status == "aenderbar_vorschlagen" and preparation_required:
         phase = "prepare"

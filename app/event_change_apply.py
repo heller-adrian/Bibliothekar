@@ -386,6 +386,11 @@ def verify_event_change(
             )
 
     reviews = get_event_change_files(database_path, cr_id)
+    if workspace_path is not None and cr["status"] == "aenderbar_bestaetigt":
+        from app.archive_reversal import incoming_archive_conflicts
+        conflicts = incoming_archive_conflicts(archive_root, workspace_path, cr_id, reviews)
+        if conflicts:
+            raise EventChangeApplyError("Geschützte Archivziele müssen zuerst geklärt werden: " + ", ".join(conflicts[:5]))
     if not reviews:
         raise EventChangeApplyError("Der Änderungsauftrag enthält keine Dateien.")
     managed_reviews = [
@@ -557,7 +562,7 @@ def verify_event_change(
                     expected_size=expected_size,
                     expected_sha=expected_sha,
                     asset_kind=asset_kind,
-                )
+                ) if source_root_kind != "shared_workspace" else None
                 if resolved is None:
                     target = _safe_archive_path(root, target_rel)
                     if not target.is_file():

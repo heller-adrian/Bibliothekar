@@ -20,12 +20,61 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from app.database import database_connection
-from app.archive_locations import resolve_archived_file_relative_path, ArchiveLocationError
+from app.archive_locations import archive_name_key, archive_target_lookup, resolve_archived_file_relative_path, ArchiveLocationError
+from app.filename_collisions import numbered_stem
 from app.event_inventory import EventInventoryError, scan_event_inventory
 
 
 class EventChangeRequestError(ValueError):
     pass
+
+
+def _reserve_incoming_archive_names(archive_root, inventory, plans):
+    incoming = {}
+    reserved = set()
+    for row in plans:
+        path = row.get("new_path")
+        if not path or row.get("advisory"):
+            continue
+        if row.get("source_root_kind") == "shared_workspace":
+            incoming.setdefault(row["family_id"], []).append(row)
+        else:
+            reserved.add(archive_name_key(path))
+    if not incoming:
+        return
+    existing = archive_target_lookup(archive_root)
+    archived_contents = {item["sha256"] for item in (inventory or {}).get("files", ())
+                         if item.get("known_file_id") is not None and item.get("sha256")}
+    for family_id, members in sorted(incoming.items()):
+        duplicate = next((row for row in members if row.get("file_id") is not None
+                          and PurePosixPath(row["old_path"]).suffix.casefold() != ".xmp"
+                          and row["expected_sha256"] in archived_contents), None)
+        if duplicate is not None:
+            raise EventChangeRequestError(
+                "Diese Aufnahme ist mit derselben SHA-256-Prüfsumme bereits im Archiv vorhanden: "
+                + PurePosixPath(duplicate["old_path"]).name
+            )
+        paths = [PurePosixPath(row["new_path"]) for row in members]
+        # Preserve compound sidecar extensions such as photo.RAF.xmp.
+        stems = [path.name[:-len(path.suffix)] if path.suffix else path.name for path in paths]
+        for index in range(10000):
+            targets = []
+            for path, stem in zip(paths, stems):
+                suffix = path.suffix
+                if suffix.casefold() == ".xmp" and PurePosixPath(stem).suffix:
+                    inner = PurePosixPath(stem).suffix
+                    stem, suffix = stem[:-len(inner)], inner + suffix
+                targets.append(str(path.with_name(numbered_stem(stem, index) + suffix)))
+            keys = {archive_name_key(path) for path in targets}
+            if len(keys) != len(targets):
+                raise EventChangeRequestError("Die Dateifamilie hat mehrdeutige Archivziele: " + str(family_id))
+            if not keys & reserved and not any(existing(path) is not None for path in targets):
+                for row, path in zip(members, targets):
+                    row["new_path"] = path
+                reserved.update(keys)
+                break
+        else:
+            raise EventChangeRequestError("Für die Dateifamilie konnte kein freier Archivname reserviert werden.")
 
 
 def _compute_event_plan(
@@ -807,6 +856,12 @@ def _compute_event_plan(
             asset["advisory_reason"] = "redundant_duplicate"
             asset["action"] = "keep"
             asset["new_path"] = str(asset.get("old_path") or "")
+
+    if archive_root is not None:
+        try:
+            _reserve_incoming_archive_names(archive_root, inventory, file_plans + asset_plans)
+        except (ArchiveLocationError, OSError) as error:
+            raise EventChangeRequestError(str(error)) from error
 
     lines = [
         f"{year} — Archiv-Aenderungsplan (manuell)",

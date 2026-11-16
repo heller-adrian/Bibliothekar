@@ -117,11 +117,9 @@ def test_0273_reversal_detects_extra_same_root_directory(tmp_path: Path):
     assert cancelled["reversal_required"] is True
 
     prepared = prepare_archive_reversal(db, archive, workspace, cr_id)
-    remove = next(
-        item for item in prepared["operations"]
-        if item["kind"] == "remove_new_directories"
-    )
-    assert any("NEU-NUR-DURCH-AENDERUNG" in path for path in remove["paths"])
+    conflict = next(item for item in prepared["operations"] if item["kind"] == "archive_conflict")
+    assert any("NEU-NUR-DURCH-AENDERUNG" in path for path in conflict["protected_paths"])
+    assert not any(item["kind"] == "remove_new_directories" for item in prepared["operations"])
 
     extra.rmdir()
     assert verify_archive_reversal(db, archive, workspace, cr_id)["complete"]
@@ -260,3 +258,85 @@ def test_0326_reversal_uses_library_specific_display_paths(tmp_path: Path):
     )
     assert restore["source"].startswith("Testarbeitsbereich/")
     assert restore["target"].startswith("Testarchiv/")
+
+
+def test_archive_reversal_protects_preexisting_and_unknown_targets(tmp_path):
+    import json
+    from app.archive_reversal import _manifest_path
+
+    db, workspace, archive, folder, old_family, new_family, _ = _seed(tmp_path, full_archive_triplet=True)
+    work = workspace / "Arbeitsbereich"
+    original = archive / "2026" / folder / "Alle" / "alt.JPG"
+    duplicate = original.read_bytes()
+    (work / "2026/2026-07-24/neu.JPG").write_bytes(duplicate)
+    from hashlib import sha256
+    digest = sha256(duplicate).hexdigest()
+    with database_connection(db) as connection:
+        # Persist an RC19-style stale request that classified the original as new.
+        connection.execute("UPDATE files SET sha256_original=?,sha256_current=? WHERE job_id='new'", (digest, digest))
+    import pytest
+    from app.event_change_request import EventChangeRequestError
+    with pytest.raises(EventChangeRequestError, match="bereits im Archiv vorhanden"):
+        propose_event_change(db, "old", "archive", _preview(folder, old_family, new_family),
+                             event_name="Test Archiv 2", archive_root=archive, workspace_path=workspace)
+    change = propose_event_change(db, "old", "archive", _preview(folder, old_family, new_family),
+                                  event_name="Test Archiv 2", workspace_path=workspace)
+    cr_id = change["change_request_id"]
+    confirm_event_change(db, cr_id, archive, workspace)
+    with database_connection(db) as connection:
+        connection.execute("""UPDATE event_change_file_reviews SET new_path=?
+            WHERE change_request_id=? AND source_root_kind='shared_workspace'""", (str(original.relative_to(archive)), cr_id))
+    manifest = _manifest_path(workspace, cr_id)
+    old = json.loads(manifest.read_text())
+    old.pop("absent_incoming_targets")
+    old["version"] = 1
+    manifest.write_text(json.dumps(old))
+
+    assert all(op["kind"] == "archive_conflict" for op in build_archive_change_assistant(
+        db, archive, workspace, cr_id, scan_live=True)["operations"])
+    assert verify_archive_reversal(db, archive, workspace, cr_id)["complete"]
+    assert cancel_event_change(db, cr_id, archive, workspace)["status"] == "abgebrochen"
+    assert original.read_bytes() == duplicate
+
+
+def test_archive_reversal_removes_only_proven_copies_and_retains_workspace(tmp_path):
+    import shutil
+    from app.event_change_request import get_event_change_files
+
+    db, workspace, archive, folder, old_family, new_family, _ = _seed(tmp_path, full_archive_triplet=True, native_archive=True)
+    target_dir = archive / "2026" / folder / "Alle"
+    (target_dir / "NEU.jpg").write_bytes(b"existing foreign content")
+    change = propose_event_change(db, "old", "archive", _preview(folder, old_family, new_family),
+                                  event_name="Test Archiv 2", archive_root=archive, workspace_path=workspace)
+    cr_id = change["change_request_id"]
+    confirm_event_change(db, cr_id, archive, workspace)
+    incoming, = [row for row in get_event_change_files(db, cr_id) if row["source_root_kind"] == "shared_workspace"]
+    assert Path(incoming["new_path"]).name == "neu_001.JPG"
+    expected = archive / incoming["new_path"]
+    workspace_copy = workspace / "Arbeitsbereich" / incoming["workspace_staging_path"]
+    shutil.copyfile(workspace_copy, expected)
+    assert cancel_event_change(db, cr_id, archive, workspace)["reversal_required"]
+
+    prepared = prepare_archive_reversal(db, archive, workspace, cr_id)
+    copies = next(row for row in prepared["operations"] if row["kind"] == "remove_new_files")
+    assert copies["paths"] == ["Kamerabibliothek/" + incoming["new_path"]]
+    assert expected.read_bytes() == workspace_copy.read_bytes() == b"neu"
+    archived_foreign = archive / "confirmed-foreign-copy"
+    original_copy = archive / "original-staged-copy"
+    expected.rename(original_copy)
+    expected.write_bytes(b"neu")  # Same bytes, but no longer the copy observed in this request.
+    conflict = next(row for row in prepare_archive_reversal(db, archive, workspace, cr_id)["operations"]
+                    if row["kind"] == "archive_conflict")
+    assert conflict["protected_paths"] == copies["paths"]
+    assert "paths" not in conflict
+    assert not verify_archive_reversal(db, archive, workspace, cr_id)["complete"]
+    assert expected.read_bytes() == original_copy.read_bytes() == b"neu"
+
+    # Simulate the owner moving the unrelated file aside outside the app.
+    expected.rename(archived_foreign)
+    assert verify_archive_reversal(db, archive, workspace, cr_id)["complete"]
+    assert finish_archive_reversal(db, archive, workspace, cr_id)["status"] == "abgebrochen"
+    assert (target_dir / "NEU.jpg").read_bytes() == b"existing foreign content"
+    assert (target_dir / "alt.JPG").read_bytes() == b"alt"
+    assert archived_foreign.read_bytes() == original_copy.read_bytes() == b"neu"
+    assert (workspace / "Arbeitsbereich" / incoming["old_path"]).read_bytes() == b"neu"

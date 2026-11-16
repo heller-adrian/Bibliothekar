@@ -728,7 +728,8 @@ def list_imported_media_origins(
     exclude_job_id: str | None = None,
 ) -> list[dict[str, Any]]:
     conditions = [
-        "j.operation IN ('folder_import','sd_import','metadata_multiple_import')",
+        """(j.operation IN ('folder_import','sd_import','metadata_multiple_import','legacy_adoption')
+             OR f.current_root_kind='camera_archive')""",
         "j.state='completed'",
         "COALESCE(TRIM(f.sha256_original),'')<>''",
     ]
@@ -756,7 +757,13 @@ def list_imported_media_origins(
             """,
             params,
         ).fetchall()
-    return [dict(row) for row in rows]
+    origins = [dict(row) for row in rows]
+    for origin in list(origins):
+        current = str(origin["sha256_current"] or "")
+        if (origin["current_root_kind"] == "camera_archive" and current
+                and current != origin["sha256"]):
+            origins.append({**origin, "sha256": current, "size_bytes": origin["current_size_bytes"]})
+    return origins
 
 
 def claim_next_job(

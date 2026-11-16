@@ -1452,7 +1452,8 @@ def process_claimed_job(
                     processing_buffer_percent=int(storage.get("processing_buffer_percent",10)),
                     safety_reserve_gib=int(storage.get("safety_reserve_gib",20)))
                 sd_recheck.run(database_file, REGISTRY_DATABASE_FILE, job,
-                    source_root=_safe_root((job.get("result") or {}).get("source_root_key", "removable")), origins=list_imported_media_origins,
+                    source_root=_safe_root((job.get("result") or {}).get("source_root_key", "removable")),
+                    origins=lambda database: sd_recheck.catalog_origins(database, REGISTRY_DATABASE_FILE),
                     signature=quick_source_signature, stop=lambda: WORKER_STOP.is_set() or _import_cancel_requested(job_id))
             except InterruptedError as error:
                 with database_connection(database_file) as connection:
@@ -1790,14 +1791,9 @@ def process_claimed_job(
                 # pre-hash snapshot that predates another completed import.
                 imported_hashes.clear(); imported_sha256.clear()
                 duplicate_origins.clear(); duplicate_origins_by_sha.clear()
-                origin_rows = list_imported_media_origins(
-                    database_file,
-                    exclude_job_id=job_id,
-                )
+                from app.sd_recheck import catalog_origins
+                origin_rows = catalog_origins(database_file, REGISTRY_DATABASE_FILE, exclude_job_id=job_id)
                 checked_folder=bool((job.get("result") or {}).get("verified_folder_check"))
-                if checked_folder:
-                    from app.sd_recheck import catalog_origins
-                    origin_rows=catalog_origins(database_file,REGISTRY_DATABASE_FILE,exclude_job_id=job_id)
                 # After an explicitly confirmed storage loss, historical SHA
                 # is no longer evidence of a retained copy. Inspect every
                 # registered catalogue and verify real retained bytes before
@@ -1805,9 +1801,6 @@ def process_claimed_job(
                 from app.root_operations import _control_location, _read
                 replacement_state = _read(_control_location(WORKSPACE_PATH)/'state.json',{})
                 loss_confirmed = bool(replacement_state.get('storage_replacements'))
-                if loss_confirmed:
-                    from app.sd_recheck import catalog_origins
-                    origin_rows = catalog_origins(database_file, REGISTRY_DATABASE_FILE, exclude_job_id=job_id)
                 if loss_confirmed or (operation == "folder_import" and (job.get("duplicate_of_job_id") or checked_folder)):
                     from app.source_reimport import retained_origins
                     origin_rows = retained_origins(REGISTRY_DATABASE_FILE, origin_rows)

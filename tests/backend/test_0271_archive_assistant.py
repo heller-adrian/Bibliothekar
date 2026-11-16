@@ -4,6 +4,7 @@ from __future__ import annotations
 from tests.backend.legacy_storage_fixture import provision_legacy_storage
 
 import hashlib
+import os
 import shutil
 from pathlib import Path
 
@@ -17,13 +18,14 @@ from app.event_change_request import get_event_change_files, propose_event_chang
 NOW = "2026-09-28T13:00:00+00:00"
 
 
-def _seed(tmp_path: Path, *, full_archive_triplet: bool = False):
+def _seed(tmp_path: Path, *, full_archive_triplet: bool = False, native_archive: bool = False):
     db = tmp_path / "kamera.sqlite3"
     workspace = tmp_path / "workspace"
-    archive = tmp_path / "archive"
+    zfs = os.environ.get("ADOPTION_ZFS_ROOT") if native_archive else None
+    archive = Path(zfs) / tmp_path.name / "archive" if zfs else tmp_path / "archive"
     work = workspace / "Arbeitsbereich"
     work.mkdir(parents=True)
-    archive.mkdir()
+    archive.mkdir(parents=True)
     initialize_database(db)
     provision_legacy_storage(workspace)
 
@@ -290,6 +292,7 @@ def test_0271_verify_requires_obsolete_old_event_folder_to_be_removed(tmp_path: 
     ]
     assert assistant["obsolete_directories"] == [f"2026/{folder}"]
 
+    confirm_event_change(db, cr_id, archive, workspace)
     old_file = archive / "2026" / folder / "Alle" / "alt.JPG"
     new_file = archive / "2026" / new_folder / "Alle" / "alt.JPG"
     new_file.parent.mkdir(parents=True, exist_ok=True)
@@ -297,7 +300,6 @@ def test_0271_verify_requires_obsolete_old_event_folder_to_be_removed(tmp_path: 
     (archive / "2026" / new_folder / "Sortiert").mkdir()
     (archive / "2026" / new_folder / "Export").mkdir()
 
-    confirm_event_change(db, cr_id, archive, workspace)
     first = verify_event_change(db, cr_id, archive)
     assert first["complete"] is False
     assert first["remaining_obsolete_directory_count"] == 1
