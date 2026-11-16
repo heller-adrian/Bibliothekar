@@ -213,7 +213,7 @@ def _frozen_rc1_extension(context, registry, job, *, existing_media=False):
     return event_id, previous
 
 
-def test_collision_and_exact_global_duplicates(inventory):
+def test_explicit_target_name_conflict_and_exact_global_duplicates(inventory):
     import hashlib
 
     context, source, registry = inventory
@@ -222,7 +222,7 @@ def test_collision_and_exact_global_duplicates(inventory):
         (source / directory / "same.jpg").write_bytes(content)
     job = _scan(context, source)
     with pytest.raises(AdoptionError, match="dieselbe Zieldatei"):
-        create_plan(context, registry, job, _draft())
+        create_plan(context, registry, job, {**_draft(), "target_stems": {"second/same": "same"}})
     register_source_backup(
         registry, backup_id="older", source_kind="import", source_identity="older", backup_path="/synthetic/older",
     )
@@ -235,6 +235,32 @@ def test_collision_and_exact_global_duplicates(inventory):
     old, new = plan_moves(context, job)
     assert old["target"] is None
     assert Path(new["target"]).name == "same.jpg"
+
+
+def test_repeated_camera_names_in_large_plan_get_stable_unique_targets(inventory):
+    from app.legacy_adoption_verify import reopen_plan
+
+    context, source, registry = inventory
+    for index in range(436):
+        folder = source / f"camera-{index:04d}"
+        folder.mkdir()
+        (folder / "capture.JPG").write_bytes(str(index).encode())
+    # A different extension alone cannot distinguish two camera families.
+    (source / "camera-0001" / "capture.JPG").rename(source / "camera-0001" / "CAPTURE.RAF")
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft())
+    moves = plan_moves(context, job, limit=200)
+    while page := plan_moves(context, job, limit=200, after=moves[-1]["relative_path"]):
+        moves.extend(page)
+    assert plan["move_families"] == len(moves) == 436
+    assert len({Path(move["target"]).stem.casefold() for move in moves}) == 436
+    assert Path(moves[1]["target"]).name == "CAPTURE_Adopted_001.RAF"
+    assert Path(moves[-1]["target"]).name == "capture_Adopted_435.JPG"
+    reopen_plan(context, job)
+    create_plan(context, registry, job, _draft())
+    assert {move["target"] for move in plan_moves(context, job, limit=200)} == {
+        move["target"] for move in moves[:200]
+    }
 
 
 def test_disjoint_collection_segments(inventory):

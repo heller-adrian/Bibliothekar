@@ -7,8 +7,8 @@ from functools import lru_cache
 from itertools import groupby
 import json
 import os
-from pathlib import Path, PurePosixPath
 import sqlite3
+from pathlib import Path, PurePosixPath
 import stat
 from uuid import uuid4
 
@@ -22,9 +22,10 @@ from app.event_naming import (
     render_event_folder_name, render_no_event_folder_name,
 )
 from app.event_structure import continuous_event_bounds
+from app.filename_collisions import numbered_stem
 from app.free_time import free_ranges_for_day
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps, normalize_no_event_segments, normal_event_ranges
-from app.legacy_adoption_inventory import _job
+from app.legacy_adoption_inventory import _job, _legacy_family_key
 from app.legacy_adoption_mode import require_no_managed_data
 from app.legacy_adoption_paths import (
     AdoptionError, bound_directory, bound_file, bound_sha256, file_identity, relative_parent,
@@ -538,13 +539,79 @@ def _suggest_folder_moves(connection, plan_id, source_fd, archive_entry, candida
             continue
 
 
+def _registered_archive_paths(connection, plan_id, event_id):
+    return {row[0] for row in connection.execute(
+        """SELECT baseline.relative_path FROM legacy_adoption_baseline baseline
+              JOIN event_inventory_files inventory ON inventory.relative_path = baseline.relative_path
+               AND inventory.sha256 = baseline.sha256 AND inventory.size_bytes = baseline.size_bytes
+              JOIN files ON files.id = inventory.known_file_id
+               AND files.current_relative_path = baseline.relative_path
+               AND files.sha256_current = baseline.sha256 AND files.size_bytes = baseline.size_bytes
+             WHERE baseline.plan_id = ? AND inventory.event_id = ?
+               AND inventory.root_kind = 'camera_archive' AND files.current_root_kind = 'camera_archive'""",
+        (plan_id, event_id),
+    )}
+
+
+def _family_targets(folder, key, family, override, archive_entry, registered, used, sequences):
+    original = PurePosixPath(key).name
+    stem = override if override is not None else original
+    if override is not None:
+        if "/" in stem:
+            raise AdoptionError("Der Zielname muss ein einzelner Dateiname ohne Endung sein.")
+        validate_target(stem)
+    # Preserve full compound endings, e.g. .RAF.xmp, for all members.
+    endings = [PurePosixPath(member["relative_path"]).name[len(original):] for member in family]
+    proposed = [str(folder / (stem + ending)) for ending in endings]
+    if len({target_key(ending) for ending in endings}) != len(endings):
+        raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + proposed[0])
+    occupied = False
+    for path in proposed:
+        validate_target(path)
+        entry = archive_entry(path)
+        if entry is not None:
+            if override is not None or path not in registered or not stat.S_ISREG(entry.st_mode):
+                raise AdoptionError("Zieldatei existiert bereits: " + path)
+            occupied = True
+
+    family_key = target_key(str(folder / stem))
+    if family_key not in used and not occupied:
+        used.add(family_key)
+        return proposed
+    if override is not None:
+        raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + proposed[0])
+
+    # The marker keeps the new stem distinct from OS copy suffix aliases used
+    # for sidecar/export matching. One sequence covers the whole family.
+    index = sequences[family_key]
+    while True:
+        index += 1
+        suffix = numbered_stem("_Adopted", index)
+        max_stem_bytes = 255 - len(suffix) - max(len(ending.encode("utf-8")) for ending in endings)
+        short_stem = stem.encode("utf-8")[:max_stem_bytes].decode("utf-8", errors="ignore")
+        unique = short_stem + suffix
+        candidate = target_key(str(folder / unique))
+        if candidate in used:
+            continue
+        targets = [str(folder / (unique + ending)) for ending in endings]
+        for path in targets:
+            validate_target(path)
+            if archive_entry(path) is not None:
+                raise AdoptionError("Zieldatei existiert bereits: " + path)
+        used.add(candidate)
+        sequences[family_key] = index
+        return targets
+
+
 def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, source_fd, archive_fd):
     archive_entry = _archive_probe(archive_fd)
+    registered = set()
     for event in events:
         prefix = event_root_relative(event)
         validate_target(str(prefix))
         if event["existing"]:
             _snapshot_existing_event(connection, plan_id, archive_fd, prefix, event["id"])
+            registered.update(_registered_archive_paths(connection, plan_id, event["id"]))
         elif archive_entry(str(prefix)) is not None:
             raise AdoptionError("Der neue Ereignisordner existiert bereits: " + str(prefix))
 
@@ -557,6 +624,8 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
     candidates = {}
     target_counts = Counter()
     planned_directories = set()
+    used_stems = {target_key(_legacy_family_key(Path(), path)) for path in registered}
+    filename_sequences = Counter()
     rows = connection.execute(
         """SELECT inventory.*, families.capture_time, families.review_required, copy.state AS review_copy
              FROM legacy_adoption_inventory inventory
@@ -591,28 +660,19 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             raise AdoptionError("Einzelne Mitglieder einer Dateifamilie sind bereits registriert "
                                 "oder haben identischen Inhalt: " + key)
 
-        for member in family:
+        new_family = not all(duplicate)
+        targets = _family_targets(
+            leaf / (layout["input_path"] if layout["structure_enabled"] else ""), key, family,
+            target_stems.get(key), archive_entry, registered, used_stems, filename_sequences,
+        ) if new_family else [None] * len(family)
+        for member, target in zip(family, targets, strict=True):
             source = member["relative_path"]
             if source.strip() != source or "\\" in source:
                 raise AdoptionError("Der Quellpfad ist für die globale Registry ungeeignet: " + source)
             with relative_parent(source_fd, source) as (directory, name):
                 with bound_file(directory, name, tuple(json.loads(member["identity"]))):
                     pass
-            target = None
-            if not all(duplicate):
-                filename = PurePosixPath(source).name
-                if key in target_stems:
-                    stem = target_stems[key]
-                    if "/" in stem:
-                        raise AdoptionError("Der Zielname muss ein einzelner Dateiname ohne Endung sein.")
-                    validate_target(stem)
-                    original_stem = PurePosixPath(key).name
-                    filename = stem + filename[len(original_stem):]
-                input_path = layout["input_path"] if layout["structure_enabled"] else ""
-                target = str(leaf / input_path / filename)
-                validate_target(target)
-                if archive_entry(target) is not None:
-                    raise AdoptionError("Zieldatei existiert bereits: " + target)
+            if target is not None:
                 source_dir = PurePosixPath(source).parent
                 target_dir = str(PurePosixPath(target).parent)
                 target_counts[target_dir] += 1
@@ -631,7 +691,7 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                 )
             except sqlite3.IntegrityError as error:
                 raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + str(target)) from error
-        if all(duplicate):
+        if not new_family:
             continue
         if (event["id"], leaf_key) not in planned_directories:
             if not event["existing"]:

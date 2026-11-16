@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Conservative recognition of filesystem-generated duplicate-name suffixes.
+"""Generate and recognize suffixes for colliding filenames.
 
 These helpers never identify content on their own. They only normalize common
 names that Finder/Windows/SMB create when two files with the same name are kept.
@@ -25,6 +25,11 @@ _EXPORT_SUFFIX_RE = re.compile(
     r"^(?P<base>.+?)_Export(?:_\d+)?$",
     re.IGNORECASE,
 )
+
+
+def numbered_stem(stem: str, index: int) -> str:
+    """Append Bibliothekar's three-digit collision sequence."""
+    return f"{stem}_{index:03d}" if index else stem
 
 
 def copy_collision_base_stem(

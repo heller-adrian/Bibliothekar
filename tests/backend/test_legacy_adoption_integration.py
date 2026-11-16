@@ -2010,3 +2010,217 @@ def test_cancel_review_batch_rolls_back_only_its_files_and_resumes(fresh_main, m
         name: sha256(content).hexdigest() for name, content in originals.items()
     }
     assert not list(archive.iterdir())
+
+
+@pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["year-boundary"])
+def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle(
+    fresh_main, monkeypatch, synthetic_dataset,
+):
+    from hashlib import sha256
+    from io import BytesIO
+    import json
+
+    from app.archive_change_assistant import build_archive_change_assistant
+    from app.archive_release_stock import verify_archive_release_copies, verify_archive_release_removal
+    from app.archive_transfer import verify_event_archive
+    from app.event_change_apply import confirm_event_change, verify_event_change
+    from app.event_change_request import get_event_change_files, propose_archived_event_deletion, propose_event_change
+    from app.event_document import build_event_document_from_db
+    from app.event_inventory import event_root_relative
+    from app.workspace_layout import backup_root, shared_work_root
+
+    workspace, database, registry, archive = fresh_main
+    source = archive.parent / "legacy-source"
+    if os.environ.get("ADOPTION_ZFS_ROOT"):
+        monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+    monkeypatch.setattr(
+        "app.legacy_adoption_inventory.read_bound_metadata",
+        lambda descriptors, _cancel: {
+            fd: {"EXIF:ExifIFD:DateTimeOriginal": os.pread(fd, 19, 0).decode()}
+            for fd in descriptors
+        },
+    )
+    extensions = (".RAF", ".JPG", ".RAF.xmp")
+    source_data = {}
+
+    def photos(folder, date_time):
+        (source / folder).mkdir(parents=True)
+        for extension in extensions:
+            relative = f"{folder}/DSCF0763{extension}"
+            content = (date_time + " " + relative).encode()
+            (source / relative).write_bytes(content)
+            source_data[relative] = content
+
+    def adopt(draft, *, later=False):
+        api = "/api/legacy-adoption/jobs"
+        job_id = _json(client, "POST", api + ("?mode=library" if later else ""), status=201, json={"root": "nas"})["id"]
+        job = api + "/" + job_id
+        _json(client, "POST", job + "/scan", status=202)
+        preview = _json(client, "POST", job + "/draft/structure", json=draft)
+        saved = _json(client, "PUT", job + "/draft", json={**draft, "revision": 0})
+        plan = _json(client, "POST", job + "/plan", json={"revision": saved["revision"]})
+        moves = _json(client, "GET", job + "/moves")
+        directories = set(_json(client, "GET", job + "/directories"))
+        assert set(preview["directories"]) <= directories
+        assert all(str(Path(move["target_path"]).parent) in directories for move in moves)
+        _json(client, "POST", job + "/documents")
+        command = {"plan_id": plan["id"]}
+        _json(client, "POST", job + "/confirm", json={**command, "acknowledged": True, "method": "manual"})
+        for item in ("folders", "documents"):
+            result = client.get(job + "/download/" + item)
+            assert result.status_code == 200, result.text
+            with ZipFile(BytesIO(result.content)) as bundle:
+                bundle.extractall(archive)
+        for move in moves:
+            assert not Path(move["target"]).exists()
+            Path(move["source"]).rename(move["target"])
+        assert _json(client, "POST", job + "/verify", json=command)["state"] == "verified"
+        assert _json(client, "POST", job + "/finalize", json=command)["state"] == "completed"
+        return plan, {move["relative_path"]: move["target_path"] for move in moves}
+
+    photos("2025/first", "2025:07:01 12:00:00")
+    photos("2026/second", "2026:01:01 10:00:00")
+    client = _onboard(fresh_main)
+    _adopt(client)
+    plan, paths = adopt({"events": [{
+        "name": "Cross-year", "start_date": "2025-07-01", "end_date": "2026-01-01",
+        "folder_layout": {"input_path": "All/JPG", "layout": {"version": 2, "nodes": [
+            {"id": "all", "name": "All", "children": [{"id": "jpg", "name": "JPG"}]},
+            {"id": "export", "name": "Export", "role": "export"},
+        ]}},
+    }]})
+    [event] = plan["events"]
+    event_id, anchor = event["id"], catalogue_job_id(plan)
+    root = archive / event_root_relative(event)
+    assert root.parent.name == "2025"
+    assert set(paths.values()) == {
+        str((root / "All" / "JPG" / (stem + extension)).relative_to(archive))
+        for stem in ("DSCF0763", "DSCF0763_Adopted_001") for extension in extensions
+    }
+    original = {path: (archive / path).read_bytes() for path in paths.values()}
+    assert original == {target: source_data[relative] for relative, target in paths.items()}
+
+    # Later adoption shares the same input folder, including already resolved names.
+    photos("extension", "2026:01:01 11:00:00")
+    assert _json(client, "GET", "/api/legacy-adoption/eligibility") == {"eligible": True, "blockers": []}
+    extension, new_paths = adopt({"events": [{"existing_id": event_id}]}, later=True)
+    assert extension["events"][0]["id"] == event_id
+    assert {Path(target).name for target in new_paths.values()} == {
+        "DSCF0763_Adopted_002" + suffix for suffix in extensions
+    }
+    paths.update(new_paths)
+    assert all((archive / path).read_bytes() == data for path, data in original.items())
+    assert sorted((p.name for p in root.iterdir())) == ["All", "Export", "event.json"]
+
+    def check_catalogue(folder):
+        with database_connection(database) as connection:
+            files = event_file_rows(connection, event_id)
+            saved_period = connection.execute(
+                "SELECT start_datetime, end_datetime FROM events WHERE id=?", (event_id,),
+            ).fetchone()
+        assert tuple(saved_period) == ("2025-07-01T00:00:00", "2026-01-01T23:59:59")
+        assert len({row["family_id"] for row in files}) == 3
+        names = {Path(target).name: source_data[relative] for relative, target in paths.items()}
+        assert len(files) == len(names) == 9
+        for row in files:
+            path = archive / row["current_relative_path"]
+            assert row["sha256_current"] == sha256(path.read_bytes()).hexdigest()
+            assert path.read_bytes() == names[path.name]
+            assert path.parent == folder / "All" / "JPG"
+        document = json.loads((folder / "event.json").read_text())
+        saved = build_event_document_from_db(database, workspace, anchor, event_id, include_archived=True)
+        for key in ("folder_layout", "structure"):
+            assert document[key] == saved[key], key
+        def file_proofs(payload):
+            return {(file["relative_path"], file["sha256"], file["size_bytes"]) for file in payload["files"]}
+        assert file_proofs(document) == file_proofs(saved)
+        for key in ("id", "name", "folder_name", "start_datetime", "end_datetime", "revision"):
+            assert document["event"][key] == saved["event"][key], key
+        return files
+
+    files = check_catalogue(root)
+    verified = verify_event_archive(database, archive, anchor, event_id, workspace_path=workspace)
+    assert verified["verified"], verified
+    renamed = root.with_name("2025-07-01 - Renamed")
+    preview = {
+        "event_kind": "event", "event_name": "Renamed", "parent_folder": renamed.name,
+        "child_folder": "", "uses_time_range": False, "preserve_day_folders": False,
+        "start_date": "2025-07-01", "end_date": "2026-01-01", "start_time": "00:00", "end_time": "23:59",
+        "selected_day_keys": ["2025-07-01", "2026-01-01"],
+        "selected_family_ids": sorted({row["family_id"] for row in files}),
+        "_folder_layout_explicit": True, "folder_layout": event["folder_layout"],
+    }
+    change = propose_event_change(database, anchor, event_id, preview, event_name="Renamed",
+                                  archive_root=archive, workspace_path=workspace)["change_request_id"]
+    confirm_event_change(database, change, archive, workspace)
+    assistant = build_archive_change_assistant(database, archive, workspace, change, scan_live=True)
+    assert [item["kind"] for item in assistant["operations"]] == ["rename_archive_folder", "replace_event_document"]
+    root.rename(renamed)
+    document_source = assistant["operations"][1]["source"].split("/", 1)[1]
+    shutil.copyfile(shared_work_root(workspace) / document_source, renamed / "event.json")
+    change_check = verify_event_change(database, change, archive, workspace)
+    assert change_check["complete"], change_check
+    _json(client, "POST", f"/api/change-requests/{change}/archive")
+    check_catalogue(renamed)
+
+    deletion = propose_archived_event_deletion(database, anchor, event_id, archive_root=archive)["change_request_id"]
+    confirm_event_change(database, deletion, archive, workspace)
+    copies = [row for row in get_event_change_files(database, deletion) if row.get("workspace_release_path")]
+    assert len(copies) == len(files)
+    for row in copies:
+        released = backup_root(workspace) / row["workspace_release_path"]
+        released.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(archive / row["old_path"], released)
+    assert verify_archive_release_copies(database, archive, workspace, deletion)["complete"]
+    shutil.rmtree(renamed)
+    assert verify_archive_release_removal(database, archive, workspace, deletion)["complete"]
+    assert verify_event_change(database, deletion, archive, workspace)["complete"]
+    _json(client, "POST", f"/api/change-requests/{deletion}/archive")
+    with database_connection(database) as connection:
+        assert connection.execute("SELECT 1 FROM events WHERE id=?", (event_id,)).fetchone() is None
+        for row in files:
+            released = connection.execute(
+                "SELECT current_root_kind, current_relative_path FROM files WHERE id=?", (row["id"],),
+            ).fetchone()
+            assert released["current_root_kind"] == "shared_workspace"
+            assert sha256((backup_root(workspace) / released["current_relative_path"]).read_bytes()).hexdigest() == row["sha256_current"]
+    summary = _json(client, "GET", "/api/workspace/summary?jobs=&physical_refresh=false")
+    assert summary["statistics"]["family_count"] == 3
+    assert summary["statistics"]["file_count"] == 9
+
+    # Reuse all three released families via the normal Workspace sort and archive flow.
+    from app.sort_apply import CONFIRMATION_PHRASE, execute_sort_run, prepare_sort_run
+    from app.sort_plan import build_event_sort_plan
+    from app.ssd_release import finalize_manually_moved_event_if_verified
+
+    refiling = _json(client, "POST", f"/api/jobs/{anchor}/events", json={
+        "event_kind": "event", "event_name": "Refiled", "start_date": "2025-07-01", "end_date": "2026-01-01",
+        "selected_day_keys": ["2025-07-01", "2026-01-01"],
+        "selected_family_ids": sorted({row["family_id"] for row in files}),
+        "folder_layout": event["folder_layout"],
+    })["parent_event"]
+    new_event, new_job = refiling["id"], refiling["job_id"]
+    library = resolve_library_context(registry, "main")
+    compat = main.compatibility_workspace_root(library)
+    sorting = build_event_sort_plan(database, new_job, new_event, compat, verify_sha256=True)
+    assert sorting["summary"]["ready"], sorting["blockers"]
+    run = prepare_sort_run(database, new_job, new_event, compat,
+                           expected_plan_token=sorting["plan_token"], confirmation_phrase=CONFIRMATION_PHRASE)
+    execute_sort_run(database, run["id"], compat)
+    relative = event_root_relative(refiling)
+    staged = shared_work_root(compat) / relative
+    shutil.copytree(staged, archive / relative)
+    shutil.rmtree(staged)
+    proof = verify_event_archive(database, archive, new_job, new_event, workspace_path=compat)
+    assert proof["verified"], proof
+    finalized = finalize_manually_moved_event_if_verified(database, compat, archive, new_job, new_event, proof)
+    assert finalized["manual_archive_finalized"]
+    with database_connection(database) as connection:
+        refiled = event_file_rows(connection, new_event)
+    def links(rows):
+        return {(row["id"], row["family_id"], row["sha256_current"]) for row in rows}
+    assert links(refiled) == links(files)
+    assert {(archive / row["current_relative_path"]).name for row in refiled} == {
+        Path(target).name for target in paths.values()
+    }

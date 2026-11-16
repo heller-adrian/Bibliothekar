@@ -18,6 +18,10 @@ const cases = Array.from({length: 55}, (_, index) => ({
   metadata_choices: [{source: "EXIF:ExifIFD:DateTimeOriginal", time: "2025-01-01T00:00:00"}],
 }));
 const inactive = {total: 0, copied: 0, failed: 0, pending: 0, running: false};
+const customLayout = {structure_enabled: true, input_path: "All", layout: {version: 2, nodes: [
+  {id: "all", name: "All", children: [{id: "jpg", name: "JPG", children: [{id: "deep", name: "Selection"}]}]},
+  {id: "export", name: "Export", role: "export"},
+]}};
 const active = {...inactive, batch_id: batchId, state: "active", total: 1, pending: 1, running: true,
   bytes_written: 2048, bytes_total: 4096};
 const paused = {...active, running: false, state: "cancelling",
@@ -35,7 +39,7 @@ async function geometry(page, selector, scrollAt) {
 }
 
 async function check(browser, width, height, theme, language) {
-  const page = await browser.newPage({viewport: {width, height}});
+  const page = await browser.newPage({viewport: {width, height}, hasTouch: width <= 1024});
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.addInitScript(({theme, language}) => {
@@ -50,7 +54,8 @@ async function check(browser, width, height, theme, language) {
     const key = url.pathname.split("/" + jobId).at(-1);
     if (url.pathname === "/legacy-adoption") return route.fulfill({body: html, contentType: "text/html"});
     if (key === "") return route.fulfill({json: {plan: {}, state: "inventoried",
-      draft: {events: [{name: "Existing test event"}], metadata_review_pending: pending}, draft_revision: 1,
+      draft: {events: [{name: "Existing test event", start_date: "2025-01-01", end_date: "2025-01-01",
+        folder_layout: customLayout}], metadata_review_pending: pending}, draft_revision: 1,
       files: 100, families: 95, errors: 0, review_count: cases.length, source_root: "/synthetic/source"}});
     if (key === "/draft/check") return route.fulfill({json: {valid: true, free_segments: segments, coverage: {unassigned: 25},
       events: [{name: "Existing test event", start: "2025-01-01T01:00:00", end: "2025-01-01T02:00:00", families: 1, files: 1}]}});
@@ -85,6 +90,42 @@ async function check(browser, width, height, theme, language) {
   await page.locator(".adoption-event-card summary").focus();
   await page.keyboard.press("Enter");
   await page.locator("#planning-preview code", {hasText: "Photos"}).waitFor();
+  await page.locator(".adoption-event-card").getByRole("button", {name: german ? "Bearbeiten" : "Edit"}).click();
+  const dialog = page.locator("#event-editor");
+  await dialog.locator(".bk-event-layout-editor > summary").click();
+  const folderRows = dialog.locator(".bk-folder-layout-row");
+  assert.equal(await folderRows.count(), 4);
+  const measure = () => folderRows.evaluateAll(rows => rows.map(row => {
+    const field = row.querySelector("[data-bk-layout-name]").getBoundingClientRect();
+    const buttons = [...row.querySelectorAll("button")].map(button => button.getBoundingClientRect());
+    return {fieldWidth: field.width, left: row.getBoundingClientRect().left,
+      top: Math.min(...buttons.map(rect => rect.top)), bottom: Math.max(...buttons.map(rect => rect.bottom)),
+      right: Math.max(...buttons.map(rect => rect.right))};
+  }));
+  const positions = await measure();
+  for (const [index, position] of positions.entries()) {
+    assert.ok(position.fieldWidth > 55 && position.right < width);
+    if (index > 0) assert.ok(position.top - positions[index - 1].bottom >= 6,
+      `folder button rows overlap at ${width}px ${theme}: ${JSON.stringify(positions)}`);
+  }
+  assert.ok(positions[0].left < positions[1].left && positions[1].left < positions[2].left);
+  assert.equal(positions[0].left, positions[3].left);
+  await folderRows.nth(2).locator("[data-bk-layout-child]").click();
+  assert.equal(await folderRows.count(), 5);
+  const deepest = folderRows.nth(3);
+  await deepest.locator("[data-bk-layout-name]").fill("Deep Folder");
+  assert.equal(await deepest.locator("[data-bk-layout-name]").inputValue(), "Deep Folder");
+  const deeper = await measure();
+  assert.ok(deeper[3].top - deeper[2].bottom >= 6 && deeper[3].fieldWidth > 55);
+  if (process.env.BIBLIOTHEKAR_BROWSER_SCREENSHOTS) {
+    await deepest.scrollIntoViewIfNeeded();
+    await page.screenshot({path: process.env.BIBLIOTHEKAR_BROWSER_SCREENSHOTS + "/folder-" + width + "-" + theme + ".png"});
+  }
+  await deepest.locator("[data-bk-layout-remove]").click();
+  assert.equal(await folderRows.count(), 4);
+  page.once("dialog", confirmation => confirmation.accept());
+  await page.keyboard.press("Escape");
+  await dialog.waitFor({state: "hidden"});
   const last = page.locator("#days [data-day]").nth(59);
   await last.focus();
   await page.keyboard.press("Space");
@@ -150,7 +191,7 @@ async function check(browser, width, height, theme, language) {
 (async () => {
   const browser = await chromium.launch({executablePath: process.env.CHROMIUM_EXECUTABLE || undefined});
   try {
-    for (const variant of [[1400, 880, "light", "en"], [1024, 680, "dark", "de"], [390, 780, "dark", "de"]]) {
+    for (const variant of [[1400, 880, "light", "en"], [1024, 680, "dark", "de"], [768, 1024, "light", "en"], [390, 780, "dark", "de"]]) {
       await check(browser, ...variant);
       console.log("Passed", ...variant);
     }

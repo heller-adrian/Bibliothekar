@@ -5845,7 +5845,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
           <summary><span>Ordnerstruktur</span><span style="color:var(--bk-muted);font-weight:600">Vorlage für neue Ereignisse</span></summary>
           <div class="bk-settings-card-body">
             <label class="bk-folder-layout-toggle"><input id="bk-folder-layout-enabled" type="checkbox"> <span>Unterordner standardmäßig erstellen</span></label>
-            <div id="bk-folder-layout-tree" style="display:grid;gap:7px;margin-top:12px"></div>
+            <div id="bk-folder-layout-tree" style="margin-top:12px"></div>
             <label style="display:grid;gap:6px;margin-top:11px">
               <span><strong>Exportordner</strong> <span style="color:var(--bk-muted)">· optional</span></span>
               <select id="bk-folder-export-node">
@@ -7871,14 +7871,15 @@ FOLDER_LAYOUT_JS = r"""
       exportSelect.value=selectedExport ? String(selectedExport.node.id) : "";
     }
     const rows=[{node:null,path:"",depth:0},...flattened.map(item=>({...item,depth:item.path.split("/").length}))];
+    host.classList.add("bk-folder-layout-tree");
     host.innerHTML=rows.map(item=>{
       const root=item.node===null;
       const checked=String(state.input_path||"")===item.path;
       if(root) return '<label class="bk-folder-input-root"><input class="bk-folder-input-radio" data-bk-input-node="" type="radio" name="'+radioName+'" value="" '+(checked?'checked':'')+'><strong>Direkt im Ereignis</strong><span style="color:var(--bk-muted)">Input</span></label>';
       const id=String(item.node.id).replaceAll('"','&quot;');
       const name=String(item.node.name).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
-      const pad=Math.max(0,(item.depth-1)*20);
-      return '<div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;gap:7px;align-items:center;margin-left:'+pad+'px">'
+      const indent=Math.max(0,item.depth-1);
+      return '<div class="bk-folder-layout-row" style="--bk-folder-depth:'+indent+'">'
         +'<input class="bk-folder-input-radio" data-bk-input-node="'+id+'" type="radio" name="'+radioName+'" value="'+String(item.path).replaceAll('"','&quot;')+'" '+(checked?'checked':'')+' title="Als Input-Ordner">'
         +'<input data-bk-layout-name="'+id+'" value="'+name+'" aria-label="Ordnername">'
         +'<button type="button" data-bk-layout-child="'+id+'" title="Unterordner hinzufügen">＋</button>'
@@ -8028,7 +8029,17 @@ _EVENT_LAYOUT_CSS = """
 .bk-event-export-help summary{list-style:none;cursor:pointer;border:1px solid var(--bk-line);border-radius:50%;width:1.4em;height:1.4em;text-align:center;padding:0;line-height:1.3}
 .bk-event-export-help summary::-webkit-details-marker{display:none}
 .bk-event-export-help p{position:absolute;inset-inline-start:-6em;z-index:3;width:min(19rem,calc(100vw - 100px));margin:5px 0 0;padding:10px 12px;background:var(--bk-surface);border:1px solid var(--bk-line);border-radius:8px;box-shadow:var(--bk-shadow)}
-.bk-event-layout-fields .bk-folder-input-root{padding-block:5px;margin-block-end:6px}
+.bk-folder-layout-tree{display:grid;gap:7px;min-width:0}
+.bk-folder-layout-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;
+  gap:7px;align-items:center;min-width:0;margin-inline-start:min(calc(var(--bk-folder-depth) * 20px),20%);
+}
+.bk-folder-layout-row [data-bk-layout-name]{min-width:0;width:100%;box-sizing:border-box}
+.bk-event-layout-fields .bk-folder-input-root{padding-block:5px}
+@media(max-width:1024px),(pointer:coarse){
+  .bk-folder-layout-tree{gap:10px}
+  .bk-folder-layout-row{margin-inline-start:min(calc(var(--bk-folder-depth) * 12px),18%)}
+  .bk-folder-layout-row button{min-height:36px;min-width:36px}
+}
 .bk-subevent-name-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center}
 .bk-subevent-name-row > label:last-child{display:flex;align-items:center;gap:6px;margin:0}
 .bk-subevent-name-row > label:last-child input{width:auto}

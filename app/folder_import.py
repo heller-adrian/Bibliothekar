@@ -17,6 +17,7 @@ import hashlib
 import shutil
 import time
 
+from app.filename_collisions import numbered_stem
 from app.metadata import analyze_tree, classify_media
 from app.source_filter import should_ignore_source_path
 from app.import_publication import import_identity, publish_import_file, rollback_import_file
@@ -470,7 +471,7 @@ def build_folder_import_plan(
 
         suffix_index = 0 if fractional or not burst else 1
         while True:
-            family_base = base if suffix_index == 0 else f"{base}_{suffix_index:03d}"
+            family_base = numbered_stem(base, suffix_index)
             relative_paths = [
                 destination_directory
                 / (family_base + Path(str(member["filename"])).suffix)
