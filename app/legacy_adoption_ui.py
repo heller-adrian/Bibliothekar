@@ -338,7 +338,7 @@ let selectedSource = null, browsedSource = null, browseVersion = 0;
 let draftPage = 40;
 let inventoryStarting = false;
 let viewStep=currentUrl.searchParams.get("step") || "";
-let manualSnapshot=null;
+let manualSnapshot=null, finishing=false;
 const recoveryPhases=["manual","script_prepared","operations_done","verifying","repair","registration_pending"];
 function manualPhase(plan) {
   return plan?.execution?.method==="manual" && [...recoveryPhases,"rolling_back"].includes(plan.execution.phase);
@@ -389,7 +389,7 @@ function navigation(){
   const phase=job.plan.execution?.phase;
   if(viewStep==="verify" && (phase==="registering" || (!recoveryOnly && phase==="registration_pending"))){
     if(!recoveryOnly && phase==="registration_pending")nav.append(action("Zurück",()=>goStep("execute")));
-    nav.append(action("Übernahme registrieren",()=>mutate("/finalize","POST",{plan_id:job.plan.id}),true));
+    nav.append(action("Übernahme prüfen und registrieren",finishAdoption,true));
     return;
   }
   if(recoveryOnly && !(viewStep==="execute" && manualPhase(job.plan)))return;
@@ -406,9 +406,10 @@ function navigation(){
   },true));
   if(viewStep==="execute" && manualPhase(job.plan)){
     const reverse=phase==="rolling_back";
-    const verify=action(reverse?"Wiederherstellung prüfen und Auftrag beenden":"Weiter: Archiv prüfen",async()=>{
+    const verify=action(reverse?"Wiederherstellung prüfen und Auftrag beenden":"Übernahme prüfen und registrieren",async()=>{
       if(!manualSnapshot?.ready) return;
-      await mutate(reverse?"/rollback/check":"/verify","POST",{plan_id:job.plan.id});
+      if(reverse)await mutate("/rollback/check","POST",{plan_id:job.plan.id});
+      else await finishAdoption();
     },true);
     const refreshButton=action("Aktualisieren",async()=>{
       verify.disabled=true;
@@ -426,6 +427,12 @@ function navigation(){
     if(reverse || !recoveryOnly)actions.append(verify);
     nav.append(actions);
   } else if(viewStep==="execute" && phase!=="rolling_back")nav.append(action("Weiter: Archiv prüfen",()=>goStep("verify"),true));
+  else if(viewStep==="verify" && job.plan.execution?.method==="script" && job.plan.state!=="completed"){
+    const button=action("Übernahme prüfen und registrieren",finishAdoption,true);
+    button.id="script-finalize";
+    button.disabled=true;
+    nav.append(button);
+  }
 }
 window.addEventListener("bk-language-changed",()=>{
   navigation();
@@ -669,10 +676,19 @@ async function refresh() {
     }
   }
 }
+async function finishAdoption(){
+  if(finishing)return;
+  finishing=true;
+  try{
+    return await mutate("/finalize","POST",{plan_id:job.plan.id});
+  } finally {
+    finishing=false;
+  }
+}
 async function mutate(path, method="POST", body) {
   requireSaved();
   report("Bibliothekar verarbeitet den Auftrag …","busy");
-  const checking=path==="/verify" || path==="/finalize";
+  const checking=path==="/finalize";
   if (checking) $("safety").textContent="Bitte keine Dateien mehr verändern. Bibliothekar prüft und registriert gerade den übernommenen Archivbestand.";
   try {
     const result=await api(jobPath(path),method,body);
@@ -684,8 +700,8 @@ async function mutate(path, method="POST", body) {
       location.replace(afterDiscard);
       return result;
     }
-    if(path==="/verify" || path==="/rollback/start")manualSnapshot=null;
-    const target={"/plan":"review","/confirm":"execute","/verify":"verify","/finalize":"verify","/reopen":"plan","/scan":"inventory","/rollback/start":"execute"}[path];
+    if(checking || path==="/rollback/start")manualSnapshot=null;
+    const target={"/plan":"review","/confirm":"execute","/finalize":"verify","/reopen":"plan","/scan":"inventory","/rollback/start":"execute"}[path];
     if(target)rememberView(target);
     await refresh();
     report();
@@ -2137,10 +2153,8 @@ async function pollScript() {
     if (!recoveryOnly && !result.running && ["script_prepared","repair"].includes(phase) && !result.command) {
       nodes.push(action("Skriptbefehl bereitstellen",()=>run("/script/release"),true));
     }
-    if (!recoveryOnly && !result.running && status?.state==="completed" && status.mode==="apply" &&
-        ["script_prepared","operations_done","verifying","repair"].includes(phase)) {
-      nodes.push(action("Archiv unabhängig prüfen",()=>run("/verify"),true));
-    }
+    const finalize=$("script-finalize");
+    if (finalize) finalize.disabled=finishing || result.running || status?.state!=="completed" || status.mode!=="apply";
     if (!$("script-progress")) target.append(slot("script-progress"));
     $("script-progress").classList.add("adoption-stage");
     $("script-progress").replaceChildren(...nodes);

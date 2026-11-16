@@ -479,7 +479,7 @@ TRANSLATIONS = {
     "Plan zur Bearbeitung öffnen": "Reopen plan for editing",
     "Archiv prüfen": "Verify archive",
     "Manuelle Schritte fortsetzen": "Resume manual steps",
-    "Übernahme registrieren": "Register adoption",
+    "Übernahme prüfen und registrieren": "Verify and register adoption",
     "Kontrollierte Wiederherstellung starten": "Start controlled rollback",
     "Möchtest du die Übernahme anhand des gespeicherten Plans rückgängig machen?": "Roll back adoption using the saved plan?",
     "Bringe verschobene Dateien über SMB an ihre ursprünglichen Pfade zurück. Stelle frühere Ereignisdokumente wieder her und entferne ausschließlich die für diesen Auftrag neu bereitgestellten Ereignisdokumente.":
@@ -520,7 +520,6 @@ TRANSLATIONS = {
     "Bitte bestätige zuerst die Sicherheitsbedingungen.": "Confirm the safety conditions first.",
     "Prüfe zuerst die drei tatsächlichen Hostpfade.": "Verify all three actual host paths first.",
     "Skriptbefehl bereitstellen": "Prepare script command",
-    "Archiv unabhängig prüfen": "Verify archive independently",
     "Weitere Zielordner": "More target folders",
     "Weitere Verschiebungen": "More moves",
     "Zielbibliothek angelegt.": "Target library created.",

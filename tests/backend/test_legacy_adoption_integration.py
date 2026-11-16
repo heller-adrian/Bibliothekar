@@ -948,7 +948,7 @@ def test_script_host_proof_release_and_independent_archive_verification(
     import subprocess
 
     from pathlib import PurePosixPath
-    from app import legacy_adoption_dataset as dataset, legacy_adoption_discover as discovery
+    from app import legacy_adoption_dataset as dataset, legacy_adoption_discover as discovery, legacy_adoption_verify
     from app import legacy_adoption_host as host, legacy_adoption_package as package
     from tests.backend.test_legacy_adoption_host import _macos_rename
 
@@ -1042,23 +1042,32 @@ def test_script_host_proof_release_and_independent_archive_verification(
     assert not _json(client, "GET", job + "/script").get("command")
     assert _json(client, "GET", job + "/download/documents", status=409)["detail"]
     apply = _json(client, "POST", job + "/script/release", json=command)["command"]
-    _json(client, "POST", job + "/verify", json=command, status=409)
+    _json(client, "POST", job + "/finalize", json=command, status=409)
     # A reported completion is insufficient while the planned files are still at the source.
     package_root = Path(probe["host"]["package"])
     binding = json.loads((package_root / "permission.json").read_text())["manifest"]
     (package_root / "status.json").write_bytes(host.json_bytes({
         "manifest": binding, "mode": "apply", "state": "completed",
     }))
-    assert _json(client, "POST", job + "/verify", json=command)["execution"]["phase"] == "repair"
+    assert _json(client, "POST", job + "/finalize", json=command)["execution"]["phase"] == "repair"
     assert external(apply) == 1
     assert _json(client, "POST", job + "/script/release", json=command)["command"] == apply
     assert external(apply) == 0
     assert not original.exists()
     assert _json(client, "GET", job + "/script")["status"]["state"] == "completed"
-    assert _json(client, "POST", job + "/verify", json=command)["execution"]["phase"] == "registration_pending"
-    assert external(apply) == 1
     [move] = _json(client, "GET", job + "/moves")
+    observed_hashes = []
+    checksum = legacy_adoption_verify.bound_sha256
+
+    def count_hash(descriptor):
+        observed_hashes.append(os.fstat(descriptor).st_ino)
+        return checksum(descriptor)
+
+    monkeypatch.setattr(legacy_adoption_verify, "bound_sha256", count_hash)
     assert _json(client, "POST", job + "/finalize", json=command)["execution"]["phase"] == "completed"
+    assert observed_hashes.count(Path(move["target"]).stat().st_ino) == 1
+    assert len(observed_hashes) == 2  # One photo and its event document.
+    assert external(apply) == 1
     assert Path(move["target"]).read_bytes() == b"synthetic script photo"
 
 
@@ -2360,14 +2369,14 @@ def test_manual_adoption_steps_follow_smb_changes_and_require_verification(
     assert client.get(f"/legacy-adoption?job={job_id}&library=main&step=execute").status_code == 200
 
     if finish == "register":
-        early = _json(client, "POST", job + "/verify", json=command)
+        early = _json(client, "POST", job + "/finalize", json=command)
         assert early["execution"]["phase"] == "repair"
-        _json(client, "POST", job + "/finalize", status=409, json=command)
+        [event] = plan["events"]
+        with database_connection(database) as connection:
+            assert event_file_rows(connection, event["id"]) == []
         (source / "second/two.jpg").rename(moves["second/two.jpg"])
         assert work()["ready"]
-        assert _json(client, "POST", job + "/verify", json=command)["state"] == "verified"
         assert _json(client, "POST", job + "/finalize", json=command)["state"] == "completed"
-        [event] = plan["events"]
         with database_connection(database) as connection:
             files = event_file_rows(connection, event["id"])
         assert len(files) == 3

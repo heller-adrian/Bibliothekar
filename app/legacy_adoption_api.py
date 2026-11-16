@@ -720,21 +720,28 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             return confirm_plan(library, job_id, command.plan_id, command.method,
                                 acknowledged=command.acknowledged, probe_digest=command.probe_sha256)
 
+    script_completion_phases = {"script_prepared", "operations_done", "verifying", "repair", "registration_pending"}
+
+    def retire_completed_script(descriptor, script):
+        if script["phase"] not in script_completion_phases:
+            raise AdoptionError("Der Übernahmeauftrag ist für diesen Schritt nicht verfügbar.")
+        status = script_status(descriptor, script)
+        if not status or (status["state"], status["mode"]) != ("completed", "apply"):
+            raise AdoptionError("Das externe Skript hat die Ausführung noch nicht abgeschlossen.")
+        permit(descriptor, script, None)
+
     @router.post("/jobs/{job_id}/verify")
     def verify(job_id: str, command: PlanCommand):
+        # Compatibility with already open assistants and older clients.
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
             planned = plan_status(library, job_id)
             execution = planned.get("execution")
             if execution and execution["method"] == "script":
                 with locked_script(library, job_id, command.plan_id) as (descriptor, script):
-                    status = script_status(descriptor, script)
-                    if not status or (status["state"], status["mode"]) != ("completed", "apply"):
-                        raise AdoptionError("Das externe Skript hat die Ausführung noch nicht abgeschlossen.")
-                    permit(descriptor, script, None)
-                    change_phase(library, job_id, command.plan_id, "operations_done", from_phases={
-                        "script_prepared", "operations_done", "verifying", "repair", "registration_pending",
-                    })
+                    retire_completed_script(descriptor, script)
+                    change_phase(library, job_id, command.plan_id, "operations_done",
+                                 from_phases=script_completion_phases)
                     return verify_execution(library, job_id, command.plan_id)
             return verify_execution(library, job_id, command.plan_id)
 
@@ -787,13 +794,18 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             planned = plan_status(library, job_id)
             if planned.get("id") != command.plan_id:
                 raise AdoptionError("Der angezeigte Verschiebeplan ist veraltet.")
-            if planned["state"] != "completed" and (
-                planned["execution"] is None or planned["execution"]["phase"] != "registering"
-            ):
+            execution = planned["execution"]
+            if planned["state"] != "completed" and (execution is None or execution["phase"] != "registering"):
                 with admission(library):
                     require_adoption(request, library)
-                    change_phase(library, job_id, command.plan_id, "registering",
-                                 from_phases={"registration_pending"})
+                    if execution and execution["method"] == "script":
+                        with locked_script(library, job_id, command.plan_id) as (descriptor, script):
+                            retire_completed_script(descriptor, script)
+                            change_phase(library, job_id, command.plan_id, "registering",
+                                         from_phases=script_completion_phases)
+                    else:
+                        change_phase(library, job_id, command.plan_id, "registering",
+                                     from_phases={"manual", "verifying", "repair", "registration_pending"})
             return finalize_adoption(library, registry_path(), job_id, command.plan_id)
 
     @router.post("/jobs/{job_id}/reopen")

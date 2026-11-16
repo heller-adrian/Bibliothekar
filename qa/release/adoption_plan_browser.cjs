@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const html = fs.readFileSync(process.argv[2], "utf8");
 const origin = "http://bibliothekar.test";
+const logos = ["/assets/bibliothekar-logo-v3.svg", "/assets/bibliothekar-logo-symbol-background.svg"];
 const jobId = "a".repeat(32);
 const batchId = "b".repeat(32);
 const segments = Array.from({length: 60}, (_, index) => {
@@ -81,8 +82,8 @@ async function check(browser, width, height, theme, language) {
       pending = {[route.request().postDataJSON().family_keys[0]]: {source: route.request().postDataJSON().source}};
       return route.fulfill({json: {revision: 2, staged: 1, rejected: {}}});
     }
-    if (key === "/assets/bibliothekar-logo-v3.svg") {
-      return route.fulfill({path: path.join(__dirname, "../../app/bibliothekar-logo-v3.svg")});
+    if (logos.includes(key)) {
+      return route.fulfill({path: path.join(__dirname, "../../app", path.basename(key))});
     }
     if (key === "/auth/client.js" || key === "/favicon.ico" || key.startsWith("/static/")) return route.fulfill({body: ""});
     throw Error("Unmocked wizard request " + url.pathname);
@@ -256,18 +257,14 @@ async function checkManual(browser, language, width) {
         {kind:"move",state,from:reverse?"new":"old",to:reverse?"old":"new",items:[{from:reverse?"a_Adopted_001.raf":"a.raf",to:reverse?"a.raf":"a_Adopted_001.raf",state}]},
       ]}});
     }
-    if (key==="/verify"){
-      assert.ok(done);execution={method:"manual",phase:"registration_pending"};
-      return route.fulfill({json:{execution,state:"verified"}});
-    }
     if (key==="/rollback/start"){
       execution={method:"manual",phase:"rolling_back"};return route.fulfill({json:{execution}});
     }
     if (key==="/rollback/check"){
       assert.ok(restored);execution={method:"manual",phase:"rolled_back"};return route.fulfill({json:{execution}});
     }
-    if (key==="/assets/bibliothekar-logo-v3.svg")
-      return route.fulfill({path:path.join(__dirname,"../../app/bibliothekar-logo-v3.svg")});
+    if (logos.includes(key))
+      return route.fulfill({path:path.join(__dirname,"../../app", path.basename(key))});
     if (key==="/auth/client.js" || key==="/favicon.ico")return route.fulfill({body:""});
     throw Error("Unmocked manual wizard request "+url.pathname);
   });
@@ -284,7 +281,7 @@ async function checkManual(browser, language, width) {
   await page.locator("#message.bk-loading-status").waitFor();
   releaseConfirm();
   await page.getByRole("link",{name:l("Ordnergerüst mit Ereignisdokumenten (ZIP)","Folder scaffold with event documents (ZIP)")}).waitFor();
-  const advance=page.getByRole("button",{name:l("Weiter: Archiv prüfen","Next: Verify archive")});
+  const advance=page.getByRole("button",{name:l("Übernahme prüfen und registrieren","Verify and register adoption")});
   assert.ok(await advance.isDisabled());
   const refresh=page.locator("#manual-refresh");
   await refresh.click();
@@ -305,8 +302,7 @@ async function checkManual(browser, language, width) {
   await page.reload();
   assert.ok(await advance.isDisabled());
   await refresh.click();
-  await advance.click();
-  await page.getByRole("button",{name:l("Übernahme registrieren","Register adoption")}).waitFor();
+  await advance.waitFor({state:"visible"});
   page.once("dialog",confirmation=>confirmation.accept());
   await page.locator("#top-actions .danger-button").click();
   await page.getByRole("link",{name:l("Ursprüngliches Ordnergerüst (ZIP)","Original folder scaffold (ZIP)")}).waitFor();
@@ -321,6 +317,47 @@ async function checkManual(browser, language, width) {
   await page.close();
 }
 
+async function checkScriptCompletion(browser, language, width) {
+  const page = await browser.newPage({viewport: {width, height: 840}});
+  const planId = "d".repeat(32);
+  const plan = {id: planId, documents_at: "set", execution: {method: "script", phase: "script_prepared"},
+    state: "prepared", move_files: 1, move_families: 1, move_bytes: 500, events: [],
+    counts: {pending: 1}, issues: 0, dataset: {dataset: "test/media"}};
+  const requests = [];
+  let finished = false;
+  await page.addInitScript(language => localStorage.setItem("bibliothekar-language", language), language);
+  await page.route(origin + "/**", async route => {
+    const {pathname} = new URL(route.request().url());
+    if (pathname === "/legacy-adoption") return route.fulfill({body: html, contentType: "text/html"});
+    if (pathname === "/legacy-adoption/history") return route.fulfill({body: "Completed"});
+    const key = pathname.split("/" + jobId).at(-1);
+    if (!key) return route.fulfill({json: {state:"inventoried", plan, draft:{}, draft_revision:1, review_count:0}});
+    if (key === "/review/batch") return route.fulfill({json: inactive});
+    if (key === "/script") return route.fulfill({json: {running: !finished,
+      status: {state: finished ? "completed" : "running", mode: "apply", processed: 1, total: 1}}});
+    if (route.request().method() === "POST") {
+      requests.push(key);
+      assert.equal(key, "/finalize");
+      assert.equal(route.request().postDataJSON().plan_id, planId);
+      return route.fulfill({json: {state: "completed"}});
+    }
+    if (logos.includes(pathname))
+      return route.fulfill({path: path.join(__dirname, "../../app", path.basename(pathname))});
+    if (pathname === "/auth/client.js" || pathname === "/favicon.ico") return route.fulfill({body: ""});
+    throw Error("Unmocked scripted wizard request " + pathname);
+  });
+  await page.goto(origin + "/legacy-adoption?job=" + jobId + "&step=verify");
+  const finalize = page.getByRole("button", {name: language === "de"
+    ? "Übernahme prüfen und registrieren" : "Verify and register adoption"});
+  await finalize.waitFor();
+  assert.ok(await finalize.isDisabled());
+  finished = true;
+  await finalize.click({timeout: 6000});
+  await page.waitForURL("**/legacy-adoption/history?*");
+  assert.deepEqual(requests, ["/finalize"]);
+  await page.close();
+}
+
 (async () => {
   const browser = await chromium.launch({executablePath: process.env.CHROMIUM_EXECUTABLE || undefined});
   try {
@@ -331,6 +368,8 @@ async function checkManual(browser, language, width) {
     for(const [language,width] of [["de",390],["en",1100]]){
       await checkManual(browser,language,width);
       console.log("Passed manual work",language,width);
+      await checkScriptCompletion(browser,language,width);
+      console.log("Passed script completion",language,width);
     }
   } finally {
     await browser.close();

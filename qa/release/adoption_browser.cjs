@@ -141,9 +141,14 @@ async function finishManualAdoption(page){
     await fs.rename(source,target);
   }
   await page.getByRole('button',{name:/Refresh|Aktualisieren/,exact:true}).click();
-  await page.getByRole('button',{name:/Next: Verify archive|Weiter: Archiv prüfen/}).click();
-  await page.locator('#wizard-navigation').getByRole('button',{name:/Register adoption|Übernahme registrieren/}).click();
+  const completionRequests=[];
+  page.on('request',request=>{
+    if(request.method()==='POST' && /\/(verify|finalize)$/.test(new URL(request.url()).pathname))
+      completionRequests.push(new URL(request.url()).pathname.split('/').at(-1));
+  });
+  await page.locator('#wizard-navigation').getByRole('button',{name:/Verify and register adoption|Übernahme prüfen und registrieren/}).click();
   await page.getByRole('heading',{name:/Collection adoption complete|Bestandsübernahme abgeschlossen/}).waitFor();
+  assert.deepEqual(completionRequests,['finalize']);
   assert.ok(await page.locator('main.adoption-complete h1').evaluate(heading=>heading.scrollWidth<=heading.clientWidth));
   await page.getByText(/Show verification record|Prüfnachweis anzeigen/,{exact:true}).click();
   await page.getByText(/SHA-256 of the confirmed plan|SHA-256 des bestätigten Plans/).waitFor();

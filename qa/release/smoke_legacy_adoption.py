@@ -284,7 +284,6 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
         for move in moves:
             target = archive / Path(move["target"]).relative_to("/main-library")
             assert hashlib.sha256(target.read_bytes()).hexdigest() == move["sha256"]
-        assert api(job + "/verify", method="POST", payload=command)["state"] == "verified"
         if rollback:
             assert api(job + "/rollback/start", method="POST", payload=command)["execution"]["phase"] == "rolling_back"
             shell = api(job + "/script")["command"]
