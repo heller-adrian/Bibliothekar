@@ -14,7 +14,7 @@ import stat
 import uuid
 
 from app.ssd_archive_guard import ArchiveGuard
-from app.archive_transfer import ArchiveVerificationError, verify_event_archive
+from app.archive_transfer import ArchiveVerificationError, latest_archive_verification, verify_event_archive
 from app.archive_locations import ArchiveLocationError, archive_path_without_symlinks
 from app.database import database_connection
 from app.event_access import event_file_rows
@@ -852,6 +852,23 @@ def finalize_manually_moved_event_if_verified(
     }
 
 
+def verify_archive_for_release(database_path, workspace_path, archive_root, job_id, event_id, *,
+                               resume_pending_release=False, verification_id=None):
+    target = (database_path, job_id, event_id)
+    open_release = _latest_open_release(*target) if resume_pending_release else None
+    verification = latest_archive_verification(*target) if verification_id else None
+    if not verification or verification["id"] != verification_id or not verification["verified"]:
+        verification = verify_event_archive(
+            database_path, archive_root, job_id, event_id, workspace_path=workspace_path,
+            resume_release_id=open_release["id"] if open_release else None, verification_id=verification_id,
+        )
+    if verification.get("verified") and open_release is None:
+        return finalize_manually_moved_event_if_verified(
+            database_path, workspace_path, archive_root, job_id, event_id, verification,
+        )
+    return verification
+
+
 @protect(workspace_arg='workspace_path', database_arg='database_path', kind='ssd', error_type=SsdReleaseError)
 def release_event_ssd(
     database_path: Path,
@@ -859,6 +876,11 @@ def release_event_ssd(
     archive_root: Path,
     job_id: str,
     event_id: str,
+    *,
+    required_verification_id: str | None = None,
+    batch_id: str | None = None,
+    verification_id: str | None = None,
+    previous_release_checks: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     completed = _latest_completed_release(database_path, job_id, event_id)
     if completed is not None:
@@ -867,6 +889,11 @@ def release_event_ssd(
     event, _files = _event_and_files(database_path, job_id, event_id)
 
     with database_connection(database_path) as connection:
+        if required_verification_id is not None:
+            from app.archive_batches import require_current_proof
+
+            require_current_proof(connection, job_id, event_id, required_verification_id, archive_root,
+                                  previous_release_checks)
         pending = connection.execute(
             """SELECT COUNT(*) AS n FROM event_reapply_removed_families
                WHERE job_id=? AND target_event_id IS NULL""",
@@ -905,6 +932,8 @@ def release_event_ssd(
     open_release = _latest_open_release(database_path, job_id, event_id)
 
     verification_options = {"workspace_path": workspace_path}
+    if verification_id is not None:
+        verification_options["verification_id"] = verification_id
     if open_release is not None:
         verification_options["resume_release_id"] = str(open_release["id"])
     try:

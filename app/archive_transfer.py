@@ -331,6 +331,7 @@ def verify_event_archive(
     *,
     workspace_path: Path | None = None,
     resume_release_id: str | None = None,
+    verification_id: str | None = None,
 ) -> dict[str, Any]:
     archive_root = archive_root.expanduser().resolve(strict=False)
 
@@ -468,7 +469,7 @@ def verify_event_archive(
         and str(item.get("asset_kind") or "") in managed_asset_kinds
     }
 
-    verification_id = "ARCHIVE_" + uuid.uuid4().hex.upper()
+    verification_id = verification_id or "ARCHIVE_" + uuid.uuid4().hex.upper()
     created_at = _now()
     total_size = (
         sum(int(row["size_bytes"]) for row in files)

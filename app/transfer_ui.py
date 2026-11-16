@@ -43,6 +43,9 @@ TRANSFER_HTML = r'''<!doctype html>
     nav button[aria-current="page"] { border:2px solid #f2f3f5; background:var(--surface-2); opacity:1; color:var(--text); }
     .global-header { position:static; }
     .page-intro { margin-bottom:12px; }
+    .archive-batch-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    #archive-batch-results { margin-block:12px; overflow-wrap:anywhere; }
+    #archive-batch-results ul { padding-inline-start:1.25em; }
     .global-navigation-bar { position:sticky; top:0; z-index:60; display:flex; align-items:center; gap:10px; margin-bottom:18px; padding:10px 0; background:rgba(9,11,13,.96); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); }
     .global-navigation-bar nav { flex:1 1 auto; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
     .global-navigation-bar nav::-webkit-scrollbar { display:none; }
@@ -141,7 +144,9 @@ TRANSFER_HTML = r'''<!doctype html>
   </div>
 
   <section>
-    <div class="section-head"><div class="bk-section-title-row"><h2 class="bk-title-help" tabindex="0" role="button" aria-expanded="false" data-bk-title-help data-help="Neu angewendete Ereignisse werden hier geprüft und anschließend von der Arbeitsbereich freigegeben. Neueste Ereignisse stehen zuerst.">Zur Archivprüfung</h2></div></div>
+    <div class="section-head archive-batch-heading"><div class="bk-section-title-row"><h2 class="bk-title-help" tabindex="0" role="button" aria-expanded="false" data-bk-title-help data-help="Neu angewendete Ereignisse werden hier geprüft und anschließend von der Arbeitsbereich freigegeben. Neueste Ereignisse stehen zuerst.">Zur Archivprüfung</h2></div><button type="button" id="archive-batch-action" disabled>Alle prüfen</button></div>
+    <p id="archive-batch-status" role="status" hidden></p>
+    <details id="archive-batch-results" hidden><summary>Einzelergebnisse</summary><ul></ul></details>
     <div id="archive-notice" class="notice" hidden></div>
     <div id="archive-list" class="list"><div class="empty bk-loading-status">Wird geladen …</div></div>
   </section>
@@ -189,9 +194,112 @@ TRANSFER_HTML = r'''<!doctype html>
   function escapeHtml(value){return String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');}
   function formatBytes(value){const n=Number(value||0);if(n<1024)return `${n} B`;const units=['KiB','MiB','GiB','TiB'];let v=n/1024;let i=0;while(v>=1024&&i<units.length-1){v/=1024;i+=1;}return `${v.toLocaleString((document.documentElement.lang === "de" ? "de-DE" : "en-US"),{maximumFractionDigits:1})} ${units[i]}`;}
   async function getJson(url){const response=await fetch(url,{cache:'no-store'});const data=await response.json();if(!response.ok)throw new Error(data.detail||`HTTP ${response.status}`);return data;}
-  async function postJson(url){const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await response.json();if(!response.ok)throw new Error(data.detail||`HTTP ${response.status}`);return data;}
+  async function postJson(url,payload={}){const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await response.json();if(!response.ok)throw new Error(data.detail||`HTTP ${response.status}`);return data;}
 
   const releaseConflictMessage='Archivdateien wurden verändert oder ein Sicherheitskonflikt wurde festgestellt. Weitere Löschungen wurden gestoppt. Bereits gelöschte Arbeitskopien sind möglicherweise nicht wiederherstellbar. Prüfen Sie das Archiv und starten Sie die Freigabe ausdrücklich erneut. Noch vorhandene Arbeitsdateien und Archivkopien werden vollständig neu geprüft.';
+  const releaseSafetyWarning='Archivdateien während der Freigabe nicht extern verändern. Gleichzeitige externe Änderungen können zum Verlust der letzten passenden Kopie führen; die Änderungsüberwachung bietet keine vollständige Erhaltungsgarantie.';
+  const archiveBatchAction=document.getElementById('archive-batch-action');
+  const archiveBatchStatus=document.getElementById('archive-batch-status');
+  const archiveBatchResults=document.getElementById('archive-batch-results');
+  const batchText=value=>window.BibliothekarI18n?.t?.(value)||value;
+  let batchDashboard, archiveReadable=false, batchSubmitting=null, batchTimer, displayedRevision='', batchError='';
+  let observedArchiveBatch=new URLSearchParams(location.search).get('archive_batch');
+
+  function renderArchiveBatch(){
+    const state=batchDashboard;
+    if(batchError){archiveBatchStatus.hidden=false;archiveBatchStatus.textContent=batchText(batchError);}
+    if(!state)return;
+    const {batch,active,active_kind,release_ready_count,candidate_count,resume_batch_id}=state;
+    const mode=batchSubmitting || active_kind || (resume_batch_id ? 'resume' : release_ready_count ? 'release' : 'verify');
+    const busy=Boolean(batchSubmitting || active);
+    archiveBatchAction.textContent=batchText(mode==='resume'?'Unterbrochene Freigabe fortsetzen':
+      mode==='release'?'Alle Arbeitsbereiche freigeben':'Alle prüfen');
+    archiveBatchAction.disabled=busy || !archiveReadable || !(release_ready_count || candidate_count || resume_batch_id);
+    archiveBatchAction.classList.toggle('bk-busy',busy);
+    archiveBatchAction.setAttribute('aria-busy',String(busy));
+    if(!batch)return;
+    const title=batchText(batch.kind==='release'?'Gemeinsame Arbeitsbereich-Freigabe':'Gemeinsame Archivprüfung');
+    const count=batchText(`${batch.processed} von ${batch.total} Ereignissen verarbeitet`);
+    const stateLabel=resume_batch_id || batch.status==='interrupted'?batchText('Unterbrochen'):
+      batch.status==='failed'?batchText('Mit Fehlern beendet'):batch.status==='completed'?batchText('Abgeschlossen'):'';
+    archiveBatchStatus.hidden=false;
+    const ready=release_ready_count ? batchText(`${release_ready_count} zur Freigabe bereit`) : '';
+    const status=[title,count,stateLabel,ready].filter(Boolean).join(' · ');
+    if(!batchError && archiveBatchStatus.textContent!==status)archiveBatchStatus.textContent=status;
+    archiveBatchResults.hidden=false;
+    const revision=[batch.id,batch.updated_at,document.documentElement.lang].join(':');
+    if(revision===displayedRevision)return;
+    displayedRevision=revision;
+    const labels={queued:'Ausstehend',running:'Läuft',verified:'Vollständig geprüft',released:'Arbeitsbereich freigegeben',
+      failed:'Fehlgeschlagen',skipped:'Übersprungen',interrupted:'Unterbrochen'};
+    archiveBatchResults.querySelector('ul').replaceChildren(...batch.items.map(item=>{
+      const row=document.createElement('li');
+      const name=document.createElement('strong');name.dataset.bkPreserveLanguage=''; name.textContent=item.event_name;
+      const state=batchText(labels[item.status]);
+      row.append(name, ' · '+state);
+      if(item.message && item.message!==labels[item.status]){
+        const detail=batchText(item.message);
+        if(document.documentElement.lang==='en' && detail===item.message){
+          row.append(' · '+batchText('Details stehen im Prüfnachweis.'));
+          const diagnostics=document.createElement('details');
+          const caption=document.createElement('summary');caption.textContent=batchText('Technische Details');
+          const message=document.createElement('span');message.dataset.bkPreserveLanguage=''; message.textContent=item.message;
+          diagnostics.append(caption,message);row.append(diagnostics);
+        }else row.append(' · '+detail);
+      }
+      if(item.status==='failed' && (item.missing_file_count || item.mismatched_file_count)){
+        row.append(' · '+batchText(`${item.missing_file_count} fehlen; ${item.mismatched_file_count} weichen ab.`));
+      }
+      return row;
+    }));
+  }
+
+  async function refreshArchiveBatch(){
+    clearTimeout(batchTimer);
+    try{
+      const previous=batchDashboard;
+      const query=observedArchiveBatch?'?'+new URLSearchParams({batch_id:observedArchiveBatch}):'';
+      batchDashboard=await getJson('/api/archive/batch'+query);
+      batchError='';
+      renderArchiveBatch();
+      if(previous?.active && !batchDashboard.active){
+        window.dispatchEvent(new Event('bk-activity-refresh'));
+        await load({forceRefresh:true});
+      }
+    }catch(error){batchError=error.message;renderArchiveBatch();}
+    finally{if(batchDashboard?.active)batchTimer=setTimeout(refreshArchiveBatch,2000);}
+  }
+
+  archiveBatchAction.addEventListener('click',async()=>{
+    if(batchSubmitting || batchDashboard?.active)return;
+    const proof=batchDashboard.verification_batch_id;
+    const resumeId=batchDashboard.resume_batch_id;
+    const kind=resumeId?'resume':proof?'release':'verify';
+    batchError='';batchSubmitting=kind;renderArchiveBatch();
+    try{
+      if(proof || resumeId){
+        const question=batchText(resumeId?'Unterbrochene Freigabe nach erneuter SHA-256-Prüfung fortsetzen?':
+          'Alle erfolgreich geprüften Arbeitsbereiche freigeben? Das Archiv wird erneut vollständig per SHA-256 geprüft.');
+        const warning=batchText(releaseSafetyWarning);
+        const confirmed=await (window.BibliothekarI18n?.confirmAsync?.(question+'\n\n'+warning) ?? window.confirm(question+'\n\n'+warning));
+        if(!confirmed)return;
+      }
+      if(resumeId){
+        await postJson('/api/archive/batch/'+encodeURIComponent(resumeId)+'/resume');
+        await load({forceRefresh:true});await refreshArchiveBatch();
+        window.dispatchEvent(new Event('bk-activity-refresh'));
+        return;
+      }
+      const batch=await postJson('/api/archive/batch/'+kind,proof?{verification_batch_id:proof}:{});
+      observedArchiveBatch=null;
+      batchDashboard={...batchDashboard,batch,active:true,active_kind:kind,verification_batch_id:null,release_ready_count:0};
+      window.dispatchEvent(new Event('bk-activity-refresh'));
+      await refreshArchiveBatch();
+    }catch(error){batchError=error.message;}
+    finally{batchSubmitting=null;renderArchiveBatch();}
+  });
+  window.addEventListener('bk-language-changed',renderArchiveBatch);
+  window.addEventListener('focus',refreshArchiveBatch);
   function showReleaseConflict(error){
     const dialog=document.createElement('dialog');
     const title=document.createElement('h2');title.textContent='Arbeitsbereich freigeben – unterbrochen';
@@ -282,6 +390,8 @@ TRANSFER_HTML = r'''<!doctype html>
     // Native details start collapsed on every screen; retain user expansion.
   }
   function renderArchive(summary){
+    archiveReadable=summary.archive_readable;
+    renderArchiveBatch();
     candidateCount.textContent=summary.candidate_count;
     verifiedCount.textContent=summary.verified_count;
     releasedCount.textContent=summary.released_count||0;
@@ -309,7 +419,7 @@ TRANSFER_HTML = r'''<!doctype html>
       releaseButton.addEventListener('click',async(event)=>{
         const button=event.currentTarget;
         try {
-          const question=`Arbeitsbereich-Bestand für „${item.name}“ freigeben? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im Arbeitsbereich entfernt.` + '\n\nArchivdateien während der Freigabe nicht extern verändern. Gleichzeitige externe Änderungen können zum Verlust der letzten passenden Kopie führen; die Änderungsüberwachung bietet keine vollständige Erhaltungsgarantie.';
+          const question=`Arbeitsbereich-Bestand für „${item.name}“ freigeben? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im Arbeitsbereich entfernt.` + '\n\n'+releaseSafetyWarning;
           const confirmation=window.BibliothekarI18n?.confirmAsync
             ? await window.BibliothekarI18n.confirmAsync(question)
             : window.confirm(window.BibliothekarI18n?.t?.(question) || question);
@@ -383,6 +493,7 @@ TRANSFER_HTML = r'''<!doctype html>
     }
   }
 
+  refreshArchiveBatch();
   load()
     .then(autoVerifyFromLocation)
     .catch(error=>{archiveList.innerHTML=`<div class="notice">${escapeHtml(error.message)}</div>`;historyList.innerHTML='';});

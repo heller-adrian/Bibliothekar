@@ -6433,6 +6433,7 @@ BIBLIOTHEKAR_0444_JS = r"""
     if (item.kind === "sd_check") return "/?library=" + lib;
     if (item.kind === "trash_restore") return "/trash?library=" + lib;
     if (item.kind === "release") return "/archive?library=" + lib;
+    if (item.kind === "archive_batch") return "/archive?library=" + lib + "&archive_batch=" + encodeURIComponent(item.id);
     const job = item.job_id ? "&job=" + encodeURIComponent(item.job_id) : "";
     return "/events?library=" + lib + job;
   }
@@ -6462,7 +6463,7 @@ BIBLIOTHEKAR_0444_JS = r"""
     detail.textContent = item.detail || "";
     link.append(name, detail);
     row.append(icon, link);
-    if ((item.kind === "apply" || item.kind === "release" || item.kind === "trash_restore") && item.progress_percent !== null
+    if ((item.kind === "apply" || item.kind === "release" || item.kind === "archive_batch" || item.kind === "trash_restore") && item.progress_percent !== null
         && item.progress_percent !== undefined
         && Number.isFinite(Number(item.progress_percent))) {
       const progress = document.createElement("span");

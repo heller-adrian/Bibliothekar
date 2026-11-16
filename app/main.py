@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event, Lock, Thread
-from typing import Any
+from typing import Any, Literal
 import json
 import hashlib
 import os
@@ -40,6 +40,7 @@ from app.legacy_adoption_mode import active_adoption, adoption_access, pending_i
 from app.root_operations import RootOperationBusy, RootOperationError, protect, reserve, mutate, assert_workspace_startable, _identity, generation, admission
 from app import background_mutation_cancel as cancel_queue
 from app.background_activity import current_activity, clear_finished_activity
+from app import archive_batches
 from app import ssd_release_background as release_queue
 from app.live_inventory import refresh_live_event_inventories
 from app.global_workspace import build_global_workspace_summary
@@ -202,11 +203,10 @@ from app.backup_management import (
 from app.archive_transfer import (
     ArchiveVerificationError,
     list_archive_candidates,
-    verify_event_archive,
 )
 from app.ssd_release import (
     SsdReleaseError,
-    finalize_manually_moved_event_if_verified,
+    verify_archive_for_release,
     release_event_ssd,
 )
 from app.workspace_layout import (
@@ -1200,7 +1200,9 @@ async def library_context_middleware(request: Request, call_next):
         return response_for(request, WORKSPACE_PATH, REGISTRY_DATABASE_FILE, operational)
     if not operational.get('workspace_writes_allowed', operational['writes_allowed']) and request.method not in {'GET','HEAD','OPTIONS'}:
         # Explicit domain retry endpoints perform their own complete qualification.
-        if request.url.path != '/api/metadata-correction/reintegrate' and not (request.url.path.startswith('/api/jobs/') and request.url.path.endswith('/import-recovery')):
+        archive_batch_retry = (request.method == 'POST' and
+                               re.fullmatch(r'/api/archive/batch/[a-f0-9]{32}/resume', request.url.path))
+        if not archive_batch_retry and request.url.path != '/api/metadata-correction/reintegrate' and not (request.url.path.startswith('/api/jobs/') and request.url.path.endswith('/import-recovery')):
             return JSONResponse(status_code=409,content={'detail':'operation_recovery_required','storage_state':'READY','operations':operational})
     if _onboarding_required():
         path = request.url.path
@@ -2381,7 +2383,9 @@ def _release_for_context(context) -> bool:
     ensure_library_database_schema(context)
     task = release_queue.claim_release(context.database_path)
     if task is None:
-        return False
+        return archive_batches.process_next(
+            context.database_path, lambda: compatibility_workspace_root(context), context.archive_root,
+        )
     release_queue.process_release(
         context.database_path, compatibility_workspace_root(context),
         context.archive_root, task,
@@ -3047,6 +3051,7 @@ def startup_database() -> None:
             ensure_library_database_schema(context)
             cancel_queue.recover_interrupted(context.database_path)
             release_queue.recover_releases(context.database_path)
+            archive_batches.recover_batches(context.database_path)
             # BA-01: Repair portable event.json files from committed SQLite
             # outbox rows before accepting new background mutations.
             try:
@@ -5636,23 +5641,13 @@ def api_archive_verify(
     event_id: str,
 ) -> dict[str, Any]:
     try:
-        verification = verify_event_archive(
+        return verify_archive_for_release(
             current_database_file(),
+            current_workspace_root(),
             current_archive_root(),
             job_id,
             event_id,
-            workspace_path=current_workspace_root(),
         )
-        if verification.get("verified"):
-            return finalize_manually_moved_event_if_verified(
-                current_database_file(),
-                current_workspace_root(),
-                current_archive_root(),
-                job_id,
-                event_id,
-                verification,
-            )
-        return verification
     except (ArchiveVerificationError, SsdReleaseError) as error:
         message = str(error)
         status_code = 404 if "nicht gefunden" in message else 409
@@ -5660,6 +5655,61 @@ def api_archive_verify(
             status_code=status_code,
             detail=message,
         ) from error
+
+
+@app.get("/api/archive/batch", tags=["Archivübernahme"])
+def api_archive_batch(batch_id: str | None = None) -> dict[str, Any]:
+    context = current_library_context()
+    result = archive_batches.dashboard(context.database_path, batch_id)
+    batch = result["batch"]
+    if batch and batch["kind"] == "release" and batch["status"] != "completed":
+        from app import operation_health
+        reservations = operation_health.inspect(context.workspace_root)["reservations"]
+        retry = archive_batches.resumable_release(context.database_path, context.library_id, batch["id"], reservations)
+        if retry:
+            result.update(active=False, active_kind=None, resume_batch_id=batch["id"])
+    return result
+
+
+@app.post("/api/archive/batch/{kind}", tags=["Archivübernahme"], status_code=202)
+@_root_request
+def api_enqueue_archive_batch(kind: Literal["verify", "release"], payload: dict[str, Any]) -> dict[str, Any]:
+    proof = payload.get("verification_batch_id") if kind == "release" else None
+    if kind == "release" and not isinstance(proof, str):
+        raise HTTPException(status_code=422, detail="Die Kennung der gemeinsamen Archivprüfung fehlt.")
+    archive = current_archive_root()
+    if not archive.is_dir() or not os.access(archive, os.R_OK | os.X_OK):
+        raise HTTPException(status_code=409, detail="Die Kamerabibliothek ist nicht lesbar eingebunden.")
+    try:
+        batch = archive_batches.enqueue(current_database_file(), kind, proof)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    start_release_worker()
+    return batch
+
+
+@app.post("/api/archive/batch/{batch_id}/resume", tags=["Archivübernahme"])
+def api_resume_archive_batch(batch_id: str) -> dict[str, Any]:
+    from app import operation_health
+
+    context = current_library_context()
+    workspace = context.workspace_root
+    health = operation_health.inspect(workspace)
+    retry = archive_batches.resumable_release(context.database_path, context.library_id, batch_id, health["reservations"])
+    if not retry:
+        raise HTTPException(status_code=409, detail=archive_batches.RESUME_UNAVAILABLE)
+    path, item = retry
+    try:
+        with operation_health.qualified_retry(workspace, {path}), admission(context):
+            archive_batches.resume_release(
+                context.database_path, compatibility_workspace_root(context), context.archive_root, item,
+            )
+            operation_health.finish_qualified_retry(workspace)
+    except (RootOperationError, SsdReleaseError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if health["issues"]:
+        startup_database()
+    return archive_batches.dashboard(context.database_path)
 
 
 @app.post(
@@ -9833,7 +9883,9 @@ def api_cancel_event_mutation(job_id: str, mutation_id: str) -> dict[str, Any]:
 @app.get("/api/background-activity", tags=["Aufträge"])
 def api_background_activity() -> dict[str, Any]:
     """Kompakter, rein lesender Status für die Desktop-Hinweise."""
-    return current_activity(current_database_file(), DATABASE_FILE)
+    context = current_library_context()
+    return current_activity(context.database_path, DATABASE_FILE,
+                            workspace=context.workspace_root, library_id=context.library_id)
 
 
 @app.post("/api/background-activity/clear", tags=["Aufträge"])

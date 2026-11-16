@@ -1113,7 +1113,7 @@ def assert_no_pending(workspace, databases, *, library_id=None, allowed_missing_
         raise RootOperationError('Ungeklärtes Sicherungs-Löschjournal verhindert den Stammordnerwechsel.')
     if any(p.is_file() or p.is_symlink() for p in (paths['backup_root']/'.incoming').rglob('*')) and (staging_precondition is None or not staging_precondition()):
         raise RootOperationError('Ungeklärtes Import-Staging verhindert den Stammordnerwechsel.')
-    checks=[('jobs','state',{'queued','copying','verifying','analyzing','organizing','moving','running','interrupted'}),('sort_runs','status',{'queued','planned','verifying','moving','finalizing','rolling_back','interrupted','rollback_failed'}),('event_ssd_releases','status',None),('ssd_release_tasks','status',{'queued','running'}),('background_mutation_cancellations','status',{'queued','running','failed'}),('operation_batches','status',{'queued','running','interrupted'})]
+    checks=[('jobs','state',{'queued','copying','verifying','analyzing','organizing','moving','running','interrupted'}),('sort_runs','status',{'queued','planned','verifying','moving','finalizing','rolling_back','interrupted','rollback_failed'}),('event_ssd_releases','status',None),('ssd_release_tasks','status',{'queued','running'}),('archive_batches','status',{'queued','running'}),('background_mutation_cancellations','status',{'queued','running','failed'}),('operation_batches','status',{'queued','running','interrupted'})]
     checks.extend([('metadata_corrections','status',{'queued','writing','interrupted','blocked'}),('event_mutations','status',{'pending_reassignment','pending_apply','manual_archive'}),('archive_recovery_incidents','status',{'manual_review'})])
     for database in databases:
         database=Path(database)
