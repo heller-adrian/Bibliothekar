@@ -2235,6 +2235,7 @@ def test_manual_adoption_steps_follow_smb_changes_and_require_verification(
     fresh_main, monkeypatch, synthetic_dataset, finish,
 ):
     from io import BytesIO
+    from time import sleep
 
     _, database, _, archive = fresh_main
     source = archive.parent / "legacy-source"
@@ -2334,7 +2335,17 @@ def test_manual_adoption_steps_follow_smb_changes_and_require_verification(
         original_document = (archive / event_document).read_bytes()
         extra = source / "first/later.raf"
         extra.write_bytes(b"unmoved additional photo")
-        later_id = _json(client, "POST", root + "?mode=library", status=201, json={"root": "nas"})["id"]
+        # The completed HTTP request may still be releasing its shared
+        # adoption lock. Retry only the middleware's explicit transient reply.
+        for attempt in range(21):
+            later_start = client.post(root + "?mode=library", json={"root": "nas"},
+                                      headers={"X-Bibliothekar-Library": "main"})
+            if (later_start.status_code != 409 or later_start.json().get("code") != "legacy_adoption_busy"
+                    or attempt == 20):
+                break
+            sleep(0.25)
+        assert later_start.status_code == 201, later_start.text
+        later_id = later_start.json()["id"]
         job = f"{root}/{later_id}"
         _json(client, "POST", job + "/scan", status=202)
         later = _json(client, "PUT", job + "/draft", json={"revision": 0, "events": [{"existing_id": event["id"]}]})
