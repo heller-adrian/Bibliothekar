@@ -130,6 +130,7 @@ jobs:
             "tests/backend/test_legacy_adoption_plan.py",
             "tests/backend/test_legacy_adoption_integration.py",
             "tests/backend/test_rc2_archive_finish_recovery.py",
+            "tests/backend/test_archive_batches.py",
             "tests/backend/test_rc11_bootstrap.py::test_new_working_directory_replaces_inherited_native_acl_and_reads_it_back",
             "tests/backend/test_0562_process_recovery.py::test_sd_import_sigkill[import.hash_chunk]",
             "tests/backend/test_f12_no_clobber.py::test_real_sigkill_around_atomic_publication_and_three_startups[import.publish_before]"
@@ -164,6 +165,8 @@ jobs:
               "test_adopted_time_segments_survive_verified_archive_deletion_and_restart[segments]",
               "test_review_batch_resumes_after_interruption_and_reintegrates_corrected_copy[review-zfs]",
               "test_cancel_review_batch_rolls_back_only_its_files_and_resumes[cancel-zfs]",
+              "test_archive_release_batch_rechecks_stale_and_damaged_events_on_zfs",
+              "test_archive_release_resumes_only_its_original_operation_on_zfs",
           ):
               matches = [case for case in cases if case.get("name") == name]
               assert len(matches) == 1 and len(matches[0]) == 0, f"Missing successful native ZFS test: {name}"
