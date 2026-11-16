@@ -37,7 +37,7 @@ from app.legacy_adoption_mode import (
     require_later_adoption, reserve_adoption,
 )
 from app.legacy_adoption_plan import MAX_PLAN_ITEMS, create_plan, plan_directories, plan_moves, plan_status
-from app.legacy_adoption_registration import finalize_adoption
+from app.legacy_adoption_registration import assert_completed_adoption, finalize_adoption
 from app.legacy_adoption_review import (
     begin_review_batch, check_review_staging, copy_review, fail_pending_review_batch, finish_review_cancellation,
     review_batch_status, review_cases, review_count, review_selection, run_review_batch, ReviewStagingError, STAGING_ERROR,
@@ -47,6 +47,7 @@ from app.legacy_adoption_review_metadata import apply_metadata, metadata_sources
 from app.legacy_adoption_review_progress import batch_details
 from app.legacy_adoption_verify import plan_issues, reopen_plan
 from app.library_registry import LibraryRegistryError, list_libraries
+from app.operation_health import read_session
 from app.root_operations import RootOperationError, admission
 
 
@@ -791,11 +792,15 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def finalize(job_id: str, command: PlanCommand, request: Request):
         library = context()
         with _errors(), adoption_execution_access(registry_path()):
-            planned = plan_status(library, job_id)
+            with read_session():
+                planned = plan_status(library, job_id)
             if planned.get("id") != command.plan_id:
                 raise AdoptionError("Der angezeigte Verschiebeplan ist veraltet.")
+            if planned["state"] == "completed":
+                assert_completed_adoption(library, registry_path(), job_id, command.plan_id)
+                return planned
             execution = planned["execution"]
-            if planned["state"] != "completed" and (execution is None or execution["phase"] != "registering"):
+            if execution is None or execution["phase"] != "registering":
                 with admission(library):
                     require_adoption(request, library)
                     if execution and execution["method"] == "script":

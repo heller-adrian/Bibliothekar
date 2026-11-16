@@ -325,6 +325,32 @@ def test_rc1_registry_upgrade_keeps_active_job_for_recovery_only(
     assert original.read_bytes() == b"existing original"
 
 
+def test_deferred_adoption_startup_waits_for_finalization_lease(fresh_main, monkeypatch):
+    from threading import Event
+    from app.legacy_adoption_mode import adoption_execution_access
+
+    _, _, registry, _ = fresh_main
+    waiting, started = Event(), Event()
+
+    class Stop(Event):
+        def wait(self, timeout=None):
+            waiting.set()
+            return super().wait(timeout)
+
+    stop = Stop()
+    monkeypatch.setattr(main, "WORKER_STOP", stop)
+    monkeypatch.setattr(main, "ADOPTION_STARTUP_THREAD", None)
+    try:
+        with adoption_execution_access(registry):
+            main._defer_startup_for_adoption(started.set)
+            assert waiting.wait(5)
+            assert not started.is_set()
+        assert started.wait(5)
+    finally:
+        stop.set()
+        main.ADOPTION_STARTUP_THREAD.join(5)
+
+
 @pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["lifecycle"])
 def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthetic_dataset):
     from io import BytesIO
@@ -438,7 +464,18 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
     assert pending_initial_setup(registry) is None
     assert _json(client, "GET", job, status=409)["code"] == "legacy_adoption_inactive"
     assert client.get("/workspace").status_code == 200
-    assert _json(client, "POST", job + "/finalize", json={"plan_id": plan["id"]})["state"] == "completed"
+
+    def startup_blocks_write_validation():
+        # Startup can begin after request admission while the client repeats a
+        # successful finalize after losing the first response.
+        raise AdoptionError("operation_recovery_required: synthetic concurrent startup")
+
+    with monkeypatch.context() as restarting:
+        restarting.setattr(registration, "validate_active_roots", startup_blocks_write_validation)
+        _json(client, "POST", job + "/finalize", json={"plan_id": "f" * 32}, status=409)
+        assert _json(client, "POST", job + "/finalize", json=command)["state"] == "completed"
+        assert operation_health.inspect(workspace)["reservations"] == []
+
     history_path = "/legacy-adoption/history?library=main"
     completion_path = f"{history_path}&job={job_id}"
     recovered_wizard = client.get(f"/legacy-adoption?library=main&job={job_id}")

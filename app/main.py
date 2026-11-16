@@ -2667,9 +2667,18 @@ def _defer_startup_for_adoption(startup):
     global ADOPTION_STARTUP_THREAD
     if ADOPTION_STARTUP_THREAD is not None and ADOPTION_STARTUP_THREAD.is_alive():
         return
+
+    def after_execution():
+        from app.legacy_adoption_mode import adoption_execution_access
+        # The catalogue commits before finalize releases its durable lease.
+        # Wait for that release before startup closes write admission.
+        with adoption_execution_access(REGISTRY_DATABASE_FILE):
+            pass
+        startup()
+
     WORKER_STOP.clear()
     ADOPTION_STARTUP_THREAD = Thread(
-        target=_after_adoption(startup), name="bibliothekar-adoption-startup", daemon=True,
+        target=_after_adoption(after_execution), name="bibliothekar-adoption-startup", daemon=True,
     )
     ADOPTION_STARTUP_THREAD.start()
 

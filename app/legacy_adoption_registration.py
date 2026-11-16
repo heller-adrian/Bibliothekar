@@ -19,6 +19,7 @@ from app.library_registry import (
     MAIN_LIBRARY_ID, claim_source_family, register_source_backup, register_source_family,
     register_source_family_members, register_source_media, source_registry_transaction,
 )
+from app.operation_health import read_session
 from app.root_operations import protect, validate_active_roots
 
 
@@ -50,6 +51,28 @@ def _receipt(connection, plan):
 def _assert_receipt(receipt, library, plan, fingerprint):
     if tuple(receipt) != (library.library_id, catalogue_job_id(plan), fingerprint):
         raise AdoptionError("Die globale Abschlussquittung widerspricht dem Bibliotheksauftrag.")
+
+
+def _read_receipt(registry_path, plan):
+    with closing(sqlite3.connect(registry_path.absolute().as_uri() + "?mode=ro", uri=True)) as registry:
+        return _receipt(registry, plan)
+
+
+def assert_completed_adoption(library, registry_path, job_id, plan_id):
+    """Check the immutable completion proof without opening a write lease."""
+    with read_session(), database_connection(library.database_path) as connection:
+        connection.execute("BEGIN")
+        _job(connection, library.library_id, job_id)
+        plan = connection.execute(
+            "SELECT * FROM legacy_adoption_plans WHERE job_id = ? AND id = ? AND state = 'completed'",
+            (job_id, plan_id),
+        ).fetchone()
+        if plan is None or plan["documents_at"] is None:
+            raise AdoptionError("Der bestätigte Auftrag ist noch nicht abgeschlossen.")
+        receipt = _read_receipt(registry_path, plan)
+        if receipt is None:
+            raise AdoptionError("Die globale Abschlussquittung fehlt.")
+        _assert_receipt(receipt, library, plan, _fingerprint(connection, plan))
 
 
 def _register_global(connection, registry, registry_path, library, job, plan, fingerprint):
@@ -141,8 +164,7 @@ def finalize_adoption(library_context, registry_path, job_id, operation_id):
         if plan is None or plan["id"] != operation_id or plan["documents_at"] is None:
             return {"state": "unavailable", "error": "Bereite den aktuellen Verschiebeplan und seine Ereignisdokumente vor."}
         fingerprint = _fingerprint(connection, plan)
-        with closing(sqlite3.connect(registry_path.absolute().as_uri() + "?mode=ro", uri=True)) as registry:
-            receipt = _receipt(registry, plan)
+        receipt = _read_receipt(registry_path, plan)
         if receipt is not None:
             _assert_receipt(receipt, library, plan, fingerprint)
         if plan["state"] == "completed":

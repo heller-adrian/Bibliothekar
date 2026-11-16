@@ -33,9 +33,11 @@ def startup_recovery_only(health):
 
 def open_request(client, request, *, expected, recovery_status=None):
     # These POSTs acquire the exclusive adoption lock before calling the endpoint.
-    retry_busy = request.method == "POST" and urllib.parse.urlsplit(request.full_url).path in {
-        "/api/libraries", "/api/setup/adoption", "/api/legacy-adoption/jobs",
-    }
+    path = urllib.parse.urlsplit(request.full_url).path
+    retry_busy = request.method == "POST" and (
+        path in {"/api/libraries", "/api/setup/adoption", "/api/legacy-adoption/jobs"}
+        or (recovery_status is not None and path.endswith("/finalize"))
+    )
     attempts = 121 if recovery_status else (21 if retry_busy else 1)
     for attempt in range(attempts):
         try:
