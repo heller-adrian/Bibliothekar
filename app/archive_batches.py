@@ -235,9 +235,9 @@ def process_next(database, workspace, archive):
                 result = verify_archive_for_release(*target, resume_pending_release=True, verification_id=verification_id)
                 state, message = ("verified", VERIFIED) if result.get("verified") else ("failed", FAILED_VERIFICATION)
             else:
-                release_event_ssd(*target, required_verification_id=item["verification_id"],
-                                  batch_id=batch["id"], verification_id=release_check)
-                state, message = "released", RELEASED
+                outcome = release_event_ssd(*target, required_verification_id=item["verification_id"],
+                                            batch_id=batch["id"], verification_id=release_check)
+                state, message = ("released", RELEASED) if outcome["released"] else ("failed", outcome["message"])
         except (ArchiveVerificationError, SsdReleaseError, RootOperationError, OSError, ValueError) as error:
             state, message = "failed", str(error)
     with database_connection(database) as connection:

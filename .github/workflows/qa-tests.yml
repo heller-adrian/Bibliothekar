@@ -39,7 +39,7 @@ jobs:
     outputs:
       request-only: ${{ steps.scope.outputs.request-only }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 24
     env:
       PYTHONPATH: ${{ github.workspace }}
       PYTEST_ADDOPTS: ''

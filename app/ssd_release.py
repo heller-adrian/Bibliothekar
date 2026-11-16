@@ -888,12 +888,22 @@ def release_event_ssd(
 
     event, _files = _event_and_files(database_path, job_id, event_id)
 
+    def failed_precheck(message):
+        # A fresh batch can record this read-only refusal and proceed to the
+        # next event. An explicit recovery must retain its original lease.
+        if batch_id and not previous_release_checks:
+            return {"released": False, "message": message}
+        raise SsdReleaseError(message)
+
     with database_connection(database_path) as connection:
         if required_verification_id is not None:
             from app.archive_batches import require_current_proof
 
-            require_current_proof(connection, job_id, event_id, required_verification_id, archive_root,
-                                  previous_release_checks)
+            try:
+                require_current_proof(connection, job_id, event_id, required_verification_id, archive_root,
+                                      previous_release_checks)
+            except SsdReleaseError as error:
+                return failed_precheck(str(error))
         pending = connection.execute(
             """SELECT COUNT(*) AS n FROM event_reapply_removed_families
                WHERE job_id=? AND target_event_id IS NULL""",
@@ -945,10 +955,12 @@ def release_event_ssd(
             **verification_options,
         )
     except ArchiveVerificationError as exc:
+        if batch_id and not previous_release_checks:
+            return failed_precheck(str(exc))
         raise SsdReleaseError(str(exc)) from exc
 
     if not verification.get("verified"):
-        raise SsdReleaseError(
+        return failed_precheck(
             "Kamerabibliothek ist bei der erneuten Prüfung der Kameraoriginale nicht vollständig identisch."
         )
 

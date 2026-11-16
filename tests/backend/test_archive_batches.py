@@ -160,7 +160,7 @@ def test_archive_release_batch_rechecks_stale_and_damaged_events_on_zfs(catalogu
     verify_event_archive(db,archive,"J",stale[0],workspace_path=workspace)
     _drain(db,workspace,archive)
     final = archive_batches.dashboard(db)["batch"]
-    assert final["id"] == release["id"] and final["status"] == "failed" and final["successful"] == 1
+    assert final["id"] == release["id"] and final["status"] == "failed" and final["successful"] == 1, final
     assert {item["event_id"]:item["status"] for item in final["items"]} == {
         ready[0]:"released",damaged[0]:"failed",stale[0]:"failed",
     }
