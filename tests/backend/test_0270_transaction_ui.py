@@ -76,13 +76,15 @@ def test_0271_archive_change_ui_is_compact_three_step_assistant():
     assert "Technische Details" in html
     assert "Freigewordene Archivdateien werden zuerst sicher in den Arbeitsbereich zurückgeholt." in html
     assert "Änderung abschließen & Arbeitsbereich freigeben" in html
-    assert 'id="change-work-progress"' in html
-    assert 'bk0511EventLabel("Arbeitsbereich und Hilfslinks sicher freigeben …","Safely releasing workspace and helper links…")' in html
+    assert 'id="change-verify-summary"' in html
+    assert 'data-cr-archive' in html
+    assert 'data-cr-verify' not in html
+    assert 'data-cr-back hidden' in html
     assert "change_step" in html
     assert "change-arrow" not in html
     assert ">↓<" not in html
     assert "NOCH ZU ENTFERNEN" in html
-    assert "Alter Ordner noch vorhanden" in html
+    assert 'outstanding(result.obsolete_directories)' in html
     assert "Freigewordene Archivdateien im Arbeitsbereich sichern" in html
     assert "Arbeitsbereich-Kopien prüfen" in html
     assert "Bestätigte Archivoriginale entfernen" in html
