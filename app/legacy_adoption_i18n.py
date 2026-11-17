@@ -470,6 +470,11 @@ TRANSLATIONS = {
     "Leeres Ordnergerüst": "Empty folder structure",
     "Ereignisdokumente": "Event documents",
     "Frühere Ereignisdokumente": "Previous event documents",
+    "Ausgeschlossene Dateien": "Excluded files",
+    "Inhalt bereits registriert": "Content already registered",
+    "Begleitdatei zu bereits registrierten Medien": "Sidecar for already registered media",
+    "Begleitdateien zu bereits registrierten Medien bleiben an der Quelle.": "Sidecars for already registered media stay at the source.",
+    "Weitere ausgeschlossene Dateien": "More excluded files",
     "Vorschau der Zielordner": "Preview target folders",
     "Tagesordner im Ganzen verschieben": "Move a complete day folder",
     "Diese Vorschläge sind Alternativen zu den Einzeloperationen. Lasse den jeweiligen Zielordner beim Bereitstellen des Gerüsts frei. Nutze die Sammelanweisung nur, wenn sich der Quellordner seit der Inventur nicht verändert hat.":

@@ -67,6 +67,7 @@ async function check(browser, width, height, theme, language) {
       return route.fulfill({json:{revision:savedRevision}});
     }
     if (key === "/draft/check") return route.fulfill({json: {valid: true, free_segments: segments, coverage: {unassigned: 25},
+      archive_segments: [{...segments[1], event_id: "archive", event_name: "Archived sample"}],
       events: [{name: "Existing test event", start: "2025-01-01T01:00:00", end: "2025-01-01T02:00:00", families: 1, files: 1}]}});
     if (key === "/draft/structure") return route.fulfill({json: {directories: ["2025/Existing test event/Photos"]}});
     if (key === "/review") return route.fulfill({json: cases});
@@ -97,6 +98,8 @@ async function check(browser, width, height, theme, language) {
   await tools.scrollIntoViewIfNeeded();
   const cardBox = await page.locator(".adoption-event-card").boundingBox();
   const toolsBox = await tools.boundingBox();
+  const archiveCard = await page.locator("#archive-segments .day-card").boundingBox();
+  assert.ok(archiveCard.y - toolsBox.y - toolsBox.height >= 10, "archived cards clear the year divider");
   assert.ok(cardBox.y - toolsBox.y - toolsBox.height >= 10, "saved cards clear the year divider");
   const flatControls = await page.locator("main button, .bk-setup-banner button").evaluateAll(buttons =>
     buttons.every(button => getComputedStyle(button).boxShadow === "none" &&
@@ -358,6 +361,71 @@ async function checkScriptCompletion(browser, language, width) {
   await page.close();
 }
 
+async function checkReviewPlan(browser, language, width) {
+  const german = language === "de";
+  const page = await browser.newPage({viewport: {width, height: 850}});
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.addInitScript(({language}) => {
+    localStorage.setItem("bibliothekar-theme", language === "de" ? "dark" : "light");
+    localStorage.setItem("bibliothekar-language", language);
+  }, {language});
+  const dirs = Array.from({length: 105}, (_, index) => "2025/Event/Folder " + String(index).padStart(3, "0"));
+  const calls = [];
+  const initial = {id: batchId, state: "prepared", documents_at: null, events: [],
+    move_files: 1, move_bytes: 20, move_families: 1, counts: {pending: 1}, inventory_duplicates: 2,
+    source_root: "/synthetic/source", archive_root: "/synthetic/archive", library_name: "Main Library"};
+  let plan = {...initial};
+  await page.route(origin + "/**", async route => {
+    const url = new URL(route.request().url());
+    const key = url.pathname.split("/" + jobId).at(-1);
+    if (key === "/legacy-adoption") return route.fulfill({body: html, contentType: "text/html"});
+    if (key === "") return route.fulfill({json: {plan, state: "inventoried", draft: {}, draft_revision: 0,
+      files: 3, families: 3, review_count: 0, errors: 0, duplicate_files: 2, source_root: "/synthetic/source"}});
+    if (key === "/directories") {
+      const after = url.searchParams.get("after");
+      return route.fulfill({json: dirs.filter(item => item > after).slice(0, 100)});
+    }
+    if (key === "/documents" || key === "/reopen") {
+      calls.push(key);
+      plan = key === "/documents" ? {...plan, documents_at: "2026-11-17"} : {};
+      return route.fulfill({json: plan});
+    }
+    if (key === "/inventory-exclusions") return route.fulfill({json: [
+      {relative_path: "old-copy.JPG", disposition: "duplicate"},
+    ]});
+    if (key === "/draft/check") return route.fulfill({json: {valid: true, events: [], coverage: {unassigned: 1}}});
+    if (key === "/chronology") return route.fulfill({json: []});
+    if (key === "/review/batch") return route.fulfill({json: inactive});
+    if (logos.includes(key)) return route.fulfill({path: path.join(__dirname, "../../app", path.basename(key))});
+    if (key === "/auth/client.js" || key === "/favicon.ico") return route.fulfill({body: ""});
+    throw Error("Unmocked review request " + url.pathname);
+  });
+  // Bookmarks cannot skip preparation. The Review step opens the tree automatically.
+  await page.goto(origin + "/legacy-adoption?job=" + jobId + "&step=execution");
+  await page.waitForURL("**step=review");
+  const preview = page.locator("details.adoption-target-preview").first();
+  await preview.getByText("Folder 104", {exact: true}).waitFor();
+  assert.ok(await preview.evaluate(details => details.open));
+  assert.equal(await page.getByRole("button", {name: /Prepare event documents|Ereignisdokumente vorbereiten|Reopen plan for editing|Plan zur Bearbeitung öffnen/}).count(), 0);
+  const next = page.getByRole("button", {name: german ? "Weiter: Methode wählen" : "Next: Choose execution"});
+  await next.click();
+  await page.waitForURL("**step=execution");
+  assert.deepEqual(calls, ["/documents"]);
+  const back = page.getByRole("button", {name: german ? "Zurück" : "Back", exact: true});
+  await back.click();
+  await page.waitForURL("**step=review");
+  await back.click();
+  await page.waitForURL("**step=plan");
+  assert.deepEqual(calls, ["/documents", "/reopen"]);
+  await back.click();
+  const inventory = page.getByText(german ? "Ausgeschlossene Dateien" : "Excluded files", {exact: true});
+  await inventory.click();
+  await page.getByText("old-copy.JPG").waitFor();
+  assert.deepEqual(errors, []);
+  await page.close();
+}
+
 (async () => {
   const browser = await chromium.launch({executablePath: process.env.CHROMIUM_EXECUTABLE || undefined});
   try {
@@ -368,6 +436,8 @@ async function checkScriptCompletion(browser, language, width) {
     for(const [language,width] of [["de",390],["en",1100]]){
       await checkManual(browser,language,width);
       console.log("Passed manual work",language,width);
+      await checkReviewPlan(browser,language,width);
+      console.log("Passed review and preparation",language,width);
       await checkScriptCompletion(browser,language,width);
       console.log("Passed script completion",language,width);
     }

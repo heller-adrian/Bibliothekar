@@ -25,7 +25,7 @@ from app.event_structure import continuous_event_bounds
 from app.filename_collisions import numbered_stem
 from app.free_time import free_ranges_for_day
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps, normalize_no_event_segments, normal_event_ranges
-from app.legacy_adoption_inventory import _job, _legacy_family_key
+from app.legacy_adoption_inventory import _job, _legacy_family_key, registered_content
 from app.legacy_adoption_mode import require_no_managed_data
 from app.legacy_adoption_paths import (
     AdoptionError, bound_directory, bound_file, bound_sha256, file_identity, relative_parent,
@@ -256,8 +256,9 @@ def preview_draft(library, job_id, draft, *, allow_existing=False):
         for row in connection.execute(
             """SELECT families.family_key, families.capture_time, families.review_required, copy.state AS review_copy,
                       (SELECT count(*) FROM legacy_adoption_inventory AS member
-                       WHERE member.job_id=families.job_id AND member.family_key=families.family_key) AS files
-               FROM legacy_adoption_families families
+                       WHERE member.job_id=families.job_id AND member.family_key=families.family_key
+                         AND member.disposition = 'candidate') AS files
+               FROM legacy_adoption_candidate_families families
                LEFT JOIN legacy_adoption_review_copies copy USING(job_id,family_key)
                WHERE families.job_id=?""", (job_id,),
         ):
@@ -390,7 +391,7 @@ def preview_event_directories(library, job_id, draft, *, allow_existing=False):
         exclusions = set(draft["exclude_families"])
         seen_leaves = [set() for _ in events]
         rows = connection.execute(
-            """SELECT family_key, capture_time, review_required FROM legacy_adoption_families AS family
+            """SELECT family_key, capture_time, review_required FROM legacy_adoption_candidate_families AS family
                WHERE job_id = ? AND NOT EXISTS (
                    SELECT 1 FROM legacy_adoption_review_copies AS copy
                    WHERE copy.job_id = family.job_id AND copy.family_key = family.family_key
@@ -505,9 +506,7 @@ def _archive_probe(root_fd, *, registered=None):
 
 def _known_content(connection, registry, plan_id, checksum):
     return bool(
-        connection.execute("SELECT 1 FROM files WHERE sha256_original = ? OR sha256_current = ? LIMIT 1",
-                           (checksum, checksum)).fetchone()
-        or registry.execute("SELECT 1 FROM source_media WHERE sha256 = ? LIMIT 1", (checksum,)).fetchone()
+        registered_content(connection, registry, checksum)
         or connection.execute(
             "SELECT 1 FROM legacy_adoption_moves WHERE plan_id = ? AND sha256 = ? LIMIT 1",
             (plan_id, checksum),
@@ -640,9 +639,9 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
         (job["id"],),
     )
     for key, group in groupby(rows, key=lambda row: row["family_key"]):
-        family = list(group)
+        family = [member for member in group if member["disposition"] == "candidate"]
         seen_draft_keys.add(key)
-        if key in exclusions or family[0]["review_copy"]:
+        if not family or key in exclusions or family[0]["review_copy"]:
             continue
         capture = overrides.get(key, family[0]["capture_time"])
         if key not in overrides and family[0]["review_required"]:
@@ -802,6 +801,10 @@ def plan_status(library, job_id: str) -> dict:
         return {
             "id": plan["id"], "state": plan["state"], "counts": counts,
             "execution": dict(execution) if execution else None,
+            "inventory_duplicates": connection.execute(
+                "SELECT count(*) FROM legacy_adoption_inventory WHERE job_id = ? AND disposition = 'duplicate'",
+                (job_id,),
+            ).fetchone()[0],
             "move_files": volume[0], "move_bytes": volume[1], "move_families": volume[2],
             "library_name": library.display_name,
             "documents_at": plan["documents_at"],

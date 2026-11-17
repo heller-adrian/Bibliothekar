@@ -722,6 +722,14 @@ def list_database_jobs(
     return jobs
 
 
+def catalogue_contains_sha256(connection: sqlite3.Connection, checksum: str) -> bool:
+    """Match catalogue media by original or current bytes, regardless of its import method."""
+    return connection.execute(
+        "SELECT 1 FROM files WHERE sha256_original = ? OR sha256_current = ? LIMIT 1",
+        (checksum, checksum),
+    ).fetchone() is not None
+
+
 def list_imported_media_origins(
     database_path: Path,
     *,

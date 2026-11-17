@@ -25,7 +25,7 @@ from app.legacy_adoption_host import ExecutionError
 from app.legacy_adoption_history import completed_adoptions, history_html
 from app.legacy_adoption_manual import manual_work
 from app.legacy_adoption_inventory import (
-    _job, create_job, discard_job, inventory_chronology, inventory_errors, inventory_families,
+    _job, create_job, discard_job, inventory_chronology, inventory_errors, inventory_exclusions, inventory_families,
     inventory_status, qualify_source, scan_inventory,
 )
 from app.legacy_adoption_package import (
@@ -203,7 +203,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 raise InterruptedError("Inventur pausiert. Bereits gelesene Dateien sind gespeichert.")
 
         try:
-            scan_inventory(library, job_id, cancellation_callback=check_pause)
+            scan_inventory(library, job_id, registry_path=registry_path(), cancellation_callback=check_pause)
         except Exception as error:
             # Most failures are already persisted by scan_inventory. A job
             # rejected before claiming a generation remains visible as ready.
@@ -443,6 +443,11 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def families(job_id: str, day: str | None = None, after: str = ""):
         with _errors():
             return inventory_families(context(), job_id, day=day, after=after, limit=60)
+
+    @router.get("/jobs/{job_id}/inventory-exclusions")
+    def inventory_excluded(job_id: str, after: str = ""):
+        with _errors():
+            return inventory_exclusions(context(), job_id, after=after)
 
     @router.get("/jobs/{job_id}/errors")
     def errors(job_id: str, after: str = ""):

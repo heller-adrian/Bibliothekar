@@ -68,11 +68,14 @@ def _status(family, members, files, draft, copied, unassigned):
         state = "confirmed"
     if copied:
         state = copied["state"]
+    candidates = [row for row in members if row["disposition"] == "candidate"]
     return {
         "family_key": key, "reasons": reasons, "state": state,
-        "can_copy": all(row["sha256"] and row["identity"] and not row["error"] for row in members) and state != "copied",
-        "size_bytes": sum(row["size_bytes"] or 0 for row in members),
+        "can_copy": all(row["sha256"] and row["identity"] and not row["error"]
+                        for row in candidates) and state != "copied",
+        "size_bytes": sum(row["size_bytes"] or 0 for row in candidates),
         "files": [{"relative_path": row["relative_path"], "error": row["error"],
+                   "disposition": row["disposition"],
                    "metadata": json.loads(row["metadata_json"]) if row["metadata_json"] else None}
                   for row in members],
         "target_relative": copied["target_relative"] if copied else None,
@@ -93,7 +96,7 @@ _REVIEW_WHERE = """
        AND family.family_key NOT IN (SELECT key FROM json_each(:accepted))
 """
 _REVIEW_FROM = """
-    FROM legacy_adoption_families family
+    FROM legacy_adoption_candidate_families family
     LEFT JOIN legacy_adoption_review_copies copy USING (job_id, family_key)
 """
 
@@ -135,6 +138,7 @@ def _copyable_cases(connection, job_id, job, plan):
             AND NOT EXISTS (
                 SELECT 1 FROM legacy_adoption_inventory member INDEXED BY legacy_adoption_inventory_family
                  WHERE member.job_id = family.job_id AND member.family_key = family.family_key
+                   AND member.disposition = 'candidate'
                    AND (member.sha256 IS NULL OR member.identity IS NULL OR member.error IS NOT NULL)
             )
             AND NOT EXISTS (
@@ -163,7 +167,7 @@ def review_selection(library, job_id, *, include_metadata=False):
             draft = json.loads(job["draft_json"])
             reviewed = draft.get("capture_overrides", {})
             keys = [row[0] for row in connection.execute(
-                "SELECT family_key FROM legacy_adoption_families WHERE job_id = ? AND review_required", (job_id,),
+                "SELECT family_key FROM legacy_adoption_candidate_families WHERE job_id = ? AND review_required", (job_id,),
             ) if row[0] not in reviewed]
             selected = sorted(set(selected) | {key for key, members in _decision_rows(connection, job, keys)
                                                if capture_choices(members)})
@@ -571,7 +575,7 @@ def copy_review(library, job_id, key):
         if not _copy_allowed(job, plan):
             raise AdoptionError("Arbeitskopien sind nur während der Planung möglich.")
         row = connection.execute(
-            "SELECT review_required FROM legacy_adoption_families WHERE job_id = ? AND family_key = ?",
+            "SELECT review_required FROM legacy_adoption_candidate_families WHERE job_id = ? AND family_key = ?",
             (job_id, key),
         ).fetchone()
         assigned = plan and _assigned(connection, job_id, plan["id"], key)
@@ -588,8 +592,9 @@ def copy_review(library, job_id, key):
         if not plan and not previous and _confirmed(draft, key):
             raise AdoptionError("Diese Familie ist kein ausstehender Prüffall.")
         members = [(Path(item["relative_path"]).name, dict(item)) for item in connection.execute(
-            """SELECT relative_path, family_key, size_bytes, identity, sha256, error FROM legacy_adoption_inventory
-                WHERE job_id = ? AND family_key = ? ORDER BY relative_path""",
+            """SELECT relative_path, family_key, size_bytes, identity, sha256, error
+                 FROM legacy_adoption_inventory
+                WHERE job_id = ? AND family_key = ? AND disposition = 'candidate' ORDER BY relative_path""",
             (job_id, key),
         )]
         if not members or any(not item["sha256"] or not item["identity"] or item["error"] for _, item in members):
@@ -654,7 +659,7 @@ def begin_review_batch(library, job_id, keys):
         connection.executemany(
             """INSERT INTO legacy_adoption_review_batch (job_id, family_key, bytes_total)
                SELECT ?, ?, coalesce(sum(size_bytes), 0) FROM legacy_adoption_inventory
-               WHERE job_id = ? AND family_key = ?""",
+               WHERE job_id = ? AND family_key = ? AND disposition = 'candidate'""",
             ((job_id, key, job_id, key) for key in eligible),
         )
         return cancel.start(connection, job_id)

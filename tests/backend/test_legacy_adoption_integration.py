@@ -507,9 +507,13 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
     from app.event_inventory import event_root_relative
     original_document = library.archive_root / event_root_relative(plan["events"][0]) / "event.json"
     previous_document = original_document.read_bytes()
-    added = source / "extra.raf"
-    added.write_bytes(b"second collection RAW bytes")
+    added = source / "same-photo.jpg"
+    added.write_bytes(b"new JPEG despite a name shared with the repeated RAW")
+    standalone_duplicate = source / "copied-under-another-name.raf"
+    standalone_duplicate.write_bytes(b"synthetic RAW bytes")
     (source / "same-photo.raf").write_bytes(b"synthetic RAW bytes")
+    detached = source / "same-photo.raf.xmp"
+    detached.write_bytes(b"new sidecar for the known RAW")
     (source / "outside.raf").write_bytes(b"outside the saved period")
     assert _json(client, "GET", api + "/eligibility") == {"eligible": True, "blockers": []}
     assert client.get("/legacy-adoption?mode=library").status_code == 200
@@ -518,17 +522,31 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
     assert pending_initial_setup(registry) is None
     assert client.get("/workspace").headers["location"].endswith("job=" + second_id)
     _json(client, "POST", second_job + "/scan", status=202)
+    status = _json(client, "GET", second_job)
+    assert (status["duplicate_files"], status["detached_files"]) == (2, 1)
+    assert _json(client, "GET", second_job + "/inventory-exclusions") == [
+        {"relative_path": "copied-under-another-name.raf", "disposition": "duplicate"},
+        {"relative_path": "same-photo.raf", "disposition": "duplicate"},
+        {"relative_path": "same-photo.raf.xmp", "disposition": "detached"},
+    ]
+    [family] = _json(client, "GET", second_job + "/families?day=2026-07-21")
+    assert family["family_key"] == "same-photo" and len(family["files"]) == 1
     matches = _json(client, "GET", second_job + "/events?day=2026-07-21")
     assert [item["id"] for item in matches] == [event_id]
     assert _json(client, "GET", second_job + "/events?day=2026-07-22") == []
     availability = _json(client, "POST", second_job + "/draft/check", json={"events": []})
     assert [item["day_key"] for item in availability["free_segments"]] == ["2026-07-25"]
-    assert [(item["event_name"], item["families"]) for item in availability["archive_segments"]] == [("Synthetisch", 2)]
+    assert [(item["event_name"], item["families"]) for item in availability["archive_segments"]] == [("Synthetisch", 1)]
     extension = {"events": [{"existing_id": event_id}]}
-    assert _json(client, "POST", second_job + "/draft/check", json=extension)["events"][0]["families"] == 2
+    assert _json(client, "POST", second_job + "/draft/check", json=extension)["events"][0]["families"] == 1
     saved = _json(client, "PUT", second_job + "/draft", json={**extension, "revision": 0})
     second_plan = _json(client, "POST", second_job + "/plan", json={"revision": saved["revision"]})
-    assert second_plan["events"][0]["id"] == event_id and second_plan["counts"]["duplicate"] == 1
+    assert second_plan["events"][0]["id"] == event_id
+    assert second_plan["inventory_duplicates"] == 2 and second_plan["counts"] == {"pending": 1}
+    _json(client, "POST", second_job + "/reopen")
+    revision = _json(client, "GET", second_job)["draft_revision"]
+    second_plan = _json(client, "POST", second_job + "/plan", json={"revision": revision})
+    assert second_plan["counts"] == {"pending": 1}
     assert second_plan["move_files"] == second_plan["move_families"] == 1
     assert any(item["family_key"] == "outside" and "unassigned_event" in item["reasons"]
                for item in _json(client, "GET", second_job + "/review"))
@@ -554,14 +572,27 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
     assert f"{history_path}&amp;job={second_id}" in client.get(history_path).text
     assert Path(move["target"]).read_bytes() == b"synthetic RAW bytes"
     assert (source / "same-photo.raf").read_bytes() == b"synthetic RAW bytes"
+    assert standalone_duplicate.read_bytes() == b"synthetic RAW bytes"
+    assert detached.read_bytes() == b"new sidecar for the known RAW"
     assert (source / "outside.raf").read_bytes() == b"outside the saved period"
     assert original_document.read_bytes() != previous_document
     with database_connection(database) as connection:
         extended_rows = event_file_rows(connection, event_id)
         assert {row["id"] for row in extended_rows} >= {media_row["id"]}
         assert len(extended_rows) == 2
+        assert len({row["sha256_original"] for row in extended_rows}) == 2
         period = connection.execute("SELECT start_datetime, end_datetime FROM events WHERE id = ?", (event_id,)).fetchone()
         assert tuple(period) == ("2026-07-21T00:00:00", "2026-07-21T23:59:59")
+
+    # A later scan also excludes the content added by the second adoption.
+    (source / "extension-copy.jpg").write_bytes(Path(extra_move["target"]).read_bytes())
+    third_id = _json(client, "POST", api + "/jobs?mode=library", status=201, json={"root": "nas"})["id"]
+    third_job = api + "/jobs/" + third_id
+    _json(client, "POST", third_job + "/scan", status=202)
+    assert _json(client, "GET", third_job)["duplicate_files"] == 3
+    assert _json(client, "GET", third_job + "/families?day=2026-07-21") == []
+    _json(client, "DELETE", third_job)
+    assert Path(extra_move["target"]).read_bytes() == (source / "extension-copy.jpg").read_bytes()
 
     # Open, edit and delete through the same tools used by standard events.
     from app.archive_change_assistant import build_archive_change_assistant
@@ -2194,11 +2225,20 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
     original = {path: (archive / path).read_bytes() for path in paths.values()}
     assert original == {target: source_data[relative] for relative, target in paths.items()}
 
-    # Later adoption shares the same input folder, including already resolved names.
+    # Both execution methods see a complete, renamed family from the previous adoption.
+    # The different captures sharing its original camera name still get distinct targets.
+    copied = source / "already-archived"
+    copied.mkdir()
+    duplicated = {copied / ("renamed" + extension): source_data["2025/first/DSCF0763" + extension]
+                  for extension in extensions}
+    for path, data in duplicated.items():
+        path.write_bytes(data)
     photos("extension", "2026:01:01 11:00:00", stem="dscf0763")
     assert _json(client, "GET", "/api/legacy-adoption/eligibility") == {"eligible": True, "blockers": []}
     extension, new_paths = adopt({"events": [{"existing_id": event_id}]}, later=True)
     assert extension["events"][0]["id"] == event_id
+    assert extension["inventory_duplicates"] == 3
+    assert {path: path.read_bytes() for path in duplicated} == duplicated
     assert {Path(target).name for target in new_paths.values()} == {
         "dscf0763_Adopted_002" + suffix for suffix in extensions
     }
@@ -2600,3 +2640,20 @@ def test_regular_import_recognizes_adopted_file_family_before_any_regular_import
         assert not connection.execute("PRAGMA foreign_key_check").fetchall()
     assert {Path(row["current_relative_path"]).name: (archive / row["current_relative_path"]).read_bytes()
             for row in archived} == contents
+
+    # The regular import's catalogue is the same physical identity index used by adoption.
+    # Scan here independently of the API, since the test still has an open Workspace import.
+    from app.legacy_adoption_inventory import create_job, inventory_families, scan_inventory
+
+    comparison = archive.parent / "adoption-after-regular-import"
+    comparison.mkdir()
+    renamed = comparison / "renamed.JPG"
+    renamed.write_bytes(new.read_bytes())
+    new_same_name = comparison / new.name
+    Image.new("RGB", (8, 8), "blue").save(new_same_name)
+    comparison_id = create_job(context, comparison)
+    scan = scan_inventory(context, comparison_id, registry_path=registry)
+    assert scan["duplicate_files"] == 1
+    [family] = inventory_families(context, comparison_id)
+    assert family["family_key"] == new.stem
+    assert renamed.read_bytes() == new.read_bytes()

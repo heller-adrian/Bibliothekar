@@ -1,15 +1,16 @@
 """Persist resumable legacy inventory in the selected library's catalogue."""
-from contextlib import ExitStack
+from contextlib import closing, ExitStack
 import hashlib
 from itertools import groupby
 import json
 import os
 from pathlib import Path
+import sqlite3
 import stat
 from uuid import uuid4
 
 from app import legacy_adoption_dataset as dataset
-from app.database import database_connection
+from app.database import catalogue_contains_sha256, database_connection
 from app.legacy_adoption_paths import (
     AdoptionError, absolute_root, bound_child_directory, bound_directory,
     bound_file, bound_sha256, directory_identity, file_identity,
@@ -85,7 +86,9 @@ def inventory_status(library: LibraryContext, job_id: str) -> dict:
         counts = connection.execute(
             """SELECT count(*) AS entries, count(sha256) AS files,
                       count(DISTINCT CASE WHEN sha256 IS NOT NULL THEN family_key END) AS families,
-                      count(error) AS errors, coalesce(sum(CASE WHEN sha256 IS NOT NULL
+                      count(error) AS errors,
+                      count(CASE WHEN disposition = 'duplicate' THEN 1 END) AS duplicate_files,
+                      count(CASE WHEN disposition = 'detached' THEN 1 END) AS detached_files, coalesce(sum(CASE WHEN sha256 IS NOT NULL
                           THEN size_bytes ELSE 0 END), 0) AS bytes
                  FROM legacy_adoption_inventory WHERE job_id = ? AND seen_generation = ?""",
             (job_id, job["scan_generation"]),
@@ -100,18 +103,22 @@ def inventory_status(library: LibraryContext, job_id: str) -> dict:
 def _inventory_groups(rows, source):
     for key, group in groupby(rows, key=lambda row: row["family_key"]):
         members = [dict(row) for row in group]
-        files = [json.loads(row["metadata_json"]) for row in members if row["metadata_json"]]
+        candidates = [row for row in members if row["disposition"] == "candidate"]
+        files = [json.loads(row["metadata_json"]) for row in candidates if row["metadata_json"]]
         family = {"family_key": key, "status": "review_required"}
         if files:
             family = summarize_file_metadata(source, files)["families"][0]
-            if any(row["error"] for row in members) or any(row["review_required"] or row.get("metadata_error") for row in files):
+            if any(row["error"] for row in candidates) or any(
+                row["review_required"] or row.get("metadata_error") for row in files
+            ):
                 family["status"] = "review_required"
         yield family, members, files
 
 
 def inventory_fingerprint(members):
     """Bind a metadata decision to the exact inventoried family."""
-    contents = sorted((row["relative_path"], row["identity"], row["sha256"]) for row in members)
+    contents = sorted((row["relative_path"], row["identity"], row["sha256"]) for row in members
+                      if row["disposition"] == "candidate")
     return hashlib.sha256(json.dumps(contents, ensure_ascii=True).encode("ascii")).hexdigest()
 
 
@@ -134,7 +141,7 @@ def inventory_chronology(library: LibraryContext, job_id: str, *, year: str = ""
         counts = connection.execute(
             """SELECT substr(coalesce(override.value, capture_time), 1, :length) AS period, count(*) AS families,
                       sum(review_required AND override.key IS NULL) AS review
-                 FROM legacy_adoption_families AS family
+                 FROM legacy_adoption_candidate_families AS family
                  LEFT JOIN json_each(:accepted) AS override ON override.key = family.family_key
                 WHERE job_id = :job AND (:year = '' OR coalesce(override.value, capture_time) LIKE :year || '-%')
                 GROUP BY period ORDER BY period""",
@@ -154,7 +161,7 @@ def inventory_families(
             raise AdoptionError("Die Inventur muss zuerst abgeschlossen werden.")
         rows = connection.execute(
             """WITH page AS (
-                   SELECT family_key, override.value AS accepted FROM legacy_adoption_families AS family
+                   SELECT family_key, override.value AS accepted FROM legacy_adoption_candidate_families AS family
                     LEFT JOIN json_each(:accepted) AS override ON override.key = family.family_key
                     WHERE job_id = :job AND family_key > :after
                       AND (:day IS NULL OR ((NOT review_required OR override.key IS NOT NULL)
@@ -181,6 +188,18 @@ def inventory_families(
                            for row in errors],
             })
     return result
+
+
+def inventory_exclusions(library: LibraryContext, job_id: str, *, after: str = "", limit: int = 100):
+    with database_connection(library.database_path) as connection:
+        connection.execute("BEGIN")
+        job = _job(connection, library.library_id, job_id)
+        return [dict(row) for row in connection.execute(
+            """SELECT relative_path, disposition FROM legacy_adoption_inventory
+                WHERE job_id = ? AND seen_generation = ? AND disposition <> 'candidate' AND relative_path > ?
+                ORDER BY relative_path LIMIT ?""",
+            (job_id, job["scan_generation"], after, max(1, min(limit, 200))),
+        )]
 
 
 def inventory_errors(library: LibraryContext, job_id: str, *, after: str = "", limit: int = 100):
@@ -339,7 +358,44 @@ def _read_batch(directory, source, rows, cached, cancel):
             row["metadata_json"] = json.dumps(record, ensure_ascii=False)
 
 
-def scan_inventory(library: LibraryContext, job_id: str, *, cancellation_callback=None) -> dict:
+def registered_content(connection, registry, checksum):
+    return catalogue_contains_sha256(connection, checksum) or (
+        registry is not None
+        and registry.execute("SELECT 1 FROM source_media WHERE sha256 = ? LIMIT 1", (checksum,)).fetchone() is not None
+    )
+
+
+def _classify_inventory(connection, registry, job_id, cancel):
+    rows = connection.execute(
+        """SELECT family_key, relative_path, sha256 FROM legacy_adoption_inventory
+            WHERE job_id = ? AND family_key IS NOT NULL ORDER BY family_key, relative_path""",
+        (job_id,),
+    )
+    for _, group in groupby(rows, key=lambda row: row["family_key"]):
+        cancel()
+        members = [(row, Path(row["relative_path"])) for row in group]
+        duplicates = {path for row, path in members
+                      if row["sha256"] and registered_content(connection, registry, row["sha256"])}
+        if not duplicates:
+            continue
+        primary = {path.as_posix().casefold() for _, path in members if classify_media(path) != "xmp"}
+        registered_primary = primary & {path.as_posix().casefold() for path in duplicates}
+        available = primary - registered_primary
+        excluded = [(job_id, path.as_posix(), "duplicate") for path in duplicates]
+        for _, path in members:
+            referenced = path.with_suffix("").as_posix().casefold()
+            if (path not in duplicates and classify_media(path) == "xmp"
+                    and (not available or referenced in registered_primary)):
+                # A sidecar for an archived primary has no authorised target in this job.
+                excluded.append((job_id, path.as_posix(), "detached"))
+        connection.executemany(
+            "UPDATE legacy_adoption_inventory SET disposition = ?3 WHERE job_id = ?1 AND relative_path = ?2",
+            excluded,
+        )
+
+
+def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path | None = None,
+                   cancellation_callback=None) -> dict:
     def cancel():
         if cancellation_callback is not None:
             cancellation_callback()
@@ -392,7 +448,7 @@ def scan_inventory(library: LibraryContext, job_id: str, *, cancellation_callbac
                        family_key = excluded.family_key, size_bytes = excluded.size_bytes,
                        identity = excluded.identity, sha256 = excluded.sha256,
                        metadata_json = excluded.metadata_json, error = excluded.error,
-                       seen_generation = excluded.seen_generation""",
+                       seen_generation = excluded.seen_generation, disposition = 'candidate'""",
                 [{**row, "job": job_id, "generation": generation} for row in rows],
             )
 
@@ -408,13 +464,21 @@ def scan_inventory(library: LibraryContext, job_id: str, *, cancellation_callbac
             _scan_tree(source_fd, source, consume, cancel)
             dataset.revalidate(evidence, source, archive, source_fd, archive_fd)
         cancel()
-        with database_connection(library.database_path) as connection:
+        with ExitStack() as stack:
+            connection = stack.enter_context(database_connection(library.database_path))
             connection.execute("BEGIN IMMEDIATE")
             check_current(connection)
+            registry = None
+            if registry_path is not None:
+                registry = stack.enter_context(closing(sqlite3.connect(
+                    registry_path.absolute().as_uri() + "?mode=ro", uri=True,
+                )))
+                registry.execute("BEGIN")
             connection.execute(
                 "DELETE FROM legacy_adoption_inventory WHERE job_id = ? AND seen_generation != ?",
                 (job_id, generation),
             )
+            _classify_inventory(connection, registry, job_id, cancel)
             connection.execute("DELETE FROM legacy_adoption_families WHERE job_id = ?", (job_id,))
             rows = connection.execute(
                 """SELECT * FROM legacy_adoption_inventory

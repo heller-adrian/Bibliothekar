@@ -26,6 +26,7 @@ def _captured_time(value):
 
 def capture_choices(members):
     """Use exact inventoried tags and refuse conflicting values within a family."""
+    members = [row for row in members if row["disposition"] == "candidate"]
     if any(not row["identity"] or not row["sha256"] or row["error"] for row in members):
         return {}
     by_source = defaultdict(list)
@@ -57,11 +58,11 @@ def capture_choices(members):
 def _decision_rows(connection, job, keys):
     rows = connection.execute(
         """SELECT item.* FROM json_each(?) AS wanted
-               CROSS JOIN legacy_adoption_families family
+               CROSS JOIN legacy_adoption_candidate_families family
                     ON family.job_id = ? AND family.family_key = wanted.value
                CROSS JOIN legacy_adoption_inventory item INDEXED BY legacy_adoption_inventory_family
                     ON item.job_id = family.job_id AND item.family_key = family.family_key
-               WHERE family.review_required AND NOT EXISTS (
+               WHERE item.disposition = 'candidate' AND family.review_required AND NOT EXISTS (
                    SELECT 1 FROM legacy_adoption_review_copies copy
                    WHERE copy.job_id = family.job_id AND copy.family_key = family.family_key
                ) ORDER BY item.family_key, item.relative_path""",

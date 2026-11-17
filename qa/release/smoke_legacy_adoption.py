@@ -192,7 +192,8 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
         host_source = source / relative
         originals = {str(path.relative_to(host_source)): hashlib.sha256(path.read_bytes()).hexdigest()
                      for path in host_source.rglob("*") if path.is_file()}
-        assert len(originals) == 2
+        duplicate_files = 2 if existing_event else 0
+        assert len(originals) == 2 + duplicate_files
         route = "/api/legacy-adoption/jobs" + ("?mode=library" if existing_event else "")
         job_id = api(route, method="POST", expected=201, payload={"root": "nas", "relative": relative})["id"]
         job = "/api/legacy-adoption/jobs/" + job_id
@@ -204,7 +205,8 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             if state["scan_error"] or attempt == 59:
                 raise AssertionError(state)
             time.sleep(1)
-        assert state["files"] == 2 and state["families"] == 1
+        assert state["files"] == 2 + duplicate_files and state["families"] == 1 + bool(duplicate_files)
+        assert state["duplicate_files"] == duplicate_files
         assert state["dataset"]["dataset"].endswith("/media")
         assert api(job + "/chronology") == [{"period": "2026", "families": 1, "review": 0}]
         for relative, digest in originals.items():
@@ -254,6 +256,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             "code"
         ] == "legacy_adoption_active"
         moves = api(job + "/moves")
+        assert len(moves) == 2 and all(move["target"] for move in moves)
         if execution == "manual":
             assert not api(job + "/manual-work?check=true")["ready"]
             with ZipFile(BytesIO(request(job + "/download/manual-setup"))) as package:
@@ -324,8 +327,14 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             '<rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreateDate="2026-07-21T14:15:00+02:00"/>'
             '</rdf:RDF></x:xmpmeta>'
         )
+        duplicates = {}
+        for item in moves:
+            name = "duplicate" + Path(item["target"]).suffix
+            duplicates[name] = (archive / item["target_path"]).read_bytes()
+            (later / name).write_bytes(duplicates[name])
         assert api("/api/legacy-adoption/eligibility")["eligible"]
         adopt("script", "later", existing_event=event)
+        assert {path.name: path.read_bytes() for path in later.iterdir()} == duplicates
         assert all(hashlib.sha256((archive / path).read_bytes()).hexdigest() == digest
                    for path, digest in previous.items())
         assert any(path.read_bytes() != content for path, content in documents.items())

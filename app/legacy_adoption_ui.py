@@ -208,7 +208,7 @@ max-height:calc(100dvh - var(--adoption-plan-tools-height,0px) - 16px);overflow:
 .legacy-adoption input[type=checkbox]{accent-color:var(--bk-blue)}
 .legacy-adoption .adoption-command{width:100%;font: .85rem/1.4 ui-monospace,monospace;overflow-wrap:anywhere}
 .legacy-adoption button:disabled{opacity:.45;cursor:not-allowed}
-.adoption-planning{grid-template-columns:minmax(0,1.5fr) minmax(19rem,1fr)!important}
+.adoption-planning{margin-block-start:12px;grid-template-columns:minmax(0,1.5fr) minmax(19rem,1fr)!important}
 .legacy-adoption .adoption-month{padding:12px;box-shadow:none;margin:14px 0}
 .adoption-day-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;max-height:clamp(280px,62vh,640px);overflow:auto;padding:3px}
 .legacy-adoption .day-card{display:grid;grid-template-columns:auto minmax(0,1fr);text-align:left;padding:14px;gap:8px;border:1px solid var(--bk-line);border-radius:15px;background:var(--bk-surface);color:var(--bk-ink);user-select:none}
@@ -355,7 +355,7 @@ function allowedSteps(){
     return [job.plan.execution.phase==="registering"?"verify":"execute"];
   }
   if(!job.plan.id)return job.state==="inventoried" ? ["inventory","plan"] : ["inventory"];
-  if(!job.plan.execution)return ["inventory","review","execution"];
+  if(!job.plan.execution)return job.plan.documents_at?["inventory","review","execution"]:["inventory","review"];
   const phase=job.plan.execution.phase;
   if(phase==="rolling_back")return ["execute"];
   if(job.plan.state==="completed" || phase==="registering")return ["verify"];
@@ -776,6 +776,17 @@ function render() {
   if(job.scan_running || inventoryStarting)status.append(inventoryProgress());
   counts.setAttribute("aria-live","polite");
   status.append(counts);
+  if(job.duplicate_files || job.detached_files){
+    const details=node("details",undefined,"adoption-target-preview");
+    const entries=slot("inventory-exclusions");
+    details.append(node("summary","Ausgeschlossene Dateien"),entries);
+    details.addEventListener("toggle",()=>{
+      if(details.open && !entries.childElementCount)showInventoryExclusions(entries).catch(error=>report(error.message,"error"));
+    });
+    status.append(line(job.duplicate_files+" "+t("Duplikate bleiben an der Quelle")));
+    if(job.detached_files)status.append(line(job.detached_files+" "+t("Begleitdateien zu bereits registrierten Medien bleiben an der Quelle.")));
+    status.append(details);
+  }
   if (job.scan_error) status.append(line(job.scan_error));
   if(job.review_count)status.append(reviewControls());
   const buttons=node("div",undefined,"inline");
@@ -1777,6 +1788,7 @@ function renderPlan(host) {
   const format=new Intl.NumberFormat(locale);
   const unit=["B","KiB","MiB","GiB","TiB"];
   const power=Math.min(unit.length-1,Math.floor(Math.log(Math.max(1,plan.move_bytes))/Math.log(1024)));
+  const duplicateFiles=(plan.inventory_duplicates || 0)+(plan.counts.duplicate || 0);
   const facts=node("dl",undefined,"adoption-plan-facts");
   for (const [title,value] of [
     ["Zu übernehmende Dateien",format.format(plan.move_files)],
@@ -1786,12 +1798,12 @@ function renderPlan(host) {
     ["Neue Ereignisse und Sammelordner",format.format(plan.events.filter(event=>!event.existing).length)],
     ["Zu ergänzende Archivereignisse",format.format(plan.events.filter(event=>event.existing).length)],
     ["Offene Prüffälle",format.format(job.review_count)],
-    ["Duplikate bleiben an der Quelle",format.format(plan.counts.duplicate || 0)],
+    ["Duplikate bleiben an der Quelle",format.format(duplicateFiles)],
   ]) {
     const fact=node("div");fact.append(node("dt",title),node("dd",value));facts.append(fact);
   }
   panel.append(facts);
-  if (plan.counts.duplicate) panel.append(line("Duplikate sind bereits registriert oder in diesem Plan mit identischem Inhalt enthalten."));
+  if (duplicateFiles) panel.append(line("Duplikate sind bereits registriert oder in diesem Plan mit identischem Inhalt enthalten."));
   if (job.review_count) panel.append(line("Dateifamilien ohne Zuordnung und ausgenommene Prüffälle bleiben an der Quelle. Prüfe sie in der Liste der Prüffälle."),reviewControls());
   const diagnostics=node("details",undefined,"adoption-proof");
   diagnostics.append(node("summary","Technische Plandetails"),
@@ -1806,13 +1818,31 @@ function renderPlan(host) {
   const directoryPreview=node("details",undefined,"adoption-target-preview");
   const tree=folderTree(), directoryControls=node("div",undefined,"inline");
   directoryPreview.append(node("summary","Vorschau der Zielordner"),tree.frame,directoryControls);
-  let loadedDirectories=false;
-  directoryPreview.addEventListener("toggle",()=>{
-    if (directoryPreview.open && !loadedDirectories) {
-      loadedDirectories=true;
-      showDirectories(tree,directoryControls).catch(error=>{loadedDirectories=false;report(error.message,"error");});
+  const expandAll=viewStep==="review";
+  let loadingDirectories=false, nextDirectory="";
+  const loadDirectories=async()=>{
+    if(loadingDirectories || nextDirectory===null)return;
+    loadingDirectories=true;
+    directoryControls.replaceChildren();
+    try{
+      do {
+        const rows=await api(jobPath("/directories?"+new URLSearchParams({after:nextDirectory})));
+        if(!directoryPreview.isConnected)return;
+        tree.add(rows);
+        nextDirectory=rows.length===100?rows.at(-1):null;
+      } while(expandAll && directoryPreview.open && nextDirectory!==null);
+      if(nextDirectory!==null)directoryControls.append(action("Weitere Zielordner",loadDirectories));
+    } catch(error) {
+      directoryControls.replaceChildren(action("Weitere Zielordner",loadDirectories));
+      throw error;
+    } finally {
+      loadingDirectories=false;
     }
+  };
+  directoryPreview.addEventListener("toggle",()=>{
+    if(directoryPreview.open && (expandAll || nextDirectory===""))loadDirectories().catch(error=>report(error.message,"error"));
   });
+  directoryPreview.open=expandAll;
   panel.append(directoryPreview);
   const renames=node("details",undefined,"adoption-target-preview");
   renames.append(node("summary","Geplante Dateiumbenennungen"),slot("rename-preview"));
@@ -1831,11 +1861,6 @@ function renderPlan(host) {
     panel.append(guide);
   }
   const controls=node("div",undefined,"inline");
-  if (!recoveryOnly && !phase && !completed) {
-    controls.append(
-      action(plan.documents_at?"Ereignisdokumente neu vorbereiten":"Ereignisdokumente vorbereiten",()=>mutate("/documents")),
-      action("Plan zur Bearbeitung öffnen",()=>mutate("/reopen")));
-  }
   let scriptDetails=null;
   if (scripted && !completed && phase!=="rolled_back") {
     const execution=node("div",undefined,"adoption-card adoption-stage");
@@ -2163,11 +2188,19 @@ async function pollScript() {
   }
   if (target===$("script-state")) scriptTimer=setTimeout(pollScript,3000);
 }
-async function showDirectories(tree,controls,after="") {
-  const rows=await api(jobPath("/directories?"+new URLSearchParams({after})));
-  tree.add(rows);
-  controls.replaceChildren();
-  if(rows.length===100)controls.append(action("Weitere Zielordner",()=>showDirectories(tree,controls,rows.at(-1))));
+async function showInventoryExclusions(host,after="") {
+  const rows=await api(jobPath("/inventory-exclusions?"+new URLSearchParams({after})));
+  if(!host.isConnected)return;
+  host.querySelector(".more")?.remove();
+  for(const {relative_path,disposition} of rows){
+    const reason=disposition==="duplicate"?"Inhalt bereits registriert":"Begleitdatei zu bereits registrierten Medien";
+    const entry=node("p");entry.append(node("code",relative_path),document.createTextNode(" · "+t(reason)));
+    host.append(entry);
+  }
+  if(rows.length===100){
+    const more=action("Weitere ausgeschlossene Dateien",()=>showInventoryExclusions(host,rows.at(-1).relative_path));
+    more.classList.add("more");host.append(more);
+  }
 }
 async function showRenames(host, after="") {
   host.querySelector(".more")?.remove();
