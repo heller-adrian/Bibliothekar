@@ -415,7 +415,18 @@ def _find_archive_location(
     return None
 
 
-def _restoration_file(restore_root: Path, archive_root: Path, path: str) -> Path:
+def _reversible_layout_renames(archive_root, manifest):
+    from app.archive_rename_guidance import layout_rename_state
+
+    return [rename for rename in manifest.get("directory_renames", ())
+            if layout_rename_state(archive_root, rename) == "done"]
+
+
+def _in_restored_rename(path, renames):
+    return any(PurePosixPath(path).is_relative_to(PurePosixPath(item["source"])) for item in renames)
+
+
+def _restoration_file(restore_root: Path, archive_root: Path, path: str, *, renames=()) -> Path:
     relative = _safe_relative(path)
     mirrored = restore_root / relative
     slot = hashlib.sha256(relative.parent.as_posix().encode()).hexdigest()[:24]
@@ -426,7 +437,9 @@ def _restoration_file(restore_root: Path, archive_root: Path, path: str) -> Path
     if os.path.lexists(loose):
         return loose
     archive_parent = _safe_archive_path(archive_root, path).parent
-    return loose if relative.name != "event.json" and archive_parent.is_dir() else mirrored
+    if relative.name != "event.json" and (archive_parent.is_dir() or _in_restored_rename(path, renames)):
+        return loose
+    return mirrored
 
 
 def _missing_original_directories(archive_root: Path, manifest: dict[str, Any]) -> list[str]:
@@ -454,11 +467,12 @@ def prepare_archive_reversal(
     restore_root = base / directory_name(base, "restoration")
     work_root = _work_root(workspace_path)
     central_root = _central_root(workspace_path)
+    renames = _reversible_layout_renames(archive_root, manifest)
     prepared_targets: list[tuple[Path, int, str]] = []
     validate_active_roots()
     restore_root.mkdir(parents=True, exist_ok=True)
     for rel in _missing_original_directories(archive_root, manifest):
-        if os.path.lexists(_safe_archive_path(archive_root, rel)):
+        if _in_restored_rename(rel, renames) or os.path.lexists(_safe_archive_path(archive_root, rel)):
             continue
         validate_active_roots()
         (restore_root / _safe_relative(rel)).mkdir(parents=True, exist_ok=True)
@@ -470,7 +484,7 @@ def prepare_archive_reversal(
         if _matches(_safe_archive_path(archive_root, asset["relative_path"]),
                     asset["size_bytes"], asset["sha256"]):
             continue
-        target = _restoration_file(restore_root, archive_root, asset["relative_path"])
+        target = _restoration_file(restore_root, archive_root, asset["relative_path"], renames=renames)
         validate_active_roots()
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists():
@@ -519,7 +533,7 @@ def prepare_archive_reversal(
         found = _find_archive_location(archive_root, manifest, old_path, new_path, size, sha)
         if found:
             continue
-        staged = _restoration_file(restore_root, archive_root, old_path)
+        staged = _restoration_file(restore_root, archive_root, old_path, renames=renames)
         if _matches(staged, size, sha):
             continue
         release_rel = str(row.get("workspace_release_path") or "").strip()
@@ -705,7 +719,15 @@ def _reversal_state(
     central_root = _central_root(workspace_path)
     restore_root = _base(workspace_path, cr_id) / directory_name(_base(workspace_path, cr_id), "restoration")
 
-    operations: list[dict[str, Any]] = []
+    renames = _reversible_layout_renames(archive_root, manifest)
+    operations: list[dict[str, Any]] = [{
+        "kind": "rename_archive_folder",
+        "title": "Geprüften Ordner zurückbenennen",
+        "source": f"{archive_display_root}/{rename['target']}",
+        "target": f"{archive_display_root}/{rename['source']}",
+        "detail": "Benenne den geprüften Ordner zurück. Ersetze keinen vorhandenen Ordner.",
+        "state": "pending",
+    } for rename in renames]
     move_groups: dict[tuple[str, str], list[str]] = {}
     restore_items: list[tuple[str, str, str]] = []
     remove_files, ambiguous = _incoming_reversal(
@@ -732,6 +754,8 @@ def _reversal_state(
             continue
         found = _find_archive_location(archive_root, manifest, old_path, new_path, size, sha)
         if found:
+            if _in_restored_rename(old_path, renames):
+                continue
             key = (PurePosixPath(found).parent.as_posix(), PurePosixPath(old_path).parent.as_posix())
             move_groups.setdefault(key, []).append(PurePosixPath(found).name)
             continue
@@ -764,7 +788,8 @@ def _reversal_state(
     if foreign_document:
         ambiguous.append(foreign_document)
 
-    missing_dirs = _missing_original_directories(archive_root, manifest)
+    missing_dirs = [path for path in _missing_original_directories(archive_root, manifest)
+                    if not _in_restored_rename(path, renames)]
     copy_roots = []
     for relative in topmost_directories(missing_dirs):
         target = _safe_archive_path(archive_root, relative)
@@ -823,6 +848,8 @@ def _reversal_state(
     known_directories = set(manifest.get("absent_directories", ()))
     remove_dirs, nonempty = [], []
     for relative in _extra_archive_directories(archive_root, manifest):
+        if any(PurePosixPath(relative).is_relative_to(PurePosixPath(rename["target"])) for rename in renames):
+            continue
         if relative in known_directories:
             path = _safe_archive_path(archive_root, relative)
             if path.is_dir():
@@ -851,7 +878,7 @@ def _reversal_state(
         })
 
 
-    if event_json and operations and not ambiguous:
+    if not renames and event_json and operations and not ambiguous:
         from app.archive_change_document import projected_archive_event_document_spec
         from app.archive_rename_guidance import qualify_rename
         spec = projected_archive_event_document_spec(database_path, cr_id)

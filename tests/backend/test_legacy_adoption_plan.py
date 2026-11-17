@@ -575,3 +575,51 @@ def test_registration_replays_after_registry_commit(inventory, monkeypatch):
     assert backfill_library_inventory(
         registry, database_path=context.database_path, library_id=context.library_id, claim_all_owned=False,
     )["family_count"] == 1
+
+
+def test_script_and_manual_plans_use_correct_family_names(inventory, monkeypatch):
+    import os
+
+    context, source, registry = inventory
+    formats = ("RAF", "JPEG", "NEF", "CR2", "CR3", "ARW", "DNG", "MOV", "MP4", "RAF.xmp")
+    families = {f"capture-{index:02}": (extension,) for index, extension in enumerate(formats[2:-1], 2)}
+    families.update({"capture-00": ("RAF", "JPEG", "RAF.xmp"), "capture-01": ("MOV",), "undated": ("MOV",)})
+    for stem, endings in families.items():
+        for ending in endings:
+            path = source / f"{stem}.{ending}"
+            path.write_bytes(path.name.encode())
+
+    def metadata(descriptors, _cancel):
+        data = {}
+        for fd in descriptors:
+            name = os.pread(fd, 100, 0).decode()
+            if name.startswith("undated"):
+                continue
+            is_video = name.endswith((".MOV", ".MP4"))
+            capture = "2026:07:21 12:00:00" if name.startswith(("capture-00", "capture-01")) else "2026:07:21 13:00:00"
+            group = "QuickTime:Keys" if is_video else "EXIF:IFD0"
+            data[fd] = {
+                ("QuickTime:Keys:CreationDate" if is_video else "EXIF:ExifIFD:DateTimeOriginal"): capture + "+02:00",
+                f"{group}:Make": "FUJIFILM",
+                f"{group}:Model": "X-E5",
+            }
+            if name.startswith("capture-00"):
+                data[fd]["EXIF:ExifIFD:SubSecTimeOriginal"] = "107"
+        return data
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    job = _scan(context, source)
+    manual = create_plan(context, registry, job, _draft())
+    manual_moves = plan_moves(context, job)
+    assert all(Path(row["target_path"]).name == Path(row["relative_path"]).name for row in manual_moves)
+    script = create_plan(context, registry, job, filename_method="script", replace_plan_id=manual["id"])
+    moves = plan_moves(context, job)
+    by_source = {row["relative_path"]: Path(row["target_path"]).name for row in moves}
+    assert script["id"] != manual["id"]
+    assert by_source.keys() == {row["relative_path"] for row in manual_moves}
+    assert "undated.MOV" not in by_source
+    assert {Path(path).suffix for path in by_source} >= {".RAF", ".JPEG", ".NEF", ".CR2", ".CR3", ".ARW", ".DNG", ".MOV", ".MP4"}
+    for ending in families["capture-00"]:
+        assert by_source[f"capture-00.{ending}"] == f"20260721_120000107_Fuji-X-E5.{ending}"
+    assert by_source["capture-01.MOV"] == "20260721_120000_Fuji-X-E5_Burst_001.MOV"
+    assert len(set(by_source.values())) == len(moves)

@@ -230,7 +230,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             assert resumed["draft_revision"] == draft["revision"] and all(resumed["draft"]["events"][0][key] == value for key, value in definition.items())
             assert b'id="safety"' in request("/")
             assert resumed["id"] == job_id
-        plan = api(job + "/plan", method="POST", payload={"revision": draft["revision"]})
+        plan = api(job + "/plan", method="POST", payload={"revision": draft["revision"], "filename_method": execution})
         [event] = plan["events"]
         assert (event["start_datetime"], event["end_datetime"]) == (date + "T12:00:00", date + "T15:00:59")
         if existing_event:
@@ -257,6 +257,11 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
         ] == "legacy_adoption_active"
         moves = api(job + "/moves")
         assert len(moves) == 2 and all(move["target"] for move in moves)
+        for move in moves:
+            if execution == "script":
+                assert Path(move["target"]).name.startswith("202607" + day + "_")
+            else:
+                assert Path(move["target"]).name == Path(move["source"]).name
         if execution == "manual":
             assert not api(job + "/manual-work?check=true")["ready"]
             with ZipFile(BytesIO(request(job + "/download/manual-setup"))) as package:

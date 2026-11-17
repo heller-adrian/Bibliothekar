@@ -35,6 +35,8 @@ def confirm_plan(library, job_id, plan_id, method, *, acknowledged, probe_digest
             raise AdoptionError("Der vollständige aktuelle Plan und seine Ereignisdokumente müssen vorliegen.")
         existing = execution_row(connection, plan_id)
         if existing is None:
+            if plan["filename_method"] not in {None, method}:
+                raise AdoptionError("Wähle zuerst die Durchführungsmethode für den angezeigten Verschiebeplan.")
             _catalogue_unchanged(connection, job_id, json.loads(plan["events_json"]))
             assert_original_layout(connection, library, job, plan)
             connection.execute(

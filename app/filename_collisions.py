@@ -7,6 +7,7 @@ names that Finder/Windows/SMB create when two files with the same name are kept.
 Callers that change canonical state must still verify identity by SHA-256/size.
 """
 
+from datetime import datetime
 import re
 
 
@@ -30,6 +31,23 @@ _EXPORT_SUFFIX_RE = re.compile(
 def numbered_stem(stem: str, index: int) -> str:
     """Append Bibliothekar's three-digit collision sequence."""
     return f"{stem}_{index:03d}" if index else stem
+
+
+def capture_stem(capture: str, device: str, occupied_stems, *, same_second: bool):
+    """Apply the import naming policy to a family with a verified capture time."""
+    timestamp = datetime.fromisoformat(capture)
+    stamp = timestamp.strftime("%Y%m%d_%H%M%S")
+    base = f"{stamp}_{device}"
+    burst_pattern = re.compile(
+        rf"^{re.escape(stamp)}\d{{3}}_{re.escape(device)}(?:_\d{{3}})?$", re.IGNORECASE,
+    )
+    burst = (same_second or base.casefold() in occupied_stems
+             or any(burst_pattern.fullmatch(stem) for stem in occupied_stems))
+    if not burst:
+        return base, 0, False
+    if re.search(r"\.\d+(?=Z|[+-]\d{2}:\d{2}|$)", capture):
+        return f"{stamp}{timestamp.microsecond // 1000:03d}_{device}", 0, True
+    return f"{base}_Burst", 1, True
 
 
 def copy_collision_base_stem(

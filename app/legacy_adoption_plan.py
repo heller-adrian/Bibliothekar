@@ -22,7 +22,8 @@ from app.event_naming import (
     render_event_folder_name, render_no_event_folder_name,
 )
 from app.event_structure import continuous_event_bounds
-from app.filename_collisions import numbered_stem
+from app.filename_collisions import capture_stem, numbered_stem
+from app.folder_import import normalize_device_name
 from app.free_time import free_ranges_for_day
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps, normalize_no_event_segments, normal_event_ranges
 from app.legacy_adoption_inventory import _job, _legacy_family_key, registered_content
@@ -501,6 +502,7 @@ def _archive_probe(root_fd, *, registered=None):
         except FileNotFoundError:
             return None
 
+    lookup.names = names
     return lookup
 
 
@@ -606,7 +608,61 @@ def _family_targets(folder, key, family, override, archive_entry, registered, us
         return targets
 
 
-def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, source_fd, archive_fd):
+def _assigned_families(rows, draft, events, intervals, seen):
+    starts = [item[0] for item in intervals]
+    overrides = {key: _local_capture(value) for key, value in (draft.get("capture_overrides") or {}).items()}
+    exclusions = set(draft.get("exclude_families") or [])
+    for key, group in groupby(rows, key=lambda row: row["family_key"]):
+        members = [member for member in group if member["disposition"] == "candidate"]
+        seen.add(key)
+        if not members or key in exclusions or members[0]["review_copy"]:
+            continue
+        capture = overrides.get(key, members[0]["capture_time"])
+        if not capture or (key not in overrides and members[0]["review_required"]):
+            continue
+        index = _assigned_index(intervals, starts, capture)
+        if index is not None:
+            yield key, members, capture, events[index], _target_leaf(events[index], capture)
+
+
+def _destination_folder(leaf, layout):
+    return leaf / (layout["input_path"] if layout["structure_enabled"] else "")
+
+
+def _camera_tokens(families):
+    tokens, groups = {}, Counter()
+    for key, members, capture, _, (_, leaf, _, layout) in families:
+        metadata = (json.loads(member["metadata_json"] or "{}") for member in members)
+        camera = next((item for item in metadata if item.get("camera_make") or item.get("camera_model")), {})
+        _, token = normalize_device_name(camera.get("camera_make"), camera.get("camera_model"))
+        group = (target_key(str(_destination_folder(leaf, layout))), capture[:19], token.casefold())
+        tokens[key] = (token, group)
+        groups[group] += 1
+    return tokens, groups
+
+
+def _automatic_family_targets(folder, key, family, capture, camera, same_second, names, stems, used):
+    original = PurePosixPath(key).name
+    endings = [PurePosixPath(member["relative_path"]).name[len(original):] for member in family]
+    if len({target_key(ending) for ending in endings}) != len(endings):
+        raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + key)
+    base, index, _ = capture_stem(capture, camera, stems, same_second=same_second)
+    while True:
+        suffix = numbered_stem("", index)
+        max_bytes = 255 - len(suffix) - max(len(ending.encode("utf-8")) for ending in endings)
+        stem = base.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore") + suffix
+        prefix = target_key(str(folder / stem))
+        targets = [str(folder / (stem + ending)) for ending in endings]
+        if prefix not in used and all(target_key(PurePosixPath(path).name) not in names for path in targets):
+            used.add(prefix)
+            for path in targets:
+                validate_target(path)
+            return targets
+        index += 1
+
+
+def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, source_fd, archive_fd,
+                filename_method):
     registered = set()
     archive_entry = _archive_probe(archive_fd, registered=registered)
     for event in events:
@@ -618,9 +674,6 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
         elif archive_entry(str(prefix)) is not None:
             raise AdoptionError("Der neue Ereignisordner existiert bereits: " + str(prefix))
 
-    starts = [item[0] for item in intervals]
-    overrides = {key: _local_capture(value) for key, value in (draft.get("capture_overrides") or {}).items()}
-    exclusions = set(draft.get("exclude_families") or [])
     target_stems = draft.get("target_stems") or {}
     seen_draft_keys = set()
     added = set()
@@ -638,23 +691,19 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             WHERE inventory.job_id = ? ORDER BY family_key, relative_path""",
         (job["id"],),
     )
-    for key, group in groupby(rows, key=lambda row: row["family_key"]):
-        family = [member for member in group if member["disposition"] == "candidate"]
-        seen_draft_keys.add(key)
-        if not family or key in exclusions or family[0]["review_copy"]:
-            continue
-        capture = overrides.get(key, family[0]["capture_time"])
-        if key not in overrides and family[0]["review_required"]:
-            continue
-        if not capture:
-            continue
-        index = _assigned_index(intervals, starts, capture)
-        if index is None:
-            continue
-        event = events[index]
+    selections = _assigned_families(rows, draft, events, intervals, seen_draft_keys)
+    if filename_method == "script":
+        selections = list(selections)
+        cameras, bursts = _camera_tokens(selections)
+    @lru_cache(maxsize=128)
+    def existing_names(folder):
+        names = archive_entry.names(folder)
+        stems = {PurePosixPath(_legacy_family_key(Path(), name)).name.casefold() for name in names}
+        return names, stems
+
+    for key, family, capture, event, (assigned, leaf, leaf_key, layout) in selections:
         if key.strip() != key:
             raise AdoptionError("Der Familienname ist für die globale Registry ungeeignet: " + key)
-        assigned, leaf, leaf_key, layout = _target_leaf(event, capture)
         if any(not member["sha256"] for member in family):
             raise AdoptionError("Die Familie konnte nicht vollständig inventarisiert werden: " + key)
 
@@ -665,10 +714,20 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                                 "oder haben identischen Inhalt: " + key)
 
         new_family = not all(duplicate)
-        targets = _family_targets(
-            leaf / (layout["input_path"] if layout["structure_enabled"] else ""), key, family,
-            target_stems.get(key), archive_entry, registered_keys, used_stems, filename_sequences,
-        ) if new_family else [None] * len(family)
+        folder = _destination_folder(leaf, layout)
+        if not new_family:
+            targets = [None] * len(family)
+        elif filename_method == "script" and key not in target_stems:
+            camera, burst_group = cameras[key]
+            targets = _automatic_family_targets(
+                folder, key, family, capture, camera, bursts[burst_group] > 1,
+                *existing_names(str(folder)), used_stems,
+            )
+        else:
+            targets = _family_targets(
+                folder, key, family, target_stems.get(key), archive_entry, registered_keys,
+                used_stems, filename_sequences,
+            )
         for member, target in zip(family, targets, strict=True):
             source = member["relative_path"]
             if source.strip() != source or "\\" in source:
@@ -707,7 +766,8 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             _store_leaf(event, key, path, layout)
             _plan_directories(connection, plan_id, path, layout, archive_entry)
     _check_planned_collisions(connection, plan_id)
-    if (overrides.keys() | exclusions | target_stems.keys()) - seen_draft_keys:
+    if (set(draft.get("capture_overrides") or {}) | set(draft.get("exclude_families") or [])
+            | target_stems.keys()) - seen_draft_keys:
         raise AdoptionError("Mindestens eine Dateifamilie aus dem Entwurf fehlt in der Inventur.")
     if not added:
         raise AdoptionError("Die Auswahl enthält keine neuen, vollständig datierten Dateifamilien.")
@@ -731,7 +791,9 @@ def _roots(stack, library, job):
 
 
 def create_plan(library, registry_path: Path, job_id: str, draft=None, *, draft_revision=None,
-                allow_existing=False) -> dict:
+                allow_existing=False, filename_method="manual", replace_plan_id=None) -> dict:
+    if filename_method not in {"manual", "script"}:
+        raise AdoptionError("Wähle eine verfügbare Durchführungsmethode.")
     plan_id = uuid4().hex
     with database_connection(library.database_path) as connection, closing(sqlite3.connect(
         registry_path.absolute().as_uri() + "?mode=ro", uri=True,
@@ -741,6 +803,18 @@ def create_plan(library, registry_path: Path, job_id: str, draft=None, *, draft_
         if not allow_existing:
             require_no_managed_data(connection)
         job = _job(connection, library.library_id, job_id)
+        if replace_plan_id is not None:
+            from app.legacy_adoption_verify import _plan, assert_original_layout
+
+            previous = _plan(connection, job_id)
+            if (previous["id"] != replace_plan_id or previous["state"] != "prepared"
+                    or connection.execute(
+                        "SELECT 1 FROM legacy_adoption_execution WHERE plan_id = ?", (replace_plan_id,),
+                    ).fetchone()):
+                raise AdoptionError("Der bestätigte Verschiebeplan ist eingefroren.")
+            assert_original_layout(connection, library, job, previous)
+            draft = json.loads(previous["draft_json"])
+            connection.execute("DELETE FROM legacy_adoption_plans WHERE id = ?", (replace_plan_id,))
         if draft_revision is not None:
             if job["draft_revision"] != draft_revision:
                 raise AdoptionError("Der Entwurf wurde in einer anderen Sitzung geändert. Lade ihn erneut.")
@@ -765,13 +839,13 @@ def create_plan(library, registry_path: Path, job_id: str, draft=None, *, draft_
             raise AdoptionError("Mehrere Ereignisse beanspruchen denselben Zielordner.")
         intervals = _assert_timeline(connection, job_id, events)
         connection.execute(
-            """INSERT INTO legacy_adoption_plans (job_id, id, state, draft_json, events_json)
-               VALUES (?, ?, 'prepared', ?, ?)""",
-            (job_id, plan_id, json.dumps(draft), json.dumps(events)),
+            """INSERT INTO legacy_adoption_plans (job_id, id, state, draft_json, events_json, filename_method)
+               VALUES (?, ?, 'prepared', ?, ?, ?)""",
+            (job_id, plan_id, json.dumps(draft), json.dumps(events), filename_method),
         )
         with ExitStack() as stack:
             source, archive = _roots(stack, library, job)
-            _plan_moves(connection, registry, job, plan_id, events, intervals, draft, source, archive)
+            _plan_moves(connection, registry, job, plan_id, events, intervals, draft, source, archive, filename_method)
         connection.execute("UPDATE legacy_adoption_plans SET events_json = ? WHERE id = ?", (json.dumps(events), plan_id))
     return plan_status(library, job_id)
 
@@ -799,7 +873,7 @@ def plan_status(library, job_id: str) -> dict:
             (job_id, plan["id"]),
         ).fetchone()
         return {
-            "id": plan["id"], "state": plan["state"], "counts": counts,
+            "id": plan["id"], "state": plan["state"], "counts": counts, "filename_method": plan["filename_method"],
             "execution": dict(execution) if execution else None,
             "inventory_duplicates": connection.execute(
                 "SELECT count(*) FROM legacy_adoption_inventory WHERE job_id = ? AND disposition = 'duplicate'",

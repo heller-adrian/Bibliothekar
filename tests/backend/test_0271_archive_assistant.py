@@ -8,6 +8,8 @@ import os
 import shutil
 from pathlib import Path
 
+import pytest
+
 from tests.backend.archive_change_helpers import copy_prepared_event_document
 from app.archive_change_assistant import build_archive_change_assistant
 from app.database import database_connection, initialize_database
@@ -419,7 +421,8 @@ def test_layout_only_change_stages_new_nested_branch_without_copying_its_parent(
     assert (archive / root / "Alle" / "alt.JPG").read_bytes() == b"alt"
 
 
-def test_stable_folder_renames_reuse_existing_archive_directories(tmp_path):
+@pytest.mark.parametrize("outcome", ["complete", "restore"])
+def test_stable_folder_renames_reuse_existing_archive_directories(tmp_path, outcome):
     from app.event_layout import ensure_event_layout_snapshot, update_event_layout
 
     db, workspace, archive, folder, old_family, _, _ = _seed(
@@ -469,6 +472,29 @@ def test_stable_folder_renames_reuse_existing_archive_directories(tmp_path):
     shutil.copytree(helper / "Auswahl", archive / root / "Auswahl")
     copy_prepared_event_document(db, workspace, archive, cr_id)
     assert verify_event_change(db, cr_id, archive, workspace)["complete"]
+    if outcome == "restore":
+        from app.archive_reversal import finish_archive_reversal, prepare_archive_reversal
+        from app.event_change_apply import cancel_event_change
+
+        assert cancel_event_change(db, cr_id, archive, workspace)["reversal_required"]
+        reversal = prepare_archive_reversal(db, archive, workspace, cr_id)
+        reverse_renames = {op["source"]: op["target"] for op in reversal["operations"]
+                           if op["kind"] == "rename_archive_folder"}
+        assert reverse_renames == {target: source for source, target in renamed.items()}
+        assert not any(op["kind"] == "move_back" for op in reversal["operations"])
+        for source, target in reverse_renames.items():
+            (archive / source.removeprefix("Kamerabibliothek/")).rename(
+                archive / target.removeprefix("Kamerabibliothek/"),
+            )
+        [restore] = [op for op in reversal["operations"] if op["kind"] == "restore_folders"]
+        assert restore["items"] == ["Sortiert"] and restore["target"] == label
+        shutil.copytree(workspace / restore["source"], archive / root / "Sortiert")
+        (archive / root / "event.json").unlink()
+        (archive / root / "Auswahl").rmdir()
+        assert finish_archive_reversal(db, archive, workspace, cr_id)["status"] == "abgebrochen"
+        assert (archive / root / "Alle").stat().st_ino == input_inode
+        assert (archive / root / "Alle" / "alt.JPG").read_bytes() == b"alt"
+        return
     finish_event_change(db, cr_id, archive, workspace)
     archived = archive / root / "All Neu" / "alt.JPG"
     assert archived.read_bytes() == b"alt" and archived.parent.stat().st_ino == input_inode

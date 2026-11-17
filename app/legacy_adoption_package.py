@@ -188,9 +188,10 @@ def prepare_probe(library, job_id, plan_id, host_appdata=None, host_source=None,
         connection.execute("BEGIN")
         job = _job(connection, library.library_id, job_id)
         plan = _plan(connection, job_id)
-        if plan["id"] != plan_id or not plan["documents_at"] or connection.execute(
+        if (plan["id"] != plan_id or plan["filename_method"] not in {None, "script"}
+                or not plan["documents_at"] or connection.execute(
             "SELECT 1 FROM legacy_adoption_execution WHERE plan_id = ?", (plan_id,),
-        ).fetchone():
+        ).fetchone()):
             raise AdoptionError("Der aktuelle Plan muss für die Hostpfadprüfung unverbindlich vorbereitet sein.")
         with ExitStack() as stack:
             _roots(stack, library, job)

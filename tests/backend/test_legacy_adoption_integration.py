@@ -1054,6 +1054,15 @@ def test_script_host_proof_release_and_independent_archive_verification(
     }]})
     plan = _json(client, "POST", job + "/plan", json={"revision": saved["revision"]})
     _json(client, "POST", job + "/documents")
+    manual_id = plan["id"]
+    [manual_move] = _json(client, "GET", job + "/moves")
+    assert Path(manual_move["target_path"]).name == "proof.raf"
+    plan = _json(client, "POST", job + "/execution-method", json={"plan_id": manual_id, "method": "script"})
+    assert plan["id"] != manual_id and plan["documents_at"] and plan["filename_method"] == "script"
+    assert _json(client, "POST", job + "/confirm", status=409,
+                 json={"plan_id": plan["id"], "method": "manual", "acknowledged": True})
+    [script_move] = _json(client, "GET", job + "/moves?renamed=true")
+    assert Path(script_move["target_path"]).name == "20260721_120000_Unbekanntes-Gerät.raf"
     command = {"plan_id": plan["id"]}
     library = resolve_library_context(registry, "main")
     # Exercise the host mapping with a synthetic mount table. The real
@@ -2148,7 +2157,8 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
         _json(client, "POST", job + "/scan", status=202)
         preview = _json(client, "POST", job + "/draft/structure", json=draft)
         saved = _json(client, "PUT", job + "/draft", json={**draft, "revision": 0})
-        plan = _json(client, "POST", job + "/plan", json={"revision": saved["revision"]})
+        plan = _json(client, "POST", job + "/plan",
+                     json={"revision": saved["revision"], "filename_method": execution})
         moves = _json(client, "GET", job + "/moves")
         directories = set(_json(client, "GET", job + "/directories"))
         assert set(preview["directories"]) <= directories
@@ -2217,9 +2227,12 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
     event_id, anchor = event["id"], catalogue_job_id(plan)
     root = archive / event_root_relative(event)
     assert root.parent.name == "2025"
+    stems = ("20250701_120000_Unbekanntes-Gerät", "20260101_100000_Unbekanntes-Gerät") if execution == "script" else (
+        "DSCF0763", "DSCF0763_Adopted_001",
+    )
     assert set(paths.values()) == {
         str((root / "All" / "JPG" / (stem + extension)).relative_to(archive))
-        for stem in ("DSCF0763", "DSCF0763_Adopted_001") for extension in extensions
+        for stem in stems for extension in extensions
     }
     original = {path: (archive / path).read_bytes() for path in paths.values()}
     assert original == {target: source_data[relative] for relative, target in paths.items()}
@@ -2239,7 +2252,8 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
     assert extension["inventory_duplicates"] == 3
     assert {path: path.read_bytes() for path in duplicated} == duplicated
     assert {Path(target).name for target in new_paths.values()} == {
-        "dscf0763_Adopted_002" + suffix for suffix in extensions
+        ("20260101_110000_Unbekanntes-Gerät" if execution == "script" else "dscf0763_Adopted_002") + suffix
+        for suffix in extensions
     }
     paths.update(new_paths)
     assert all((archive / path).read_bytes() == data for path, data in original.items())

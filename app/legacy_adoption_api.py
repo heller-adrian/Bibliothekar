@@ -107,6 +107,15 @@ class Freeze(BaseModel):
     revision: int = Field(ge=0)
 
 
+class FreezePlan(Freeze):
+    filename_method: Literal["manual", "script"] = "manual"
+
+
+class SelectExecution(BaseModel):
+    plan_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    method: Literal["manual", "script"]
+
+
 class SelectedMetadata(Freeze):
     family_keys: list[str] = Field(min_length=1, max_length=10000)
 
@@ -604,7 +613,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         return {"saved": True, "revision": revision}
 
     @router.post("/jobs/{job_id}/plan")
-    def freeze(job_id: str, draft: Freeze, request: Request):
+    def freeze(job_id: str, draft: FreezePlan, request: Request):
         library = context()
         with _errors(), admission(library):
             require_adoption(request, library)
@@ -612,7 +621,22 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             with database_connection(library.database_path) as connection:
                 require_no_partial_publication(connection, job_id)
             return create_plan(library, registry_path(), job_id, draft_revision=draft.revision,
-                               allow_existing=is_later(request))
+                               allow_existing=is_later(request), filename_method=draft.filename_method)
+
+    @router.post("/jobs/{job_id}/execution-method")
+    def select_execution(job_id: str, command: SelectExecution, request: Request):
+        library = context()
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
+            require_adoption(request, library)
+            require_review_idle(library, job_id)
+            with database_connection(library.database_path) as connection:
+                require_no_partial_publication(connection, job_id)
+            create_plan(
+                library, registry_path(), job_id, allow_existing=is_later(request),
+                filename_method=command.method, replace_plan_id=command.plan_id,
+            )
+            prepare_documents(library, job_id)
+            return plan_status(library, job_id)
 
     @router.get("/jobs/{job_id}/directories")
     def directories(job_id: str, after: str = ""):

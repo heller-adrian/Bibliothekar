@@ -675,9 +675,11 @@ def analyze_file_metadata(
         "metadata_conflict": conflict,
         "camera_make": metadata.get("EXIF:IFD0:Make")
             or metadata.get("EXIF:ExifIFD:Make")
+            or metadata.get("QuickTime:Keys:Make")
             or metadata.get("QuickTime:Make"),
         "camera_model": metadata.get("EXIF:IFD0:Model")
             or metadata.get("EXIF:ExifIFD:Model")
+            or metadata.get("QuickTime:Keys:Model")
             or metadata.get("QuickTime:Model"),
         "inherited_from_family": False,
         "review_required": confidence in {

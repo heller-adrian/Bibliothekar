@@ -412,6 +412,17 @@ async function checkReviewPlan(browser, language, width) {
       plan = key === "/documents" ? {...plan, documents_at: "2026-11-17"} : {};
       return route.fulfill({json: plan});
     }
+    if (key === "/execution-method") {
+      const payload=route.request().postDataJSON();
+      assert.equal(payload.plan_id,plan.id);
+      calls.push(payload.method);
+      plan={...plan,id:payload.method==="script"?"e".repeat(32):batchId,filename_method:payload.method};
+      return route.fulfill({json:plan});
+    }
+    if (key === "/script/probe") return route.fulfill({json:{}});
+    if (key === "/moves") return route.fulfill({json:[{
+      source:"/synthetic/source/DSCF.MOV",target:"/synthetic/archive/20261117_090000_Camera.MOV",
+    }]});
     if (key === "/inventory-exclusions") return route.fulfill({json: [
       {relative_path: "old-copy.JPG", disposition: "duplicate"},
     ]});
@@ -433,12 +444,18 @@ async function checkReviewPlan(browser, language, width) {
   await next.click();
   await page.waitForURL("**step=execution");
   assert.deepEqual(calls, ["/documents"]);
+  await page.locator('input[name=adoption-execution][value=script]').click();
+  await page.getByText("→ /synthetic/archive/20261117_090000_Camera.MOV",{exact:true}).waitFor();
+  assert.ok(await page.locator('input[name=adoption-execution][value=script]').isChecked());
+  assert.ok(await page.getByRole("button",{name:german?"Durchführung verbindlich starten":"Confirm and start"}).isDisabled());
+  await page.locator('input[name=adoption-execution][value=manual]').click();
+  await page.waitForFunction(()=>!document.querySelector('input[name=adoption-execution][value=manual]').disabled);
   const back = page.getByRole("button", {name: german ? "Zurück" : "Back", exact: true});
   await back.click();
   await page.waitForURL("**step=review");
   await back.click();
   await page.waitForURL("**step=plan");
-  assert.deepEqual(calls, ["/documents", "/reopen"]);
+  assert.deepEqual(calls, ["/documents", "script", "manual", "/reopen"]);
   await back.click();
   const inventory = page.getByText(german ? "Ausgeschlossene Dateien" : "Excluded files", {exact: true});
   await inventory.click();

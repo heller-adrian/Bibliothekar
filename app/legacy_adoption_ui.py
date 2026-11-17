@@ -1845,6 +1845,7 @@ function renderPlan(host) {
     const target=renames.querySelector("#rename-preview");
     if(renames.open && !target.childElementCount)showRenames(target).catch(error=>report(error.message,"error"));
   });
+  renames.open=viewStep==="execution" && plan.filename_method==="script";
   panel.append(renames);
   if(!recoveryOnly && !phase && plan.documents_at && viewStep==="execution")renderConfirmation(panel,command);
   if (manualPhase(plan) && viewStep==="execute"){
@@ -2010,12 +2011,12 @@ function renderConfirmation(panel,command) {
   choice.setAttribute("role","radiogroup");
   choice.setAttribute("aria-label",t("Durchführungsmethode"));
   const methods=[
-    ["manual","Manuelle Durchführung über SMB","Verschiebe die Dateien selbst anhand des bestätigten Plans."],
-    ["script","Skriptgestützte Durchführung auf TrueNAS","Prüfe die Hostpfade und führe den freigegebenen Befehl in der TrueNAS-Shell aus."],
+    ["manual","Manuelle Durchführung über SMB","Du führst jede Verschiebung selbst aus. Die Dateinamen bleiben bis auf nötige Kollisionsauflösungen erhalten."],
+    ["script","Skriptgestützte Durchführung auf TrueNAS","Für größere Sammlungen geeignet. Das Skript verschiebt und benennt die Dateien automatisch. Prüfe den Plan und starte den Befehl selbst mit den nötigen Berechtigungen."],
   ];
   for(const [value,title,description] of methods){
     const option=node("label"), radio=node("input");
-    radio.type="radio";radio.name="adoption-execution";radio.value=value;radio.checked=value==="manual";
+    radio.type="radio";radio.name="adoption-execution";radio.value=value;radio.checked=value===(job.plan.filename_method || "manual");
     option.append(radio,node("strong",title),node("small",description));choice.append(option);
   }
   const method=()=>choice.querySelector("input:checked").value;
@@ -2125,7 +2126,21 @@ function renderConfirmation(panel,command) {
     updateConfirmation();
     if (!scripts.hidden && !probe && !checking) checkProbe().catch(error=>report(error.message,"error"));
   }
-  choice.addEventListener("change",selectMethod);
+  choice.addEventListener("change",async()=>{
+    const selected=method();
+    for(const radio of choice.querySelectorAll("input"))radio.disabled=true;
+    checking=true;ack.checked=false;updateConfirmation();
+    try {
+      await mutate("/execution-method","POST",{...command,method:selected});
+    } catch(error) {
+      await refresh().catch(()=>{});
+      report(error.message,"error");
+    } finally {
+      checking=false;
+      for(const radio of choice.querySelectorAll("input"))radio.disabled=false;
+      updateConfirmation();
+    }
+  });
   ack.addEventListener("change",updateConfirmation);
   confirmation.append(node("h3","Verbindliche Sicherheitsbestätigung"),choice,
     line("Nach dieser Bestätigung müssen die geplanten Verschiebungen abgeschlossen, überprüft oder kontrolliert rückgängig gemacht werden."),
