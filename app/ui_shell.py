@@ -7861,15 +7861,19 @@ FOLDER_LAYOUT_JS = r"""
   function render({state, host, exportSelect, radioName="bk-input-folder", onChange, manageExport=true}) {
     const rerender=()=>render({state,host,exportSelect,radioName,onChange,manageExport});
     const changed=()=>onChange?.(state);
-    const flattened=bkFlattenLayout(state.layout?.nodes||[]);
-    if(exportSelect){
-      const selectedExport=flattened.find(item=>String(item.node?.role||"").toLowerCase()==="export");
-      exportSelect.innerHTML='<option value="">Kein Ordner fest als Exportordner klassifiziert</option>'
-        + flattened.map(item=>'<option data-bk-preserve-language value="'+String(item.node.id).replaceAll('"','&quot;')+'">'
-          +String(item.path).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;')
-          +'</option>').join('');
-      exportSelect.value=selectedExport ? String(selectedExport.node.id) : "";
+    function syncExport(rows){
+      if(!exportSelect)return;
+      const selected=rows.find(({node})=>String(node.role||"").toLowerCase()==="export");
+      const options=rows.map(({node,path})=>{
+        const option=new Option(path,node.id);
+        option.dataset.bkPreserveLanguage="";
+        return option;
+      });
+      exportSelect.replaceChildren(new Option("Kein Ordner fest als Exportordner klassifiziert",""),...options);
+      exportSelect.value=selected?.node.id || "";
     }
+    const flattened=bkFlattenLayout(state.layout?.nodes||[]);
+    syncExport(flattened);
     const rows=[{node:null,path:"",depth:0},...flattened.map(item=>({...item,depth:item.path.split("/").length}))];
     host.classList.add("bk-folder-layout-tree");
     host.innerHTML=rows.map(item=>{
@@ -7887,16 +7891,16 @@ FOLDER_LAYOUT_JS = r"""
         +'<span style="color:var(--bk-muted);font-size:.82rem">'+(checked?'Input':'')+'</span></div>';
     }).join("");
     host.querySelectorAll("[data-bk-layout-name]").forEach(input=>input.addEventListener("input",()=>{
-      const selected=host.querySelector('[data-bk-input-node]:checked');
-      const selectedNodeId=String(selected?.dataset?.bkInputNode||"");
       const found=bkFindParent(state.layout.nodes,input.dataset.bkLayoutName);
-      if(found) found.node.name=input.value;
-      if(selectedNodeId){
-        const selectedRow=bkFlattenLayout(state.layout.nodes).find(item=>String(item.node?.id||"")===selectedNodeId);
-        state.input_path=selectedRow?.path||"";
-      }else if(selected){
-        state.input_path=selected.value;
+      if(!found)return;
+      found.node.name=input.value;
+      const rows=bkFlattenLayout(state.layout.nodes);
+      const paths=new Map(rows.map(({node,path})=>[String(node.id),path]));
+      for(const radio of host.querySelectorAll("[data-bk-input-node]")){
+        radio.value=paths.get(radio.dataset.bkInputNode) || "";
+        if(radio.checked)state.input_path=radio.value;
       }
+      syncExport(rows);
       changed();
     }));
     host.querySelectorAll("[data-bk-layout-child]").forEach(button=>button.addEventListener("click",()=>{
@@ -7906,10 +7910,9 @@ FOLDER_LAYOUT_JS = r"""
     host.querySelectorAll("[data-bk-layout-remove]").forEach(button=>button.addEventListener("click",()=>{
       const found=bkFindParent(state.layout.nodes,button.dataset.bkLayoutRemove);
       if(!found)return;
-      const removedPath=bkFlattenLayout([found.node]).map(x=>x.path);
-      const index=found.nodes.findIndex(n=>n.id===found.node.id);
-      if(index>=0)found.nodes.splice(index,1);
-      if(removedPath.some(p=>String(state.input_path||"").endsWith(p)))state.input_path="";
+      const selected=host.querySelector("[data-bk-input-node]:checked")?.dataset.bkInputNode;
+      if(bkFindParent([found.node],selected))state.input_path="";
+      found.nodes.splice(found.nodes.indexOf(found.node),1);
       rerender();
     }));
     host.querySelectorAll('[data-bk-input-node]').forEach(radio=>radio.addEventListener("change",()=>{

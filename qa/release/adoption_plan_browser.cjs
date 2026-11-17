@@ -130,6 +130,19 @@ async function check(browser, width, height, theme, language) {
   }
   assert.ok(positions[0].left < positions[1].left && positions[1].left < positions[2].left);
   assert.equal(positions[0].left, positions[3].left);
+  const exportSelect=dialog.locator(".bk-event-export-heading + select");
+  const exportName=folderRows.nth(3).locator("[data-bk-layout-name]");
+  assert.equal(await exportSelect.inputValue(),"export");
+  await exportName.fill("Export Test");
+  assert.equal(await exportSelect.locator("option:checked").textContent(),"Export Test");
+  assert.equal(await exportSelect.inputValue(),"export");
+  await folderRows.nth(2).locator("[data-bk-input-node]").check();
+  await folderRows.nth(0).locator("[data-bk-layout-name]").fill("Photos");
+  assert.equal(await folderRows.nth(2).locator("[data-bk-input-node]").inputValue(),"Photos/JPG/Selection");
+  await exportSelect.selectOption("jpg");
+  await folderRows.nth(1).locator("[data-bk-layout-name]").fill("JPEGs");
+  assert.equal(await exportSelect.locator("option:checked").textContent(),"Photos/JPEGs");
+  await exportSelect.selectOption("export");
   await folderRows.nth(2).locator("[data-bk-layout-child]").click();
   assert.equal(await folderRows.count(), 5);
   const deepest = folderRows.nth(3);
@@ -284,6 +297,9 @@ async function checkManual(browser, language, width) {
   await page.locator("#message.bk-loading-status").waitFor();
   releaseConfirm();
   await page.getByRole("link",{name:l("Ordnergerüst mit Ereignisdokumenten (ZIP)","Folder scaffold with event documents (ZIP)")}).waitFor();
+  assert.equal(await page.locator("#wizard-steps button").count(),6);
+  assert.equal(await page.locator("#wizard-steps [aria-current=step]").textContent(),
+    l("6. Ausführen und prüfen","6. Execute and verify"));
   const advance=page.getByRole("button",{name:l("Übernahme prüfen und registrieren","Verify and register adoption")});
   assert.ok(await advance.isDisabled());
   const refresh=page.locator("#manual-refresh");
@@ -342,6 +358,7 @@ async function checkScriptCompletion(browser, language, width) {
       requests.push(key);
       assert.equal(key, "/finalize");
       assert.equal(route.request().postDataJSON().plan_id, planId);
+      if(requests.length===1)return route.fulfill({status:409,json:{detail:"Synthetic verification issue"}});
       return route.fulfill({json: {state: "completed"}});
     }
     if (logos.includes(pathname))
@@ -350,14 +367,18 @@ async function checkScriptCompletion(browser, language, width) {
     throw Error("Unmocked scripted wizard request " + pathname);
   });
   await page.goto(origin + "/legacy-adoption?job=" + jobId + "&step=verify");
+  await page.waitForURL("**step=execute");
+  assert.equal(await page.locator("#wizard-steps button").count(),6);
   const finalize = page.getByRole("button", {name: language === "de"
     ? "Übernahme prüfen und registrieren" : "Verify and register adoption"});
   await finalize.waitFor();
   assert.ok(await finalize.isDisabled());
   finished = true;
   await finalize.click({timeout: 6000});
+  await page.getByText("Synthetic verification issue",{exact:true}).waitFor();
+  await finalize.click({timeout:6000});
   await page.waitForURL("**/legacy-adoption/history?*");
-  assert.deepEqual(requests, ["/finalize"]);
+  assert.deepEqual(requests, ["/finalize","/finalize"]);
   await page.close();
 }
 

@@ -346,21 +346,17 @@ function manualPhase(plan) {
 /* SHARED_EVENT_TIME_JS */
 let freeSegments=[], archiveSegments=[], selectedEvent=null, selectedArchive=null;
 let selectedDays=new Set(), dayRows=[], selectionAnchor="", dayPage=60, selectedDaysJob="", draftStats=[], draftCoverage=null, previewRevision=-1;
-const steps=[["setup","Einrichten"],["inventory","Inventur"],["plan","Ereignisse planen"],["review","Plan prüfen"],["execution","Methode wählen"],["execute","Durchführen"],["verify","Prüfen und abschließen"]];
+const steps=[["setup","Einrichten"],["inventory","Inventur"],["plan","Ereignisse planen"],["review","Plan prüfen"],["execution","Methode wählen"],["execute","Ausführen und prüfen"]];
 function allowedSteps(){
   if(!job || job.state==="discarded")return ["setup"];
   if(recoveryOnly){
     if(!job.plan.id)return ["inventory"];
     if(!job.plan.execution)return ["inventory","review"];
-    return [job.plan.execution.phase==="registering"?"verify":"execute"];
+    return ["execute"];
   }
   if(!job.plan.id)return job.state==="inventoried" ? ["inventory","plan"] : ["inventory"];
   if(!job.plan.execution)return job.plan.documents_at?["inventory","review","execution"]:["inventory","review"];
-  const phase=job.plan.execution.phase;
-  if(phase==="rolling_back")return ["execute"];
-  if(job.plan.state==="completed" || phase==="registering")return ["verify"];
-  if(manualPhase(job.plan) && phase!=="registration_pending")return ["execute"];
-  return ["execute","verify"];
+  return ["execute"];
 }
 function rememberView(step,push=false){
   if(viewStep!==step) $("introduction").open=false;
@@ -387,13 +383,12 @@ function navigation(){
   const nav=$("wizard-navigation");nav.replaceChildren();
   if(!job)return;
   const phase=job.plan.execution?.phase;
-  if(viewStep==="verify" && (phase==="registering" || (!recoveryOnly && phase==="registration_pending"))){
-    if(!recoveryOnly && phase==="registration_pending")nav.append(action("Zurück",()=>goStep("execute")));
+  if(viewStep==="execute" && (phase==="registering" || (!recoveryOnly && phase==="registration_pending"))){
     nav.append(action("Übernahme prüfen und registrieren",finishAdoption,true));
     return;
   }
   if(recoveryOnly && !(viewStep==="execute" && manualPhase(job.plan)))return;
-  const previous={plan:"inventory",review:job.plan.execution?null:"plan",execution:"review",verify:job.plan.state==="completed"?null:"execute"}[viewStep];
+  const previous={plan:"inventory",review:"plan",execution:"review"}[viewStep];
   if(previous)nav.append(action("Zurück",()=>goStep(previous)));
   if(viewStep==="inventory" && job.state==="inventoried")nav.append(action("Weiter: Ereignisse planen",()=>goStep("plan"),true));
   if(viewStep==="plan" && !reviewBusy())nav.append(action("Weiter: Plan prüfen",()=>{
@@ -426,8 +421,8 @@ function navigation(){
     actions.append(refreshButton);
     if(reverse || !recoveryOnly)actions.append(verify);
     nav.append(actions);
-  } else if(viewStep==="execute" && phase!=="rolling_back")nav.append(action("Weiter: Archiv prüfen",()=>goStep("verify"),true));
-  else if(viewStep==="verify" && job.plan.execution?.method==="script" && job.plan.state!=="completed"){
+  } else if(viewStep==="execute" && phase!=="rolling_back" && job.plan.execution?.method==="script" &&
+            job.plan.state!=="completed"){
     const button=action("Übernahme prüfen und registrieren",finishAdoption,true);
     button.id="script-finalize";
     button.disabled=true;
@@ -701,7 +696,7 @@ async function mutate(path, method="POST", body) {
       return result;
     }
     if(checking || path==="/rollback/start")manualSnapshot=null;
-    const target={"/plan":"review","/confirm":"execute","/finalize":"verify","/reopen":"plan","/scan":"inventory","/rollback/start":"execute"}[path];
+    const target={"/plan":"review","/confirm":"execute","/finalize":"execute","/reopen":"plan","/scan":"inventory","/rollback/start":"execute"}[path];
     if(target)rememberView(target);
     await refresh();
     report();
@@ -1864,10 +1859,11 @@ function renderPlan(host) {
   let scriptDetails=null;
   if (scripted && !completed && phase!=="rolled_back") {
     const execution=node("div",undefined,"adoption-card adoption-stage");
-    const title=phase==="rolling_back"?"Wiederherstellung auf TrueNAS":viewStep==="verify"?"Archiv prüfen und registrieren":"Skript auf TrueNAS ausführen";
+    const registering=["registration_pending","registering"].includes(phase);
+    const title=phase==="rolling_back"?"Wiederherstellung auf TrueNAS":registering?"Archiv prüfen und registrieren":"Skript auf TrueNAS ausführen";
     execution.append(node("h3",title));
-    if(viewStep==="execute" && phase!=="rolling_back")execution.append(line("Kopiere den freigegebenen Befehl in die TrueNAS-Host-Shell. TrueNAS kann wegen sudo nach deinem Passwort fragen."));
-    if(viewStep==="verify" && ["registration_pending","registering"].includes(phase)){
+    if(!registering && phase!=="rolling_back")execution.append(line("Kopiere den freigegebenen Befehl in die TrueNAS-Host-Shell. TrueNAS kann wegen sudo nach deinem Passwort fragen."));
+    if(registering){
       const status=node("p",label(phase),"adoption-status");status.setAttribute("role","status");execution.append(status);
     }
     execution.append(slot("script-state"));
@@ -2175,7 +2171,8 @@ async function pollScript() {
       delete target.dataset.command;
       target.replaceChildren();
     }
-    if (!recoveryOnly && !result.running && ["script_prepared","repair"].includes(phase) && !result.command) {
+    if (!recoveryOnly && !result.running && status?.state!=="completed" &&
+        ["script_prepared","repair"].includes(phase) && !result.command) {
       nodes.push(action("Skriptbefehl bereitstellen",()=>run("/script/release"),true));
     }
     const finalize=$("script-finalize");

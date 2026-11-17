@@ -13,7 +13,8 @@ def test_0273_reversal_is_separate_right_to_left_three_step_workflow():
     assert verify < finder < prepare
     assert "Dieser Wiederherstellungsbereich wird erst mit „Rückänderung vorbereiten“ angelegt:" in source
     assert "/reversal/prepare" in source
-    assert "/reversal/verify" in source
+    assert "data-reversal-verify" not in source
+    assert "data-reversal-back hidden" in source
     assert "/reversal/finish" in source
     assert "wird anschließend ein eigener Rückänderungsauftrag geöffnet" in source
 

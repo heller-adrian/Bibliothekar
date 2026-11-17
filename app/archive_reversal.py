@@ -37,6 +37,12 @@ class ArchiveReversalError(RuntimeError):
     pass
 
 
+class IncompleteArchiveReversal(ArchiveReversalError):
+    def __init__(self, verification):
+        super().__init__(f"Rückänderung ist noch nicht vollständig: {verification['problem_count']} Punkt(e) offen.")
+        self.verification = verification
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -996,9 +1002,7 @@ def finish_archive_reversal(
 ) -> dict[str, Any]:
     verification = verify_archive_reversal(database_path, archive_root, workspace_path, cr_id)
     if not verification["complete"]:
-        raise ArchiveReversalError(
-            f"Rückänderung ist noch nicht vollständig: {verification['problem_count']} Punkt(e) offen."
-        )
+        raise IncompleteArchiveReversal(verification)
 
     from app.archive_staging import cleanup_archive_change_staging
     from app.archive_release_stock import cleanup_archive_release_stock

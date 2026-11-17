@@ -628,14 +628,13 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
     assert not list(new_folder.rglob("Export"))
     sorted_folder = next(new_folder.rglob("Sorted"))
     sorted_folder.rmdir()
-    incomplete = verify_event_change(database, change_id, library.archive_root, workspace)
+    rejected = _json(client, "POST", f"/api/change-requests/{change_id}/archive", status=400)
+    incomplete = rejected["verification"]
     assert not incomplete["complete"]
     assert [item["path"] for item in incomplete["directories"] if item["status"] == "missing"] == [
         sorted_folder.relative_to(library.archive_root).as_posix()
     ]
     sorted_folder.mkdir()
-    verified = verify_event_change(database, change_id, library.archive_root, workspace)
-    assert verified["complete"], verified
     _json(client, "POST", f"/api/change-requests/{change_id}/archive")
     with database_connection(database) as connection:
         assert connection.execute("SELECT name FROM events WHERE id = ?", (event_id,)).fetchone()[0] == "Umbenannt"

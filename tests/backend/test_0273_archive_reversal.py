@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import shutil
+
+import pytest
 from pathlib import Path
 
 from app.archive_change_assistant import build_archive_change_assistant
@@ -10,6 +12,7 @@ from app.archive_release_stock import (
     verify_archive_release_removal,
 )
 from app.archive_reversal import (
+    IncompleteArchiveReversal,
     finish_archive_reversal,
     prepare_archive_reversal,
     verify_archive_reversal,
@@ -75,12 +78,12 @@ def test_0273_cancel_after_archive_removal_becomes_verified_reversal(tmp_path: P
         item for item in prepared["operations"]
         if item["kind"] == "restore_from_ssd"
     )
+    with pytest.raises(IncompleteArchiveReversal) as blocked:
+        finish_archive_reversal(case["db"], case["archive"], case["workspace"], case["cr_id"])
+    assert {row["old_path"] for row in rows} <= {
+        problem["path"] for problem in blocked.value.verification["problems"]
+    }
     _copy_reversal_event_root(case["workspace"], case["archive"], restore)
-
-    verified = verify_archive_reversal(
-        case["db"], case["archive"], case["workspace"], case["cr_id"]
-    )
-    assert verified["complete"] is True, verified["problems"]
 
     finished = finish_archive_reversal(
         case["db"], case["archive"], case["workspace"], case["cr_id"]

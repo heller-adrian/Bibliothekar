@@ -287,6 +287,7 @@ from app.event_change_apply import (
     finish_event_change,
     verify_event_change,
     EventChangeApplyError,
+    IncompleteArchiveChange,
 )
 
 from app.event_suggestions import (
@@ -14290,11 +14291,14 @@ def api_verify_change_reversal(cr_id: str) -> JSONResponse:
 @app.post("/api/change-requests/{cr_id}/reversal/finish")
 @_root_request
 def api_finish_change_reversal(cr_id: str) -> JSONResponse:
+    from app.archive_reversal import IncompleteArchiveReversal, finish_archive_reversal
+
     try:
-        from app.archive_reversal import finish_archive_reversal
         return JSONResponse(content=finish_archive_reversal(
             current_database_file(), current_archive_root(), current_workspace_root(), cr_id
         ))
+    except IncompleteArchiveReversal as exc:
+        return JSONResponse(status_code=409, content={"detail": str(exc), "verification": exc.verification})
     except Exception as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -14438,6 +14442,8 @@ def api_archive_change(cr_id: str) -> JSONResponse:
         )
         synchronize_global_central_stock()
         return JSONResponse(content=result)
+    except IncompleteArchiveChange as exc:
+        return JSONResponse(status_code=400, content={"detail": str(exc), "verification": exc.verification})
     except EventChangeApplyError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:

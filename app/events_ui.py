@@ -1504,6 +1504,35 @@ EVENTS_HTML = r"""<!doctype html>
     }
     #event-edit-dialog .child-segment-top {flex-wrap:wrap}
     #event-edit-dialog .child-segment-name {min-inline-size:0}
+    #event-edit-dialog .edit-folder-options {
+      grid-column:1/-1;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:6px 24px;
+    }
+    #event-edit-dialog .edit-folder-options > label:first-child { grid-column:1/-1; }
+    #event-edit-dialog .edit-folder-options > select { inline-size:100%; min-inline-size:0; }
+    #event-edit-dialog .edit-parent-folder {
+      justify-self:end;
+      align-self:center;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-height:38px;
+      max-inline-size:100%;
+    }
+    @container event-editor (max-width:420px) {
+      #event-edit-dialog .edit-folder-options { grid-template-columns:minmax(0,1fr); }
+    }
+    #event-edit-dialog .edit-parent-folder > input[type="checkbox"] {
+      flex:0 0 1rem;
+      inline-size:1rem !important;
+      block-size:1rem !important;
+      min-inline-size:0 !important;
+      min-block-size:0 !important;
+      margin:0;
+      padding:0;
+    }
     #event-edit-dialog .edit-field > input:not([type="checkbox"]):not([type="radio"]),
     #event-edit-dialog .edit-field > select,
     #event-edit-dialog .edit-field > textarea {
@@ -3653,8 +3682,11 @@ EVENTS_HTML = r"""<!doctype html>
               <label class="edit-field"><span>Endzeit</span><input id="edit-end-time" type="time" value="${escapeHtml(isoTime(event.end_datetime,'23:59'))}" ${structural ? "" : "disabled"}></label>
             </div>
           </div>
-          <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
-          <label class="edit-field check-row"><input id="edit-subfolders" type="checkbox" ${context.folder_layout?.structure_enabled ? "checked" : ""} ${structural ? "" : "disabled"}><span>Unterordner des Hauptereignisses erstellen</span></label>
+          <div class="edit-folder-options">
+            <label for="edit-preserve">Tagesordner</label>
+            <select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select>
+            <label class="edit-parent-folder"><input id="edit-subfolders" type="checkbox" ${context.folder_layout?.structure_enabled ? "checked" : ""} ${structural ? "" : "disabled"}><span>Unterordner des Hauptereignisses erstellen</span></label>
+          </div>
           <input id="edit-time-enabled" type="hidden" value="1">
           <div class="edit-field full"><span>Optionale Unterereignisse</span><div id="normal-event-segments">${normalSegmentHtml}</div><button id="add-normal-segment" type="button">Unterereignis hinzufügen</button></div>`}
 
@@ -4582,6 +4614,34 @@ EVENTS_HTML = r"""<!doctype html>
         return `Move ${count} ${count===1?"file":"files"} to the specified destination folder.`;
       return window.BibliothekarI18n?.t?.(source) || source;
     }
+    function archiveOperationStatus(element, text, state="idle"){
+      if(!element)return;
+      element.textContent=text;
+      element.className={idle:"muted",busy:"bk-loading-status",success:"success-text",error:"danger-text"}[state];
+      element.setAttribute("aria-busy",String(state==="busy"));
+    }
+
+    function archiveVerificationProblems(result){
+      const outstanding=(rows=[])=>rows.filter(row=>!["verified","advisory"].includes(row.status));
+      return [...outstanding(result.files),...outstanding(result.directories),
+        ...outstanding(result.obsolete_directories),...outstanding(result.event_document?[result.event_document]:[])];
+    }
+
+    function renderArchiveVerificationProblems(host, problems){
+      host.replaceChildren(...problems.map(problem=>{
+        const card=document.createElement("div");
+        card.className="card";
+        const description=document.createElement("div");
+        const message=problem.message || problem.status || problem.kind;
+        description.textContent=window.BibliothekarI18n?.t?.(message) || message;
+        const path=document.createElement("code");
+        path.textContent=problem.new_path || problem.path || problem.old_path || "";
+        card.append(description,path);
+        return card;
+      }));
+      host.hidden=!problems.length;
+    }
+
     async function showArchiveReversalDetail(crId, options={}) {
       const assistant = options.assistant || await requestJson(
         `/api/change-requests/${encodeURIComponent(crId)}/reversal`
@@ -4635,6 +4695,7 @@ EVENTS_HTML = r"""<!doctype html>
       if (phase === "prepare") {
         html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Rückänderung vorbereiten</h3><p class="muted">Du hast bestätigt, dass die Archivänderung verworfen werden soll. Der ursprüngliche Zustand wird jetzt als eigener Rückweg vorbereitet.</p></div></div>`;
         html += `<div class="card"><strong>Dieser Wiederherstellungsbereich wird erst mit „Rückänderung vorbereiten“ angelegt:</strong><code style="display:block;margin-top:8px;white-space:pre-wrap;word-break:break-word">${escapeHtml(assistant.original_stock_path || bk0511EventLabel("Pfad wird beim Vorbereiten bestimmt","Path is determined during preparation"))}</code><p class="muted" style="margin-top:9px">Vor diesem Schritt muss der angezeigte Ordner noch nicht existieren. Beim Vorbereiten prüft die App den tatsächlichen Archivzustand sowie Größe und SHA-256. Nur Originale, die für den Rückweg wirklich auf SSD benötigt werden, werden dort sicher materialisiert.</p></div>`;
+        html += '<div data-reversal-activity role="status" aria-live="polite"></div>';
         html += historical
           ? '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-return>'+bk0511EventLabel("Zum aktuellen Schritt","Return to current step")+'</button></div></section>'
           : '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-prepare>'+bk0511EventLabel("Rückänderung vorbereiten","Prepare restoration")+'</button></div></section>';
@@ -4657,13 +4718,14 @@ EVENTS_HTML = r"""<!doctype html>
         if (!(assistant.operations || []).length) {
           html += '<div class="card success-text">✓ Der ursprüngliche Finder-Zustand ist bereits wiederhergestellt.</div>';
         }
+        html += '<div data-reversal-activity role="status" aria-live="polite"></div>';
         html += historical
           ? '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-return>'+bk0511EventLabel("Zum aktuellen Schritt","Return to current step")+'</button></div></section>'
           : '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-finder-check'+(hasConflict?' disabled':'')+'>'+bk0511EventLabel("Rückarbeit prüfen · weiter","Check restoration · continue")+'</button></div></section>';
       } else {
         html += '<section class="change-pane"><div class="change-pane-heading"><div><h3>Prüfen & Verwerfen</h3><p class="muted">Der ursprüngliche Archivzustand wird vollständig read-only nach Ordnern, Pfaden, Größen und SHA-256 geprüft.</p></div></div>';
-        html += '<div id="reversal-verify-panel" class="card"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button type="button" class="plan-button" data-reversal-verify>Rückänderung prüfen</button><span class="muted" data-reversal-summary>Noch nicht geprüft.</span></div><div data-reversal-errors style="display:none;margin-top:10px"></div></div>';
-        html += '<div class="change-footer"><button type="button" class="plan-button" data-reversal-back>Zur manuellen Wiederherstellung zurück</button><button type="button" class="plan-button bk-positive-action" data-reversal-finish disabled>Ursprungszustand bestätigen & Änderung verwerfen</button></div></section>';
+        html += '<div id="reversal-verify-panel" class="card"><div class="muted" role="status" data-reversal-summary>Noch nicht geprüft.</div><div data-reversal-errors class="stack" hidden></div></div>';
+        html += '<div class="change-footer"><button type="button" class="plan-button" data-reversal-back hidden>Zur manuellen Wiederherstellung zurück</button><button type="button" class="plan-button bk-positive-action" data-reversal-finish>'+bk0511EventLabel("Ursprungszustand bestätigen & Änderung verwerfen","Confirm original state and discard change")+'</button></div></section>';
       }
 
       html += '<div class="card" style="margin-top:10px;border-color:var(--bk-danger,#c75050)"><details><summary><strong>Notausstieg bei unmöglicher Rückänderung</strong></summary><p class="muted" style="margin-top:8px">Nur verwenden, wenn die Wiederherstellung unmöglich ist. Der Auftrag wird beendet, aber das Ereignis bleibt gesperrt, bis der Originalbestand gesondert geprüft wurde. Es werden keine Archivdateien verändert oder als geprüft markiert.</p><button type="button" class="plan-button danger-button" data-reversal-force>Abbrechen erzwingen · manuelle Klärung</button></details></div>';
@@ -4719,9 +4781,11 @@ EVENTS_HTML = r"""<!doctype html>
         box.hidden=false;
       };
 
+      const activity=changeRequestBody.querySelector("[data-reversal-activity]");
       changeRequestBody.querySelector("[data-reversal-prepare]")?.addEventListener("click", async event => {
         const button=event.currentTarget;
         button.disabled=true;
+        archiveOperationStatus(activity,bk0511EventLabel("Rückänderung wird vorbereitet …","Preparing reversal…"),"busy");
         try {
           const next=await requestJson(
             `/api/change-requests/${encodeURIComponent(crId)}/reversal/prepare`,
@@ -4730,7 +4794,7 @@ EVENTS_HTML = r"""<!doctype html>
           await showArchiveReversalDetail(crId,{assistant:next});
         } catch(error) {
           button.disabled=false;
-          showReversalError(error.message);
+          archiveOperationStatus(activity,bkPre71ArchiveError(error),"error");
         }
       });
 
@@ -4747,48 +4811,33 @@ EVENTS_HTML = r"""<!doctype html>
         }
       });
 
-      changeRequestBody.querySelector("[data-reversal-finder-check]")?.addEventListener("click", async () => {
-        await showArchiveReversalDetail(crId,{refreshLive:true});
-      });
-
-      const verifyButton=changeRequestBody.querySelector("[data-reversal-verify]");
-      const finishButton=changeRequestBody.querySelector("[data-reversal-finish]");
-      verifyButton?.addEventListener("click", async () => {
-        verifyButton.disabled=true;
-        const summary=changeRequestBody.querySelector("[data-reversal-summary]");
-        const errors=changeRequestBody.querySelector("[data-reversal-errors]");
+      changeRequestBody.querySelector("[data-reversal-finder-check]")?.addEventListener("click", async event => {
+        const button=event.currentTarget;
+        button.disabled=true;
+        archiveOperationStatus(activity,bk0511EventLabel("Manuelle Wiederherstellung wird geprüft …","Checking manual restoration…"),"busy");
         try {
-          const result=await requestJson(
-            `/api/change-requests/${encodeURIComponent(crId)}/reversal/verify`,
-            {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}
-          );
-          if (result.complete) {
-            verifyButton.classList.add("success");
-            verifyButton.textContent="✓ Rückänderung geprüft";
-            if(summary){summary.className="success-text";summary.textContent="Der ursprüngliche Archivzustand ist vollständig wiederhergestellt.";}
-            if(errors){errors.style.display="none";errors.innerHTML="";}
-            if(finishButton) finishButton.disabled=false;
-          } else {
-            verifyButton.disabled=false;
-            if(summary){summary.className="danger-text";summary.textContent=`${Number(result.problem_count||0)} Punkt(e) sind noch offen.`;}
-            if(errors){
-              errors.style.display="block";
-              errors.innerHTML=(result.problems||[]).map(problem=>`<div class="card" style="margin-top:7px"><strong>${escapeHtml(problem.message||"Noch offen")}</strong><code style="display:block;margin-top:5px;white-space:pre-wrap;word-break:break-word">${escapeHtml(problem.path||"")}</code></div>`).join("");
-            }
-          }
+          await showArchiveReversalDetail(crId,{refreshLive:true});
         } catch(error) {
-          verifyButton.disabled=false;
-          showReversalError(error.message);
+          button.disabled=false;
+          archiveOperationStatus(activity,bkPre71ArchiveError(error),"error");
         }
       });
 
+      const finishButton=changeRequestBody.querySelector("[data-reversal-finish]");
       finishButton?.addEventListener("click", async () => {
+        const summary=changeRequestBody.querySelector("[data-reversal-summary]");
+        const errors=changeRequestBody.querySelector("[data-reversal-errors]");
+        const back=changeRequestBody.querySelector("[data-reversal-back]");
         finishButton.disabled=true;
+        back.hidden=true;
+        renderArchiveVerificationProblems(errors,[]);
+        archiveOperationStatus(summary,bk0511EventLabel("Ursprünglicher Archivzustand wird geprüft …","Verifying original archive state…"),"busy");
         try {
           await requestJson(
             `/api/change-requests/${encodeURIComponent(crId)}/reversal/finish`,
             {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}
           );
+          archiveOperationStatus(summary,bk0511EventLabel("Ursprünglicher Archivzustand bestätigt.","Original archive state confirmed."),"success");
           mandatoryArchiveChangeContext=null;
           clearChangeTaskFromUrl(crId);
           changeRequestClose.disabled=false;
@@ -4800,7 +4849,12 @@ EVENTS_HTML = r"""<!doctype html>
           setStatus("Rückänderung abgeschlossen. Die Archivänderung wurde verworfen.",false,true);
         } catch(error) {
           finishButton.disabled=false;
-          showReversalError(error.message);
+          const problems=error.data?.verification?.problems || [];
+          back.hidden=!problems.length;
+          renderArchiveVerificationProblems(errors,problems);
+          archiveOperationStatus(summary,problems.length
+            ? bk0511EventLabel("Die Wiederherstellung ist noch nicht vollständig.","Restoration is incomplete.")
+            : bkPre71ArchiveError(error),"error");
         }
       });
     }
@@ -5088,19 +5142,11 @@ EVENTS_HTML = r"""<!doctype html>
 
         if (phase === "verify") {
 
-          const managedReviewRows = Array.isArray(reviewRows)
-            ? reviewRows.filter(row => !Boolean(row.advisory))
-            : [];
-          const initiallyVerified =
-            Array.isArray(reviewRows)
-            && reviewRows.length > 0
-            && managedReviewRows.every(row => String(row.verification_status || "") === "verified");
           html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>${bk0511EventLabel("Prüfen & Abschließen","Verify and complete")}</h3><p class="muted">${bk0511EventLabel("So soll die Kamerabibliothek jetzt aussehen. Die Prüfung selbst bleibt vollständig read-only.","The archive should now match this layout. Verification is strictly read-only.")}</p></div></div>`;
           if (targetTree) html += `<div class="card"><strong>${bk0511EventLabel("SOLL-Struktur","Target structure")}</strong><pre class="change-target-tree" style="margin-top:9px">${targetStructureDeleted ? escapeHtml(bk0511EventLabel("Ereignis wird vollständig aus der Kamerabibliothek entfernt.","The entire event will be removed from the archive.")) : escapeHtml(targetTree)}</pre></div>`;
-          html += `<div id="change-verify-panel" class="card"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button type="button" class="plan-button${initiallyVerified ? " success" : ""}" data-cr-verify>${initiallyVerified ? bk0511EventLabel("✓ Prüfung erfolgreich","✓ Verification successful") : bk0511EventLabel("Prüfen","Verify")}</button><span id="change-verify-summary" class="${initiallyVerified ? "success-text" : "muted"}">${initiallyVerified ? `${reviewRows.length}/${reviewRows.length} ${bk0511EventLabel("Dateien bestätigt.","files verified.")}` : bk0511EventLabel("Noch nicht geprüft.","Not verified yet.")}</span></div><div id="change-work-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div><div id="change-verify-errors" style="display:none;margin-top:10px"></div></div>`;
+          html += `<div id="change-verify-panel" class="card"><div id="change-verify-summary" class="muted" role="status">${bk0511EventLabel("Noch nicht geprüft.","Not verified yet.")}</div><div id="change-verify-errors" class="stack" hidden></div></div>`;
           html += renderTechnicalDetails();
-          html += `<div id="change-finalize-status" class="card" role="status"><strong>${bk0511EventLabel("Datenbankabschluss offen","Database completion pending")}</strong><p class="muted">${bk0511EventLabel("Eine erfolgreiche Dateiprüfung bestätigt noch nicht den Datenbankabschluss. Beim Abschließen werden die Dateien erneut geprüft und die Archiv- und Bestandsdaten übernommen.","Successful file verification does not complete the database operation. Completion rechecks the files and updates the archive and stock records.")}</p><div id="change-finalize-errors"></div></div>`;
-          html += `<div class="change-footer"><button type="button" class="plan-button" data-cr-back hidden>${bk0511EventLabel("Zur manuellen Arbeit zurück","Back to manual steps")}</button><button type="button" class="plan-button bk-positive-action" data-cr-archive ${initiallyVerified ? "" : "disabled"}>${bk0511EventLabel("Änderung abschließen & Arbeitsbereich freigeben","Complete archive change and release workspace")}</button></div></section>`;
+          html += `<div class="change-footer"><button type="button" class="plan-button" data-cr-back hidden>${bk0511EventLabel("Zur manuellen Arbeit zurück","Back to manual steps")}</button><button type="button" class="plan-button bk-positive-action" data-cr-archive>${bk0511EventLabel("Änderung abschließen & Arbeitsbereich freigeben","Complete archive change and release workspace")}</button></div></section>`;
         }
 
         changeRequestBody.innerHTML = html;
@@ -5379,168 +5425,41 @@ EVENTS_HTML = r"""<!doctype html>
           sessionStorage.removeItem(manualGateKey);
           showChangeRequestDetail(crId,{phase:"finder",refreshLive:true});
         });
-        const verifyBtn = changeRequestBody.querySelector("[data-cr-verify]");
         const archiveBtn = changeRequestBody.querySelector("[data-cr-archive]");
-        const failedVerificationBack = changeRequestBody.querySelector("[data-cr-back]");
-        if (verifyBtn) verifyBtn.addEventListener("click", async () => {
-          const progress = changeRequestBody.querySelector("#change-work-progress");
-          const bar = progress?.querySelector(".change-progress-bar");
-          const label = progress?.querySelector("[data-progress-label]");
-          const summary = changeRequestBody.querySelector("#change-verify-summary");
-          const errors = changeRequestBody.querySelector("#change-verify-errors");
-          verifyBtn.disabled = true;
-          verifyBtn.classList.remove("success", "danger");
-          if (failedVerificationBack) failedVerificationBack.hidden = true;
-          verifyBtn.textContent = "Prüfung läuft …";
-          progress?.classList.add("active");
-          if (bar) bar.style.width = "20%";
-          if (label) label.textContent = "Kamerabibliothek wird nach Pfad, Größe und SHA-256 geprüft …";
-          if (errors) { errors.style.display = "none"; errors.innerHTML = ""; }
+        archiveBtn?.addEventListener("click", async () => {
+          const summary=changeRequestBody.querySelector("#change-verify-summary");
+          const errors=changeRequestBody.querySelector("#change-verify-errors");
+          const back=changeRequestBody.querySelector("[data-cr-back]");
+          archiveBtn.disabled=true;
+          back.hidden=true;
+          renderArchiveVerificationProblems(errors,[]);
+          archiveOperationStatus(summary,bk0511EventLabel("Änderung wird geprüft …","Verifying change…"),"busy");
           try {
-            if (String(cr.status) === "aenderbar_vorschlagen") {
-              await changeRequestAction(crId, "confirm", {terminal:false});
-            }
-            if (bar) bar.style.width = "45%";
-            const data = await requestJson(
-              `/api/change-requests/${encodeURIComponent(crId)}/verify`,
-              {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})}
-            );
-            if (bar) bar.style.width = "100%";
-            const total = Number(data.file_count || 0);
-            const ok = Number(data.verified_file_count || 0);
-            const advisories = data.advisories || [];
-            const problems = (data.files || []).filter(row => !["verified","advisory"].includes(String(row.status || "")));
-            const directoryProblems = (data.directories || []).filter(row => String(row.status || "") !== "verified");
-            const obsoleteDirectoryProblems = (data.obsolete_directories || []).filter(row => String(row.status || "") !== "verified");
-            const eventDocumentProblem =
-              data.event_document && String(data.event_document.status || "") !== "verified"
-                ? data.event_document
-                : null;
-            if (failedVerificationBack) failedVerificationBack.hidden=Boolean(data.complete);
-            if (!data.complete) sessionStorage.removeItem(manualGateKey);
-            if (data.complete) {
-              verifyBtn.classList.add("success");
-              verifyBtn.textContent = "✓ Prüfung erfolgreich";
-              if (summary) {
-                summary.className = "success-text";
-                summary.textContent = ok + "/" + total + " verwaltete Dateien bestätigt."
-                  + (advisories.length ? " · " + advisories.length + " zusätzliche Datei" + (advisories.length===1?"":"en") + " nur als Hinweis." : "");
-              }
-              if (label) label.textContent = "Prüfung abgeschlossen.";
-              if (errors && advisories.length) {
-                errors.style.display = "block";
-                errors.innerHTML = advisories.map(row => {
-                  const title = row.advisory_reason === "redundant_duplicate"
-                    ? "Byte-identische Zusatzkopie · nur Hinweis"
-                    : "Zusätzliche nicht verwaltete Datei · nur Hinweis";
-                  return '<div class="card" style="margin-top:8px"><strong>'+escapeHtml(title)+'</strong><div class="muted">'
-                    + escapeHtml(row.message || "") + '</div><code style="display:block;white-space:pre-wrap;word-break:break-word">'
-                    + escapeHtml(row.path || "—") + '</code></div>';
-                }).join("");
-              }
-              if (archiveBtn) archiveBtn.disabled = false;
-            } else {
-              verifyBtn.classList.add("danger");
-              verifyBtn.textContent = "✕ Prüfung mit Problemen";
-              const problemCount = problems.length + directoryProblems.length + obsoleteDirectoryProblems.length + (eventDocumentProblem ? 1 : 0);
-              if (summary) { summary.className = "danger-text"; summary.textContent = `${ok}/${total} Dateien bestätigt · ${problemCount} Problem${problemCount===1?"":"e"}.`; }
-              if (label) label.textContent = "Bitte die angezeigten Abweichungen im Finder korrigieren und erneut prüfen.";
-              if (archiveBtn) archiveBtn.disabled = true;
-              if (errors) {
-                errors.style.display = "block";
-                const fileHtml = problems.map(row => {
-                  const problemLabel =
-                    row.status === "missing" ? "Fehlt am Ziel"
-                    : row.status === "old_path_still_exists" ? "Liegt noch am alten Ort"
-                    : row.status === "size_mismatch" ? "Dateigröße abweichend"
-                    : row.status === "sha256_mismatch" ? "SHA-256 abweichend"
-                    : row.status === "needs_reassignment" ? "Noch neu zuzuordnen"
-                    : (row.message || row.status || "Problem");
-                  return `<div class="card" style="margin-top:8px"><strong>${escapeHtml(problemLabel)}</strong>${row.message ? `<div class="muted">${escapeHtml(row.message)}</div>` : ""}<div class="muted" style="margin-top:5px">${bk0511EventLabel("SOLL","To Be")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.new_path || "—")}</code></div>`;
-                }).join("");
-                const directoryHtml = directoryProblems.map(row =>
-                  `<div class="card" style="margin-top:8px"><strong>Erforderlicher Ordner fehlt</strong><div class="muted">SOLL · Kamerabibliothek</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.path || "—")}</code></div>`
-                ).join("");
-                const obsoleteHtml = obsoleteDirectoryProblems.map(row =>
-                  `<div class="card" style="margin-top:8px"><strong>Alter Ordner noch vorhanden</strong><div class="muted">Dieser Ordner wird im SOLL nicht mehr benötigt</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.path || "—")}</code></div>`
-                ).join("");
-                const eventDocumentHtml = eventDocumentProblem
-                  ? `<div class="card" style="margin-top:8px"><strong>event.json stimmt noch nicht</strong><div class="muted">${escapeHtml(eventDocumentProblem.message || "")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(eventDocumentProblem.path || "event.json")}</code></div>`
-                  : "";
-                const advisoryHtml = advisories.map(row => {
-                  const title = row.advisory_reason === "redundant_duplicate"
-                    ? "Byte-identische Zusatzkopie · nur Hinweis"
-                    : "Zusätzliche nicht verwaltete Datei · nur Hinweis";
-                  return '<div class="card" style="margin-top:8px"><strong>'+escapeHtml(title)+'</strong><div class="muted">'
-                    + escapeHtml(row.message || "") + '</div><code style="display:block;white-space:pre-wrap;word-break:break-word">'
-                    + escapeHtml(row.path || "—") + '</code></div>';
-                }).join("");
-                errors.innerHTML = fileHtml + directoryHtml + obsoleteHtml + eventDocumentHtml + advisoryHtml;
-              }
-            }
-          } catch (error) {
-            verifyBtn.classList.add("danger");
-            verifyBtn.textContent = "✕ Prüfung fehlgeschlagen";
-            if (failedVerificationBack) failedVerificationBack.hidden = false;
-            sessionStorage.removeItem(manualGateKey);
-            if (summary) { summary.className = "danger-text"; summary.textContent = bkPre71ArchiveError(error); }
-            if (errors) { errors.style.display="block"; errors.innerHTML=bkArchiveTechnicalDetails(error); }
-            if (archiveBtn) archiveBtn.disabled = true;
-          } finally {
-            verifyBtn.disabled = false;
-          }
-        });
-
-        if (archiveBtn) archiveBtn.addEventListener("click", async () => {
-          const progress = changeRequestBody.querySelector("#change-work-progress");
-          const bar = progress?.querySelector(".change-progress-bar");
-          const label = progress?.querySelector("[data-progress-label]");
-          const summary = changeRequestBody.querySelector("#change-verify-summary");
-          archiveBtn.disabled = true;
-          verifyBtn && (verifyBtn.disabled = true);
-          progress?.classList.add("active");
-          if (bar) bar.style.width = "12%";
-          if (label) label.textContent = "Geprüften SOLL-Zustand in die Datenbank übernehmen …";
-
-          let pct = 12;
-          const pulse = window.setInterval(() => {
-            pct = Math.min(78, pct + 7);
-            if (bar) bar.style.width = `${pct}%`;
-            if (pct >= 48 && label) label.textContent = bk0511EventLabel("Arbeitsbereich und Hilfslinks sicher freigeben …","Safely releasing workspace and helper links…");
-          }, 220);
-          try {
-            const res = await fetch(`/api/change-requests/${encodeURIComponent(crId)}/archive`, {
-              method:"POST",
-              headers:{"Content-Type":"application/json"},
-              body:JSON.stringify({})
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-            window.clearInterval(pulse);
-            if (bar) bar.style.width = "100%";
-            if (label) label.textContent = bk0511EventLabel("Abgeschlossen · Arbeitsbereich freigegeben und leere Quellordner aufgeräumt.","Completed · workspace released and empty source folders cleaned up.");
-            if (summary) { summary.className = "success-text"; summary.textContent = "Änderung vollständig abgeschlossen."; }
-            await new Promise(resolve => setTimeout(resolve, 280));
-
-            mandatoryArchiveChangeContext = null;
+            await requestJson(`/api/change-requests/${encodeURIComponent(crId)}/archive`,
+              {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+            archiveOperationStatus(summary,bk0511EventLabel("Änderung vollständig abgeschlossen.","Archive change completed."),"success");
+            mandatoryArchiveChangeContext=null;
             sessionStorage.removeItem(manualGateKey);
             clearChangeTaskFromUrl(crId);
-            changeRequestClose.textContent = "Schließen";
+            changeRequestClose.textContent="Schließen";
             changeRequestClose.classList.remove("danger-button");
-            if (changeRequestDialog.open) changeRequestDialog.close();
+            if(changeRequestDialog.open)changeRequestDialog.close();
             await loadEvents({reset:true});
             refreshGlobalTasks();
-            setStatus("Archivänderung abgeschlossen.", false, true);
-          } catch (error) {
-            window.clearInterval(pulse);
-            archiveBtn.disabled = false;
-            verifyBtn && (verifyBtn.disabled = false);
-            archiveBtn.textContent=bk0511EventLabel("Abschluss erneut prüfen","Retry completion");
-            const friendly=bkPre71ArchiveError(error);
-            if (label) label.textContent = friendly;
-            const completionErrors=changeRequestBody.querySelector("#change-finalize-errors");
-            if(completionErrors) completionErrors.innerHTML='<p class="danger-text">'+escapeHtml(friendly)+'</p>'+bkArchiveTechnicalDetails(error);
-            setStatus(friendly, true);
+            setStatus("Archivänderung abgeschlossen.",false,true);
+          } catch(error) {
+            archiveBtn.disabled=false;
+            const verification=error.data?.verification;
+            if(verification){
+              sessionStorage.removeItem(manualGateKey);
+              back.hidden=false;
+              renderArchiveVerificationProblems(errors,archiveVerificationProblems(verification));
+              archiveOperationStatus(summary,bk0511EventLabel("Die Archivänderung ist noch nicht vollständig.","The archive change is incomplete."),"error");
+            } else {
+              archiveOperationStatus(summary,bkPre71ArchiveError(error),"error");
+              errors.innerHTML=bkArchiveTechnicalDetails(error);
+              errors.hidden=false;
+            }
           }
         });
       } catch (error) {

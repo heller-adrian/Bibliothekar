@@ -32,6 +32,17 @@ class EventChangeApplyError(ValueError):
     pass
 
 
+class IncompleteArchiveChange(EventChangeApplyError):
+    def __init__(self, verification):
+        super().__init__(
+            "Die manuelle Archivänderung ist noch nicht vollständig geprüft. "
+            f"{verification['verified_file_count']} von {verification['file_count']} Dateien sind korrekt; "
+            f"{verification.get('open_release_count', 0)} freigewordene Dateien sind noch nicht sicher zurückgeholt; "
+            f"{verification['open_reassignment_count']} weitere Dateien benötigen Klärung."
+        )
+        self.verification = verification
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -745,7 +756,7 @@ def _checked_finish_entry(function):
             if not reviews or any(row.get('verification_status') != 'verified' for row in reviews):
                 verification = verify_event_change(database_path, cr_id, archive_root, workspace_path)
                 if not verification['complete']:
-                    raise EventChangeApplyError('Die Archivdateien müssen zuerst vollständig geprüft werden.')
+                    raise IncompleteArchiveChange(verification)
         return function(database_path, cr_id, archive_root, workspace_path)
     return call
 
@@ -830,12 +841,7 @@ def finish_event_change(
         database_path, cr_id, archive_root, workspace_path
     )
     if not verification["complete"]:
-        raise EventChangeApplyError(
-            "Die manuelle Archivänderung ist noch nicht vollständig geprüft. "
-            f"{verification['verified_file_count']} von {verification['file_count']} Dateien sind korrekt; "
-            f"{verification.get('open_release_count', 0)} freigewordene Dateien sind noch nicht sicher zurückgeholt; "
-            f"{verification['open_reassignment_count']} weitere Dateien benötigen Klärung."
-        )
+        raise IncompleteArchiveChange(verification)
 
     event_document_cleanup_spec = None
     if workspace_path is not None:
