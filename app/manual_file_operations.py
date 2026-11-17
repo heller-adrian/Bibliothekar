@@ -14,3 +14,9 @@ def group_file_operations(rows):
         pair = (parent_directory(source), parent_directory(target))
         groups.setdefault(pair, []).append(item)
     return sorted(groups.items())
+
+
+def topmost_directories(paths):
+    """Return the outermost paths of complete, already selected subtrees."""
+    directories = {PurePosixPath(path) for path in paths}
+    return sorted(path for path in directories if directories.isdisjoint(path.parents))

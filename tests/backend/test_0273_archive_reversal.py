@@ -36,7 +36,7 @@ from tests.backend.test_0271_archive_release_stock import (
 )
 
 
-def _copy_reversal_event_root(workspace: Path, archive: Path, operation: dict) -> None:
+def _copy_reversal_files(workspace: Path, archive: Path, operation: dict) -> None:
     source_text = str(operation["source"])
     target_text = str(operation["target"])
     assert source_text.startswith("Arbeitsbereich/")
@@ -44,8 +44,10 @@ def _copy_reversal_event_root(workspace: Path, archive: Path, operation: dict) -
     work = workspace / "Arbeitsbereich"
     source = work / source_text.removeprefix("Arbeitsbereich/")
     target_parent = archive / target_text.removeprefix("Kamerabibliothek/")
-    target_parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, target_parent / source.name, dirs_exist_ok=True)
+    assert target_parent.is_dir()
+    for name in operation["items"]:
+        assert not (target_parent / name).exists()
+        shutil.copyfile(source / name, target_parent / name)
 
 
 def test_0273_cancel_after_archive_removal_becomes_verified_reversal(tmp_path: Path):
@@ -83,7 +85,13 @@ def test_0273_cancel_after_archive_removal_becomes_verified_reversal(tmp_path: P
     assert {row["old_path"] for row in rows} <= {
         problem["path"] for problem in blocked.value.verification["problems"]
     }
-    _copy_reversal_event_root(case["workspace"], case["archive"], restore)
+    destination = Path(rows[0]["old_path"]).parent.as_posix()
+    assert restore["target"] == f"Kamerabibliothek/{destination}"
+    assert "/Restoration/Files/" in restore["source"] or "/Wiederherstellung/Files/" in restore["source"]
+    work = case["workspace"] / "Arbeitsbereich"
+    stock = work / prepared["original_stock_path"].removeprefix("Arbeitsbereich/")
+    assert not (stock / destination).exists()
+    _copy_reversal_files(case["workspace"], case["archive"], restore)
 
     finished = finish_archive_reversal(
         case["db"], case["archive"], case["workspace"], case["cr_id"]

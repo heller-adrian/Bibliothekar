@@ -220,14 +220,13 @@ def _compute_event_plan(
         else:
             rows = []
 
-    from app.event_layout import layout_paths, layout_role_paths, normalize_layout, resolve_layout_choice, validate_input_path
+    from app.event_layout import layout_node_paths, layout_role_paths, normalize_layout, resolve_layout_choice, validate_input_path
     from app.physical_state import organization_path_for_event_relative
 
     layout_explicit = bool(preview.get("_folder_layout_explicit"))
     current_root = PurePosixPath(str(event["start_datetime"])[:4], str(event["folder_name"]))
     configured_exports = layout_role_paths(current_layout_state["layout"], "export")
     requested_layout_state: dict[str, Any] | None = None
-    requested_layout_paths: set[str] = set()
     if layout_explicit:
         raw_layout = preview.get("folder_layout")
         if not isinstance(raw_layout, dict):
@@ -246,7 +245,6 @@ def _compute_event_plan(
             "input_path": requested_input,
             "layout": normalized_layout,
         }
-        requested_layout_paths = set(layout_paths(normalized_layout))
 
     parent_folder = str(preview.get("parent_folder") or "").strip()
     child_folder = str(preview.get("child_folder") or "").strip()
@@ -409,23 +407,7 @@ def _compute_event_plan(
         safe_branch = branch if branch in {"All", "Sorted", "Alle", "Sortiert", "Export"} else ""
 
         def organization_path(target_leaf: dict[str, Any] | None = None) -> str:
-            if target_leaf is not None:
-                if not target_leaf["structure_enabled"]:
-                    return ""
-                for old_leaf in old_leaves_by_prefix:
-                    prefix = old_leaf["leaf_prefix"]
-                    if not old_event_relative_path or (prefix and not old_event_relative_path.startswith(prefix + "/")):
-                        continue
-                    relative = old_event_relative_path.removeprefix(prefix + "/") if prefix else old_event_relative_path
-                    observed = organization_path_for_event_relative(relative, old_leaf)
-                    if observed in layout_paths(target_leaf["layout"]):
-                        return observed
-                    if PurePosixPath(relative).parent == PurePosixPath(".") and not target_leaf["input_path"]:
-                        return ""
-                    break
-                exports = layout_role_paths(target_leaf["layout"], "export")
-                return exports[0] if branch == "Export" and exports else str(target_leaf["input_path"])
-            if requested_layout_state is None:
+            if target_leaf is None and requested_layout_state is None:
                 if saved_layout is None:
                     return safe_branch
                 if not current_layout_state["structure_enabled"]:
@@ -435,19 +417,32 @@ def _compute_event_plan(
                 if branch == "Export" and configured_exports:
                     return configured_exports[0]
                 return str(current_layout_state["input_path"] or "")
-            if not bool(requested_layout_state["structure_enabled"]):
+            target_layout = target_leaf or requested_layout_state
+            if not target_layout["structure_enabled"]:
                 return ""
-            # OFF -> ON is intentionally simple in 0.28.3: no historical
-            # placement restoration; everything enters the chosen input.
-            if not bool(current_layout_state.get("structure_enabled")):
-                return str(requested_layout_state["input_path"] or "")
-            observed = organization_path_for_event_relative(
-                old_event_relative_path,
-                current_layout_state,
-            )
-            if observed and observed in requested_layout_paths:
-                return observed
-            return str(requested_layout_state["input_path"] or "")
+
+            original_layout = current_layout_state
+            relative = old_event_relative_path
+            if target_leaf is not None and relative:
+                for old_leaf in old_leaves_by_prefix:
+                    prefix = old_leaf["leaf_prefix"]
+                    if not prefix or relative.startswith(prefix + "/"):
+                        relative = relative.removeprefix(prefix + "/") if prefix else relative
+                        original_layout = old_leaf
+                        break
+            observed = organization_path_for_event_relative(relative, original_layout)
+            exports = layout_role_paths(target_layout["layout"], "export")
+            if branch == "Export" and exports:
+                return exports[0]
+            if observed:
+                old_nodes = layout_node_paths(original_layout["layout"])
+                new_nodes = layout_node_paths(target_layout["layout"])
+                original_id = next((node_id for node_id, path in old_nodes.items() if path == observed), None)
+                if original_id in new_nodes:
+                    return new_nodes[original_id]
+                if observed in new_nodes.values():
+                    return observed
+            return str(target_layout["input_path"] or "")
 
         parts = [year, parent_folder]
 

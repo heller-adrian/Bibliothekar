@@ -368,3 +368,109 @@ def test_0326_assistant_uses_explicit_library_path_labels(tmp_path: Path):
     )
     assert operation["source"].startswith("Testarbeitsbereich/Später zuordnen/")
     assert operation["target"].startswith("Testarchiv/")
+
+
+def test_layout_only_change_stages_new_nested_branch_without_copying_its_parent(tmp_path):
+    from app.event_layout import ensure_event_layout_snapshot, update_event_layout
+
+    db, workspace, archive, folder, old_family, _, _ = _seed(
+        tmp_path, full_archive_triplet=True, native_archive=True,
+    )
+    root = Path("2026") / folder
+    original = {"version": 2, "nodes": [
+        {"id": "input", "name": "Alle"}, {"id": "export", "name": "Export", "role": "export"},
+        {"id": "sorted", "name": "Sortiert"},
+    ]}
+    with database_connection(db) as connection:
+        ensure_event_layout_snapshot(connection, "archive", now=NOW)
+        update_event_layout(connection, "archive", structure_enabled=True, input_path="Alle",
+                            layout=original, updated_at=NOW)
+    preview = _preview(folder, old_family, None)
+    preview["_folder_layout_explicit"] = True
+    preview["folder_layout"] = {
+        "structure_enabled": True, "input_path": "Alle", "layout": {"version": 2, "nodes": [
+            {"id": "input", "name": "Alle", "children": [{"id": "new", "name": "Auswahl"}]},
+            {"id": "export", "name": "Export", "role": "export"},
+        ]},
+    }
+    proposed = propose_event_change(
+        db, "old", "archive", preview, event_name="Test Archiv 2", archive_root=archive, workspace_path=workspace,
+    )
+    cr_id = proposed["change_request_id"]
+    confirm_event_change(db, cr_id, archive, workspace)
+    assistant = build_archive_change_assistant(db, archive, workspace, cr_id, scan_live=True)
+    expected = (root / "Alle" / "Auswahl").as_posix()
+    assert assistant["preparation"]["missing_directories"] == [expected]
+    assert assistant["obsolete_directories"] == [(root / "Sortiert").as_posix()]
+    [operation] = [op for op in assistant["operations"] if op["kind"] == "copy_helper_folders"]
+    assert operation["target"] == f"Kamerabibliothek/{root}/Alle"
+    assert operation["items"] == ["Auswahl"]
+    staged = workspace / operation["sources"][0]
+    assert staged.is_dir() and not list(staged.iterdir())
+    assert not (workspace / "Arbeitsbereich" / "Später zuordnen" / root / "Export").exists()
+    assert any("Auswahl" in line for line in assistant["target_structure"]["lines"])
+    # Only the newly listed subfolder and the explicit document are copied.
+    copy_prepared_event_document(db, workspace, archive, cr_id)
+    incomplete = verify_event_change(db, cr_id, archive, workspace)
+    assert not incomplete["complete"] and incomplete["missing_directory_count"] == 1
+    (archive / root / "Sortiert").rmdir()
+    shutil.copytree(staged, archive / expected)
+    assert verify_event_change(db, cr_id, archive, workspace)["complete"]
+    assert (archive / root / "Alle" / "alt.JPG").read_bytes() == b"alt"
+
+
+def test_stable_folder_renames_reuse_existing_archive_directories(tmp_path):
+    from app.event_layout import ensure_event_layout_snapshot, update_event_layout
+
+    db, workspace, archive, folder, old_family, _, _ = _seed(
+        tmp_path, full_archive_triplet=True, native_archive=True,
+    )
+    root = Path("2026") / folder
+    with database_connection(db) as connection:
+        ensure_event_layout_snapshot(connection, "archive", now=NOW)
+        update_event_layout(
+            connection, "archive", structure_enabled=True, input_path="Alle", updated_at=NOW,
+            layout={"version": 2, "nodes": [
+                {"id": "input", "name": "Alle"}, {"id": "export", "name": "Export", "role": "export"},
+                {"id": "sorted", "name": "Sortiert"},
+            ]},
+        )
+    preview = _preview(folder, old_family, None)
+    preview["_folder_layout_explicit"] = True
+    preview["folder_layout"] = {
+        "structure_enabled": True, "input_path": "All Neu", "layout": {"version": 2, "nodes": [
+            {"id": "input", "name": "All Neu"}, {"id": "export", "name": "Export Test", "role": "export"},
+            {"id": "new", "name": "Auswahl"},
+        ]},
+    }
+    proposed = propose_event_change(
+        db, "old", "archive", preview, event_name="Test Archiv 2", archive_root=archive, workspace_path=workspace,
+    )
+    cr_id = proposed["change_request_id"]
+    confirm_event_change(db, cr_id, archive, workspace)
+    assistant = build_archive_change_assistant(db, archive, workspace, cr_id, scan_live=True)
+    renamed = {op["source"]: op["target"] for op in assistant["operations"] if op["kind"] == "rename_archive_folder"}
+    label = f"Kamerabibliothek/{root}"
+    assert renamed == {f"{label}/Alle": f"{label}/All Neu", f"{label}/Export": f"{label}/Export Test"}
+    assert not any(op["kind"] == "move_archive_files" for op in assistant["operations"])
+    helper = workspace / "Arbeitsbereich" / "Später zuordnen" / root
+    assert sorted(path.name for path in helper.iterdir()) == ["Auswahl", "event.json"]
+    old = archive / root / "Alle"
+    foreign = old / "unreviewed.txt"
+    foreign.write_bytes(b"keep")
+    blocked = build_archive_change_assistant(db, archive, workspace, cr_id, scan_live=True)
+    assert next(op for op in blocked["operations"] if op.get("source") == f"{label}/Alle")["state"] == "blocked"
+    assert foreign.read_bytes() == b"keep"
+    foreign.rename(archive / "unreviewed.txt")
+    input_inode = old.stat().st_ino
+    old.rename(archive / root / "All Neu")
+    (archive / root / "Export").rename(archive / root / "Export Test")
+    (archive / root / "Sortiert").rmdir()
+    shutil.copytree(helper / "Auswahl", archive / root / "Auswahl")
+    copy_prepared_event_document(db, workspace, archive, cr_id)
+    assert verify_event_change(db, cr_id, archive, workspace)["complete"]
+    finish_event_change(db, cr_id, archive, workspace)
+    archived = archive / root / "All Neu" / "alt.JPG"
+    assert archived.read_bytes() == b"alt" and archived.parent.stat().st_ino == input_inode
+    with database_connection(db) as connection:
+        assert connection.execute("SELECT current_relative_path FROM files WHERE job_id='old'").fetchone()[0] == archived.relative_to(archive).as_posix()

@@ -20,6 +20,7 @@ import hashlib
 import os
 
 from app.database import database_connection
+from app.manual_file_operations import topmost_directories
 from app.workspace_layout import backup_root, shared_work_root
 
 
@@ -417,7 +418,16 @@ def _desired_directory_plan(
         directories.add(container)
         for branch in _plan_fallback_branches(plan):
             directories.add(container / branch)
+    if preview.get("_folder_layout_explicit"):
+        directories.update(parent for directory in tuple(directories)
+                           for parent in directory.parents if parent.is_relative_to(root))
     return directories
+
+
+def _target_directories_for_change(preview, plan):
+    return _desired_directory_plan(
+        preview, plan, moves_only=not preview.get("_folder_layout_explicit"), within_event_only=True,
+    )
 
 
 def _current_event_root(database_path: Path, event_id: str) -> PurePosixPath:
@@ -460,6 +470,37 @@ def _existing_suffixes(
                 result.add(tuple(child.relative_to(event_root).parts))
         directories[:] = safe
     return result
+
+
+def _obsolete_layout_directories(database_path, event_id, current_root, preview, plan, items):
+    from app.event_layout import event_layout_from_row
+    from app.event_leaf_layouts import effective_leaf_layouts
+
+    with database_connection(database_path) as connection:
+        layout = connection.execute(
+            "SELECT * FROM event_folder_layouts WHERE event_id=?", (event_id,),
+        ).fetchone()
+        leaves = effective_leaf_layouts(connection, event_id)
+    original = {
+        "parent_folder": current_root.name,
+        "start_date": current_root.parts[0] + "-01-01",
+        "target_leaf_layouts": list(leaves.values()),
+        "_folder_layout_explicit": True,
+    }
+    if layout:
+        original["folder_layout"] = event_layout_from_row(layout)
+    old_files = [
+        {**item, "action": "keep", "new_path": old.as_posix()}
+        for item in items
+        if item.get("old_path") and not item.get("advisory")
+        and (old := _safe_relative(item["old_path"])).is_relative_to(current_root)
+    ]
+    old_directories = _desired_directory_plan(original, {"families_with_plans": old_files})
+    desired = _target_directories_for_change(preview, plan)
+    return {
+        path for path in old_directories - desired
+        if path != current_root and not any(path in target.parents for target in desired)
+    }
 
 
 def _obsolete_directories_from_plan(
@@ -522,6 +563,9 @@ def _obsolete_directories_from_plan(
     removed_child_directories = {
         current_root / name for name in (old_children - wanted_children)
     }
+    if preview.get("_folder_layout_explicit"):
+        obsolete = _obsolete_layout_directories(database_path, event_id, current_root, preview, plan, items)
+        return [path.as_posix() for path in topmost_directories(obsolete | removed_child_directories)]
     if not affected_items:
         return sorted(path.as_posix() for path in removed_child_directories)
 
@@ -632,7 +676,7 @@ def describe_archive_change_staging(
     except ArchiveStagingError:
         existing_suffixes = set()
     desired = _desired_directory_plan(preview, plan)
-    touched = _desired_directory_plan(preview, plan, moves_only=True, within_event_only=True)
+    touched = _target_directories_for_change(preview, plan)
 
     missing: set[PurePosixPath] = set()
     for directory in touched:
@@ -730,6 +774,7 @@ def _request_preview_and_plan(
         "subevents": subevents,
     }
     if cr.get("folder_layout_json") is not None:
+        preview["_folder_layout_explicit"] = True
         try:
             stored_layout = json.loads(str(cr.get("folder_layout_json") or "{}"))
         except Exception as exc:
@@ -799,6 +844,48 @@ def _request_preview_and_plan(
         ],
     }
     return cr, preview, plan
+
+
+def planned_archive_layout_renames(database_path, archive_root, cr_id, description, directories, files, rows):
+    from app.archive_rename_guidance import qualify_layout_renames
+    from app.event_layout import event_layout_from_row, layout_node_paths
+    from app.event_leaf_layouts import effective_leaf_layouts
+
+    cr, preview, _ = _request_preview_and_plan(database_path, cr_id)
+    if not preview.get("_folder_layout_explicit") or description["current_root"] != description["target_root"]:
+        return []
+    root = _safe_relative(description["current_root"])
+    with database_connection(database_path) as connection:
+        row = connection.execute(
+            "SELECT * FROM event_folder_layouts WHERE event_id=?", (cr["event_id"],),
+        ).fetchone()
+        old_leaves = effective_leaf_layouts(connection, cr["event_id"])
+    new_leaves = {leaf["leaf_key"]: leaf for leaf in preview.get("target_leaf_layouts") or []}
+    if row:
+        old_leaves.setdefault(cr["event_id"], {**event_layout_from_row(row), "leaf_prefix": ""})
+        if not preview.get("preserve_day_folders"):
+            new_leaves.setdefault(cr["event_id"], {**preview["folder_layout"], "leaf_prefix": ""})
+    pairs = []
+    for key, old in old_leaves.items():
+        new = new_leaves.get(key)
+        if not new or not old["structure_enabled"] or not new["structure_enabled"]:
+            continue
+        old_paths, new_paths = (layout_node_paths(item["layout"]) for item in (old, new))
+        pairs.extend((root / old["leaf_prefix"] / old_paths[node], root / new["leaf_prefix"] / new_paths[node])
+                     for node in old_paths.keys() & new_paths.keys()
+                     if old_paths[node] != new_paths[node])
+    return qualify_layout_renames(archive_root, pairs, directories, files, description["desired_directories"], rows)
+
+
+def staging_without_renamed_folders(description, renames):
+    targets = tuple(_safe_relative(item["target"]) for item in renames)
+    return {
+        **description,
+        "directory_renames": renames,
+        **{key: [path for path in description[key]
+                 if not any(_safe_relative(path).is_relative_to(target) for target in targets)]
+           for key in ("missing_directories", "helper_directories")},
+    }
 
 
 def describe_archive_change_staging_for_request(
@@ -934,9 +1021,7 @@ def required_target_directories_for_request(
     except ArchiveStagingError:
         # Legacy requests without a structural target use file-only verification.
         return []
-    directories = _desired_directory_plan(
-        preview, plan, moves_only=True, within_event_only=True,
-    )
+    directories = _target_directories_for_change(preview, plan)
     return sorted(path.as_posix() for path in directories)
 
 
@@ -972,6 +1057,10 @@ def prepare_archive_change_staging_for_request(
         plan,
         delete_event=bool(cr.get("delete_event") or 0),
     )
+    from app.archive_reversal import _manifest_path, _read_baseline
+    if _manifest_path(workspace_path, cr_id).is_file():
+        baseline = _read_baseline(workspace_path, cr_id)
+        description = staging_without_renamed_folders(description, baseline.get("directory_renames", []))
     from app.archive_change_document import projected_archive_event_document_spec
     event_document = projected_archive_event_document_spec(database_path, cr_id)
     description = {

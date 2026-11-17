@@ -25,6 +25,7 @@ from app.archive_locations import (
 )
 from app.database import database_connection
 from app.legacy_adoption_paths import AdoptionError, bound_directory, bound_file, bound_sha256
+from app.manual_file_operations import group_file_operations, topmost_directories
 from app.workspace_layout import backup_root, shared_work_root
 
 
@@ -300,8 +301,11 @@ def prepare_reversal_baseline(
             "sha256": expected_sha,
         })
 
-    from app.archive_staging import describe_archive_change_staging_for_request
+    from app.archive_staging import describe_archive_change_staging_for_request, planned_archive_layout_renames
     description = describe_archive_change_staging_for_request(database_path, archive_root, cr_id)
+    directory_renames = planned_archive_layout_renames(
+        database_path, archive_root, cr_id, description, directories, original_file_paths, request_rows,
+    )
     original_names = {archive_name_key(path) for path in directories}
     new_directories = [path for path in description["desired_directories"]
                        if archive_name_key(path) not in original_names and existing(path) is None]
@@ -317,6 +321,7 @@ def prepare_reversal_baseline(
         "target_root": target_root,
         "original_directories": sorted(set(directories)),
         "original_file_paths": sorted(set(original_file_paths)),
+        "directory_renames": directory_renames,
         "absent_incoming_targets": sorted(set(absent_targets)),
         "absent_directories": new_directories,
         "absent_document": absent_document,
@@ -410,6 +415,25 @@ def _find_archive_location(
     return None
 
 
+def _restoration_file(restore_root: Path, archive_root: Path, path: str) -> Path:
+    relative = _safe_relative(path)
+    mirrored = restore_root / relative
+    slot = hashlib.sha256(relative.parent.as_posix().encode()).hexdigest()[:24]
+    loose = restore_root / "Files" / slot / relative.name
+    # Existing packages and interrupted preparations retain their known source.
+    if os.path.lexists(mirrored):
+        return mirrored
+    if os.path.lexists(loose):
+        return loose
+    archive_parent = _safe_archive_path(archive_root, path).parent
+    return loose if relative.name != "event.json" and archive_parent.is_dir() else mirrored
+
+
+def _missing_original_directories(archive_root: Path, manifest: dict[str, Any]) -> list[str]:
+    return [path for path in manifest.get("original_directories", ())
+            if not _safe_archive_path(archive_root, path).is_dir()]
+
+
 @protect(workspace_arg='workspace_path', database_arg='database_path', kind='archive', error_type=ArchiveReversalError)
 def prepare_archive_reversal(
     database_path: Path,
@@ -431,17 +455,22 @@ def prepare_archive_reversal(
     work_root = _work_root(workspace_path)
     central_root = _central_root(workspace_path)
     prepared_targets: list[tuple[Path, int, str]] = []
-    for rel in manifest.get("original_directories") or []:
+    validate_active_roots()
+    restore_root.mkdir(parents=True, exist_ok=True)
+    for rel in _missing_original_directories(archive_root, manifest):
+        if os.path.lexists(_safe_archive_path(archive_root, rel)):
+            continue
         validate_active_roots()
-        restore_root.joinpath(*_safe_relative(rel).parts).mkdir(parents=True, exist_ok=True)
+        (restore_root / _safe_relative(rel)).mkdir(parents=True, exist_ok=True)
 
     for asset in manifest.get("original_assets") or []:
         source = work_root.joinpath(
             *_safe_relative(asset["backup_relative_path"]).parts
         )
-        target = restore_root.joinpath(
-            *_safe_relative(asset["relative_path"]).parts
-        )
+        if _matches(_safe_archive_path(archive_root, asset["relative_path"]),
+                    asset["size_bytes"], asset["sha256"]):
+            continue
+        target = _restoration_file(restore_root, archive_root, asset["relative_path"])
         validate_active_roots()
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists():
@@ -457,9 +486,10 @@ def prepare_archive_reversal(
         ))
 
     event_json = manifest.get("event_json")
-    if event_json:
+    if event_json and not _matches(_safe_archive_path(archive_root, event_json["relative_path"]),
+                                   event_json["size_bytes"], event_json["sha256"]):
         source = work_root.joinpath(*_safe_relative(event_json["backup_relative_path"]).parts)
-        target = restore_root.joinpath(*_safe_relative(event_json["relative_path"]).parts)
+        target = _restoration_file(restore_root, archive_root, event_json["relative_path"])
         validate_active_roots()
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists():
@@ -489,7 +519,7 @@ def prepare_archive_reversal(
         found = _find_archive_location(archive_root, manifest, old_path, new_path, size, sha)
         if found:
             continue
-        staged = restore_root.joinpath(*_safe_relative(old_path).parts)
+        staged = _restoration_file(restore_root, archive_root, old_path)
         if _matches(staged, size, sha):
             continue
         release_rel = str(row.get("workspace_release_path") or "").strip()
@@ -500,7 +530,7 @@ def prepare_archive_reversal(
         if not _matches(source, size, sha):
             missing_sources.append(old_path)
             continue
-        target = restore_root.joinpath(*_safe_relative(old_path).parts).resolve(strict=False)
+        target = staged
         validate_active_roots()
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists():
@@ -677,7 +707,7 @@ def _reversal_state(
 
     operations: list[dict[str, Any]] = []
     move_groups: dict[tuple[str, str], list[str]] = {}
-    restore_items: list[str] = []
+    restore_items: list[tuple[str, str, str]] = []
     remove_files, ambiguous = _incoming_reversal(
         archive_root, workspace_path, manifest, rows, require_receipt=True,
     )
@@ -705,11 +735,11 @@ def _reversal_state(
             key = (PurePosixPath(found).parent.as_posix(), PurePosixPath(old_path).parent.as_posix())
             move_groups.setdefault(key, []).append(PurePosixPath(found).name)
             continue
-        staged = restore_root.joinpath(*_safe_relative(old_path).parts)
+        staged = _restoration_file(restore_root, archive_root, old_path)
         if _matches(staged, size, sha):
-            restore_items.append(old_path)
+            restore_items.append((staged.relative_to(work_root).as_posix(), old_path, PurePosixPath(old_path).name))
         else:
-            restore_items.append(old_path)
+            ambiguous.append(old_path)
 
     event_json = manifest.get("event_json")
     if event_json:
@@ -721,7 +751,11 @@ def _reversal_state(
                 projected and projected["target_relative_path"] == relative
                 and _matches(target, projected["size_bytes"], projected["sha256"])
             ):
-                restore_items.append(relative)
+                staged = _restoration_file(restore_root, archive_root, relative)
+                if _matches(staged, event_json["size_bytes"], event_json["sha256"]):
+                    restore_items.append((staged.relative_to(work_root).as_posix(), relative, "event.json"))
+                else:
+                    ambiguous.append(relative)
             else:
                 ambiguous.append(relative)
     generated, foreign_document = _generated_document_reversal(archive_root, manifest)
@@ -730,22 +764,37 @@ def _reversal_state(
     if foreign_document:
         ambiguous.append(foreign_document)
 
-    missing_dirs = [
-        rel for rel in manifest.get("original_directories") or []
-        if not _safe_archive_path(archive_root, rel).is_dir()
-    ]
+    missing_dirs = _missing_original_directories(archive_root, manifest)
+    copy_roots = []
+    for relative in topmost_directories(missing_dirs):
+        target = _safe_archive_path(archive_root, relative)
+        staged = restore_root / relative
+        if os.path.lexists(target) or not staged.is_dir() or staged.is_symlink():
+            ambiguous.append(relative.as_posix())
+            continue
+        copy_roots.append(relative)
+        operations.append({
+            "kind": "restore_folders",
+            "title": "Fehlenden ursprünglichen Ordner wiederherstellen",
+            "source": work_display_root + "/" + staged.relative_to(work_root).as_posix(),
+            "target": archive_display_root + "/" + relative.parent.as_posix(),
+            "items": [relative.name],
+            "detail": "Kopiere nur den genannten Ordner in seinen Zielordner. Vorhandene Ordner nicht ersetzen.",
+            "state": "pending",
+        })
 
-    if restore_items or missing_dirs:
+    loose_files = (item for item in restore_items
+                   if not any(PurePosixPath(item[1]).is_relative_to(root)
+                              and (work_root / item[0]).is_relative_to(restore_root / root)
+                              for root in copy_roots))
+    for (source, target), names in group_file_operations(loose_files):
         operations.append({
             "kind": "restore_from_ssd",
-            "title": "Ursprünglichen Bestand aus Später zuordnen zurückkopieren",
-            "source": work_display_root + "/" + (
-                restore_root.joinpath(*_safe_relative(str(manifest["original_root"])).parts)
-                .relative_to(work_root).as_posix()
-            ),
-            "target": archive_display_root + "/" + PurePosixPath(str(manifest["original_root"])).parent.as_posix(),
-            "items": sorted(set([PurePosixPath(value).name for value in restore_items] + [PurePosixPath(value).name for value in missing_dirs])),
-            "detail": "Fehlende ursprüngliche Ordner und Dateien aus dem vorbereiteten Rückänderungsbestand zurück in die alte Archivstruktur übernehmen.",
+            "title": "Ursprüngliche Dateien aus dem Arbeitsbereich zurückkopieren",
+            "source": work_display_root + "/" + source,
+            "target": archive_display_root + "/" + target,
+            "items": sorted(names),
+            "detail": "Kopiere nur die genannten Dateien in den Zielordner. Ersetze ausschließlich die angegebene event.json.",
             "state": "pending",
         })
 
@@ -819,15 +868,12 @@ def _reversal_state(
             if compact:
                 operations = compact
 
-    restore_event_root = restore_root.joinpath(
-        *_safe_relative(str(manifest["original_root"])).parts
-    )
     return {
         "manifest": manifest,
         "operations": operations,
         "complete": len(operations) == 0,
         "original_stock_path": work_display_root + "/" + (
-            restore_event_root.relative_to(work_root).as_posix()
+            restore_root.relative_to(work_root).as_posix()
         ),
     }
 
@@ -857,7 +903,6 @@ def build_archive_reversal_assistant(
                 (
                     _base(workspace_path, cr_id)
                     / directory_name(_base(workspace_path, cr_id), "restoration")
-                    / Path(str(manifest["original_root"]))
                 )
                 .relative_to(_work_root(workspace_path)).as_posix()
             ),

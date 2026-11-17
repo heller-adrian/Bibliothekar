@@ -82,3 +82,90 @@ def qualify_rename(archive,rows,*,current_document,replacement,replacement_meta,
           {'kind':'replace_event_document','title':'Aktuelle event.json ins Archiv übernehmen','source':work_label+'/'+replacement.relative_to(work_root).as_posix(),
            'target':archive_label+'/'+str(_relative(document_target)),'items':['event.json'],'file_count':1,'state':'pending','detail':'Die bestehende event.json im Archiv durch die vorbereitete neue event.json ersetzen.'}]
     except (KeyError,ValueError,OSError,RuntimeError):return None
+
+
+def qualify_layout_renames(archive_root, pairs, original_directories, original_files, desired, rows):
+    """Use a directory rename only where it exactly implements the reviewed move rows."""
+    from app.archive_locations import archive_target_lookup
+
+    existing = archive_target_lookup(archive_root)
+    before = {PurePosixPath(path) for path in original_directories}
+    after = {PurePosixPath(path) for path in desired}
+    files = [PurePosixPath(path) for path in original_files]
+    moves = {PurePosixPath(row["old_path"]): row for row in rows
+             if row.get("old_path") and row.get("source_root_kind") != "shared_workspace"}
+    result = []
+    for source, target in sorted(set(pairs)):
+        if (source.parent != target.parent or source not in before or source in after
+                or target not in after or existing(target.as_posix()) is not None):
+            continue
+        if (any(source.is_relative_to(PurePosixPath(item["source"])) for item in result)
+                or any(target.is_relative_to(PurePosixPath(item["target"])) for item in result)):
+            continue
+        if {target / path.relative_to(source) for path in before if path.is_relative_to(source)} != {
+            path for path in after if path.is_relative_to(target)
+        }:
+            continue
+        members = {}
+        for path in files:
+            if not path.is_relative_to(source):
+                continue
+            row = moves.get(path, {})
+            relative = path.relative_to(source).as_posix()
+            if row.get("action") == "delete":
+                continue
+            elif (row.get("action") == "move" and row.get("expected_sha256")
+                    and row.get("new_path") == (target / relative).as_posix()):
+                members[relative] = (row["expected_size_bytes"], row["expected_sha256"])
+            else:
+                break
+        else:
+            destinations = {row["new_path"] for row in rows if row.get("new_path")
+                            and PurePosixPath(row["new_path"]).is_relative_to(target)}
+            if destinations != {(target / relative).as_posix() for relative in members}:
+                continue
+            info = (archive_root / source).stat(follow_symlinks=False)
+            result.append({"source": source.as_posix(), "target": target.as_posix(),
+                           "identity": [info.st_dev, info.st_ino], "members": members,
+                           "directories": sorted(path.relative_to(source).as_posix()
+                                                 for path in before if path != source and path.is_relative_to(source))})
+    return result
+
+
+def layout_rename_state(archive_root, rename):
+    """Recheck the directory's identity and contents before suggesting a rename."""
+    from app.archive_locations import ArchiveLocationError, archive_target_lookup
+    from app.archive_reversal import _matches
+
+    lookup = archive_target_lookup(archive_root)
+    try:
+        source, target = (lookup(rename[key]) for key in ("source", "target"))
+        if (source is None) == (target is None):
+            return "blocked"
+        root = source or target
+        assert root is not None
+        info = root.stat(follow_symlinks=False)
+        if (not stat.S_ISDIR(info.st_mode) or [info.st_dev, info.st_ino] != rename["identity"]
+                or root.relative_to(archive_root.resolve()).as_posix() != rename["source" if source else "target"]):
+            return "blocked"
+        directories, files = set(), set()
+        def walk_error(error):
+            raise error
+        for directory, names, entries in os.walk(root, followlinks=False, onerror=walk_error):
+            for name in names:
+                path = Path(directory) / name
+                if path.is_symlink():
+                    return "blocked"
+                directories.add(path.relative_to(root).as_posix())
+            for name in entries:
+                path = Path(directory) / name
+                key = path.relative_to(root).as_posix()
+                proof = rename["members"].get(key)
+                if not proof or not _matches(path, *proof):
+                    return "blocked"
+                files.add(key)
+        if directories == set(rename["directories"]) and files == set(rename["members"]):
+            return "pending" if source else "done"
+    except (ArchiveLocationError, OSError, RuntimeError, ValueError):
+        pass
+    return "blocked"

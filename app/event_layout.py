@@ -122,18 +122,23 @@ def normalize_layout(value: Any) -> dict[str, Any]:
     return {"version": 2, "nodes": normalize_nodes(raw_nodes)}
 
 
-def layout_paths(layout: dict[str, Any]) -> list[str]:
+def layout_node_paths(layout: dict[str, Any]) -> dict[str, str]:
+    """Index the complete configured paths by stable folder ID."""
     normalized = normalize_layout(layout)
-    result: list[str] = []
+    result: dict[str, str] = {}
 
     def walk(nodes: list[dict[str, Any]], prefix: tuple[str, ...] = ()) -> None:
         for node in nodes:
             parts = (*prefix, str(node["name"]))
-            result.append(PurePosixPath(*parts).as_posix())
+            result[node["id"]] = PurePosixPath(*parts).as_posix()
             walk(node.get("children") or [], parts)
 
     walk(normalized["nodes"])
     return result
+
+
+def layout_paths(layout: dict[str, Any]) -> list[str]:
+    return list(layout_node_paths(layout).values())
 
 
 def layout_role_paths(layout: dict[str, Any], role: str) -> list[str]:

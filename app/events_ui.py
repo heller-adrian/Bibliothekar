@@ -4574,7 +4574,8 @@ EVENTS_HTML = r"""<!doctype html>
         replace_event_document:"Copy updated event.json into archive",
         move_archive_files:"Move files within the camera library",
         remove_directories:"Remove obsolete folders",
-        restore_from_ssd:"Restore files from SSD",
+        restore_folders:"Restore missing original folder",
+        restore_from_ssd:"Restore original files from Workspace",
         move_back:"Move archive files to their original locations",
         remove_new_files:"Remove new archive files",
         archive_conflict:"Archive paths with unverified ownership",
@@ -4589,12 +4590,16 @@ EVENTS_HTML = r"""<!doctype html>
       const detail={
         remove_deleted_event_root:
           "After safely recovering all archive files to the SSD, remove the previous event folder, including its event.json.",
+        rename_archive_folder:
+          "Rename only the listed folder. Keep any existing destination intact.",
         replace_event_document:
           "Replace the existing event.json with the prepared version. Do not leave a second event.json in the event folder.",
         remove_directories:
           "After moving the files, remove these old directories only when they are empty.",
+        restore_folders:
+          "Copy the named folder to its destination. Keep existing folders intact.",
         restore_from_ssd:
-          "Restore missing original folders and files from the verified SSD inventory into the original archive structure.",
+          "Copy only the listed files to the destination folder. Replace only the indicated event.json.",
         move_back:
           "These files still exist in the archive and must be moved back to their original locations.",
         remove_new_files:
@@ -4605,11 +4610,9 @@ EVENTS_HTML = r"""<!doctype html>
           "After restoring file positions, remove the directories created by the discarded change."
       }[String(op.kind||"")];
       if(detail) return detail;
-      if(op.kind==="copy_helper_folders") return source.includes("event.json")
-        ? "Copy the prepared structure into the archive. Replace the existing event.json with the verified new version; never leave duplicate event.json files."
-        : "Copy the prepared folders into the archive together in one operation.";
-      if(op.kind==="copy_files")
-        return `Copy ${count} ${count===1?"file":"files"} into the existing destination folder.`;
+      if(op.kind==="copy_helper_folders") return (op.items || []).includes("event.json")
+        ? "Copy the listed folders and replace event.json with the prepared version."
+        : "Copy only the listed folders to the specified destination. Keep existing folders intact.";
       if(op.kind==="move_archive_files")
         return `Move ${count} ${count===1?"file":"files"} to the specified destination folder.`;
       return window.BibliothekarI18n?.t?.(source) || source;
