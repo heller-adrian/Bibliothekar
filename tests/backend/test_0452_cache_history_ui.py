@@ -175,7 +175,9 @@ def test_0452_patch_publish_requires_explicit_release_request():
     assert "uses: ./.github/workflows/publish-container.yml" in trigger_workflow
     assert "type=raw,value=patch-" in main_workflow
     # Patch builds never overwrite stable release tags or the latest image.
-    assert "enable=${{ github.ref == 'refs/heads/main' }}" in main_workflow
+    assert "if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'" in main_workflow
+    assert "uses: ./.github/workflows/publish-qualified-stable.yml" in main_workflow
+    assert "type=raw,value=latest" not in main_workflow
     assert ".github/release-requests/**" in trigger_workflow
 
 

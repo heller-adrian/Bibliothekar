@@ -74,6 +74,14 @@ async function check(browser, language, width) {
     assert.ok(bounds.x - day.x - day.width >= 20);
   }
   await editor.locator(".bk-event-layout-editor summary").first().click();
+  const rootChoice = editor.locator(".bk-folder-input-root");
+  const gap = await rootChoice.evaluate(label => {
+    const radio = label.querySelector("input").getBoundingClientRect();
+    return label.querySelector("strong").getBoundingClientRect().left - radio.right;
+  });
+  assert.ok(gap >= 6, "the input radio has room before the localized label");
+  await rootChoice.locator("strong").click();
+  assert.ok(await rootChoice.locator("input").isChecked());
   await editor.locator("[data-bk-layout-name=export]").fill("Export Test");
   assert.equal(await editor.locator(".bk-event-export-heading + select option:checked").textContent(),"Export Test");
 

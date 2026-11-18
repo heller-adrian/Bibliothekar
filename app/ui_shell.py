@@ -985,7 +985,8 @@ button.bk-busy::after {
   white-space: nowrap; line-height: 1.2; margin-left: auto;
 }
 #bk-folder-layout-settings input[type="checkbox"],
-#bk-folder-layout-settings input[type="radio"] {
+#bk-folder-layout-settings input[type="radio"],
+:where(#event-dialog, #event-edit-dialog) .bk-folder-input-root > .bk-folder-input-radio {
   width: 18px !important; min-width: 18px !important;
   height: 18px !important; min-height: 18px !important;
   padding: 0 !important; margin: 0 !important;
@@ -994,11 +995,11 @@ button.bk-busy::after {
 #bk-folder-layout-settings input[type="checkbox"] { border-radius: 4px !important; }
 #bk-folder-layout-settings input[type="radio"] { border-radius: 50% !important; }
 .bk-folder-input-root {
-  display: grid; grid-template-columns: 18px minmax(0, 1fr) auto;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center; gap: 8px; padding: 7px 9px;
   border: 1px solid var(--bk-line); border-radius: 9px;
 }
-.bk-folder-input-root strong { white-space: nowrap; }
+.bk-folder-input-root strong { overflow-wrap: anywhere; }
 .bk-choice-row button.active {
   background: var(--bk-ink) !important;
   color: var(--bk-paper) !important;
@@ -5973,7 +5974,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
       <button class="bk-dialog-close" type="button" data-bk-dialog-close aria-label="Schließen">×</button>
     </div>
     <p style="line-height:1.55">Bibliothekar organisiert Kameraimporte sicher vom ersten Einlesen bis in die dauerhafte Kamerabibliothek.</p>
-    <p style="color:var(--bk-muted)">Version <span data-bk-version>1.0.1</span></p>
+    <p style="color:var(--bk-muted)">Version <span data-bk-version>1.1.0</span></p>
   </div>
 </dialog>
 

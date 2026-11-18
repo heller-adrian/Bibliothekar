@@ -1,6 +1,6 @@
-# Bestandsübernahme mit Bibliothekar 1.0.1
+# Bestandsübernahme mit Bibliothekar 1.1.0
 
-Für den ersten Durchlauf eignen sich eine getrennte Installation und eine kleine synthetische Sammlung. Verwende den Image-Digest aus der GitHub-Vorabveröffentlichung. Bewahre für einen Wechsel zurück zu 1.0.0 den damaligen Stand der Bibliotheksdatenbanken und der globalen Registry separat auf.
+Für den ersten Durchlauf eignen sich eine getrennte Installation und eine kleine synthetische Sammlung. Verwende den Image-Digest aus dem GitHub-Release. Bewahre für einen Wechsel zurück zu 1.0.0 den damaligen Stand der Bibliotheksdatenbanken und der globalen Registry separat auf.
 
 ## Einrichten und inventarisieren
 

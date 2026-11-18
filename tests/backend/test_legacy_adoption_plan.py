@@ -181,6 +181,57 @@ def test_later_extension_rejects_collision_with_archived_original(inventory):
         assert connection.execute("SELECT count(*) FROM legacy_adoption_plans").fetchone()[0] == 0
 
 
+@pytest.mark.parametrize(
+    ("kind", "status"),
+    [("event", "archived"), ("event", "planned"), ("no_event", "archived"), ("no_event", "planned")],
+)
+def test_later_adoption_respects_existing_event_time_and_segment_gaps(inventory, kind, status):
+    from app.event_timeline import normalize_no_event_segments, replace_event_segments
+    from app.legacy_adoption_plan import preview_draft
+
+    context, source, registry = inventory
+    (source / "gap.jpg").write_bytes(b"new media in the free interval")
+    job = _scan(context, source)
+    event_id = _existing(context)
+    day = "2026-07-21"
+    with database_connection(context.database_path) as connection:
+        if kind == "no_event" and status == "archived":
+            connection.execute("UPDATE jobs SET kind = 'archive_verification', operation = 'legacy_adoption' WHERE id = 'old'")
+        connection.execute(
+            """UPDATE events SET event_kind = ?, status = ?, start_datetime = ?, end_datetime = ?
+               WHERE id = ?""",
+            (kind, status, day + "T09:00:00", day + ("T13:59:59" if kind == "no_event" else "T11:59:59"), event_id),
+        )
+        if kind == "no_event":
+            segments = normalize_no_event_segments([
+                {"day_key": day, "start_time": "09:00", "end_time": "11:59"},
+                {"day_key": day, "start_time": "13:00", "end_time": "13:59"},
+            ])
+            replace_event_segments(connection, event_id=event_id, job_id="old", segments=segments, now="2026")
+
+    def proposed(start):
+        return _draft(start_date=day, end_date=day, start_time=start, end_time="12:59")
+
+    conflict = preview_draft(context, job, proposed("11:59"), allow_existing=True)
+    assert conflict["conflicts"] == [{
+        "index": 0, "kind": "archive" if status == "archived" else "catalogue",
+        "existing_id": event_id, "name": "Urlaub", "start": day + "T11:59:00", "end": day + "T11:59:59",
+    }]
+    with pytest.raises(AdoptionError, match="Zeitüberschneidung mit „Urlaub“"):
+        create_plan(context, registry, job, proposed("11:59"), allow_existing=True)
+
+    if status == "archived":
+        extension = {"events": [{"existing_id": event_id}]}
+        projection = preview_draft(context, job, extension, allow_existing=True)
+        assert projection["valid"] and projection["events"][0]["families"] == 0
+
+    accepted = proposed("12:00")
+    assert preview_draft(context, job, accepted, allow_existing=True)["events"][0]["families"] == 1
+    plan = create_plan(context, registry, job, accepted, allow_existing=True)
+    assert plan["move_families"] == 1
+    assert plan["events"][0]["id"] != event_id
+
+
 def _frozen_rc1_extension(context, registry, job, *, existing_media=False):
     """Build the persisted RC1 projection that verification must still understand."""
     import hashlib
@@ -235,6 +286,45 @@ def test_explicit_target_name_conflict_and_exact_global_duplicates(inventory):
     old, new = plan_moves(context, job)
     assert old["target"] is None
     assert Path(new["target"]).name == "same.jpg"
+
+
+def test_later_adoption_with_only_known_files_cannot_freeze_an_empty_event(inventory):
+    from hashlib import sha256
+
+    from app.legacy_adoption_plan import preview_draft
+
+    context, source, registry = inventory
+    event_id = _existing(context)
+    original = source / "known-under-a-new-name.jpg"
+    original.write_bytes(b"previously registered media")
+    register_source_backup(
+        registry, backup_id="older", source_kind="import", source_identity="older", backup_path="/synthetic/older",
+    )
+    register_source_media(
+        registry, backup_id="older", relative_path="archived.jpg", size_bytes=original.stat().st_size,
+        sha256=sha256(original.read_bytes()).hexdigest(), media_type="jpeg",
+    )
+    job = create_job(context, source)
+    summary = scan_inventory(context, job, registry_path=registry)
+    assert summary["duplicate_files"] == 1
+    before = {path: path.read_bytes() for path in context.archive_root.rglob("*") if path.is_file()}
+    drafts = (
+        _draft(start_date="2026-07-25", end_date="2026-07-25"),
+        {"events": [{"event_kind": "no_event", "segments": [{"day_key": "2026-07-25"}]}]},
+        {"events": [{"existing_id": event_id}]},
+    )
+    for draft in drafts:
+        preview = preview_draft(context, job, draft, allow_existing=True)
+        assert preview["valid"] and preview["events"][0]["files"] == 0
+        with pytest.raises(AdoptionError, match="keine neuen, vollständig datierten Dateifamilien"):
+            create_plan(context, registry, job, draft, allow_existing=True)
+
+    with database_connection(context.database_path) as connection:
+        assert [row["id"] for row in connection.execute("SELECT id FROM events")] == [event_id]
+        for table in ("legacy_adoption_plans", "legacy_adoption_moves", "event_assignments"):
+            assert connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
+    assert {path: path.read_bytes() for path in context.archive_root.rglob("*") if path.is_file()} == before
+    assert original.read_bytes() == b"previously registered media"
 
 
 def test_repeated_camera_names_in_large_plan_get_stable_unique_targets(inventory):

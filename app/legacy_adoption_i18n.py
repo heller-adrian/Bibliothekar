@@ -663,6 +663,8 @@ PATTERNS = [
     (r"^library_workspace_name_collision: (.+)$", "A workspace with that name already exists: $1"),
     (r"^Der Arbeitsbereich überschneidet sich mit (.+)\.$", "The workspace overlaps with $1."),
     (r"^Das Archiv überschneidet sich mit (.+)\.$", "The archive overlaps with $1."),
+    (r"^Zeitüberschneidung mit „(.+)“\. Prüfe den gespeicherten Zeitraum\.$",
+     "The time range overlaps with “$1”. Check the saved time range."),
     (r"^Am (\d{4}-\d{2}-\d{2}) muss das Ende nach dem Beginn liegen\.$", "On $1, the end must follow the start."),
     (r"^Die „Ohne Ereignis“-Zeitsegmente am (\d{4}-\d{2}-\d{2}) ueberlappen sich\.$",
      "The time ranges for $1 in this collection folder overlap."),

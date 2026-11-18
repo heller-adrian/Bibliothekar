@@ -1,3 +1,10 @@
+## 1.1.0 – Bestandsübernahme und Archivverwaltung
+
+- Bestehende Fotosammlungen sicher innerhalb eines gemeinsamen ZFS-Datasets übernehmen. Beide Ausführungswege behalten SHA-256-Prüfung, Wiederanlauf und kontrollierte Rücknahme bei.
+- Bereits registrierte Dateien erkennen und archivierte Ereignisse gezielt erweitern. Archivänderungen und ihre Rückabwicklung zeigen die notwendigen Datei- und Ordnerschritte.
+- In den Editoren für Ereignisse und „Ohne Ereignis“ bleibt der Auswahlkreis bei „Direkt im Ereignis“ von der Beschriftung getrennt.
+- [Anleitung zur Bestandsübernahme](docs/legacy-adoption.md)
+
 ## 1.0.1-rc.1 – Bestandsübernahme
 
 - Bestehende Fotosammlungen in Etappen inventarisieren und auf neue oder vorhandene Archivereignisse verteilen.

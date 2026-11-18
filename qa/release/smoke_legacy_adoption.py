@@ -119,6 +119,22 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
 
     wait_ready()
     login()
+    assert api("/api/health")["version"] == os.environ["ADOPTION_SMOKE_VERSION"]
+    if method == "upgrade":
+        assert b'id="bk-settings-dialog"' in request("/workspace")
+        assert b'legacy-adoption/history?library=main&amp;job=' in request("/legacy-adoption/history?library=main")
+        catalogue = api("/api/events/search")
+        assert [event["status"] for event in catalogue["events"]] == ["archived"]
+        return
+    if method == "upgrade-100":
+        [library] = api("/api/libraries")["libraries"]
+        assert library["library_id"] == "main" and library["display_name"] == "Smoke"
+        assert library["archive_root"] == "/main-library"
+        assert b'id="bk-settings-dialog"' in request("/workspace")
+        assert "jobs" in api("/api/jobs")
+        assert not list(archive.iterdir())
+        print("Upgrade from 1.0.0 retained the existing library and normal Workspace access on native ZFS.")
+        return
     assert api("/api/settings/storage-health")["ready"]
     checked = api("/api/libraries/check", method="POST", payload={
         "work_root": "", "archive_root": "/main-library", "default_library_id": "smoke",
@@ -128,7 +144,9 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
         "display_name": "Smoke", "work_root": "", "archive_root": "/main-library",
     })["library"]
     assert library["library_id"] == "main"
-    assert api("/api/health")["version"] == "1.0.1"
+    if method == "prepare-upgrade-100":
+        assert b'id="bk-settings-dialog"' in request("/workspace")
+        return
     choice = request("/workspace")
     assert "Hast du eine bestehende Fotosammlung?".encode() in choice
     assert b'id="bk-settings-dialog"' not in choice

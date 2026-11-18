@@ -99,11 +99,11 @@ The repository provides a [Compose example](compose.example.yaml) for a TrueNAS 
 4. Deploy the Custom App and finish the web-based setup. Back up app data and your database before upgrading.
 
 ```text
-Image: ghcr.io/heller-adrian/bibliothekar:1.0.0
+Image: ghcr.io/heller-adrian/bibliothekar:1.1.0
 Web UI: http://<your-truenas-host>:30044
 ```
 
-**Stable version:** 1.0.0. Verify that the [GitHub Release](https://github.com/heller-adrian/Bibliothekar/releases) and the corresponding GHCR image have actually been published before installing it. For reproducible deployments, pin a numbered image tag or digest. The floating image tag is `ghcr.io/heller-adrian/bibliothekar:latest`.
+**Stable version:** 1.1.0. Verify that the [GitHub Release](https://github.com/heller-adrian/Bibliothekar/releases) and the corresponding GHCR image have actually been published before installing it. For reproducible deployments, pin a numbered image tag or digest. The floating image tag is `ghcr.io/heller-adrian/bibliothekar:latest`.
 
 | Container path | Use | Mount |
 | --- | --- | --- |
@@ -131,7 +131,7 @@ Like any file-management software, Bibliothekar is **not a replacement for an in
 
 ## Scope
 
-**Release candidate version:** 1.0.1. This release candidate adds manual and scripted adoption of existing photo collections within one ZFS dataset. See the [adoption guide](docs/legacy-adoption.md) for setup, a first transfer and recovery.
+**Collection adoption:** Bibliothekar 1.1.0 supports manual and scripted adoption of existing photo collections within one ZFS dataset. See the [adoption guide](docs/legacy-adoption.md) for setup, a first transfer and recovery.
 
 The **1.0.0 milestone** focuses on the stable camera-file workflow. Bibliothekar is **not** a photo gallery, an Immich replacement or an AI-based photo selector. Possible future integrations (including Immich and optional AI-assisted preselection) are separate work, not promised features of 1.0.0.
 

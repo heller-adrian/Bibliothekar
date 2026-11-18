@@ -131,7 +131,7 @@ jobs:
       - name: Verify adoption including the kernel read-only bind mount
         if: steps.scope.outputs.request-only != 'true'
         env:
-          RECOVERY_PROBE: ${{ github.event_name == 'workflow_dispatch' && !inputs.full_backend }}
+          RECOVERY_PROBE: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           test "$(git rev-parse HEAD)" = "$QA_SOURCE"
           cat > "$RUNNER_TEMP/adoption-targets.json" <<'JSON'
@@ -176,6 +176,8 @@ jobs:
           cases = list(ElementTree.parse(junit).iter("testcase"))
           for name in (
               "test_adoption_reads_actual_read_only_archive",
+              "test_upgrades_1_0_0_catalogue_and_registry_without_touching_existing_rows",
+              "test_later_adoption_with_only_known_files_cannot_freeze_an_empty_event",
               "test_regular_import_recognizes_adopted_file_family_before_any_regular_import[native-zfs]",
               "test_script_and_manual_plans_use_correct_family_names",
               "test_layout_only_change_stages_new_nested_branch_without_copying_its_parent",
