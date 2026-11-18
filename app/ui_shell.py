@@ -985,8 +985,7 @@ button.bk-busy::after {
   white-space: nowrap; line-height: 1.2; margin-left: auto;
 }
 #bk-folder-layout-settings input[type="checkbox"],
-#bk-folder-layout-settings input[type="radio"],
-:where(#event-dialog, #event-edit-dialog) .bk-folder-input-root > .bk-folder-input-radio {
+#bk-folder-layout-settings input[type="radio"] {
   width: 18px !important; min-width: 18px !important;
   height: 18px !important; min-height: 18px !important;
   padding: 0 !important; margin: 0 !important;
@@ -995,11 +994,11 @@ button.bk-busy::after {
 #bk-folder-layout-settings input[type="checkbox"] { border-radius: 4px !important; }
 #bk-folder-layout-settings input[type="radio"] { border-radius: 50% !important; }
 .bk-folder-input-root {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  display: grid; grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center; gap: 8px; padding: 7px 9px;
   border: 1px solid var(--bk-line); border-radius: 9px;
 }
-.bk-folder-input-root strong { overflow-wrap: anywhere; }
+.bk-folder-input-root strong { white-space: nowrap; }
 .bk-choice-row button.active {
   background: var(--bk-ink) !important;
   color: var(--bk-paper) !important;
@@ -8039,6 +8038,17 @@ _EVENT_LAYOUT_CSS = """
 }
 .bk-folder-layout-row [data-bk-layout-name]{min-width:0;width:100%;box-sizing:border-box}
 .bk-event-layout-fields .bk-folder-input-root{padding-block:5px}
+:where(#event-dialog, #event-edit-dialog) .bk-event-layout-fields .bk-folder-input-root{
+  grid-template-columns:auto minmax(0,1fr) auto;
+}
+:where(#event-dialog, #event-edit-dialog) .bk-event-layout-fields .bk-folder-input-root > strong{
+  white-space:normal;overflow-wrap:anywhere;
+}
+:where(#event-dialog, #event-edit-dialog) .bk-event-layout-fields .bk-folder-input-root > .bk-folder-input-radio{
+  width:18px !important;min-width:18px !important;
+  height:18px !important;min-height:18px !important;
+  padding:0 !important;margin:0 !important;
+}
 @media(max-width:1024px),(pointer:coarse){
   .bk-folder-layout-tree{gap:10px}
   .bk-folder-layout-row{margin-inline-start:min(calc(var(--bk-folder-depth) * 12px),18%)}
