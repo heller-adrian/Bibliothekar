@@ -193,7 +193,7 @@ def test_upgrades_1_0_0_catalogue_and_registry_without_touching_existing_rows(tm
         library_registry.register_source_backup(
             registry, backup_id="historic", source_kind="import", source_identity="old", backup_path="/synthetic",
         )
-    assert initialize_database(db)["newly_applied_versions"] == list(range(56, 72))
+    assert initialize_database(db)["newly_applied_versions"] == list(range(56, 73))
     assert library_registry.initialize_library_registry(registry)["newly_applied_versions"] == [4, 5, 6, 7, 8]
     assert library_registry.read_library_identity(db) == "historic"
     assert library_registry.get_source_backup(registry, "historic")["source_identity"] == "old"
@@ -225,10 +225,70 @@ def test_rc12_review_batch_upgrade_preserves_finished_and_pending_copies(tmp_pat
                 "INSERT INTO legacy_adoption_review_batch (job_id, family_key, state) VALUES ('job', ?, ?)",
                 [("ready", "copied"), ("pending", "pending")],
             )
-    assert initialize_database(db)["newly_applied_versions"] == [66, 67, 68, 69, 70, 71]
+    assert initialize_database(db)["newly_applied_versions"] == [66, 67, 68, 69, 70, 71, 72]
     with database.database_connection(db) as connection:
         rows = connection.execute(
             """SELECT family_key, state, bytes_total, bytes_verified FROM legacy_adoption_review_batch
                ORDER BY family_key""",
         )
         assert [tuple(row) for row in rows] == [("pending", "pending", 400, 0), ("ready", "copied", 200, 200)]
+
+
+def test_separate_raw_jpeg_require_unique_identity_and_compatible_capture(library, monkeypatch):
+    context, source = library
+    raw = source / "RAW"
+    jpeg = source / "JPEG"
+    other = source / "Other"
+    for directory in (raw, jpeg, other):
+        directory.mkdir()
+    valid_id = "00112233445566778899aabbccddeeff"
+    originals = {}
+    metadata = {}
+    for index, kind in enumerate(("pair", "no-id", "camera", "serial", "burst", "ambiguous", "sidecars"), 1):
+        for directory, extension in ((raw, ".DNG"), (jpeg, ".JPG")):
+            path = directory / (kind + extension)
+            data = path.relative_to(source).as_posix().encode()
+            originals[path] = data
+            path.write_bytes(data)
+            item = {"EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+                    "EXIF:IFD0:Make": "Synthetic", "EXIF:IFD0:Model": "Test Camera",
+                    "EXIF:ExifIFD:BodySerialNumber": "123456",
+                    "EXIF:ExifIFD:ImageUniqueID": f"{index:02x}" + valid_id[2:]}
+            if kind == "no-id":
+                item.pop("EXIF:ExifIFD:ImageUniqueID")
+            if kind == "camera" and directory == jpeg:
+                item["EXIF:IFD0:Model"] = "Another Camera"
+            if kind == "serial" and directory == jpeg:
+                item["EXIF:ExifIFD:BodySerialNumber"] = "999999"
+            if kind == "burst":
+                item["EXIF:ExifIFD:SubSecTimeOriginal"] = "100" if directory == jpeg else "250"
+            metadata[data] = item
+    for path in (raw / "pair.DNG.xmp", raw / "sidecars.xmp", jpeg / "sidecars.xmp", other / "ambiguous.JPG"):
+        data = originals[path] = path.relative_to(source).as_posix().encode()
+        path.write_bytes(data)
+        metadata[data] = metadata[b"JPEG/ambiguous.JPG"] if path.suffix == ".JPG" else {}
+
+    calls = []
+    def read(descriptors, _cancel):
+        calls.extend(descriptors)
+        return {fd: metadata[os.pread(fd, 256, 0)] for fd in descriptors}
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", read)
+    job = create_job(context, source)
+    assert scan_inventory(context, job)["files"] == len(originals)
+    families = {item["family_key"]: item for item in inventory_families(context, job)}
+    assert len(families) == 14
+    assert {member["relative_path"] for member in families["RAW/pair"]["files"]} == {
+        "RAW/pair.DNG", "RAW/pair.DNG.xmp", "JPEG/pair.JPG",
+    }
+    assert "JPEG/pair" not in families
+    assert set(item["family_key"] for item in families["RAW/pair"]["files"]) == {"RAW/pair"}
+    assert all(families[f"{directory}/{kind}"]["member_count"] == (2 if kind == "sidecars" else 1)
+               for kind in ("no-id", "camera", "serial", "burst", "ambiguous", "sidecars") for directory in ("RAW", "JPEG"))
+    assert families["Other/ambiguous"]["member_count"] == 1
+    calls.clear()
+    scan_inventory(context, job)
+    assert not calls
+    assert {item["family_key"] for item in inventory_families(context, job)} == set(families)
+    assert {path: path.read_bytes() for path in originals} == originals
+    assert not list(context.archive_root.iterdir())

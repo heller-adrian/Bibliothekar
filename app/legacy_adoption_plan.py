@@ -197,7 +197,7 @@ def _assigned_index(intervals, starts, capture):
     return intervals[at][2] if at >= 0 and time <= intervals[at][1] else None
 
 
-def preview_draft(library, job_id, draft, *, allow_existing=False):
+def preview_draft(library, job_id, draft, *, allow_existing=False, validate_only=False):
     """Read-only planning feedback, never a move/registration authority."""
     with database_connection(library.database_path) as connection:
         connection.execute('BEGIN')
@@ -241,6 +241,8 @@ def preview_draft(library, job_id, draft, *, allow_existing=False):
         prefixes = [target_key(str(event_root_relative(event))) for event in events]
         if len(set(prefixes)) != len(prefixes):
             raise AdoptionError('Mehrere Ereignisse beanspruchen denselben Zielordner.')
+        if validate_only:
+            return {'valid': True, 'conflicts': []}
         starts = [item[0] for item in intervals]
         counts = [{'families': 0, 'files': 0, 'days': set()} for _ in events]
         overrides = {key: _local_capture(value) for key, value in draft.get('capture_overrides', {}).items()}
@@ -256,7 +258,7 @@ def preview_draft(library, job_id, draft, *, allow_existing=False):
             archive_ends.append(max(end, archive_ends[-1]) if archive_ends else end)
         for row in connection.execute(
             """SELECT families.family_key, families.capture_time, families.review_required, copy.state AS review_copy,
-                      (SELECT count(*) FROM legacy_adoption_inventory AS member
+                      (SELECT count(*) FROM legacy_adoption_inventory AS member INDEXED BY legacy_adoption_inventory_family
                        WHERE member.job_id=families.job_id AND member.family_key=families.family_key
                          AND member.disposition = 'candidate') AS files
                FROM legacy_adoption_candidate_families families

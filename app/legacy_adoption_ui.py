@@ -194,6 +194,7 @@ border-radius:10px;background:var(--bk-surface);color:var(--bk-ink);box-shadow:v
 .adoption-plan-inspector{position:sticky;top:var(--adoption-plan-tools-height,0px);align-self:start;
 max-height:calc(100dvh - var(--adoption-plan-tools-height,0px) - 16px);overflow:auto;background:var(--bk-surface);padding:8px 4px}
 #dated-media :focus-visible,.adoption-review-list :focus-visible{scroll-margin-top:calc(var(--adoption-plan-tools-height,0px) + 1rem)}
+#review-loading:empty{display:none}
 @media(max-width:900px){
   .adoption-plan-inspector{position:static;max-height:none}
   .adoption-plan-inspector:has(#planning-preview:not(:empty)){position:sticky;order:-1;z-index:2;max-height:24dvh}
@@ -296,6 +297,7 @@ min-height:38px;margin-block:5px 8px;gap:8px}
 </details>
 <p id="safety" role="status">Bitte keine manuellen Änderungen an der alten Fotosammlung oder am Zielarchiv vornehmen. Andernfalls kann der gespeicherte Übernahmeplan ungültig werden.</p>
 <div id="message" role="status" aria-live="polite"></div>
+<button type="button" id="retry-adoption" hidden>Gespeicherten Auftrag erneut laden</button>
 <div id="dirty" role="status" aria-live="polite"></div>
 <section id="setup">
   <h2>Gemeinsamen Quellordner auswählen</h2>
@@ -337,6 +339,7 @@ let reviewSelectionVersion=0;
 let selectedSource = null, browsedSource = null, browseVersion = 0;
 let draftPage = 40;
 let inventoryStarting = false;
+let refreshVersion=0;
 let viewStep=currentUrl.searchParams.get("step") || "";
 let manualSnapshot=null, finishing=false;
 const recoveryPhases=["manual","script_prepared","operations_done","verifying","repair","registration_pending"];
@@ -366,6 +369,7 @@ function rememberView(step,push=false){
 }
 async function goStep(step){
   requireSaved();
+  if(reviewMetadataSaving)return;
   if(step==="plan" && job?.plan.id && !job.plan.execution)await mutate("/reopen");
   if(!allowedSteps().includes(step))return;
   rememberView(step,true);await refresh();
@@ -391,7 +395,7 @@ function navigation(){
   const previous={plan:"inventory",review:"plan",execution:"review"}[viewStep];
   if(previous)nav.append(action("Zurück",()=>goStep(previous)));
   if(viewStep==="inventory" && job.state==="inventoried")nav.append(action("Weiter: Ereignisse planen",()=>goStep("plan"),true));
-  if(viewStep==="plan" && !reviewBusy())nav.append(action("Weiter: Plan prüfen",()=>{
+  if(viewStep==="plan" && previewRevision===draftRevision && !reviewBusy())nav.append(action("Weiter: Plan prüfen",()=>{
     if(!draft.events.length)throw new Error("Lege mindestens ein Ereignis oder einen Sammelordner an.");
     return mutate("/plan","POST",{revision:draftRevision});
   },true));
@@ -508,11 +512,22 @@ function detail(value) {
 async function api(path, method="GET", body) {
   const headers = {"X-Bibliothekar-Library":library};
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const response = await fetch(path, {method,headers,cache:"no-store",
-    body:body===undefined ? undefined : JSON.stringify(body)});
-  const value = await response.json();
-  if (!response.ok) throw new Error(detail(value.detail));
-  return value;
+  const readOnly=method==="GET" || path.endsWith("/draft/check") || path.endsWith("/review/metadata/sources");
+  const controller=readOnly ? new AbortController() : null;
+  const timeout=controller && setTimeout(()=>controller.abort(),20000);
+  try{
+    const response = await fetch(path, {method,headers,cache:"no-store",signal:controller?.signal,
+      body:body===undefined ? undefined : JSON.stringify(body)});
+    const value = await response.json().catch(error=>{
+      if(controller?.signal.aborted)throw error;
+      throw new Error("Der Server hat keine lesbare Antwort gesendet.");
+    });
+    if (!response.ok) throw new Error(detail(value.detail));
+    return value;
+  }catch(error){
+    if(controller?.signal.aborted)throw new Error("Die Anfrage hat zu lange gedauert. Versuche es erneut.");
+    throw error;
+  }finally{if(timeout)clearTimeout(timeout);}
 }
 function jobPath(path="") { return base+"/jobs/"+encodeURIComponent(jobId)+path; }
 function action(text, handler, primary=false, settled) {
@@ -637,8 +652,22 @@ async function refresh() {
   clearTimeout(scriptTimer);
   if (!jobId) return;
   const requested=jobId;
+  const version=++refreshVersion;
+  const current=()=>requested===jobId && version===refreshVersion;
+  $("retry-adoption").hidden=true;
+  report(job?.metadata_running?"Metadatenentscheidungen werden angewendet …":"Gespeicherter Auftrag wird geladen …","busy");
+  try{
+    await restoreJob(current);
+  }catch(error){
+    if(!current())return;
+    $("retry-adoption").hidden=false;
+    report(error.message,"error");
+    throw error;
+  }
+}
+async function restoreJob(current) {
   const [state, batch]=await Promise.all([api(jobPath()),api(jobPath("/review/batch?details=true"))]);
-  if (requested!==jobId) return;
+  if(!current())return;
   requireSaved();
   job=state;reviewBatch=batch;
   if(manualSnapshot && (manualSnapshot.plan_id!==job.plan.id ||
@@ -652,17 +681,25 @@ async function refresh() {
   }
   draftRevision=state.draft_revision;
   draft={events:[],capture_overrides:{},exclude_families:[],target_stems:{},...state.draft};
-  let checked=null;
-  if(!recoveryOnly && job.state==="inventoried" && !job.plan.id && previewRevision!==draftRevision){
-    checked=await api(jobPath("/draft/check"),"POST",draft);
-    applyDraftPreview(checked);previewRevision=draftRevision;
-  }
   render();
   scheduleReviewPoll();
+  if(job.scan_running || job.metadata_running){
+    if(job.metadata_running)report("Metadatenentscheidungen werden angewendet …","busy");
+    timer=setTimeout(()=>refresh().catch(()=>{}),2000);
+    return;
+  }
+  let checked=null;
+  if(viewStep==="plan" && !recoveryOnly && job.state==="inventoried" && !job.plan.id && previewRevision!==draftRevision){
+    report("Ereignisplanung wird geladen …","busy");
+    const revision=draftRevision;
+    checked=await api(jobPath("/draft/check"),"POST",draft);
+    if(!current() || revision!==draftRevision)return;
+    applyDraftPreview(checked);previewRevision=revision;
+    render();
+    scheduleReviewPoll();
+  }
   if(checked && !checked.valid && $("event-editor"))showConflicts(checked,draft);
-  if (job.scan_running) {
-    timer=setTimeout(()=>refresh().catch(error=>report(error.message,"error")),2000);
-  } else if (!job.plan.id && job.state==="inventoried" && viewStep==="plan") {
+  if (!job.plan.id && job.state==="inventoried" && viewStep==="plan") {
     await chronology();
   } else if (job.plan.id) {
     if($("manual-steps") && !manualSnapshot)await loadManualWork(false);
@@ -670,6 +707,11 @@ async function refresh() {
       await pollScript();
     }
   }
+  if(!current())return;
+  const {applied,remaining}=draft.metadata_review_result || {};
+  if(applied)report(t("Aufnahmezeiten übernommen")+" · "+applied+
+    (remaining?" · "+t("Noch zu prüfen")+" · "+remaining:""),remaining?"error":"success");
+  else report();
 }
 async function finishAdoption(){
   if(finishing)return;
@@ -794,6 +836,7 @@ function render() {
     },true));
   }
   if (!terminal && !job.plan.execution && !job.scan_running && !inventoryStarting && !reviewBusy()) { const discard=action("Änderungen verwerfen",async()=>{
+    if(reviewBusy())return;
     if (!confirm(t("Auftrag und Entwurf verwerfen? Originale und fertige Arbeitskopien in General bleiben erhalten."))) return;
     await api(jobPath(),"DELETE");
     dirty.clear();
@@ -827,6 +870,10 @@ function applyDraftPreview(checked){
 }
 function renderDraft(host) {
   const panel=section("Ereignisse planen");
+  if(previewRevision!==draftRevision){
+    host.append(panel);
+    return;
+  }
   const instruction=line("Wähle freie Aufnahmetage oder Zeitabschnitte. Mit Umschalt wählst du einen Bereich. Du kannst auch ohne Auswahl planen.");
   instruction.id="planning-instruction";
   panel.append(instruction);
@@ -1010,7 +1057,7 @@ const reviewStates={
   copied:"Kopiert"
 };
 function reviewBusy(){
-  return reviewSubmitting || reviewCancelling || reviewMetadataSaving || reviewBatch.running || reviewBatch.pending>0 ||
+  return reviewSubmitting || reviewCancelling || reviewMetadataSaving || job?.metadata_running || reviewBatch.running || reviewBatch.pending>0 ||
     ["active","cancelling"].includes(reviewBatch.state);
 }
 function reviewHelp(){
@@ -1190,16 +1237,23 @@ function showReview(target) {
   const toolbar=node("div",undefined,planning?"inline adoption-review-tools":"inline");
   const list=node("div",undefined,"adoption-review-list");
   const feedback=node("div");
+  const loading=slot("review-loading","p");
+  loading.setAttribute("role","status");
+  let loadingCases=false, selecting=false;
   const metadataControls=new Map();
   const editable=!job.plan.id && !recoveryOnly && job.state==="inventoried";
   const selectionCount=slot("review-selection","span");
   const selectAll=action("Alle auswählen",async()=>{
     const version=++reviewSelectionVersion;
-    const keys=await api(jobPath("/review/selection?metadata="+editable));
-    if(version===reviewSelectionVersion && target.isConnected && !reviewBusy()){
-      reviewSelection=new Set(keys);
-      syncSelection();
-    }
+    selecting=true;syncSelection();
+    report("Prüffälle werden ausgewählt …","busy");
+    try{
+      const keys=await api(jobPath("/review/selection?metadata="+editable));
+      if(version===reviewSelectionVersion && list.isConnected && !reviewBusy()){
+        reviewSelection=new Set(keys);
+        report(keys.length+" "+t("ausgewählt"),"success");
+      }else report();
+    }finally{selecting=false;}
   },false,()=>syncSelection());
   const clearSelection=action("Auswahl aufheben",()=>{
     reviewSelectionVersion++;reviewSelection.clear();syncSelection();
@@ -1210,7 +1264,11 @@ function showReview(target) {
     reviewSubmitting=true;reviewSelectionVersion++;
     syncSelection();renderReviewProgress();
     try{
-      await api(jobPath("/review/batch"),"POST",{family_keys:[...reviewSelection]});
+      const eligible=await api(jobPath("/review/selection"));
+      const allowed=new Set(eligible);
+      const keys=[...reviewSelection].filter(key=>allowed.has(key));
+      if(!keys.length)throw new Error("Für diese Auswahl sind nur Metadatenentscheidungen möglich.");
+      await api(jobPath("/review/batch"),"POST",{family_keys:keys});
       reviewSelection.clear();previewRevision=-1;
     }finally{
       reviewSubmitting=false;
@@ -1220,6 +1278,7 @@ function showReview(target) {
   async function stage(keys, source, individual=false){
     requireSaved();
     reviewMetadataSaving=true;syncSelection();
+    report("Metadatenquelle wird vorgemerkt …","busy");
     try{
       const result=await api(jobPath("/review/metadata"),"PUT",{revision:draftRevision,family_keys:keys,source,individual});
       draftRevision=result.revision;
@@ -1230,13 +1289,19 @@ function showReview(target) {
       }
       reviewMetadataFeedback=result;
       metadataFeedback(feedback,result);
+      report(result.staged?t("Metadatenquelle vorgemerkt")+" · "+result.staged:"",result.staged?"success":"");
     }finally{reviewMetadataSaving=false;syncSelection();}
   }
   const accept=action("EXIF-Daten übernehmen",async()=>{
     requireSaved();
     const keys=[...reviewSelection];
-    const result=await api(jobPath("/review/metadata/sources"),"POST",{revision:draftRevision,family_keys:keys});
-    if(!target.isConnected)return;
+    selecting=true;syncSelection();report("Verfügbare Metadatenquellen werden geladen …","busy");
+    let result;
+    try{
+      result=await api(jobPath("/review/metadata/sources"),"POST",{revision:draftRevision,family_keys:keys});
+    }finally{selecting=false;syncSelection();}
+    if(!list.isConnected)return;
+    report();
     const dialog=node("dialog");
     const heading=node("h3","EXIF-Daten übernehmen");heading.id="review-source-title";
     dialog.setAttribute("aria-labelledby",heading.id);
@@ -1264,6 +1329,7 @@ function showReview(target) {
   const apply=action("Änderungen anwenden",async()=>{
     requireSaved();
     reviewMetadataSaving=true;syncSelection();
+    report("Metadatenentscheidungen werden angewendet …","busy");
     try{
       const result=await api(jobPath("/review/metadata/apply"),"POST",{revision:draftRevision});
       reviewMetadataFeedback=result;
@@ -1273,10 +1339,11 @@ function showReview(target) {
       previewRevision=-1;
       reviewMetadataSaving=false;
       await refreshReviewView();
+      if(!result.applied && Object.keys(result.rejected).length)report("Prüffälle konnten nicht angewendet werden. Prüfe die Hinweise und versuche es erneut.","error");
     }finally{reviewMetadataSaving=false;}
   },true,()=>syncSelection());
   function syncSelection(){
-    const blocked=reviewBusy() || recoveryOnly || job.state!=="inventoried" || job.plan.execution;
+    const blocked=reviewBusy() || selecting || loadingCases || recoveryOnly || job.state!=="inventoried" || job.plan.execution;
     selectAll.disabled=Boolean(blocked);
     clearSelection.disabled=Boolean(blocked || !reviewSelection.size);
     const pending=draft.metadata_review_pending || {};
@@ -1305,13 +1372,30 @@ function showReview(target) {
   target.className="adoption-review-cases";
   target.replaceChildren(node("h3","Prüffälle"),
     line("Ungeklärte Dateifamilien bleiben an der Quelle. Fertige Arbeitskopien in General bleiben auch nach dem Verwerfen erhalten."),
-    toolbar,feedback,list);
+    ...(editable?[line("Die Auswahl gilt für Arbeitskopien und für die gemeinsame Wahl einer Metadatenquelle. Quellen pro Zeile werden einzeln vorgemerkt.")]:[]),
+    toolbar,feedback,loading,list);
   if(planning)planningToolsObserver.observe(toolbar);
   metadataFeedback(feedback,reviewMetadataFeedback);
   const more=action("Weitere Prüffälle",load);
   async function load(){
-    const rows=await api(jobPath("/review?"+new URLSearchParams({after:cursor})));
-    if(!target.isConnected)return;
+    if(loadingCases)return;
+    loadingCases=true;syncSelection();
+    loading.replaceChildren("Prüffälle werden geladen …");
+    loading.classList.add("bk-loading-status");
+    let rows;
+    try{
+      rows=await api(jobPath("/review?"+new URLSearchParams({after:cursor})));
+    }catch(error){
+      loading.replaceChildren(action("Prüffälle erneut laden",load));
+      report(error.message,"error");
+      return;
+    }finally{
+      loadingCases=false;
+      loading.classList.remove("bk-loading-status");
+      if(list.isConnected)syncSelection();
+    }
+    if(!list.isConnected)return;
+    loading.replaceChildren();
     more.remove();
     for(const item of rows){
       const entry=node("div",undefined,"row adoption-review-row");
@@ -1379,6 +1463,7 @@ function showReview(target) {
       list.append(entry);
     }
     if(rows.length===60){cursor=rows.at(-1).family_key;list.append(more);}
+    else if(!list.childElementCount)loading.textContent="Keine offenen Prüffälle.";
     syncSelection();
     renderReviewRows();
   }
@@ -1387,12 +1472,31 @@ function showReview(target) {
 }
 async function showFamilies() {
   const target=$("families");
-  target.querySelector(".more")?.remove();
+  if(!target || target.querySelector(".bk-loading-status"))return;
+  const moreButton=target.querySelector(".more");
+  const loading=node("p","Dateifamilien werden geladen …","bk-loading-status");
+  loading.setAttribute("role","status");
+  target.append(loading);
   const requestedDay=day;
   const query=new URLSearchParams({after:familyCursor});
   if(requestedDay!==null)query.set("day",requestedDay);
-  const rows=await api(jobPath("/families?"+query));
-  if(!target.isConnected || requestedDay!==day)return;
+  let rows;
+  try{
+    rows=await api(jobPath("/families?"+query));
+  }catch(error){
+    if(loading.isConnected && !moreButton)target.append(action("Dateifamilien erneut laden",async()=>{
+      target.replaceChildren();await showFamilies();
+    }));
+    if(loading.isConnected)report(error.message,"error");
+    return;
+  }finally{
+    const current=loading.isConnected;
+    loading.remove();
+    if(!current)rows=null;
+  }
+  if(!rows || !target.isConnected || requestedDay!==day)return;
+  moreButton?.remove();
+  if(!rows.length && !familyCursor)target.append(line("Keine Dateifamilien gefunden."));
   for (const family of rows) {
     const row=node("details",undefined,"row");
     watchDraft(row);
@@ -2304,5 +2408,6 @@ $("start").addEventListener("click",async()=>{
   }
   catch(error) { report(error.message,"error"); }
 })();
+$("retry-adoption").addEventListener("click",()=>refresh().catch(()=>{}));
 </script>
 </body></html>"""

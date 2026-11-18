@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from app import legacy_adoption_dataset as dataset
 from app.database import catalogue_contains_sha256, database_connection
+from app.legacy_adoption_families import capture_identity, join_split_families
 from app.legacy_adoption_paths import (
     AdoptionError, absolute_root, bound_child_directory, bound_directory,
     bound_file, bound_sha256, directory_identity, file_identity,
@@ -105,6 +106,8 @@ def _inventory_groups(rows, source):
         members = [dict(row) for row in group]
         candidates = [row for row in members if row["disposition"] == "candidate"]
         files = [json.loads(row["metadata_json"]) for row in candidates if row["metadata_json"]]
+        for file in files:
+            file["family_key"] = key
         family = {"family_key": key, "status": "review_required"}
         if files:
             family = summarize_file_metadata(source, files)["families"][0]
@@ -328,21 +331,25 @@ def _read_batch(directory, source, rows, cached, cancel):
             path = row["relative_path"]
             old = cached.get(path)
             bound = bound_file(directory, Path(path).name, tuple(json.loads(row["identity"])))
+            previous_hash = None
             try:
                 if old is not None and old["identity"] == row["identity"] and old["sha256"]:
-                    with bound:
-                        record = json.loads(old["metadata_json"])
+                    previous_hash = old["sha256"]
+                    record = json.loads(old["metadata_json"])
+                    if "capture_identity" in record:
+                        with bound:
+                            pass
                         record["family_key"] = row["family_key"]
                         row.update(sha256=old["sha256"], metadata_json=json.dumps(record, ensure_ascii=False))
-                    continue
+                        continue
                 descriptor, _ = files.enter_context(bound)
             except (OSError, AdoptionError) as error:
                 row.update(sha256=None, metadata_json=None, error=str(error))
                 continue
-            pending.append((descriptor, row))
-        metadata = read_bound_metadata(tuple(fd for fd, _ in pending), cancel)
-        for descriptor, row in pending:
-            row["sha256"] = bound_sha256(descriptor, cancel)
+            pending.append((descriptor, row, previous_hash))
+        metadata = read_bound_metadata(tuple(fd for fd, _, _ in pending), cancel)
+        for descriptor, row, previous_hash in pending:
+            row["sha256"] = previous_hash or bound_sha256(descriptor, cancel)
             try:
                 record = analyze_file_metadata(
                     source, source / row["relative_path"], row["size_bytes"], metadata.get(descriptor, {}),
@@ -355,6 +362,7 @@ def _read_batch(directory, source, rows, cached, cancel):
                 record["metadata_error"] = str(reported_error)
                 record["review_required"] = True
             record["family_key"] = row["family_key"]
+            record["capture_identity"] = capture_identity(metadata.get(descriptor, {}))
             row["metadata_json"] = json.dumps(record, ensure_ascii=False)
 
 
@@ -479,13 +487,14 @@ def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path 
                 (job_id, generation),
             )
             _classify_inventory(connection, registry, job_id, cancel)
+            draft = json.loads(_job(connection, library.library_id, job_id)["draft_json"])
+            join_split_families(connection, job_id, draft, cancel)
             connection.execute("DELETE FROM legacy_adoption_families WHERE job_id = ?", (job_id,))
             rows = connection.execute(
                 """SELECT * FROM legacy_adoption_inventory
                     WHERE job_id = ? AND family_key IS NOT NULL ORDER BY family_key, relative_path""",
                 (job_id,),
             )
-            draft = json.loads(_job(connection, library.library_id, job_id)["draft_json"])
             pending = draft.get("metadata_review_pending", {})
             applied = draft.get("metadata_review_applied", {})
             decisions = len(pending) + len(applied)

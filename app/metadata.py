@@ -252,6 +252,8 @@ def run_exiftool(
         "-FileName",
         "-Directory",
     ]
+    if _bound_descriptors:
+        common.extend(("-ImageUniqueID", "-BodySerialNumber"))
 
     def execute(
         command: list[str],

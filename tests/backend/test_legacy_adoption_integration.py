@@ -2670,3 +2670,111 @@ def test_regular_import_recognizes_adopted_file_family_before_any_regular_import
     [family] = inventory_families(context, comparison_id)
     assert family["family_key"] == new.stem
     assert renamed.read_bytes() == new.read_bytes()
+
+
+@pytest.mark.parametrize("fresh_main", ["large-inventory"], indirect=True, ids=["large-inventory"])
+def test_large_adoption_restores_review_and_plans_from_saved_inventory(fresh_main, monkeypatch, synthetic_dataset):
+    from hashlib import sha256
+
+    _, database, _, archive = fresh_main
+    source = archive.parent / "large-source"
+    source.mkdir()
+    if os.environ.get("ADOPTION_ZFS_ROOT"):
+        monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+    date_taken = "EXIF:ExifIFD:DateTimeOriginal"
+    creation = "EXIF:ExifIFD:CreateDate"
+    total = 10_347
+
+    def metadata(descriptors, _cancel):
+        rows = {}
+        for descriptor in descriptors:
+            number = int(os.pread(descriptor, 16, 0))
+            rows[descriptor] = {date_taken: "2026:01:01 12:00:00"}
+            if number < 26:
+                rows[descriptor] = {date_taken: "2022:06:03 12:00:00", creation: "2022:06:03 14:00:00"}
+            elif number >= total - 2:
+                rows[descriptor].update({
+                    "EXIF:IFD0:Make": "Synthetic", "EXIF:IFD0:Model": "Camera",
+                    "EXIF:ExifIFD:ImageUniqueID": "00112233445566778899aabbccddeeff",
+                })
+        return rows
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    for start in range(0, total - 2, 300):
+        folder = source / f"camera-{start:05}"
+        folder.mkdir()
+        for number in range(start, min(start + 300, total - 2)):
+            (folder / f"DSC{number:05}.jpg").write_bytes(str(number).encode())
+    for folder, extra in (("RAW", "DNG"), ("JPEG", "JPG")):
+        (source / folder).mkdir()
+        number = total - (2 if extra == "DNG" else 1)
+        (source / folder / f"split.{extra}").write_bytes(str(number).encode())
+
+    client = _onboard(fresh_main)
+    _adopt(client)
+    root = "/api/legacy-adoption/jobs"
+    job = root + "/" + _json(client, "POST", root, status=201, json={"root": "nas"})["id"]
+    _json(client, "POST", job + "/scan", status=202)
+    state = _json(client, "GET", job)
+    assert (state["files"], state["families"], state["review_count"], state["errors"]) == (total, total - 1, 26, 0)
+    review = _json(client, "GET", job + "/review")
+    assert all("conflicting_capture_time" in row["reasons"] for row in review)
+    selected = _json(client, "GET", job + "/review/selection?metadata=true")
+    assert selected == [row["family_key"] for row in review] and len(selected) == 26
+    sources = _json(client, "POST", job + "/review/metadata/sources",
+                    json={"revision": state["draft_revision"], "family_keys": selected})
+    assert sources["sources"][date_taken] == sources["sources"][creation] == 26
+    revision = state["draft_revision"]
+    for keys, tag in ((selected[:1], creation), (selected[1:], date_taken)):
+        staged = _json(client, "PUT", job + "/review/metadata", json={
+            "revision": revision, "family_keys": keys, "source": tag,
+        })
+        assert staged["staged"] == len(keys)
+        revision = staged["revision"]
+
+    # Recreate startup state and the client while the choices are still pending.
+    main.startup_database()
+    client = TestClient(main.app, follow_redirects=False)
+    resumed = _json(client, "GET", job)
+    assert resumed["draft_revision"] == revision
+    assert set(resumed["draft"]["metadata_review_pending"]) == set(selected)
+    applied = _json(client, "POST", job + "/review/metadata/apply", json={"revision": revision})
+    assert applied["applied"] == 26 and applied["rejected"] == {}
+    _json(client, "POST", job + "/review/metadata/apply", json={"revision": revision}, status=409)
+    state = _json(client, "GET", job)
+    assert state["draft"]["metadata_review_result"] == {"applied": 26, "remaining": 0}
+    assert _json(client, "GET", job + "/review") == []
+    years = _json(client, "GET", job + "/chronology")
+    assert years == [{"period": "2022", "families": 26, "review": 0},
+                     {"period": "2026", "families": total - 27, "review": 0}]
+
+    day = "2026-01-01"
+    proposal = {"events": [{"name": "Large event", "start_date": day, "end_date": day}],
+                "capture_overrides": state["draft"]["capture_overrides"]}
+    preview = _json(client, "POST", job + "/draft/check", json=proposal)
+    assert preview["valid"] and preview["events"][0]["families"] == total - 27
+    assert preview["events"][0]["files"] == total - 26
+    saved = _json(client, "PUT", job + "/draft", json={**proposal, "revision": applied["revision"]})
+    assert _json(client, "GET", job)["draft_revision"] == saved["revision"]
+    [day_preview] = _json(client, "GET", job + "/chronology?year=2026")
+    assert day_preview["families"] == total - 27
+    first_page = _json(client, "GET", job + "/families?day=" + day)
+    assert len(first_page) == 60
+    assert not list(archive.iterdir())
+    assert sum(1 for _ in source.rglob("*.jpg")) == total - 2
+    for path in source.rglob("*.jpg"):
+        assert path.read_bytes() == str(int(path.stem[3:])).encode()
+    assert (source / "RAW" / "split.DNG").read_bytes() == str(total - 2).encode()
+    assert (source / "JPEG" / "split.JPG").read_bytes() == str(total - 1).encode()
+    with database_connection(database) as connection:
+        assert not connection.execute("PRAGMA foreign_key_check").fetchall()
+        assert connection.execute("SELECT count(*) FROM events").fetchone()[0] == 0
+        split = connection.execute(
+            "SELECT relative_path, family_key, sha256 FROM legacy_adoption_inventory WHERE relative_path LIKE '%/split.%'",
+        ).fetchall()
+        assert {row["family_key"] for row in split} == {"RAW/split"}
+        assert {row["relative_path"]: row["sha256"] for row in split} == {
+            "RAW/split.DNG": sha256(str(total - 2).encode()).hexdigest(),
+            "JPEG/split.JPG": sha256(str(total - 1).encode()).hexdigest(),
+        }
