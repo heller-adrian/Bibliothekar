@@ -32,7 +32,7 @@ from app.legacy_adoption_paths import (
     AdoptionError, bound_directory, bound_file, bound_sha256, file_identity, relative_parent,
     target_key, validate_target, verify_inventory_identity, walk_bound_files,
 )
-from app.metadata import LOCAL_TIMEZONE
+from app.metadata import LOCAL_TIMEZONE, family_member_ending
 from app.operation_health import read_session
 from app.released_ranges import merge_intervals
 from app.subevents import assignment_target, normalize_subevents
@@ -568,7 +568,7 @@ def _family_targets(folder, key, family, override, archive_entry, registered, us
             raise AdoptionError("Der Zielname muss ein einzelner Dateiname ohne Endung sein.")
         validate_target(stem)
     # Preserve full compound endings, e.g. .RAF.xmp, for all members.
-    endings = [PurePosixPath(member["relative_path"]).name[len(original):] for member in family]
+    endings = [family_member_ending(member["relative_path"]) for member in family]
     proposed = [str(folder / (stem + ending)) for ending in endings]
     if len({target_key(ending) for ending in endings}) != len(endings):
         raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + proposed[0])
@@ -644,8 +644,7 @@ def _camera_tokens(families):
 
 
 def _automatic_family_targets(folder, key, family, capture, camera, same_second, names, stems, used):
-    original = PurePosixPath(key).name
-    endings = [PurePosixPath(member["relative_path"]).name[len(original):] for member in family]
+    endings = [family_member_ending(member["relative_path"]) for member in family]
     if len({target_key(ending) for ending in endings}) != len(endings):
         raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + key)
     base, index, _ = capture_stem(capture, camera, stems, same_second=same_second)

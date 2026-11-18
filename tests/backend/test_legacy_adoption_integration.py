@@ -2116,6 +2116,7 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
     from app.event_change_request import get_event_change_files, propose_archived_event_deletion, propose_event_change
     from app.event_document import build_event_document_from_db
     from app.event_inventory import event_root_relative
+    from app.metadata import family_member_ending
     from app.workspace_layout import backup_root, shared_work_root
 
     workspace, database, registry, archive = fresh_main
@@ -2135,17 +2136,21 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
     monkeypatch.setattr(
         "app.legacy_adoption_inventory.read_bound_metadata",
         lambda descriptors, _cancel: {
-            fd: {"EXIF:ExifIFD:DateTimeOriginal": os.pread(fd, 19, 0).decode()}
+            fd: {"EXIF:ExifIFD:DateTimeOriginal": os.pread(fd, 19, 0).decode(),
+                 "EXIF:IFD0:Make": "FUJIFILM", "EXIF:IFD0:Model": "X-T5",
+                 "EXIF:ExifIFD:ImageUniqueID": sha256(os.pread(fd, 19, 0)).hexdigest()[:32]}
             for fd in descriptors
         },
     )
-    extensions = (".RAF", ".JPG", ".RAF.xmp")
+    locations = {".RAF": "RAW", ".JPG": "JPEG", ".dng": "DNG", ".RAF.xmp": "Sidecar"}
+    extensions = tuple(locations)
     source_data = {}
 
     def photos(folder, date_time, stem="DSCF0763"):
-        (source / folder).mkdir(parents=True)
-        for extension in extensions:
-            relative = f"{folder}/{stem}{extension}"
+        for extension, kind in locations.items():
+            name = stem + "-renamed" if extension == ".JPG" else stem
+            relative = f"{folder}/{kind}/{name}{extension}"
+            (source / relative).parent.mkdir(parents=True)
             content = (date_time + " " + relative).encode()
             (source / relative).write_bytes(content)
             source_data[relative] = content
@@ -2178,7 +2183,7 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
             for move in moves:
                 assert not Path(move["target"]).exists()
                 if move in renamed and not later and move["relative_path"].endswith(".JPG"):
-                    observed = Path(move["target"]).with_name("DSCF0763 copy.JPG")
+                    observed = Path(move["target"]).with_name(Path(move["source"]).stem + " copy.JPG")
                     Path(move["source"]).rename(observed)
                     work = _json(client, "GET", job + "/manual-work?check=true")
                     [hint] = [item for step in work["steps"] for item in step["items"] if "observed_archive_path" in item]
@@ -2227,7 +2232,7 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
     event_id, anchor = event["id"], catalogue_job_id(plan)
     root = archive / event_root_relative(event)
     assert root.parent.name == "2025"
-    stems = ("20250701_120000_Unbekanntes-Gerät", "20260101_100000_Unbekanntes-Gerät") if execution == "script" else (
+    stems = ("20250701_120000_Fuji-X-T5", "20260101_100000_Fuji-X-T5") if execution == "script" else (
         "DSCF0763", "DSCF0763_Adopted_001",
     )
     assert set(paths.values()) == {
@@ -2241,18 +2246,18 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
     # The different captures sharing its original camera name still get distinct targets.
     copied = source / "already-archived"
     copied.mkdir()
-    duplicated = {copied / ("renamed" + extension): source_data["2025/first/DSCF0763" + extension]
-                  for extension in extensions}
+    duplicated = {copied / ("renamed" + family_member_ending(relative)): data
+                  for relative, data in source_data.items() if relative.startswith("2025/first/")}
     for path, data in duplicated.items():
         path.write_bytes(data)
     photos("extension", "2026:01:01 11:00:00", stem="dscf0763")
     assert _json(client, "GET", "/api/legacy-adoption/eligibility") == {"eligible": True, "blockers": []}
     extension, new_paths = adopt({"events": [{"existing_id": event_id}]}, later=True)
     assert extension["events"][0]["id"] == event_id
-    assert extension["inventory_duplicates"] == 3
+    assert extension["inventory_duplicates"] == len(extensions)
     assert {path: path.read_bytes() for path in duplicated} == duplicated
     assert {Path(target).name for target in new_paths.values()} == {
-        ("20260101_110000_Unbekanntes-Gerät" if execution == "script" else "dscf0763_Adopted_002") + suffix
+        ("20260101_110000_Fuji-X-T5" if execution == "script" else "dscf0763_Adopted_002") + suffix
         for suffix in extensions
     }
     paths.update(new_paths)
@@ -2268,7 +2273,7 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
         assert tuple(saved_period) == ("2025-07-01T00:00:00", "2026-01-01T23:59:59")
         assert len({row["family_id"] for row in files}) == 3
         names = {Path(target).name: source_data[relative] for relative, target in paths.items()}
-        assert len(files) == len(names) == 9
+        assert len(files) == len(names) == 3 * len(extensions)
         for row in files:
             path = archive / row["current_relative_path"]
             assert row["sha256_current"] == sha256(path.read_bytes()).hexdigest()
@@ -2333,7 +2338,7 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
             assert sha256((backup_root(workspace) / released["current_relative_path"]).read_bytes()).hexdigest() == row["sha256_current"]
     summary = _json(client, "GET", "/api/workspace/summary?jobs=&physical_refresh=false")
     assert summary["statistics"]["family_count"] == 3
-    assert summary["statistics"]["file_count"] == 9
+    assert summary["statistics"]["file_count"] == 3 * len(extensions)
 
     # Reuse all three released families via the normal Workspace sort and archive flow.
     from app.sort_apply import CONFIRMATION_PHRASE, execute_sort_run, prepare_sort_run
@@ -2388,9 +2393,16 @@ def test_manual_adoption_steps_follow_smb_changes_and_require_verification(
         monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
     monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
     monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", lambda descriptors, _cancel: {
-        fd: {"EXIF:ExifIFD:DateTimeOriginal": "2026:01:01 12:30:00"} for fd in descriptors
+        fd: {"EXIF:ExifIFD:DateTimeOriginal": "2026:01:01 12:30:00",
+             "EXIF:IFD0:Make": "Synthetic", "EXIF:IFD0:Model": "Camera",
+             "EXIF:ExifIFD:ImageUniqueID": "00112233445566778899aabbccddeeff"
+             if os.pread(fd, 6, 0) == b"camera" else ""} for fd in descriptors
     })
-    originals = {"first/one.jpg": b"camera JPEG", "first/one.raf": b"camera RAW", "second/two.jpg": b"second photo"}
+    originals = {"first/one.jpg": b"camera JPEG", "first/one.raf": b"camera RAW",
+                 "first/one.raf.xmp": b"camera XMP", "second/one.dng": b"camera DNG",
+                 "second/two.jpg": b"second photo"}
+    first_paths = tuple(path for path in originals if path.startswith("first/"))
+    second_paths = tuple(path for path in originals if path.startswith("second/"))
     for path, content in originals.items():
         (source / path).write_bytes(content)
 
@@ -2425,7 +2437,7 @@ def test_manual_adoption_steps_follow_smb_changes_and_require_verification(
     prepared, first_files, second_files = work()["steps"]
     assert prepared["state"] == first_files["state"] == second_files["state"] == "pending"
     assert first_files["from"] == "first" and second_files["from"] == "second"
-    assert {item["from"] for item in first_files["items"]} == {"one.jpg", "one.raf"}
+    assert {item["from"] for item in first_files["items"]} == {Path(path).name for path in first_paths}
 
     if finish == "restore-unstarted":
         assert _json(client, "POST", job + "/rollback/start", json=command)["execution"]["phase"] == "rolling_back"
@@ -2441,7 +2453,7 @@ def test_manual_adoption_steps_follow_smb_changes_and_require_verification(
     assert work()["steps"][0]["state"] == "done"
 
     moves = {row["relative_path"]: Path(row["target"]) for row in _json(client, "GET", job + "/moves")}
-    for path in ("first/one.jpg", "first/one.raf"):
+    for path in first_paths:
         (source / path).rename(moves[path])
     states = work()
     assert not states["ready"]
@@ -2464,12 +2476,14 @@ def test_manual_adoption_steps_follow_smb_changes_and_require_verification(
         [event] = plan["events"]
         with database_connection(database) as connection:
             assert event_file_rows(connection, event["id"]) == []
-        (source / "second/two.jpg").rename(moves["second/two.jpg"])
+        for path in second_paths:
+            (source / path).rename(moves[path])
         assert work()["ready"]
         assert _json(client, "POST", job + "/finalize", json=command)["state"] == "completed"
         with database_connection(database) as connection:
             files = event_file_rows(connection, event["id"])
-        assert len(files) == 3
+        assert len(files) == len(originals)
+        assert len({file["family_id"] for file in files}) == 2
         assert all(file["current_root_kind"] == "camera_archive" for file in files)
         assert {path: target.read_bytes() for path, target in moves.items()} == originals
 
@@ -2517,7 +2531,7 @@ def test_manual_adoption_steps_follow_smb_changes_and_require_verification(
     assert [step["state"] for step in reversal["steps"][:3]] == ["pending", "pending", "done"]
     assert reversal["steps"][1]["to"] == "first"
     assert "first/" in extract("original-folders", source)
-    for path in ("first/one.jpg", "first/one.raf"):
+    for path in first_paths:
         moves[path].rename(source / path)
     assert [step["state"] for step in work()["steps"][:4]] == ["done", "done", "done", "pending"]
     (archive / event_document).unlink()
@@ -2633,19 +2647,44 @@ def test_regular_import_recognizes_adopted_file_family_before_any_regular_import
     mixed.mkdir()
     for name, data in contents.items():
         (mixed / name.replace("DSCF0763", "renamed-camera-original")).write_bytes(data)
-    new = mixed / "DSCF0763.JPG"
+    new = mixed / "JPEG" / "DSCF0763.JPG"
+    new.parent.mkdir()
     Image.new("RGB", (8, 8), "green").save(new)
     subprocess.run(["exiftool", "-overwrite_original", "-DateTimeOriginal=2026:07:19 17:11:37",
                     "-SubSecTimeOriginal=800", "-Make=FUJIFILM", "-Model=X-E5", str(new)],
                    check=True, capture_output=True)
+    from app import metadata as metadata_module
+
+    source_members = (new, mixed / "RAW/DSCF0763.RAF", mixed / "DNG/DSCF0763.dng", mixed / "RAW/DSCF0763.RAF.xmp")
+    for member in source_members[1:]:
+        member.parent.mkdir(exist_ok=True)
+        member.write_text(member.relative_to(mixed).as_posix())
+    read_fixture = metadata_module.run_exiftool
+    def read_split_capture(root, **kwargs):
+        records = read_fixture(root, **kwargs)
+        synthetic = [{
+            "SourceFile": str(root / member.relative_to(mixed)),
+            "EXIF:ExifIFD:DateTimeOriginal": "2026:07:19 17:11:37",
+            "EXIF:ExifIFD:SubSecTimeOriginal": "800",
+            "EXIF:IFD0:Make": "FUJIFILM", "EXIF:IFD0:Model": "X-E5",
+            "EXIF:ExifIFD:ImageUniqueID": "00112233445566778899aabbccddeeff",
+        } for member in source_members if (root / member.relative_to(mixed)).is_file()]
+        fixture_paths = {row["SourceFile"] for row in synthetic}
+        return [row for row in records if row["SourceFile"] not in fixture_paths] + synthetic
+
+    monkeypatch.setattr(metadata_module, "run_exiftool", read_split_capture)
     payload["source_relative_path"] = "mixed"
     _json(client, "POST", import_route, status=202, json=payload)
     assert process()["result"]["status"] == "import_queued"
     regular = process()
     assert regular["result"]["source"]["duplicate_file_count"] == len(contents)
     with database_connection(database) as connection:
-        [file] = connection.execute("SELECT * FROM files WHERE job_id=?", (regular["id"],)).fetchall()
-        assert file["sha256_original"] == sha256(new.read_bytes()).hexdigest()
+        imported = connection.execute("SELECT * FROM files WHERE job_id=?", (regular["id"],)).fetchall()
+        assert len(imported) == len(source_members)
+        assert len({row["family_id"] for row in imported}) == 1
+        assert {row["sha256_original"] for row in imported} == {
+            sha256(path.read_bytes()).hexdigest() for path in source_members
+        }
         [event] = plan["events"]
         archived = event_file_rows(connection, event["id"])
         assert len({row["family_id"] for row in archived}) == 1

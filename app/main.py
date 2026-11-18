@@ -125,7 +125,7 @@ from app.database import (
     list_imported_media_origins,
     store_imported_source_files,
 )
-from app.metadata import MetadataError, analyze_tree
+from app.metadata import MetadataError, analyze_import_tree as analyze_tree
 from app.metadata_correction import (
     MetadataCorrectionError,
     apply_metadata_correction,

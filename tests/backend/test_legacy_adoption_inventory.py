@@ -292,3 +292,41 @@ def test_separate_raw_jpeg_require_unique_identity_and_compatible_capture(librar
     assert {item["family_key"] for item in inventory_families(context, job)} == set(families)
     assert {path: path.read_bytes() for path in originals} == originals
     assert not list(context.archive_root.iterdir())
+
+
+def test_saved_rc1_family_retains_members_when_new_capture_evidence_is_available(library, monkeypatch):
+    import json
+
+    from app.database import database_connection
+
+    context, source = library
+    proof = {
+        "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+        "EXIF:IFD0:Make": "Synthetic", "EXIF:IFD0:Model": "Camera",
+        "EXIF:ExifIFD:ImageUniqueID": "00112233445566778899aabbccddeeff",
+    }
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata",
+                        lambda descriptors, _cancel: {fd: proof for fd in descriptors})
+    original = ("day/RAW/frame.RAF", "day/JPEG/frame.JPG")
+    for relative in original:
+        path = source / relative
+        path.parent.mkdir(parents=True)
+        path.write_text(relative)
+    job = create_job(context, source)
+    scan_inventory(context, job)
+    anchor = "day/RAW/frame"
+    with database_connection(context.database_path) as connection:
+        draft = json.loads(connection.execute("SELECT draft_json FROM legacy_adoption_jobs WHERE id = ?", (job,)).fetchone()[0])
+        draft["target_stems"] = {anchor: "saved-name"}
+        connection.execute("UPDATE legacy_adoption_jobs SET draft_json = ? WHERE id = ?", (json.dumps(draft), job))
+        connection.execute(
+            "UPDATE legacy_adoption_inventory SET metadata_json = json_remove(metadata_json, '$.capture_identity_version') WHERE job_id = ?",
+            (job,),
+        )
+    converted = source / "day/DNG/frame.dng"
+    converted.parent.mkdir()
+    converted.write_text("third member")
+    scan_inventory(context, job)
+    families = {item["family_key"]: item["members"] for item in inventory_families(context, job)}
+    assert set(families[anchor]) == set(original)
+    assert families["day/DNG/frame"] == [converted.relative_to(source).as_posix()]

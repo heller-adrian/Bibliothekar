@@ -18,7 +18,7 @@ import shutil
 import time
 
 from app.filename_collisions import capture_stem, numbered_stem
-from app.metadata import analyze_tree, classify_media
+from app.metadata import analyze_import_tree as analyze_tree, classify_media, family_member_ending
 from app.source_filter import should_ignore_source_path
 from app.import_publication import import_identity, publish_import_file, rollback_import_file
 from app.pipeline import (
@@ -453,7 +453,7 @@ def build_folder_import_plan(
             family_base = numbered_stem(base, suffix_index)
             relative_paths = [
                 destination_directory
-                / (family_base + Path(str(member["filename"])).suffix)
+                / (family_base + family_member_ending(member["filename"]))
                 for member in members
             ]
             if _destination_is_free(shared_root, relative_paths, reserved):
