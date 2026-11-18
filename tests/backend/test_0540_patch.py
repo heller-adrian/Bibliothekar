@@ -1,7 +1,7 @@
 """0.55.1: mobile editor and non-destructive background activity controls."""
 
 from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app import __version__, main
@@ -81,3 +81,17 @@ def test_0540_completed_expires_failed_persists_and_clear_is_safe(tmp_path):
         item["id"] == "failed-old" and not item["active"]
         for item in current_activity(db, db)["operations"]
     )
+
+
+def test_completed_activity_has_its_own_ten_minute_window(tmp_path):
+    db = tmp_path / "activity.sqlite3"
+    initialize_database(db)
+    now = datetime.now(timezone.utc)
+    for name, state, age in (
+        ("expired", "completed", 11), ("recent", "completed", 9),
+        ("still-running", "copying", 15), ("needs-attention", "failed", 15),
+    ):
+        _create_job(db, name, state, (now - timedelta(minutes=age)).isoformat())
+    assert {item["id"] for item in current_activity(db, db)["operations"]} == {
+        "recent", "still-running", "needs-attention",
+    }

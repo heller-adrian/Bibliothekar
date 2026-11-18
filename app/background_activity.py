@@ -11,6 +11,7 @@ from sqlite3 import OperationalError
 from typing import Any
 
 from app.database import database_connection
+from app.archive_batches import resumable_release, visible_batches
 from app.background_mutation_cancel import list_visible
 from app.operation_batches import get_operation_batch
 from app.sort_apply import get_sort_run
@@ -25,10 +26,10 @@ _SORT_STATES = ("queued", "verifying", "moving", "finalizing", "rolling_back")
 _BATCH_STATES = ("queued", "running", "interrupted")
 
 
-def current_activity(library_database: Path, global_import_database: Path) -> dict[str, Any]:
+def current_activity(library_database: Path, global_import_database: Path, *, workspace=None, library_id=None) -> dict[str, Any]:
     operations: list[dict[str, Any]] = []
-    # Keep recently completed operations visible long enough for a 2.5s UI poll.
-    recent_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+    # Each successful operation expires from the dock based on its own completion.
+    recent_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
 
     # Camera and folder imports are globally managed in the main DB, even
     # while a secondary library is selected in the browser.
@@ -47,7 +48,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
                        AND (state IN ('failed','interrupted')
                          OR (state='completed' AND updated_at>=?)))
                  )
-               ORDER BY updated_at DESC,id DESC LIMIT 12"""
+               ORDER BY (state='completed'),updated_at DESC,id DESC LIMIT 12"""
         try:
             rows=connection.execute(sql,(recent_cutoff,)).fetchall()
         except (OperationalError,TypeError) as error:
@@ -105,7 +106,7 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
         batch_candidates = connection.execute(
             """SELECT * FROM operation_batches
                WHERE status IN ('queued','running','interrupted','applied','failed')
-               ORDER BY created_at DESC,id DESC LIMIT 12"""
+               ORDER BY (status='applied'),created_at DESC,id DESC LIMIT 12"""
         ).fetchall()
         batches = [
             row for row in batch_candidates
@@ -213,6 +214,28 @@ def current_activity(library_database: Path, global_import_database: Path) -> di
             "active": status in ("queued", "running"),
         })
 
+    try:
+        archives = visible_batches(library_database)
+    except OperationalError as error:
+        if "no such table: archive_batches" not in str(error):
+            raise
+        archives = []
+    for batch in archives:
+        status = batch["status"]
+        if workspace is not None and batch["kind"] == "release" and status == "running":
+            from app.operation_health import inspect
+
+            if resumable_release(library_database, library_id, batch["id"], inspect(workspace)["reservations"]):
+                status = "interrupted"
+        operations.append({
+            "kind": "archive_batch", "id": batch["id"], "status": status,
+            "revision": status + ":" + batch["updated_at"],
+            "label": "Alle prüfen" if batch["kind"] == "verify" else "Alle Arbeitsbereiche freigeben",
+            "detail": f"{batch['processed']} von {batch['total']} Ereignissen verarbeitet",
+            "href": "/archive?archive_batch=" + batch["id"],
+            "progress_percent": batch["progress_percent"], "active": status in ("queued", "running"),
+        })
+
     if all(item["active"] for item in operations):
         return {"operations": operations, "active_count": len(operations)}
     # Nur exakt dieser beendete Versuch wird ausgeblendet. Nach einem Retry
@@ -262,6 +285,8 @@ def clear_finished_activity(library_database: Path, global_import_database: Path
                           WHERE status IN ('completed','failed')"""),
             ("release", """SELECT id,status,updated_at FROM ssd_release_tasks
                            WHERE status IN ('completed','failed')"""),
+            ("archive_batch", """SELECT id,status,updated_at FROM archive_batches
+                                 WHERE status IN ('completed','failed','interrupted')"""),
         )
         for kind, sql in queries:
             try:

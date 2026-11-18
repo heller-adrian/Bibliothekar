@@ -66,7 +66,7 @@ def _normalise_children(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
             end += ":59"
         name = str(item.get("name") or "Unterereignis")
         folder = str(item.get("folder_name") or item.get("folder") or "").strip()
-        if not folder:
+        if not folder and item.get('create_subfolder') is not False:
             folder = (
                 f"{start[5:16].replace('T',' ').replace(':','-')} - "
                 f"{end[5:16].replace('T',' ').replace(':','-')} - {name}"
@@ -246,6 +246,7 @@ def build_projected_archive_event_document(
     ]
     year = str(cr.get("start_date") or start_datetime)[:4]
     folder_name = str(cr.get("parent_folder") or "")
+    target_leaves = _loads(cr.get("target_leaf_layouts_json"), [])
     structure_lines = render_structure(
         year,
         folder_name,
@@ -253,6 +254,8 @@ def build_projected_archive_event_document(
         structure_children,
         preserve_day_folders,
         layout_state=projected_layout_state,
+        leaf_layouts=target_leaves,
+        parent_event_id=str(event["id"]),
     )
 
     occupied_intervals = (
@@ -295,6 +298,7 @@ def build_projected_archive_event_document(
             "notes": str(cr.get("notes") or ""),
         },
         "folder_layout": projected_layout_state,
+        **({"leaf_folder_layouts": target_leaves} if target_leaves else {}),
         "child_events": structure_children,
         "no_event_segments": no_event_segments,
         "child_event": structure_children[0] if len(structure_children) == 1 else None,

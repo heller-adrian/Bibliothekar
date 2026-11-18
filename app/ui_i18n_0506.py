@@ -94,7 +94,7 @@ UI_0506_TRANSLATIONS = {
     # Archive changes, rollback, manual reconciliation and deletion
     "Archivänderung": "Archive change",
     "Archivänderung anwenden": "Apply archive change",
-    "Änderung abschließen & SSD freigeben": "Complete change and release SSD workspace",
+    "Änderung abschließen & Arbeitsbereich freigeben": "Complete archive change and release workspace",
     "Änderung verwerfen": "Discard change",
     "Änderungen verwerfen": "Discard changes",
     "Rückänderung": "Reversal",

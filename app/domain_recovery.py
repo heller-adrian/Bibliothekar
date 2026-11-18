@@ -15,6 +15,7 @@ DELETE_FUNCTIONS={'app.trash_selective.delete_selected_trash_files','app.trash.e
 RECOVERY_FUNCTIONS={'app.trash_selective.recover_trash_deletions','app.trash_restore.recover_trash_restores'}
 ORIGINAL_TRASH_RESTORE='app.trash_restore.restore_trash_files'
 ARCHIVE_COPY='app.archive_release_copy.create_archive_release_copies'
+LEGACY_ADOPTION='app.legacy_adoption_registration.finalize_adoption'
 
 
 def handlers():
@@ -25,7 +26,9 @@ def handlers():
     # Register the original protected archive entry before qualifying its scope.
     from app.archive_release_copy import create_archive_release_copies
     from app.archive_release_copy_recovery import recover_archive_release_copy
+    from app.legacy_adoption_registration import finalize_adoption
     return {
+        LEGACY_ADOPTION: finalize_adoption,
         ARCHIVE_COPY: recover_archive_release_copy,
         'app.trash_selective.recover_trash_deletions':recover_trash_deletions,
         'app.trash_restore.recover_trash_restores':recover_trash_restores,
@@ -53,11 +56,11 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
     dead=[r for r in status['reservations'] if not r['live']]
     failures={'app.trash_failure.finalize_failure','app.trash_failure.rescue_failure'}
     if not dead or not all(r['qualified'] and r['ids'].get('function') in dispatch
-            and r['kind']==('archive' if r['ids']['function']==ARCHIVE_COPY else 'sort' if r['ids']['function'] in SORT_FUNCTIONS else 'trash' if r['ids']['function'] in failures
+            and r['kind']==('archive' if r['ids']['function'] in {ARCHIVE_COPY, LEGACY_ADOPTION} else 'sort' if r['ids']['function'] in SORT_FUNCTIONS else 'trash' if r['ids']['function'] in failures
                            or r['ids']['function'] in DELETE_FUNCTIONS
                            or r['ids']['function']==ORIGINAL_TRASH_RESTORE else 'recovery') for r in dead):
         return False
-    if len(dead)!=1 and any(r['ids']['function'] in SORT_FUNCTIONS or r['ids']['function']==ARCHIVE_COPY for r in dead):
+    if len(dead)!=1 and any(r['ids']['function'] in SORT_FUNCTIONS or r['ids']['function'] in {ARCHIVE_COPY, LEGACY_ADOPTION} for r in dead):
         return False  # No combined media replay without a cross-domain proof.
     if not confirmed_rescue and any(r['ids']['function']=='app.trash_failure.rescue_failure' for r in dead):
         return False  # Never infer or renew a user's explicit rescue decision.
@@ -95,7 +98,8 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
         failure_finish=record['ids']['function'] in failures
         sort_replay=record['ids']['function'] in SORT_FUNCTIONS
         archive_copy=record['ids']['function']==ARCHIVE_COPY
-        owner=owners.get(record.get('database')) if failure_finish or sort_replay or archive_copy else None
+        legacy_adoption=record['ids']['function']==LEGACY_ADOPTION
+        owner=owners.get(record.get('database')) if failure_finish or sort_replay or archive_copy or legacy_adoption else None
         expected_ids={'function':record['ids']['function']}
         expected_roots=set(required)
         if record['ids']['function']==ORIGINAL_TRASH_RESTORE:
@@ -158,6 +162,22 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
                 raise health.DomainStartupError('archive_release_recovery_owner_mismatch')
             expected_ids['cr_id']=change_id
             expected_roots.update((owner['work_root'],owner['archive_root']))
+        elif legacy_adoption:
+            job_id=record['ids'].get('job_id')
+            if (not isinstance(job_id,str) or len(job_id)!=32 or any(c not in '0123456789abcdef' for c in job_id)
+                    or not owner or owner['library_id']!=record['library']):
+                raise health.DomainStartupError('legacy_adoption_recovery_owner_mismatch')
+            with closing(read_connection(Path(record['database']))) as catalogue:
+                plan=catalogue.execute(
+                    """SELECT plan.id FROM legacy_adoption_plans plan
+                       JOIN legacy_adoption_jobs job ON job.id=plan.job_id
+                       WHERE plan.job_id=? AND job.library_id=? AND plan.documents_at IS NOT NULL""",
+                    (job_id,owner['library_id']),
+                ).fetchone()
+            if plan is None or plan[0]!=record['ids'].get('operation_id'):
+                raise health.DomainStartupError('legacy_adoption_recovery_plan_missing')
+            expected_ids.update(job_id=job_id,operation_id=plan[0])
+            expected_roots.update((owner['work_root'],owner['archive_root']))
         elif failure_finish:
             job=record['ids'].get('job_id')
             if (not isinstance(job,str) or not job or '/' in job or '\\' in job or '\x00' in job
@@ -169,7 +189,7 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
             raise health.DomainStartupError('domain_recovery_shared_owner_mismatch')
         if (hashlib.sha256(json.dumps(record,sort_keys=True).encode()).hexdigest()!=item['record_sha256']
             or set(record)-{'format','reservation_id','shared','workspace','library','generation','bindings','database','kind','ids','effect_resources'}
-            or record.get('shared') is not (False if sort_replay or archive_copy else True)
+            or record.get('shared') is not (False if sort_replay or archive_copy or legacy_adoption else True)
             or record.get('ids')!=expected_ids
             or record.get('generation')!=[state['generation'],state.get('libraries',{}).get(record['library'],0)]
             or not expected_roots<=record['bindings'].keys()
@@ -214,6 +234,15 @@ def replay(workspace,registry,*,database,outcomes=None,allowed_databases=None,co
                             root,record['ids']['cr_id'],
                         )
                         disposition='verified_prior_archive_release_copies_restored_without_media_mutation'
+                    elif function==LEGACY_ADOPTION:
+                        from app.library_context import resolve_library_context
+                        library=resolve_library_context(Path(registry),record['library'])
+                        outcome=dispatch[function].__wrapped__(
+                            library,Path(registry),record['ids']['job_id'],record['ids']['operation_id'],
+                        )
+                        result={key:outcome[key] for key in ('id','state','counts','issues') if key in outcome}
+                        disposition=('verified_legacy_adoption_registered'
+                                     if result['state']=='completed' else 'legacy_adoption_precondition_not_met')
                     elif sort_replay:
                         from app.sort_recovery_proof import qualify
                         from app.database import database_connection

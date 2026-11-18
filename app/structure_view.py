@@ -19,8 +19,10 @@ def render_structure(year, folder, day_keys=(), children=(), preserve_days=False
     branches = []
     leaf_by_key = {str(leaf.get('leaf_key')): leaf for leaf in (leaf_layouts or [])}
     # The parent branch represents files assigned directly to the parent.
-    if default_days or not child_list:
-        branches.append(("", default_days, str(parent_event_id or "")))
+    flat_child_days = {day for child in child_list if child.get("folder_name") == "" for day in child.get("day_keys", [])}
+    default_days = sorted(set(default_days) | flat_child_days)
+    if default_days or not child_list or any(child.get("folder_name") == "" for child in child_list):
+        branches.append(("", default_days, str(parent_event_id or ""), layout_state))
     seen = {""}
     for child in child_list:
         branch = str(child.get("folder_name") or child.get("folder") or "")
@@ -32,13 +34,13 @@ def render_structure(year, folder, day_keys=(), children=(), preserve_days=False
             if "day_keys" in child
             else default_days
         )
-        branches.append((branch, child_days, str(child.get("id") or "")))
+        branches.append((branch, child_days, str(child.get("id") or ""), child.get("folder_layout") or layout_state))
 
-    for branch, branch_days, owner_id in branches:
+    for branch, branch_days, owner_id, branch_layout in branches:
         rendered_days = branch_days if preserve_days and branch_days else [""]
         for day in rendered_days:
             key = owner_id + ('@' + day if day else '')
-            leaf_layout = leaf_by_key.get(key) or layout_state
+            leaf_layout = leaf_by_key.get(key) or leaf_by_key.get(owner_id) or branch_layout
             for leaf in _layout_paths(leaf_layout):
                 parts = [str(year), str(folder), branch, day]
                 if leaf:

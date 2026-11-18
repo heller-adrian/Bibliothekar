@@ -38,7 +38,17 @@ with (output/'stdout.log').open('w') as log:
  # 147-case manifest gets a longer deadline; every per-test watchdog is intact.
  pre5_historical_gate=(mode=='targets' and len(sys.argv)>3
                         and Path(sys.argv[3]).name=='backend_unretested.json')
- limit=5400 if pre5_historical_gate else (3600 if mode=='backend' else 2400)
+ partitioned_backend = mode == 'targets' and 'RC13_PARTITION' in env
+ if pre5_historical_gate:
+  limit = 5400
+ elif mode == 'backend':
+  limit = 3600
+ elif partitioned_backend:
+  # A full partition reached 331/338 cases at 40 minutes, all passing.
+  # Reserve time for the rest of the suite without changing any test deadline.
+  limit = 3000
+ else:
+  limit = 2400
  try:
   result=subprocess.run(args,cwd=source,env=env,stdout=log,
                         stderr=subprocess.STDOUT,timeout=limit)

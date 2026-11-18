@@ -6,9 +6,11 @@ from app.workspace_layout import shared_work_root
 
 from pathlib import Path
 
+import pytest
+
 from app.database import database_connection, initialize_database
 from app.event_inventory import scan_event_inventory
-from app.event_layout import ensure_event_layout_snapshot, get_event_layout, layout_paths, update_event_layout
+from app.event_layout import ensure_event_layout_snapshot, get_event_layout, layout_paths, set_global_default, update_event_layout
 from app.event_change_request import propose_event_change
 from app.event_change_apply import confirm_event_change, verify_event_change, finish_event_change
 from app.archive_change_document import build_projected_archive_event_document
@@ -761,3 +763,92 @@ def test_0283_archived_structure_off_finishes_without_followup_manual_task(tmp_p
     with database_connection(db) as connection:
         layout = get_event_layout(connection, "e")
     assert layout["structure_enabled"] is False
+
+
+@pytest.mark.parametrize("enabled,input_path,nodes,child_override", [
+    (True, "All", [{"id": "all", "name": "All"}, {"id": "sorted", "name": "Sorted"},
+                  {"id": "export", "name": "Export", "role": "export"}], False),
+    (True, "All", [{"id": "all", "name": "All"}], False),
+    (True, "Media/RAW", [{"id": "media", "name": "Media", "children": [{"id": "raw", "name": "RAW"}]},
+                        {"id": "prints", "name": "Prints"}], False),
+    (True, "", [{"id": "prints", "name": "Prints"}], False),
+    (False, "", [{"id": "export", "name": "Export"}], False),
+    (True, "Camera", [{"id": "camera", "name": "Camera"}], True),
+], ids=["default", "all-only", "custom-nested", "direct-input", "disabled", "child-override"])
+def test_archived_rename_uses_the_saved_layout_after_global_defaults_change(
+    tmp_path, enabled, input_path, nodes, child_override,
+):
+    db = tmp_path / "db.sqlite3"
+    workspace = tmp_path / "workspace"
+    archive = tmp_path / "archive"
+    workspace.mkdir()
+    archive.mkdir()
+    original, family_id, _ = _seed_archived_layout_event(db, workspace, archive, structure_enabled=False)
+    from app.event_leaf_layouts import save_leaf_layouts, stored_leaf_layouts
+    from app.subevents import normalize_subevents
+
+    segment = {"id": "child", "name": "Field trip",
+               "start_datetime": "2026-07-23T10:00:00", "end_datetime": "2026-07-23T13:00:00"}
+    child = normalize_subevents([segment], "2026-07-23T00:00:00", "2026-07-23T23:59:59")[0]
+    layout = {"version": 2, "nodes": nodes}
+    leaf = {"leaf_key": "child", "leaf_prefix": child["folder_name"], "structure_enabled": enabled,
+            "input_path": input_path, "layout": layout}
+    with database_connection(db) as connection:
+        state = update_event_layout(
+            connection, "e", structure_enabled=enabled,
+            input_path="Export" if child_override else input_path,
+            layout={"version": 2, "nodes": [{"id": "export", "name": "Export"}]} if child_override else layout,
+            updated_at=NOW,
+        )
+        if child_override:
+            seed_event(connection, status="archived", event_id="child", folder=child["folder_name"])
+            connection.execute(
+                """UPDATE events SET parent_event_id='e', event_level='child', name=?,
+                       start_datetime=?, end_datetime=?, uses_time_range=1 WHERE id='child'""",
+                (child["name"], child["start_datetime"], child["end_datetime"]),
+            )
+            connection.execute("UPDATE event_assignments SET event_id='child' WHERE family_id=?", (family_id,))
+            save_leaf_layouts(connection, "e", [leaf], now=NOW)
+        set_global_default(connection, {
+            "layout": {"version": 2, "nodes": [{"id": "global", "name": "New global default"}]},
+            "input_path": "New global default",
+        }, updated_at=NOW)
+    container = Path(leaf["leaf_prefix"]) if child_override else Path()
+    required = {container / value for value in layout_paths(layout)} if enabled else set()
+    if child_override:
+        required.add(container)
+    for folder in required:
+        (original / folder).mkdir(parents=True, exist_ok=True)
+    if input_path or child_override:
+        for filename in ("A.JPG", "A.xmp"):
+            (original / filename).rename(original / container / input_path / filename)
+
+    preview = _archived_layout_preview(family_id, state, enabled)
+    preview.pop("_folder_layout_explicit")
+    preview.pop("folder_layout")
+    preview["parent_folder"] = "07-23 - Renamed"
+    if child_override:
+        preview["subevents"] = [segment]
+    request = propose_event_change(db, "j", "e", preview, event_name="Renamed",
+                                   archive_root=archive, workspace_path=workspace)
+    change_id = request["change_request_id"]
+    confirm_event_change(db, change_id, archive, workspace)
+    target = original.with_name(preview["parent_folder"])
+    original.rename(target)
+    spec = required_event_document_for_request(db, change_id)
+    assert spec is not None
+    work = shared_work_root(workspace)
+    document = work / staging_directory_name(work) / spec["target_relative_path"]
+    (archive / spec["target_relative_path"]).write_bytes(document.read_bytes())
+    verified = verify_event_change(db, change_id, archive, workspace)
+    assert verified["complete"], verified
+    assert {Path(row["path"]).relative_to(target.relative_to(archive)).as_posix()
+            for row in verified["directories"]} == {".", *(path.as_posix() for path in required)}
+    finish_event_change(db, change_id, archive, workspace)
+    with database_connection(db) as connection:
+        assert get_event_layout(connection, "e") == state
+        assert connection.execute("SELECT folder_name FROM events WHERE id='e'").fetchone()[0] == target.name
+        if child_override:
+            assert stored_leaf_layouts(connection, "e")["child"]["leaf_prefix"] == leaf["leaf_prefix"]
+    assert (target / container / input_path / "A.JPG").read_bytes() == b"camera-a"
+    assert (target / container / input_path / "A.xmp").read_bytes() == b"xmp-a"

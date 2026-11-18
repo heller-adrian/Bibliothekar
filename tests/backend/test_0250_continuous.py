@@ -100,6 +100,32 @@ def test_nonadjacent_extension_rejected(tmp_path):
         create(db,payload('2026-07-24T00:00','2026-07-24T23:59',existing_parent_event_id=event['id']))
 
 
+def test_regular_subevents_keep_custom_layout_and_flat_assignment(tmp_path):
+    from app.event_leaf_layouts import effective_leaf_layouts
+
+    db = tmp_path / 'db'
+    day = '2026-07-23'
+    setup(db, [day + 'T13:30:00', day + 'T14:30:00'])
+    custom = {"layout": {"version": 2, "nodes": [{"id": "original", "name": "Custom originals"}]},
+              "input_path": "Custom originals"}
+    assignment = payload(subevents=[
+        {'name': 'Custom', 'start_datetime': day + 'T13:00', 'end_datetime': day + 'T14:00',
+         'folder_layout': custom},
+        {'name': 'Flat', 'start_datetime': day + 'T14:01', 'end_datetime': day + 'T15:00',
+         'create_subfolder': False},
+    ])
+    preview = build_event_preview(assignment, list_job_available_families(db, 'j'))
+    assert 'Custom originals' in str(preview)
+    result = create_planned_event(db, 'j', preview)
+    parent = result['parent_event']['id']
+    first, second = get_event_edit_context(db, 'j', parent)['child_events']
+    assert first['folder_layout']['input_path'] == 'Custom originals'
+    assert second['folder_name'] == ''
+    with database_connection(db) as connection:
+        assert set(effective_leaf_layouts(connection, parent)) == {first['id']}
+        assert connection.execute('SELECT count(*) FROM event_assignments WHERE event_id=?', (second['id'],)).fetchone()[0] == 1
+
+
 def test_extension_appends_new_subevent_without_rewriting_existing_child(tmp_path):
     db=tmp_path/'db'
     setup(db,['2026-07-23T14:00:00','2026-07-23T18:00:00'])

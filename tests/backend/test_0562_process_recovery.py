@@ -46,10 +46,14 @@ def invoke(case,action,boundary,control,*,kill=False):
                         break
                 time.sleep(.01)
             if process.poll() is None:process.wait(timeout=max(1,deadline-time.monotonic()))
-        except BaseException:
+        except BaseException as error:
             try:os.killpg(process.pid,signal.SIGKILL)
             except ProcessLookupError:pass
-            process.wait(timeout=5)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                error.add_note(f"Worker {process.pid} did not exit within 5 seconds after SIGKILL.")
+            error.add_note(f"Worker log {log}:\n{log.read_text(errors='replace')[-6000:]}")
             raise
     record={'command':command,'pid':process.pid,'returncode':process.returncode,'signal':'SIGKILL' if process.returncode==-9 else None,'action':action,'boundary':boundary}
     if (control/'checkpoint.json').exists():record['checkpoint']=json.loads((control/'checkpoint.json').read_text())

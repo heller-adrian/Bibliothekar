@@ -100,6 +100,7 @@ def test_0287_released_archive_groups_merge_same_interval_across_backups(tmp_pat
     with database_connection(db) as connection:
         seed_job(connection, "a")
         seed_job(connection, "b")
+        connection.execute("UPDATE jobs SET kind='archive_verification', operation='legacy_adoption' WHERE id='a'")
         fa, _ = _seed_family_file(
             connection, job_id="a", stem="A", capture="2026-07-20T10:00:00",
             current_path="Freigewordene Archivdateien/2026/2026-07-20/A.JPG", content=b"a",
@@ -125,7 +126,12 @@ def test_0287_released_archive_groups_merge_same_interval_across_backups(tmp_pat
     assert group["source_label"] == "2 Sicherungen"
     assert {source["job_id"] for source in group["source_groups"]} == {"a", "b"}
 
-    filtered = build_global_workspace_summary(db, ["a"])["released_archive_groups"]
+    empty_filter = build_global_workspace_summary(db, [])
+    mixed_filter = build_global_workspace_summary(db, ["b"])
+    assert empty_filter["statistics"]["family_count"] == 2
+    assert mixed_filter["statistics"]["family_count"] == 2
+    assert empty_filter["released_archive_groups"] == mixed_filter["released_archive_groups"]
+    filtered = mixed_filter["released_archive_groups"]
     assert len(filtered) == 1
     assert set(filtered[0]["family_ids"]) == {fa, fb}
     assert set(filtered[0]["source_job_ids"]) == {"a", "b"}

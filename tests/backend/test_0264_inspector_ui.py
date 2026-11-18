@@ -10,14 +10,18 @@ def source(path: str) -> str:
 
 def test_version_sources_are_consistent():
     from app import __version__ as package_version
+    from tests.backend.release_contract import EXPECTED_RELEASE_VERSION, EXPECTED_STABLE_VERSION
 
     main_source = source("app/main.py")
     assert "from app import __version__" in main_source
     assert "APP_VERSION = __version__" in main_source
     readme = source("README.md")
-    assert f"**Stable version:** {package_version}" in readme
-    assert f"ghcr.io/heller-adrian/bibliothekar:{package_version}" in readme
-    assert "not yet been accepted into the official TrueNAS Apps Catalog" in readme
+    assert package_version == EXPECTED_RELEASE_VERSION
+    assert f"**Stable version:** {EXPECTED_STABLE_VERSION}" in readme
+    assert f"ghcr.io/heller-adrian/bibliothekar:{EXPECTED_STABLE_VERSION}" in readme
+    if package_version != EXPECTED_STABLE_VERSION:
+        assert f"**Release candidate version:** {package_version}" in readme
+    assert "Deploy the Custom App" in readme
 
 
 def test_workspace_preview_preserves_tree_and_db_facts():

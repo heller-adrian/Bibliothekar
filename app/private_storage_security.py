@@ -87,7 +87,7 @@ def _darwin_attributes(fd):
     raise OSError('nontrivial Darwin ACL requires administrative qualification')
 
 
-def attributes(fd):
+def attributes(fd, *, allow_zfs_posix=False):
     if sys.platform == 'darwin':
         return _darwin_attributes(fd)
     kind = filesystem(fd)
@@ -106,9 +106,69 @@ def attributes(fd):
         # not proof of Linux kernel enforcement, even when its XDR looks valid.
         if kind != 'zfs' or native != {NFS4[0]}:
             raise OSError(f'{kind}: unsupported/non-native ACL namespace {sorted(native)}; native ZFS system.nfs4_acl_xdr required')
-    elif kind not in LOCAL_FILESYSTEMS:
+    elif kind not in LOCAL_FILESYSTEMS and not (allow_zfs_posix and kind == 'zfs'):
         raise OSError(f'{kind}: native ACL unavailable; use a private dataset with an explicit, readable owner/admin-only native ACL')
     return result
+
+
+def _native_entries(raw, path):
+    if len(raw) < 28 or len(raw) > 20488 or (len(raw) - 8) % 20:
+        raise PrivateStorageError('private_acl_unknown', path, 'invalid native XDR length')
+    flags, count = struct.unpack_from('!II', raw)
+    if count != (len(raw) - 8) // 20 or flags & ~0x30007:
+        raise PrivateStorageError('private_acl_unknown', path, 'invalid native header/count/flags')
+    for index, (kind, ace_flags, special, mask, who) in enumerate(struct.iter_unpack('!IIIII', raw[8:])):
+        if kind not in (0, 1, 2, 3) or ace_flags & ~0xff or special not in (0, 1) or mask & ~0x1f01ff:
+            raise PrivateStorageError('private_acl_unknown', path, f'unknown ACE {index}')
+        if special and who not in (1, 2, 3):
+            raise PrivateStorageError('private_acl_unknown', path, f'unknown special principal ACE {index}')
+        yield index, kind, ace_flags, special, mask, who
+
+
+def secure_working_directory(fd, name, *, created=False):
+    """Make a newly created, empty application directory private before writing into it."""
+    info = os.fstat(fd)
+    owner = os.geteuid()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != owner:
+        raise PrivateStorageError('private_owner_untrusted', name, 'application-owned directory required')
+
+    def acl():
+        attrs = attributes(fd, allow_zfs_posix=True)
+        native = attrs.get(NFS4[0])
+        expected = {NFS4[0]} if native is not None else {'system.posix_acl_access', 'system.posix_acl_default'}
+        if set(attrs) - expected:
+            raise PrivateStorageError('private_acl_unknown', name, 'unexpected ACL backend')
+        return native
+
+    def private(native):
+        # On POSIX the mode's group class also bounds named ACL principals.
+        if native is not None:
+            for _, kind, flags, special, mask, who in _native_entries(native, name):
+                owner_ace = (special and who == 1) or (not special and not flags & 0x40 and who == owner)
+                if kind == 0 and not owner_ace and mask & (WRITE | 0x21):
+                    return False
+        return stat.S_IMODE(os.fstat(fd).st_mode) & 0o777 == 0o700
+
+    native = acl()
+    if created and not private(native):
+        if os.listdir(fd):
+            raise PrivateStorageError('private_identity_changed', name, 'new working directory is not empty')
+        if native is None:
+            os.fchmod(fd, 0o700)
+        else:
+            # TrueNAS aclmode=restricted rejects chmod on nontrivial inherited ACLs.
+            # Set a protected owner-only ACL on this new descriptor and read it back.
+            owner_acl = struct.pack('!IIIIIII', 0x2, 1, 0, 0, 1, 0x1f01ff, 1)
+            try:
+                os.setxattr(fd, NFS4[0], owner_acl, os.XATTR_REPLACE)
+            except OSError as error:
+                raise PrivateStorageError(
+                    'private_acl_replace_failed', name, f'fsetxattr({NFS4[0]}): errno={error.errno}',
+                ) from error
+        os.fsync(fd)
+        native = acl()
+    if not private(native):
+        raise PrivateStorageError('private_acl_untrusted_write', name, 'owner-only working directory required')
 
 
 def check_acl(fd, users, *, path='<descriptor>', sticky=False, existing_ancestor=False, reader=None):
@@ -137,16 +197,7 @@ def check_acl(fd, users, *, path='<descriptor>', sticky=False, existing_ancestor
         raise PrivateStorageError('private_acl_unknown', path, f'unsupported/conflicting ACL attributes: {sorted(attrs)}')
     if native:
         raw = native[0][1]
-        if len(raw) < 28 or len(raw) > 20488 or (len(raw)-8) % 20:
-            raise PrivateStorageError('private_acl_unknown', path, 'invalid native XDR length')
-        flags, count = struct.unpack_from('!II', raw)
-        if count != (len(raw)-8)//20 or flags & ~0x30007:
-            raise PrivateStorageError('private_acl_unknown', path, 'invalid native header/count/flags')
-        for index, (kind, ace_flags, special, mask, who) in enumerate(struct.iter_unpack('!IIIII', raw[8:])):
-            if kind not in (0, 1, 2, 3) or ace_flags & ~0xff or special not in (0, 1) or mask & ~0x1f01ff:
-                raise PrivateStorageError('private_acl_unknown', path, f'unknown ACE {index}')
-            if special and who not in (1, 2, 3):
-                raise PrivateStorageError('private_acl_unknown', path, f'unknown special principal ACE {index}')
+        for index, kind, ace_flags, special, mask, who in _native_entries(raw, path):
             if kind != 0 or not mask & WRITE:
                 continue
             group = bool(ace_flags & 0x40)

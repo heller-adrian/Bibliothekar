@@ -75,7 +75,7 @@ def test_0269_sort_plan_materializes_empty_subevent_directories():
     assert '"code": "empty_subevent_days"' in sort_plan
     assert "An entirely empty subevent keeps the configured event" in sort_plan
     assert "folder structure directly below its folder." in sort_plan
-    assert "_layout_directories_at_leaf(child_root, layout_state)" in sort_plan
+    assert '_layout_directories_at_leaf(child_root, layout_for(str(child["id"])))' in sort_plan
     assert "planned_directories.update(layout_dirs or {str(child_root)})" in sort_plan
     assert '"code": "empty_subevent"' in sort_plan
 

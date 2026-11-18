@@ -76,14 +76,8 @@ def inspect(workspace):
         item={'path':str(path),'scope':'workspace','live':False,'qualified':False}
         try:
             r=ro._read(path)
-            if r is None and not os.path.lexists(path):
-                # Another F14 writer completed, fsynced its finished receipt,
-                # then unlinked the operation after our glob snapshot. A
-                # vanished directory entry is not a persistent orphan. Do not
-                # grant any lease/retry from it; only omit this stale listing.
-                # Existing unreadable files, including dangling symlinks,
-                # remain unqualified workspace-wide write blockers.
-                continue
+            if r is None:
+                raise ValueError('operation record disappeared while reading')
             nonce=r.get('reservation_id')
             if (r.get('format')!=1 or r.get('workspace')!=str(root) or not isinstance(r.get('ids'),dict)
                 or not isinstance(r.get('kind'),str) or not isinstance(r.get('library'),str)
@@ -111,6 +105,19 @@ def inspect(workspace):
                 recovering.append({'phase':'domain_recovery_in_progress','scope':item['scope'],
                     'detail':str(path)})
         except Exception as error:item['detail']=str(error)
+        if not item['live']:
+            # A successful writer unlinks the record under its lease before
+            # releasing the lock. If the observed name is now absent, the
+            # snapshot is stale. An extant object must still pass recovery.
+            try:
+                with ro.private_qualified(parent, directory=True) as (parent_fd, check):
+                    try:
+                        os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        check()
+                        continue
+            except (OSError, ro.RootOperationError) as error:
+                item.update(scope='workspace', qualified=False, detail=str(error))
         entries.append(item)
     with _STATUS_LOCK:
         issues=list(_FAILURES.get(str(root),[]))

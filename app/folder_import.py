@@ -17,6 +17,7 @@ import hashlib
 import shutil
 import time
 
+from app.filename_collisions import capture_stem, numbered_stem
 from app.metadata import analyze_tree, classify_media
 from app.source_filter import should_ignore_source_path
 from app.import_publication import import_identity, publish_import_file, rollback_import_file
@@ -436,41 +437,20 @@ def build_folder_import_plan(
                 })
             continue
 
-        capture = datetime.fromisoformat(str(capture_value))
-        stamp = capture.strftime("%Y%m%d_%H%M%S")
-        base = stamp + "_" + device_token
         destination_directory = location_for(str(capture_value))
         group = (destination_directory.as_posix().casefold(),
                  str(capture_value)[:19], device_token.casefold())
-        stems = existing_stems(destination_directory)
-        burst_prefix = re.compile(
-            r"^" + re.escape(stamp) + r"\d{3}_" + re.escape(device_token)
-            + r"(?:_\d{3})?$", flags=re.IGNORECASE,
-        )
-        existing_burst = base.casefold() in stems or any(
-            burst_prefix.fullmatch(stem) for stem in stems
-        )
         catalog_burst = bool(
             existing_second_callback(str(capture_value)[:19], device_token)
         ) if existing_second_callback is not None else False
-        burst = len(burst_groups.get(group, ())) > 1 or existing_burst or catalog_burst
-        fractional = re.search(
-            r"\.(\d+)(?=Z|[+-]\d{2}:\d{2}|$)", str(capture_value)
+        base, suffix_index, burst = capture_stem(
+            str(capture_value), device_token, existing_stems(destination_directory),
+            same_second=len(burst_groups.get(group, ())) > 1 or catalog_burst,
         )
-        if burst:
-            burst_family_count += 1
-            if fractional:
-                # Exactly three real millisecond digits, not hundredths.
-                base = f"{stamp}{capture.microsecond // 1000:03d}_{device_token}"
-            else:
-                # EXIF lacks a fractional capture time: a clearly marked
-                # sequence fallback, never a fabricated millisecond value.
-                burst_without_subseconds_count += 1
-                base += "_Burst"
-
-        suffix_index = 0 if fractional or not burst else 1
+        burst_family_count += int(burst)
+        burst_without_subseconds_count += int(burst and suffix_index == 1)
         while True:
-            family_base = base if suffix_index == 0 else f"{base}_{suffix_index:03d}"
+            family_base = numbered_stem(base, suffix_index)
             relative_paths = [
                 destination_directory
                 / (family_base + Path(str(member["filename"])).suffix)

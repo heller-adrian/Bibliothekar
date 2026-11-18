@@ -1158,6 +1158,8 @@ EVENTS_HTML = r"""<!doctype html>
     #normal-event-segments { display:grid; gap:10px; }
     .child-segment-card { padding:12px 14px !important; margin:0 !important; }
     .child-segment-card > summary { padding:2px 0 8px; }
+    .child-segment-card > summary:has([data-remove-child-segment]){display:flex;align-items:center;gap:8px}
+    .child-segment-card > summary [data-remove-child-segment]{margin-inline-start:auto}
     .child-segment-fields { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; padding-top:4px; }
     .child-segment-top { display:flex; align-items:end; justify-content:space-between; gap:12px; }
     .child-segment-name { flex:0 1 55%; min-width:220px; }
@@ -1502,6 +1504,35 @@ EVENTS_HTML = r"""<!doctype html>
     }
     #event-edit-dialog .child-segment-top {flex-wrap:wrap}
     #event-edit-dialog .child-segment-name {min-inline-size:0}
+    #event-edit-dialog .edit-folder-options {
+      grid-column:1/-1;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      gap:6px 24px;
+    }
+    #event-edit-dialog .edit-folder-options > label:first-child { grid-column:1/-1; }
+    #event-edit-dialog .edit-folder-options > select { inline-size:100%; min-inline-size:0; }
+    #event-edit-dialog .edit-parent-folder {
+      justify-self:end;
+      align-self:center;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-height:38px;
+      max-inline-size:100%;
+    }
+    @container event-editor (max-width:420px) {
+      #event-edit-dialog .edit-folder-options { grid-template-columns:minmax(0,1fr); }
+    }
+    #event-edit-dialog .edit-parent-folder > input[type="checkbox"] {
+      flex:0 0 1rem;
+      inline-size:1rem !important;
+      block-size:1rem !important;
+      min-inline-size:0 !important;
+      min-block-size:0 !important;
+      margin:0;
+      padding:0;
+    }
     #event-edit-dialog .edit-field > input:not([type="checkbox"]):not([type="radio"]),
     #event-edit-dialog .edit-field > select,
     #event-edit-dialog .edit-field > textarea {
@@ -1960,7 +1991,9 @@ EVENTS_HTML = r"""<!doctype html>
           jobId: String(cr.job_id || "")
         };
         changeRequestClose.disabled = false;
-        changeRequestClose.textContent = "Änderung verwerfen";
+        changeRequestClose.textContent = String(cr.status)==="aenderbar_vorschlagen"
+          ? bk0511EventLabel("Änderung verwerfen","Discard change")
+          : bk0511EventLabel("Änderung sicher zurücknehmen","Safely reverse change");
         changeRequestClose.classList.add("danger-button");
         setChangeTaskInUrl(cr.id, cr.job_id || "");
         return true;
@@ -2222,7 +2255,7 @@ EVENTS_HTML = r"""<!doctype html>
 
     function renderSummary(events) {
       const familyCount = events.reduce((sum,event)=>sum+Number(event.assigned_family_count||0),0);
-      const deletableCount = events.filter(isDeletable).length;
+      const deletableCount = events.filter(event=>event.status!=="archived" && isDeletable(event)).length;
       const cards = [
         ["Angezeigte Ereignisse", events.length],
         ["Zugeordnete Familien", familyCount],
@@ -2251,6 +2284,17 @@ EVENTS_HTML = r"""<!doctype html>
         && !event.mutation_id;
     }
 
+    function eventDateRange(start, end) {
+      const first = formatDateTime(start), last = formatDateTime(end);
+      return first && last && first !== last ? `${first} – ${last}` : first || last;
+    }
+
+    window.addEventListener("bk-language-changed",()=>{
+      eventList.querySelectorAll("[data-event-start]").forEach(node=>{
+        node.textContent = eventDateRange(node.dataset.eventStart,node.dataset.eventEnd);
+      });
+    });
+
 
     function renderEvents(events) {
       currentEvents = events;
@@ -2271,7 +2315,7 @@ EVENTS_HTML = r"""<!doctype html>
         const reconcileTargetNotice = isReconcileTarget ? `
           <div class="reassignment-resume"><span><strong>↳ Ziel einer offenen Nachsortierung</strong><br><span class="muted">Dieses geplante Ereignis wird nicht separat angewendet. Es wird zusammen mit dem bearbeiteten Ursprungsereignis im gemeinsamen Nachsortierplan geprüft und angewendet.</span></span></div>` : "";
         card.innerHTML = `
-          <div class="event-card-header"><div><strong class="event-name" data-bk-preserve-language>${escapeHtml(event.display_title || event.name)}</strong><div class="event-folder" data-bk-preserve-language>${escapeHtml(event.folder_name||"")}</div><div class="muted">${escapeHtml(String(event.start_datetime||"").slice(0,16))} bis ${escapeHtml(String(event.end_datetime||"").slice(0,16))} · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
+          <div class="event-card-header"><div><strong class="event-name" data-bk-preserve-language>${escapeHtml(event.display_title || event.name)}</strong><div class="event-folder" data-bk-preserve-language>${escapeHtml(event.folder_name||"")}</div><div class="muted"><span data-event-start="${escapeHtml(event.start_datetime||"")}" data-event-end="${escapeHtml(event.end_datetime||"")}" data-bk-preserve-language>${escapeHtml(eventDateRange(event.start_datetime,event.end_datetime))}</span> · ${Number(event.assigned_family_count||0)} Familien</div></div><span class="status-chip ${statusClass}">${escapeHtml(eventStatusLabel(event.status))}</span></div>
           ${reconcileTargetNotice}
           <div class="event-card-actions" hidden>
             <button type="button" data-view-event="${escapeHtml(event.id)}" data-job-id="${escapeHtml(event._job_id||event.job_id||"")}">Öffnen</button>
@@ -3397,12 +3441,12 @@ EVENTS_HTML = r"""<!doctype html>
           <div class="inspect-field"><span>Zugeordnet</span><strong>${assigned.length} Familien</strong></div>
         </div>
         ${event.notes?`<div class="inspect-section"><strong>Notizen</strong><p class="muted">${escapeHtml(event.notes)}</p></div>`:""}
-        ${noEvent?`<div class="inspect-section"><strong>Gespeicherte Tages-/Zeitsegmente</strong><div id="inspect-segment-host"></div><button type="button" id="inspect-more-segments" class="inspect-more" hidden>Weitere</button></div>`:""}
+        ${noEvent?`<div class="inspect-section"><strong>Gespeicherte Tages-/Zeitsegmente</strong><div id="inspect-segment-host"></div><button type="button" id="inspect-more-segments" class="inspect-more" hidden>${bk0511EventLabel("Weitere Zeitsegmente","More time segments")}</button></div>`:""}
         ${childEvents.length?`<div class="inspect-section"><strong>Unterereignisse</strong>${childCards}</div>`:""}
         <details class="inspect-section inspect-card collapse-card" id="inspect-family-days">
           <summary><strong>Dateifamilien nach Aufnahmetag</strong><span class="muted">${dayEntries.length} Tage</span></summary>
           <div id="inspect-family-day-host"></div>
-          <button type="button" id="inspect-more-family-days" class="inspect-more" hidden>Weitere</button>
+          <button type="button" id="inspect-more-family-days" class="inspect-more" hidden>${bk0511EventLabel("Weitere Tage","More days")}</button>
         </details>
         <div class="inspect-section"><strong>Zielstruktur</strong><pre class="inspect-structure">${escapeHtml(structureData?.structure_text||"Keine Struktur vorhanden.")}</pre></div>`;
 
@@ -3595,7 +3639,7 @@ EVENTS_HTML = r"""<!doctype html>
         const startDate=isoDate(segment.start_datetime);
         const endDate=isoDate(segment.end_datetime);
         const title=segment.name || "Unterereignis";
-        return `<details class="card child-segment-card" data-child-segment data-child-id="${escapeHtml(segment.id)}" open>
+        return `<details class="card child-segment-card" data-child-segment data-child-id="${escapeHtml(segment.id)}">
           <summary><strong data-child-summary>${escapeHtml(title)}</strong> <span class="muted">· ${escapeHtml(start)}–${escapeHtml(end)}</span></summary>
           <div class="child-segment-fields">
             <div class="child-segment-top">
@@ -3627,7 +3671,7 @@ EVENTS_HTML = r"""<!doctype html>
               <p class="muted">Jeder Tag bzw. Teil eines Tages wird separat gespeichert. Zwischenräume gehören ausdrücklich nicht zu „Ohne Ereignis“.</p>
             </div>
             <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
-            <label class="edit-field"><span>Unterordner</span><select id="edit-subfolders" ${structural ? "" : "disabled"}><option value="1" ${context.folder_layout?.structure_enabled ? "selected" : ""}>Erstellen</option><option value="0" ${context.folder_layout?.structure_enabled ? "" : "selected"}>Nicht erstellen</option></select></label>` : `
+            ` : `
           <div class="edit-boundaries">
             <div class="edit-boundary">
               <label class="edit-field"><span>Beginn</span><input id="edit-start-date" type="date" value="${escapeHtml(isoDate(event.start_datetime))}" ${structural ? "" : "disabled"}></label>
@@ -3638,11 +3682,15 @@ EVENTS_HTML = r"""<!doctype html>
               <label class="edit-field"><span>Endzeit</span><input id="edit-end-time" type="time" value="${escapeHtml(isoTime(event.end_datetime,'23:59'))}" ${structural ? "" : "disabled"}></label>
             </div>
           </div>
-          <label class="edit-field"><span>Tagesordner</span><select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select></label>
-          <label class="edit-field"><span>Unterordner</span><select id="edit-subfolders" ${structural ? "" : "disabled"}><option value="1" ${context.folder_layout?.structure_enabled ? "selected" : ""}>Erstellen</option><option value="0" ${context.folder_layout?.structure_enabled ? "" : "selected"}>Nicht erstellen</option></select></label>
+          <div class="edit-folder-options">
+            <label for="edit-preserve">Tagesordner</label>
+            <select id="edit-preserve" ${structural ? "" : "disabled"}><option value="0" ${event.preserve_day_folders ? "" : "selected"}>Nicht erhalten</option><option value="1" ${event.preserve_day_folders ? "selected" : ""}>Erhalten</option></select>
+            <label class="edit-parent-folder"><input id="edit-subfolders" type="checkbox" ${context.folder_layout?.structure_enabled ? "checked" : ""} ${structural ? "" : "disabled"}><span>Unterordner des Hauptereignisses erstellen</span></label>
+          </div>
           <input id="edit-time-enabled" type="hidden" value="1">
           <div class="edit-field full"><span>Optionale Unterereignisse</span><div id="normal-event-segments">${normalSegmentHtml}</div><button id="add-normal-segment" type="button">Unterereignis hinzufügen</button></div>`}
 
+          ${structural ? '<div class="edit-field full" id="edit-event-layout"></div>' : ''}
           <label class="edit-field full"><span>Notizen</span><textarea id="edit-notes" maxlength="4000">${escapeHtml(event.notes || "")}</textarea></label>
         </div>
         <div class="edit-actions">
@@ -3650,12 +3698,33 @@ EVENTS_HTML = r"""<!doctype html>
           <button type="submit" class="plan-button bk-positive-action">${event.status === "applied" ? "Änderungen anwenden" : "Änderungen speichern"}</button>
         </div>`;
 
+      if (structural) {
+        const host=document.getElementById("edit-event-layout");
+        const editor=window.BibliothekarFolderLayout.eventEditor({saved:context.folder_layout,defaults:context.folder_layout,allowDisabled:noEvent});
+        host.layoutValue=editor.value;
+        host.append(editor.panel);
+      }
       if (!noEvent) {
         const normalContainer=document.getElementById('normal-event-segments');
         const bind=()=>{
           normalContainer.querySelectorAll("[data-child-segment]").forEach(row=>{
+            if(structural && !row.folderOptions){
+              const original=(context.child_events || []).find(child=>child.id===row.dataset.childId);
+              const label=document.createElement("label");label.className="check-row";
+              const checkbox=document.createElement("input");checkbox.type="checkbox";
+              label.append(checkbox,document.createTextNode("Unterordner erstellen"));
+              const fields=row.querySelector(".child-segment-fields");
+              const editor=window.BibliothekarFolderLayout.subeventEditor({checkbox,saved:original,defaults:context.folder_layout});
+              window.BibliothekarFolderLayout.expandCard(row);
+              const nameRow=fields.querySelector(".child-segment-top");nameRow.classList.add("bk-subevent-name-row");
+              nameRow.append(label);fields.append(editor.panel);
+              row.folderOptions=()=>editor.value({preserveSaved:true});
+            }
             const remove=row.querySelector("[data-remove-child-segment]");
-            if(remove)remove.onclick=()=>row.remove();
+            if(remove){
+              row.querySelector("summary").append(remove);
+              remove.onclick=event=>{event.preventDefault();row.remove();};
+            }
             const nameInput=row.querySelector("[data-child-name]");
             const summary=row.querySelector("[data-child-summary]");
             if(nameInput&&summary){
@@ -3807,7 +3876,9 @@ EVENTS_HTML = r"""<!doctype html>
         notes: document.getElementById("edit-notes").value,
       };
       if (structural) {
-        payload.create_subfolders = document.getElementById("edit-subfolders").value === "1";
+        const layout=document.getElementById("edit-event-layout")?.layoutValue();
+        if(layout)payload.folder_layout=layout;
+        if(!noEvent)payload.create_subfolders=document.getElementById("edit-subfolders").checked && layout?.structure_enabled!==false;
         if (noEvent) {
           payload.event_kind = "no_event";
           payload.preserve_day_folders = document.getElementById("edit-preserve").value === "1";
@@ -3834,7 +3905,8 @@ EVENTS_HTML = r"""<!doctype html>
                 : `${row.querySelector('[data-child-start-date]').value}T${row.querySelector('[data-child-start-time]').value}:00`,
               end_datetime:row.querySelector('[data-child-end]')
                 ? row.querySelector('[data-child-end]').value
-                : `${row.querySelector('[data-child-end-date]').value}T${row.querySelector('[data-child-end-time]').value}:59`
+                : `${row.querySelector('[data-child-end-date]').value}T${row.querySelector('[data-child-end-time]').value}:59`,
+              ...row.folderOptions?.()
             }))
           });
         }
@@ -4502,9 +4574,11 @@ EVENTS_HTML = r"""<!doctype html>
         replace_event_document:"Copy updated event.json into archive",
         move_archive_files:"Move files within the camera library",
         remove_directories:"Remove obsolete folders",
-        restore_from_ssd:"Restore files from SSD",
+        restore_folders:"Restore missing original folder",
+        restore_from_ssd:"Restore original files from Workspace",
         move_back:"Move archive files to their original locations",
         remove_new_files:"Remove new archive files",
+        archive_conflict:"Archive paths with unverified ownership",
         remove_new_directories:"Remove newly created directories"
       }[String(op.kind || "")];
       return bk0511EventLabel(source,english || window.BibliothekarI18n?.t?.(source) || source);
@@ -4516,29 +4590,61 @@ EVENTS_HTML = r"""<!doctype html>
       const detail={
         remove_deleted_event_root:
           "After safely recovering all archive files to the SSD, remove the previous event folder, including its event.json.",
+        rename_archive_folder:
+          "Rename only the listed folder. Keep any existing destination intact.",
         replace_event_document:
           "Replace the existing event.json with the prepared version. Do not leave a second event.json in the event folder.",
         remove_directories:
           "After moving the files, remove these old directories only when they are empty.",
+        restore_folders:
+          "Copy the named folder to its destination. Keep existing folders intact.",
         restore_from_ssd:
-          "Restore missing original folders and files from the verified SSD inventory into the original archive structure.",
+          "Copy only the listed files to the destination folder. Replace only the indicated event.json.",
         move_back:
           "These files still exist in the archive and must be moved back to their original locations.",
         remove_new_files:
-          "These files did not belong to the original archive state. Keep the original SSD files.",
+          "These files were absent before the change and match the verified workspace copies. Keep those copies.",
+        archive_conflict:
+          "Keep these paths untouched. Bibliothekar cannot verify that they belong to this change request.",
         remove_new_directories:
           "After restoring file positions, remove the directories created by the discarded change."
       }[String(op.kind||"")];
       if(detail) return detail;
-      if(op.kind==="copy_helper_folders") return source.includes("event.json")
-        ? "Copy the prepared structure into the archive. Replace the existing event.json with the verified new version; never leave duplicate event.json files."
-        : "Copy the prepared folders into the archive together in one operation.";
-      if(op.kind==="copy_files")
-        return `Copy ${count} ${count===1?"file":"files"} into the existing destination folder.`;
+      if(op.kind==="copy_helper_folders") return (op.items || []).includes("event.json")
+        ? "Copy the listed folders and replace event.json with the prepared version."
+        : "Copy only the listed folders to the specified destination. Keep existing folders intact.";
       if(op.kind==="move_archive_files")
         return `Move ${count} ${count===1?"file":"files"} to the specified destination folder.`;
       return window.BibliothekarI18n?.t?.(source) || source;
     }
+    function archiveOperationStatus(element, text, state="idle"){
+      if(!element)return;
+      element.textContent=text;
+      element.className={idle:"muted",busy:"bk-loading-status",success:"success-text",error:"danger-text"}[state];
+      element.setAttribute("aria-busy",String(state==="busy"));
+    }
+
+    function archiveVerificationProblems(result){
+      const outstanding=(rows=[])=>rows.filter(row=>!["verified","advisory"].includes(row.status));
+      return [...outstanding(result.files),...outstanding(result.directories),
+        ...outstanding(result.obsolete_directories),...outstanding(result.event_document?[result.event_document]:[])];
+    }
+
+    function renderArchiveVerificationProblems(host, problems){
+      host.replaceChildren(...problems.map(problem=>{
+        const card=document.createElement("div");
+        card.className="card";
+        const description=document.createElement("div");
+        const message=problem.message || problem.status || problem.kind;
+        description.textContent=window.BibliothekarI18n?.t?.(message) || message;
+        const path=document.createElement("code");
+        path.textContent=problem.new_path || problem.path || problem.old_path || "";
+        card.append(description,path);
+        return card;
+      }));
+      host.hidden=!problems.length;
+    }
+
     async function showArchiveReversalDetail(crId, options={}) {
       const assistant = options.assistant || await requestJson(
         `/api/change-requests/${encodeURIComponent(crId)}/reversal`
@@ -4592,6 +4698,7 @@ EVENTS_HTML = r"""<!doctype html>
       if (phase === "prepare") {
         html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>Rückänderung vorbereiten</h3><p class="muted">Du hast bestätigt, dass die Archivänderung verworfen werden soll. Der ursprüngliche Zustand wird jetzt als eigener Rückweg vorbereitet.</p></div></div>`;
         html += `<div class="card"><strong>Dieser Wiederherstellungsbereich wird erst mit „Rückänderung vorbereiten“ angelegt:</strong><code style="display:block;margin-top:8px;white-space:pre-wrap;word-break:break-word">${escapeHtml(assistant.original_stock_path || bk0511EventLabel("Pfad wird beim Vorbereiten bestimmt","Path is determined during preparation"))}</code><p class="muted" style="margin-top:9px">Vor diesem Schritt muss der angezeigte Ordner noch nicht existieren. Beim Vorbereiten prüft die App den tatsächlichen Archivzustand sowie Größe und SHA-256. Nur Originale, die für den Rückweg wirklich auf SSD benötigt werden, werden dort sicher materialisiert.</p></div>`;
+        html += '<div data-reversal-activity role="status" aria-live="polite"></div>';
         html += historical
           ? '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-return>'+bk0511EventLabel("Zum aktuellen Schritt","Return to current step")+'</button></div></section>'
           : '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-prepare>'+bk0511EventLabel("Rückänderung vorbereiten","Prepare restoration")+'</button></div></section>';
@@ -4599,10 +4706,13 @@ EVENTS_HTML = r"""<!doctype html>
         html += `<section class="change-pane"><div class="change-pane-heading"><div><div style="display:flex;align-items:center;gap:8px"><h3 style="margin:0">Finder-Rückarbeit</h3><button class="bk-help" type="button" aria-label="Hinweis zur Finder-Rückarbeit" data-help="Die App prüft den realen Archivzustand read-only. Noch vorhandene Dateien werden an ihren ursprünglichen Ort zurückverschoben; fehlende Originale kommen aus dem vorbereiteten SSD-Rückbestand.">?</button></div>${assistant.live_refreshed ? '<p class="success-text" style="margin-top:6px">✓ Aktueller Archivbestand wurde read-only geprüft.</p>' : ''}</div><button type="button" class="plan-button change-refresh-button" data-reversal-refresh>↻ Aktualisieren</button></div>`;
         html += `<div class="card"><strong>Ursprüngliches Ziel</strong><code style="display:block;margin-top:7px">${escapeHtml(reversalArchiveRoot)}/${escapeHtml(assistant.original_root || "")}</code><div class="muted" style="margin-top:7px">SSD-Rückbestand</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(assistant.original_stock_path || "")}</code></div>`;
         let number=1;
+        const hasConflict=(assistant.operations || []).some(operation=>operation.state==="blocked");
         for (const operation of assistant.operations || []) {
-          html += `<details class="card change-operation" ${number===1?"open":""}><summary><span>${number}. ${escapeHtml(bk0511OperationTitle(operation))}</span><span class="badge warning">Ausstehend</span></summary><div class="change-operation-body"><div>${escapeHtml(bk0511OperationDetail(operation))}</div>`;
+          const badge=operation.state==="blocked" ? bk0511EventLabel("Gesperrt","Blocked") : "Ausstehend";
+          html += `<details class="card change-operation" ${number===1?"open":""}><summary><span>${number}. ${escapeHtml(bk0511OperationTitle(operation))}</span><span class="badge warning">${escapeHtml(badge)}</span></summary><div class="change-operation-body"><div>${escapeHtml(bk0511OperationDetail(operation))}</div>`;
           if (operation.source) html += `<div class="muted">VON</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.source)}</code>`;
           if (operation.target) html += `<div class="muted">NACH</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
+          if ((operation.protected_paths || []).length) html += `<div class="muted">${bk0511EventLabel("GESCHÜTZTE PFADE","PROTECTED PATHS")}</div>${operation.protected_paths.map(path=>`<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
           if ((operation.paths || []).length) html += `<div class="muted">ZU ENTFERNEN</div>${operation.paths.map(path=>`<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
           if ((operation.items || []).length) html += `<details><summary>${operation.items.length} Element${operation.items.length===1?"":"e"} anzeigen</summary><div style="margin-top:7px">${operation.items.map(name=>`<code style="display:block">${escapeHtml(name)}</code>`).join("")}</div></details>`;
           html += "</div></details>";
@@ -4611,13 +4721,14 @@ EVENTS_HTML = r"""<!doctype html>
         if (!(assistant.operations || []).length) {
           html += '<div class="card success-text">✓ Der ursprüngliche Finder-Zustand ist bereits wiederhergestellt.</div>';
         }
+        html += '<div data-reversal-activity role="status" aria-live="polite"></div>';
         html += historical
           ? '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-return>'+bk0511EventLabel("Zum aktuellen Schritt","Return to current step")+'</button></div></section>'
-          : '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-finder-check>'+bk0511EventLabel("Rückarbeit prüfen · weiter","Check restoration · continue")+'</button></div></section>';
+          : '<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-reversal-finder-check'+(hasConflict?' disabled':'')+'>'+bk0511EventLabel("Rückarbeit prüfen · weiter","Check restoration · continue")+'</button></div></section>';
       } else {
         html += '<section class="change-pane"><div class="change-pane-heading"><div><h3>Prüfen & Verwerfen</h3><p class="muted">Der ursprüngliche Archivzustand wird vollständig read-only nach Ordnern, Pfaden, Größen und SHA-256 geprüft.</p></div></div>';
-        html += '<div id="reversal-verify-panel" class="card"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button type="button" class="plan-button" data-reversal-verify>Rückänderung prüfen</button><span class="muted" data-reversal-summary>Noch nicht geprüft.</span></div><div data-reversal-errors style="display:none;margin-top:10px"></div></div>';
-        html += '<div class="change-footer"><button type="button" class="plan-button" data-reversal-back>Zur manuellen Wiederherstellung zurück</button><button type="button" class="plan-button bk-positive-action" data-reversal-finish disabled>Ursprungszustand bestätigen & Änderung verwerfen</button></div></section>';
+        html += '<div id="reversal-verify-panel" class="card"><div class="muted" role="status" data-reversal-summary>Noch nicht geprüft.</div><div data-reversal-errors class="stack" hidden></div></div>';
+        html += '<div class="change-footer"><button type="button" class="plan-button" data-reversal-back hidden>Zur manuellen Wiederherstellung zurück</button><button type="button" class="plan-button bk-positive-action" data-reversal-finish>'+bk0511EventLabel("Ursprungszustand bestätigen & Änderung verwerfen","Confirm original state and discard change")+'</button></div></section>';
       }
 
       html += '<div class="card" style="margin-top:10px;border-color:var(--bk-danger,#c75050)"><details><summary><strong>Notausstieg bei unmöglicher Rückänderung</strong></summary><p class="muted" style="margin-top:8px">Nur verwenden, wenn die Wiederherstellung unmöglich ist. Der Auftrag wird beendet, aber das Ereignis bleibt gesperrt, bis der Originalbestand gesondert geprüft wurde. Es werden keine Archivdateien verändert oder als geprüft markiert.</p><button type="button" class="plan-button danger-button" data-reversal-force>Abbrechen erzwingen · manuelle Klärung</button></details></div>';
@@ -4673,9 +4784,11 @@ EVENTS_HTML = r"""<!doctype html>
         box.hidden=false;
       };
 
+      const activity=changeRequestBody.querySelector("[data-reversal-activity]");
       changeRequestBody.querySelector("[data-reversal-prepare]")?.addEventListener("click", async event => {
         const button=event.currentTarget;
         button.disabled=true;
+        archiveOperationStatus(activity,bk0511EventLabel("Rückänderung wird vorbereitet …","Preparing reversal…"),"busy");
         try {
           const next=await requestJson(
             `/api/change-requests/${encodeURIComponent(crId)}/reversal/prepare`,
@@ -4684,7 +4797,7 @@ EVENTS_HTML = r"""<!doctype html>
           await showArchiveReversalDetail(crId,{assistant:next});
         } catch(error) {
           button.disabled=false;
-          showReversalError(error.message);
+          archiveOperationStatus(activity,bkPre71ArchiveError(error),"error");
         }
       });
 
@@ -4701,48 +4814,33 @@ EVENTS_HTML = r"""<!doctype html>
         }
       });
 
-      changeRequestBody.querySelector("[data-reversal-finder-check]")?.addEventListener("click", async () => {
-        await showArchiveReversalDetail(crId,{refreshLive:true});
-      });
-
-      const verifyButton=changeRequestBody.querySelector("[data-reversal-verify]");
-      const finishButton=changeRequestBody.querySelector("[data-reversal-finish]");
-      verifyButton?.addEventListener("click", async () => {
-        verifyButton.disabled=true;
-        const summary=changeRequestBody.querySelector("[data-reversal-summary]");
-        const errors=changeRequestBody.querySelector("[data-reversal-errors]");
+      changeRequestBody.querySelector("[data-reversal-finder-check]")?.addEventListener("click", async event => {
+        const button=event.currentTarget;
+        button.disabled=true;
+        archiveOperationStatus(activity,bk0511EventLabel("Manuelle Wiederherstellung wird geprüft …","Checking manual restoration…"),"busy");
         try {
-          const result=await requestJson(
-            `/api/change-requests/${encodeURIComponent(crId)}/reversal/verify`,
-            {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}
-          );
-          if (result.complete) {
-            verifyButton.classList.add("success");
-            verifyButton.textContent="✓ Rückänderung geprüft";
-            if(summary){summary.className="success-text";summary.textContent="Der ursprüngliche Archivzustand ist vollständig wiederhergestellt.";}
-            if(errors){errors.style.display="none";errors.innerHTML="";}
-            if(finishButton) finishButton.disabled=false;
-          } else {
-            verifyButton.disabled=false;
-            if(summary){summary.className="danger-text";summary.textContent=`${Number(result.problem_count||0)} Punkt(e) sind noch offen.`;}
-            if(errors){
-              errors.style.display="block";
-              errors.innerHTML=(result.problems||[]).map(problem=>`<div class="card" style="margin-top:7px"><strong>${escapeHtml(problem.message||"Noch offen")}</strong><code style="display:block;margin-top:5px;white-space:pre-wrap;word-break:break-word">${escapeHtml(problem.path||"")}</code></div>`).join("");
-            }
-          }
+          await showArchiveReversalDetail(crId,{refreshLive:true});
         } catch(error) {
-          verifyButton.disabled=false;
-          showReversalError(error.message);
+          button.disabled=false;
+          archiveOperationStatus(activity,bkPre71ArchiveError(error),"error");
         }
       });
 
+      const finishButton=changeRequestBody.querySelector("[data-reversal-finish]");
       finishButton?.addEventListener("click", async () => {
+        const summary=changeRequestBody.querySelector("[data-reversal-summary]");
+        const errors=changeRequestBody.querySelector("[data-reversal-errors]");
+        const back=changeRequestBody.querySelector("[data-reversal-back]");
         finishButton.disabled=true;
+        back.hidden=true;
+        renderArchiveVerificationProblems(errors,[]);
+        archiveOperationStatus(summary,bk0511EventLabel("Ursprünglicher Archivzustand wird geprüft …","Verifying original archive state…"),"busy");
         try {
           await requestJson(
             `/api/change-requests/${encodeURIComponent(crId)}/reversal/finish`,
             {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}
           );
+          archiveOperationStatus(summary,bk0511EventLabel("Ursprünglicher Archivzustand bestätigt.","Original archive state confirmed."),"success");
           mandatoryArchiveChangeContext=null;
           clearChangeTaskFromUrl(crId);
           changeRequestClose.disabled=false;
@@ -4754,7 +4852,12 @@ EVENTS_HTML = r"""<!doctype html>
           setStatus("Rückänderung abgeschlossen. Die Archivänderung wurde verworfen.",false,true);
         } catch(error) {
           finishButton.disabled=false;
-          showReversalError(error.message);
+          const problems=error.data?.verification?.problems || [];
+          back.hidden=!problems.length;
+          renderArchiveVerificationProblems(errors,problems);
+          archiveOperationStatus(summary,problems.length
+            ? bk0511EventLabel("Die Wiederherstellung ist noch nicht vollständig.","Restoration is incomplete.")
+            : bkPre71ArchiveError(error),"error");
         }
       });
     }
@@ -4764,13 +4867,24 @@ EVENTS_HTML = r"""<!doctype html>
       const raw=String(error?.message||error||"");
       if(raw.includes("operation_recovery_required"))
         return bk0511EventLabel(
-          "Eine unterbrochene Archivoperation muss vor weiteren Änderungen sicher überprüft werden. Keine Originale oder Reservationsdateien löschen.",
-          "An interrupted archive operation requires verified recovery before further changes. Do not delete originals or reservation records."
+          "Der Datenbankabschluss wartet auf eine sichere Wiederaufnahme. Versuche den Abschluss erneut; dabei werden alle Dateien erneut geprüft. Bleibt die Sperre bestehen, öffne die Wiederherstellungsdiagnose in den Einstellungen. Keine Originale oder Reservationsdateien löschen.",
+          "Database completion is waiting for verified recovery. Retry completion to recheck every file. If it remains blocked, inspect recovery diagnostics in Settings. Do not delete originals or reservation records."
+        );
+      if(/archive_completion_|archive_retry_|retry_|not authorized|database is locked/.test(raw))
+        return bk0511EventLabel(
+          "Der Datenbankabschluss ist noch offen. Ein Abschlussnachweis, eine Rückkopie oder eine andere Operation muss sicher geprüft werden. Bewahre alle Dateien auf und prüfe die Wiederherstellungsdiagnose.",
+          "Database completion is still pending. A completion receipt, return copy or another operation requires verified recovery. Keep all files and inspect recovery diagnostics."
         );
       if(raw.includes("Am SSD-Rückkehrpfad existiert bereits ein Eintrag"))
         return bk0511EventLabel("Der SSD-Rückkehrpfad ist bereits belegt. Nicht überschreiben.",
           "The SSD return path is already occupied. Do not overwrite it.");
       return window.BibliothekarI18n?.t?.(raw)||raw;
+    }
+    function bkArchiveTechnicalDetails(error){
+      return '<details class="card" style="margin-top:10px"><summary>'+
+        bk0511EventLabel("Technische Diagnose","Technical diagnostics")+
+        '</summary><code style="display:block;white-space:pre-wrap;overflow-wrap:anywhere">'+
+        escapeHtml(String(error?.message||error))+'</code></details>';
     }
     async function showChangeRequestDetail(crId, options={}) {
       try {
@@ -4994,11 +5108,13 @@ EVENTS_HTML = r"""<!doctype html>
               html += `<details class="card change-disclosure"><summary><strong>${targetTitle}</strong></summary><p class="muted" style="margin-top:8px">${targetHint}</p><pre class="change-target-tree" style="margin-top:9px">${targetStructureDeleted ? escapeHtml(bk0511EventLabel("Ereignis wird vollständig aus der Kamerabibliothek entfernt.","The entire event will be removed from the archive.")) : escapeHtml(targetTree)}</pre></details>`;
             }
 
+            const hasConflict=(assistant.operations || []).some(operation=>operation.state==="blocked");
             for (const operation of assistant.operations || []) {
               const state = String(operation.state || "");
               const stateBadge =
                 state === "done" ? '<span class="badge success">'+bk0511EventLabel("Erledigt","Done")+'</span>'
                 : state === "pending" ? '<span class="badge warning">'+bk0511EventLabel("Ausstehend","Pending")+'</span>'
+                : state === "blocked" ? '<span class="badge danger">'+bk0511EventLabel("Gesperrt","Blocked")+'</span>'
                 : state === "attention" ? '<span class="badge danger">'+bk0511EventLabel("Prüfen","Review")+'</span>'
                 : "";
               html += `<details class="card change-operation" ${number === 1 ? "open" : ""}><summary><span>${number}. ${escapeHtml(bk0511OperationTitle(operation))}</span>${stateBadge}</summary><div class="change-operation-body"><div>${escapeHtml(bk0511OperationDetail(operation))}</div>`;
@@ -5011,6 +5127,9 @@ EVENTS_HTML = r"""<!doctype html>
                 html += `<details><summary>${operation.items.length} Element${operation.items.length===1?"":"e"} anzeigen</summary><div style="margin-top:7px">${operation.items.map(name => `<code style="display:block">${escapeHtml(name)}</code>`).join("")}</div></details>`;
               }
               if (operation.target) html += `<div class="muted">${bk0511EventLabel("NACH","TO")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(operation.target)}</code>`;
+              if ((operation.protected_paths || []).length) {
+                html += `<div class="muted">${bk0511EventLabel("GESCHÜTZTE PFADE","PROTECTED PATHS")}</div>${operation.protected_paths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
+              }
               if ((operation.paths || []).length) {
                 html += `<div class="muted">${bk0511EventLabel("NOCH ZU ENTFERNEN","STILL TO REMOVE")}</div>${operation.paths.map(path => `<code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(path)}</code>`).join("")}`;
               } else if (operation.kind === "remove_directories" && state === "done") {
@@ -5020,24 +5139,17 @@ EVENTS_HTML = r"""<!doctype html>
               number += 1;
             }
             html += renderTechnicalDetails();
-            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-finder-done>${bk0511EventLabel("Manuelle Arbeit prüfen · weiter","Check manual work · continue")}</button></div></section>`;
+            html += `<div class="change-footer"><button type="button" class="plan-button bk-positive-action" data-cr-finder-done${hasConflict?" disabled":""}>${bk0511EventLabel("Manuelle Arbeit prüfen · weiter","Check manual work · continue")}</button></div></section>`;
           }
         }
 
         if (phase === "verify") {
 
-          const managedReviewRows = Array.isArray(reviewRows)
-            ? reviewRows.filter(row => !Boolean(row.advisory))
-            : [];
-          const initiallyVerified =
-            Array.isArray(reviewRows)
-            && reviewRows.length > 0
-            && managedReviewRows.every(row => String(row.verification_status || "") === "verified");
           html += `<section class="change-pane"><div class="change-pane-heading"><div><h3>${bk0511EventLabel("Prüfen & Abschließen","Verify and complete")}</h3><p class="muted">${bk0511EventLabel("So soll die Kamerabibliothek jetzt aussehen. Die Prüfung selbst bleibt vollständig read-only.","The archive should now match this layout. Verification is strictly read-only.")}</p></div></div>`;
           if (targetTree) html += `<div class="card"><strong>${bk0511EventLabel("SOLL-Struktur","Target structure")}</strong><pre class="change-target-tree" style="margin-top:9px">${targetStructureDeleted ? escapeHtml(bk0511EventLabel("Ereignis wird vollständig aus der Kamerabibliothek entfernt.","The entire event will be removed from the archive.")) : escapeHtml(targetTree)}</pre></div>`;
-          html += `<div id="change-verify-panel" class="card"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button type="button" class="plan-button${initiallyVerified ? " success" : ""}" data-cr-verify>${initiallyVerified ? bk0511EventLabel("✓ Prüfung erfolgreich","✓ Verification successful") : bk0511EventLabel("Prüfen","Verify")}</button><span id="change-verify-summary" class="${initiallyVerified ? "success-text" : "muted"}">${initiallyVerified ? `${reviewRows.length}/${reviewRows.length} ${bk0511EventLabel("Dateien bestätigt.","files verified.")}` : bk0511EventLabel("Noch nicht geprüft.","Not verified yet.")}</span></div><div id="change-work-progress" class="change-progress"><div class="muted" data-progress-label></div><div class="change-progress-track"><div class="change-progress-bar"></div></div></div><div id="change-verify-errors" style="display:none;margin-top:10px"></div></div>`;
+          html += `<div id="change-verify-panel" class="card"><div id="change-verify-summary" class="muted" role="status">${bk0511EventLabel("Noch nicht geprüft.","Not verified yet.")}</div><div id="change-verify-errors" class="stack" hidden></div></div>`;
           html += renderTechnicalDetails();
-          html += `<div class="change-footer"><button type="button" class="plan-button" data-cr-back hidden>${bk0511EventLabel("Zur manuellen Arbeit zurück","Back to manual steps")}</button><button type="button" class="plan-button bk-positive-action" data-cr-archive ${initiallyVerified ? "" : "disabled"}>${bk0511EventLabel("Änderung abschließen & SSD freigeben","Complete change and release SSD")}</button></div></section>`;
+          html += `<div class="change-footer"><button type="button" class="plan-button" data-cr-back hidden>${bk0511EventLabel("Zur manuellen Arbeit zurück","Back to manual steps")}</button><button type="button" class="plan-button bk-positive-action" data-cr-archive>${bk0511EventLabel("Änderung abschließen & Arbeitsbereich freigeben","Complete archive change and release workspace")}</button></div></section>`;
         }
 
         changeRequestBody.innerHTML = html;
@@ -5096,7 +5208,7 @@ EVENTS_HTML = r"""<!doctype html>
             if(label) label.textContent=bk0511EventLabel("Kopieren fehlgeschlagen.","Copy failed.");
             if(errors){
               errors.style.display="block";
-              errors.textContent=error.message;
+              errors.textContent=bkPre71ArchiveError(error);
             }
           }
         });
@@ -5137,7 +5249,7 @@ EVENTS_HTML = r"""<!doctype html>
             if(label) label.textContent="Prüfung fehlgeschlagen.";
             if(errors){
               errors.style.display="block";
-              errors.textContent=error.message;
+              errors.textContent=bkPre71ArchiveError(error);
             }
           }
         });
@@ -5178,7 +5290,7 @@ EVENTS_HTML = r"""<!doctype html>
             if(label) label.textContent="Prüfung fehlgeschlagen.";
             if(errors){
               errors.style.display="block";
-              errors.textContent=error.message;
+              errors.textContent=bkPre71ArchiveError(error);
             }
           }
         });
@@ -5186,14 +5298,14 @@ EVENTS_HTML = r"""<!doctype html>
         for (const button of changeRequestBody.querySelectorAll("[data-change-step]")) {
           button.addEventListener("click", () => {
             showChangeRequestDetail(crId, {phase:button.dataset.changeStep})
-              .catch(error => setStatus(error.message, true));
+              .catch(error => setStatus(bkPre71ArchiveError(error), true));
           });
         }
 
         const preparedNextBtn = changeRequestBody.querySelector("[data-cr-prepared-next]");
         if (preparedNextBtn) preparedNextBtn.addEventListener("click", () => {
           showChangeRequestDetail(crId, {phase:verifyUnlocked ? "verify" : finderNeeded ? "finder" : "verify"})
-            .catch(error => setStatus(error.message, true));
+            .catch(error => setStatus(bkPre71ArchiveError(error), true));
         });
 
         const prepareBtn = changeRequestBody.querySelector("[data-cr-prepare]");
@@ -5281,7 +5393,7 @@ EVENTS_HTML = r"""<!doctype html>
             }
           };
           prepareBtn.addEventListener("click", () => {
-            runArchivePreparation(null).catch(error => setStatus(error.message, true));
+            runArchivePreparation(null).catch(error => setStatus(bkPre71ArchiveError(error), true));
           });
         }
 
@@ -5316,163 +5428,41 @@ EVENTS_HTML = r"""<!doctype html>
           sessionStorage.removeItem(manualGateKey);
           showChangeRequestDetail(crId,{phase:"finder",refreshLive:true});
         });
-        const verifyBtn = changeRequestBody.querySelector("[data-cr-verify]");
         const archiveBtn = changeRequestBody.querySelector("[data-cr-archive]");
-        const failedVerificationBack = changeRequestBody.querySelector("[data-cr-back]");
-        if (verifyBtn) verifyBtn.addEventListener("click", async () => {
-          const progress = changeRequestBody.querySelector("#change-work-progress");
-          const bar = progress?.querySelector(".change-progress-bar");
-          const label = progress?.querySelector("[data-progress-label]");
-          const summary = changeRequestBody.querySelector("#change-verify-summary");
-          const errors = changeRequestBody.querySelector("#change-verify-errors");
-          verifyBtn.disabled = true;
-          verifyBtn.classList.remove("success", "danger");
-          if (failedVerificationBack) failedVerificationBack.hidden = true;
-          verifyBtn.textContent = "Prüfung läuft …";
-          progress?.classList.add("active");
-          if (bar) bar.style.width = "20%";
-          if (label) label.textContent = "Kamerabibliothek wird nach Pfad, Größe und SHA-256 geprüft …";
-          if (errors) { errors.style.display = "none"; errors.innerHTML = ""; }
+        archiveBtn?.addEventListener("click", async () => {
+          const summary=changeRequestBody.querySelector("#change-verify-summary");
+          const errors=changeRequestBody.querySelector("#change-verify-errors");
+          const back=changeRequestBody.querySelector("[data-cr-back]");
+          archiveBtn.disabled=true;
+          back.hidden=true;
+          renderArchiveVerificationProblems(errors,[]);
+          archiveOperationStatus(summary,bk0511EventLabel("Änderung wird geprüft …","Verifying change…"),"busy");
           try {
-            if (String(cr.status) === "aenderbar_vorschlagen") {
-              await changeRequestAction(crId, "confirm", {terminal:false});
-            }
-            if (bar) bar.style.width = "45%";
-            const data = await requestJson(
-              `/api/change-requests/${encodeURIComponent(crId)}/verify`,
-              {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})}
-            );
-            if (bar) bar.style.width = "100%";
-            const total = Number(data.file_count || 0);
-            const ok = Number(data.verified_file_count || 0);
-            const advisories = data.advisories || [];
-            const problems = (data.files || []).filter(row => !["verified","advisory"].includes(String(row.status || "")));
-            const directoryProblems = (data.directories || []).filter(row => String(row.status || "") !== "verified");
-            const obsoleteDirectoryProblems = (data.obsolete_directories || []).filter(row => String(row.status || "") !== "verified");
-            const eventDocumentProblem =
-              data.event_document && String(data.event_document.status || "") !== "verified"
-                ? data.event_document
-                : null;
-            if (failedVerificationBack) failedVerificationBack.hidden=Boolean(data.complete);
-            if (!data.complete) sessionStorage.removeItem(manualGateKey);
-            if (data.complete) {
-              verifyBtn.classList.add("success");
-              verifyBtn.textContent = "✓ Prüfung erfolgreich";
-              if (summary) {
-                summary.className = "success-text";
-                summary.textContent = ok + "/" + total + " verwaltete Dateien bestätigt."
-                  + (advisories.length ? " · " + advisories.length + " zusätzliche Datei" + (advisories.length===1?"":"en") + " nur als Hinweis." : "");
-              }
-              if (label) label.textContent = "Prüfung abgeschlossen.";
-              if (errors && advisories.length) {
-                errors.style.display = "block";
-                errors.innerHTML = advisories.map(row => {
-                  const title = row.advisory_reason === "redundant_duplicate"
-                    ? "Byte-identische Zusatzkopie · nur Hinweis"
-                    : "Zusätzliche nicht verwaltete Datei · nur Hinweis";
-                  return '<div class="card" style="margin-top:8px"><strong>'+escapeHtml(title)+'</strong><div class="muted">'
-                    + escapeHtml(row.message || "") + '</div><code style="display:block;white-space:pre-wrap;word-break:break-word">'
-                    + escapeHtml(row.path || "—") + '</code></div>';
-                }).join("");
-              }
-              if (archiveBtn) archiveBtn.disabled = false;
-            } else {
-              verifyBtn.classList.add("danger");
-              verifyBtn.textContent = "✕ Prüfung mit Problemen";
-              const problemCount = problems.length + directoryProblems.length + obsoleteDirectoryProblems.length + (eventDocumentProblem ? 1 : 0);
-              if (summary) { summary.className = "danger-text"; summary.textContent = `${ok}/${total} Dateien bestätigt · ${problemCount} Problem${problemCount===1?"":"e"}.`; }
-              if (label) label.textContent = "Bitte die angezeigten Abweichungen im Finder korrigieren und erneut prüfen.";
-              if (archiveBtn) archiveBtn.disabled = true;
-              if (errors) {
-                errors.style.display = "block";
-                const fileHtml = problems.map(row => {
-                  const problemLabel =
-                    row.status === "missing" ? "Fehlt am Ziel"
-                    : row.status === "old_path_still_exists" ? "Liegt noch am alten Ort"
-                    : row.status === "size_mismatch" ? "Dateigröße abweichend"
-                    : row.status === "sha256_mismatch" ? "SHA-256 abweichend"
-                    : row.status === "needs_reassignment" ? "Noch neu zuzuordnen"
-                    : (row.message || row.status || "Problem");
-                  return `<div class="card" style="margin-top:8px"><strong>${escapeHtml(problemLabel)}</strong>${row.message ? `<div class="muted">${escapeHtml(row.message)}</div>` : ""}<div class="muted" style="margin-top:5px">${bk0511EventLabel("SOLL","To Be")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.new_path || "—")}</code></div>`;
-                }).join("");
-                const directoryHtml = directoryProblems.map(row =>
-                  `<div class="card" style="margin-top:8px"><strong>Erforderlicher Ordner fehlt</strong><div class="muted">SOLL · Kamerabibliothek</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.path || "—")}</code></div>`
-                ).join("");
-                const obsoleteHtml = obsoleteDirectoryProblems.map(row =>
-                  `<div class="card" style="margin-top:8px"><strong>Alter Ordner noch vorhanden</strong><div class="muted">Dieser Ordner wird im SOLL nicht mehr benötigt</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(row.path || "—")}</code></div>`
-                ).join("");
-                const eventDocumentHtml = eventDocumentProblem
-                  ? `<div class="card" style="margin-top:8px"><strong>event.json stimmt noch nicht</strong><div class="muted">${escapeHtml(eventDocumentProblem.message || "")}</div><code style="display:block;white-space:pre-wrap;word-break:break-word">${escapeHtml(eventDocumentProblem.path || "event.json")}</code></div>`
-                  : "";
-                const advisoryHtml = advisories.map(row => {
-                  const title = row.advisory_reason === "redundant_duplicate"
-                    ? "Byte-identische Zusatzkopie · nur Hinweis"
-                    : "Zusätzliche nicht verwaltete Datei · nur Hinweis";
-                  return '<div class="card" style="margin-top:8px"><strong>'+escapeHtml(title)+'</strong><div class="muted">'
-                    + escapeHtml(row.message || "") + '</div><code style="display:block;white-space:pre-wrap;word-break:break-word">'
-                    + escapeHtml(row.path || "—") + '</code></div>';
-                }).join("");
-                errors.innerHTML = fileHtml + directoryHtml + obsoleteHtml + eventDocumentHtml + advisoryHtml;
-              }
-            }
-          } catch (error) {
-            verifyBtn.classList.add("danger");
-            verifyBtn.textContent = "✕ Prüfung fehlgeschlagen";
-            if (failedVerificationBack) failedVerificationBack.hidden = false;
-            sessionStorage.removeItem(manualGateKey);
-            if (summary) { summary.className = "danger-text"; summary.textContent = error.message; }
-            if (archiveBtn) archiveBtn.disabled = true;
-          } finally {
-            verifyBtn.disabled = false;
-          }
-        });
-
-        if (archiveBtn) archiveBtn.addEventListener("click", async () => {
-          const progress = changeRequestBody.querySelector("#change-work-progress");
-          const bar = progress?.querySelector(".change-progress-bar");
-          const label = progress?.querySelector("[data-progress-label]");
-          const summary = changeRequestBody.querySelector("#change-verify-summary");
-          archiveBtn.disabled = true;
-          verifyBtn && (verifyBtn.disabled = true);
-          progress?.classList.add("active");
-          if (bar) bar.style.width = "12%";
-          if (label) label.textContent = "Geprüften SOLL-Zustand in die Datenbank übernehmen …";
-
-          let pct = 12;
-          const pulse = window.setInterval(() => {
-            pct = Math.min(78, pct + 7);
-            if (bar) bar.style.width = `${pct}%`;
-            if (pct >= 48 && label) label.textContent = "SSD-Originale und Hilfslinks sicher freigeben …";
-          }, 220);
-          try {
-            const res = await fetch(`/api/change-requests/${encodeURIComponent(crId)}/archive`, {
-              method:"POST",
-              headers:{"Content-Type":"application/json"},
-              body:JSON.stringify({})
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-            window.clearInterval(pulse);
-            if (bar) bar.style.width = "100%";
-            if (label) label.textContent = "Abgeschlossen · SSD freigegeben und leere Quellordner aufgeräumt.";
-            if (summary) { summary.className = "success-text"; summary.textContent = "Änderung vollständig abgeschlossen."; }
-            await new Promise(resolve => setTimeout(resolve, 280));
-
-            mandatoryArchiveChangeContext = null;
+            await requestJson(`/api/change-requests/${encodeURIComponent(crId)}/archive`,
+              {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+            archiveOperationStatus(summary,bk0511EventLabel("Änderung vollständig abgeschlossen.","Archive change completed."),"success");
+            mandatoryArchiveChangeContext=null;
             sessionStorage.removeItem(manualGateKey);
             clearChangeTaskFromUrl(crId);
-            changeRequestClose.textContent = "Schließen";
+            changeRequestClose.textContent="Schließen";
             changeRequestClose.classList.remove("danger-button");
-            if (changeRequestDialog.open) changeRequestDialog.close();
+            if(changeRequestDialog.open)changeRequestDialog.close();
             await loadEvents({reset:true});
             refreshGlobalTasks();
-            setStatus("Archivänderung abgeschlossen.", false, true);
-          } catch (error) {
-            window.clearInterval(pulse);
-            archiveBtn.disabled = false;
-            verifyBtn && (verifyBtn.disabled = false);
-            if (label) label.textContent = error.message;
-            setStatus(error.message, true);
+            setStatus("Archivänderung abgeschlossen.",false,true);
+          } catch(error) {
+            archiveBtn.disabled=false;
+            const verification=error.data?.verification;
+            if(verification){
+              sessionStorage.removeItem(manualGateKey);
+              back.hidden=false;
+              renderArchiveVerificationProblems(errors,archiveVerificationProblems(verification));
+              archiveOperationStatus(summary,bk0511EventLabel("Die Archivänderung ist noch nicht vollständig.","The archive change is incomplete."),"error");
+            } else {
+              archiveOperationStatus(summary,bkPre71ArchiveError(error),"error");
+              errors.innerHTML=bkArchiveTechnicalDetails(error);
+              errors.hidden=false;
+            }
           }
         });
       } catch (error) {
@@ -5482,7 +5472,7 @@ EVENTS_HTML = r"""<!doctype html>
           bk0511EventLabel("Technische Diagnose","Technical diagnostics")+
           '</summary><code style="display:block;white-space:pre-wrap;overflow-wrap:anywhere">'+
           escapeHtml(String(error?.message||error))+'</code></details>';
-        setStatus(error.message, true);
+        setStatus(bkPre71ArchiveError(error), true);
       }
     }
 
@@ -6087,7 +6077,7 @@ EVENTS_HTML = r"""<!doctype html>
       }
       if(!archiveMode){
         structureChangeBody.innerHTML=`
-          <div class="card"><strong>${bk0511EventLabel("Erkannte Änderungen","Detected changes")}</strong>${changeDetails}</div>
+          <div class="card" style="margin-top:12px"><strong>${bk0511EventLabel("Erkannte Änderungen","Detected changes")}</strong>${changeDetails}</div>
           ${archiveChoices}`;
         attachArchiveMode();
         return;
@@ -6126,7 +6116,7 @@ EVENTS_HTML = r"""<!doctype html>
               "Archive change verified and recorded in SQLite."),false,true);
           }catch(error){
             button.disabled=false;button.classList.remove("loading");button.removeAttribute("aria-busy");
-            if(feedback){feedback.className="error-box";feedback.textContent=error.message;}
+            if(feedback){feedback.className="error-box";feedback.textContent=window.BibliothekarI18n?.t(error.message)||error.message;}
           }
         });
       }else{

@@ -9,8 +9,7 @@ from app.root_operations import protect, validate_active_roots
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
-from typing import Any, Callable
+from typing import Any, BinaryIO, Callable
 import hashlib
 import json
 import math
@@ -68,17 +67,26 @@ def sha256_file(
     cancellation_callback: Callable[[], None] | None = None,
     progress_callback: Callable[[int], None] | None = None,
 ) -> str:
-    digest = hashlib.sha256()
     validate_active_roots()
     with path.open("rb") as handle:
-        while True:
-            if cancellation_callback is not None:
-                cancellation_callback()
-            block = handle.read(1024 * 1024)
-            if not block:
-                break
-            digest.update(block)
-            if progress_callback is not None: progress_callback(len(block))
+        return sha256_stream(handle, cancellation_callback, progress_callback)
+
+
+def sha256_stream(
+    handle: BinaryIO,
+    cancellation_callback: Callable[[], None] | None = None,
+    progress_callback: Callable[[int], None] | None = None,
+) -> str:
+    digest = hashlib.sha256()
+    while True:
+        if cancellation_callback is not None:
+            cancellation_callback()
+        block = handle.read(1024 * 1024)
+        if not block:
+            break
+        digest.update(block)
+        if progress_callback is not None:
+            progress_callback(len(block))
     if cancellation_callback is not None:
         cancellation_callback()
     return digest.hexdigest()

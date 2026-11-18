@@ -228,8 +228,9 @@ def test_0276_visible_ui_contracts_and_frozen_disclosures():
     assert '"Ordnerimport"' in main
     assert "body[data-bk-area=\"archive\"] .archive-verify-button" in shell
     assert "background: var(--bk-yellow) !important" in shell
-    assert "vorhandene event.json im Ereignisordner durch die" in assistant
-    assert "keine zweite event.json daneben behalten" in assistant
+    assert "die event.json durch die vorbereitete Fassung ersetzen" in assistant
+    assert "Die bestehende event.json im Archiv durch die vorbereitete neue" in assistant
+    assert "event.json ersetzen. Nicht daneben ablegen und keine zweite" in assistant
 
     # Bereits manuell als PASS bestätigt: zentrale Disclosure-Regel unverändert.
     assert "#change-request-dialog details > summary::before" in events

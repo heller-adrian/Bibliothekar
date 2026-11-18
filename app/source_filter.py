@@ -6,7 +6,14 @@ from typing import Iterator
 
 # Betriebssystem-Verwaltungsbereiche sind keine Kameraquelle. Sie dürfen weder
 # die Quellsignatur noch Manifest, Sicherung oder Metadatenanalyse beeinflussen.
+LEGACY_REVIEW_STAGING = ".bibliothekar-legacy-review-stage"
+LEGACY_REVIEW_PRIVATE_STAGING = ".bibliothekar-legacy-review-private"
+LEGACY_REVIEW_VERIFIED_STAGING = ".bibliothekar-legacy-review-verified"
+
 IGNORED_SOURCE_DIRECTORIES = {
+    LEGACY_REVIEW_STAGING,
+    LEGACY_REVIEW_PRIVATE_STAGING,
+    LEGACY_REVIEW_VERIFIED_STAGING,
     ".trashes",
     ".spotlight-v100",
     ".fseventsd",

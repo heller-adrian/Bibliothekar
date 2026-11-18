@@ -387,7 +387,9 @@ def pipeline_loop_boundary(function):
 
 from app import pipeline as _pipeline_boundaries
 PIPELINE_COPY_BETWEEN_CHUNKS = pipeline_loop_boundary(_pipeline_boundaries.copy_and_verify)
-PIPELINE_HASH_BETWEEN_CHUNKS = pipeline_loop_boundary(_pipeline_boundaries.sha256_file)
+# Earlier release sources still hash inside sha256_file.
+PIPELINE_HASH_FUNCTION = getattr(_pipeline_boundaries, 'sha256_stream', _pipeline_boundaries.sha256_file)
+PIPELINE_HASH_BETWEEN_CHUNKS = pipeline_loop_boundary(PIPELINE_HASH_FUNCTION)
 
 
 def trace_probe(frame,event,arg):
@@ -398,8 +400,10 @@ def trace_probe(frame,event,arg):
     if module=='app.pipeline':
         if boundary=='import.copy_chunk' and function=='copy_and_verify' and frame.f_lineno==PIPELINE_COPY_BETWEEN_CHUNKS and len(loc.get('block',b''))>=1024*1024:
             stop(boundary)
-        if boundary=='import.hash_chunk' and function=='sha256_file' and frame.f_lineno==PIPELINE_HASH_BETWEEN_CHUNKS and '.incoming' in str(loc.get('path','')) and len(loc.get('block',b''))>=1024*1024:
-            stop(boundary)
+        if boundary=='import.hash_chunk' and function==PIPELINE_HASH_FUNCTION.__name__ and frame.f_lineno==PIPELINE_HASH_BETWEEN_CHUNKS:
+            path = loc.get('path') or getattr(loc.get('handle'), 'name', '')
+            if '.incoming' in str(path) and len(loc.get('block', b'')) >= 1024 * 1024:
+                stop(boundary)
     if module=='app.database' and function=='complete_job' and boundary=='import.in_tx' and frame.f_lineno==IMPORT_COMPLETED_IN_TX:
         assert loc['connection'].in_transaction
         assert loc['cursor'].rowcount == 1

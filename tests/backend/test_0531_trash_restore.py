@@ -67,8 +67,8 @@ def test_0531_preview_ui_and_tasks_contract():
     assert "Physical actual inventory" in WORKSPACE_HTML
     assert "Physical directory layout differs" in WORKSPACE_HTML
     assert "archive_pending" in list_global_tasks.__code__.co_consts.__repr__()
-    assert "/api/trash/empty-selection" in {r.path for r in main.app.routes}
-    assert "/api/event-structure-changes/{change_id}/undo" in {r.path for r in main.app.routes}
+    assert "/api/trash/empty-selection" in main.app.openapi()["paths"]
+    assert "/api/event-structure-changes/{change_id}/undo" in main.app.openapi()["paths"]
     assert "Gesamten Papierkorb leeren" in TRASH_HTML
     assert "Auswahl leeren" in TRASH_HTML
     assert "Änderungen rückgängig machen" in EVENTS_HTML

@@ -17,6 +17,23 @@ from app.trash import TrashError
 from app import trash_import as ti, trash_selective as ts
 from tests.backend import test_0562_process_recovery as recovery
 from tests.backend.test_0562_process_recovery import isolated_process_environment
+from tests.backend.thread_evidence import snapshot as thread_snapshot
+
+
+CHECKPOINT_SECONDS = 30
+
+
+def wait_for_checkpoint(reached, thread, result, label):
+    # A request can fail before reaching the checkpoint. Report its error
+    # immediately instead of letting the event timeout hide the cause.
+    deadline = time.monotonic() + CHECKPOINT_SECONDS
+    while (remaining := deadline - time.monotonic()) > 0:
+        if reached.wait(min(remaining, .1)):
+            return
+        if not thread.is_alive():
+            break
+    evidence = thread_snapshot(label, [thread], completed=result)
+    pytest.fail(f"Request did not reach its checkpoint: {evidence}")
 
 
 def fixture(tmp_path, monkeypatch):
@@ -91,11 +108,16 @@ def test_f11_original_boundary_and_restore(tmp_path,monkeypatch):
     case,ev,data,db,ws=fixture(tmp_path,monkeypatch)
     reached=threading.Event();proceed=threading.Event();real=main.empty_trash_filesystem
     def paused(root):
-        reached.set();assert proceed.wait(15);return real(root)
+        reached.set();assert proceed.wait(CHECKPOINT_SECONDS);return real(root)
     monkeypatch.setattr(main,'empty_trash_filesystem',paused)
-    thread,result=run_thread(empty);assert reached.wait(15)
-    main.api_restore_trash({'relative_paths':['A.JPG']})
-    proceed.set();thread.join(15);assert not thread.is_alive()
+    thread,result=run_thread(empty)
+    try:
+        wait_for_checkpoint(reached, thread, result, "f11-before-delete")
+        main.api_restore_trash({'relative_paths':['A.JPG']})
+    finally:
+        proceed.set()
+        thread.join(CHECKPOINT_SECONDS)
+    assert not thread.is_alive(),thread_snapshot("f11-before-delete-cleanup", [thread], completed=result)
     assert result[0][0]=='error' and result[0][1].status_code==409
     assert (ws/'Papierkorb/A.JPG').read_bytes()==b'synthetic-trash-A.JPG'
     recovery.snapshot(case,ev/'after-conflict.json');restart(case,ev)
@@ -108,18 +130,22 @@ def test_f11_delete_wins_restore_rejected(tmp_path,monkeypatch,operation):
     case,ev,data,db,ws=fixture(tmp_path,monkeypatch)
     reached=threading.Event();proceed=threading.Event();real=ts._move_checked
     def paused(*args,**kwargs):
-        result=real(*args,**kwargs);reached.set();assert proceed.wait(15);return result
+        result=real(*args,**kwargs);reached.set();assert proceed.wait(CHECKPOINT_SECONDS);return result
     monkeypatch.setattr(ts,'_move_checked',paused)
     action=empty if operation=='full' else lambda:main.api_empty_trash_selection({'relative_paths':['A.JPG']})
-    thread,result=run_thread(action);assert reached.wait(15)
-    before=recovery.snapshot(case,ev/'staged.json')
+    thread,result=run_thread(action)
     try:
+        wait_for_checkpoint(reached, thread, result, f"f11-{operation}-staged-delete")
+        before=recovery.snapshot(case,ev/'staged.json')
         with pytest.raises(HTTPException) as error:main.api_restore_trash({'relative_paths':['B.JPG']})
         assert error.value.status_code==409
         assert recovery.business_rows(before)==recovery.business_rows(recovery.snapshot(case,ev/'rejected.json'))
         assert not list(case.rglob('TRASH_IMPORT_*.json'))
-    finally:proceed.set();thread.join(15)
-    assert not thread.is_alive() and result[0][0]=='ok',result
+    finally:
+        proceed.set()
+        thread.join(CHECKPOINT_SECONDS)
+    assert not thread.is_alive(),thread_snapshot(f"f11-{operation}-delete-cleanup", [thread], completed=result)
+    assert result and result[0][0]=='ok',result
     state=restart(case,ev)
     assert not list(case.rglob('DELETE_*.json'))
     assert (ws/'Papierkorb/B.JPG').exists()==(operation=='selective')
@@ -136,12 +162,10 @@ def test_f11_two_concurrent_requests(tmp_path,monkeypatch,kind):
     # Both requests must finish; capture each live stack if the loaded CI VM
     # is slow or a lock remains held. A longer wait is not a silent PASS.
     a.join(30);b.join(30)
-    if a.is_alive() or b.is_alive():
-        from tests.backend.thread_evidence import snapshot
-        snapshot("f11-concurrent-"+kind, [a,b],
-                 completed=[(status, str(value)[:500]) for status,value in x+y])
-    assert not a.is_alive() and not b.is_alive()
-    results=x+y;assert any(r[0]=='ok' for r in results)
+    results=x+y
+    if a.is_alive() or b.is_alive() or not any(status=='ok' for status,_ in results):
+        pytest.fail(f"Concurrent requests produced no usable result: "
+                    f"{thread_snapshot('f11-concurrent-'+kind, [a,b], completed=results)}")
     for status,result in results:
         if status=='error':assert isinstance(result,HTTPException) and result.status_code==409
     if kind=='restore':

@@ -8,6 +8,17 @@ from __future__ import annotations
 import json
 
 UI_TRANSLATIONS = {
+  "Bestehendes Unterereignis ohne eigenen Ereignisordner": "Existing subevent without a dedicated event folder",
+  "Die event.json im Archiv entspricht noch nicht der vorbereiteten Datei.": "The event.json in the archive does not yet match the prepared file.",
+  "Unterordnerstruktur": "Subfolder Layout",
+  "Unterordner des Hauptereignisses erstellen": "Create parent event subfolder",
+  "Bibliotheksstandard": "Library default",
+  "Eigene Ordnerstruktur": "Custom folder layout",
+  "Ohne zusätzliche Ordner": "No additional folders",
+  "Struktur des Ereignisses übernehmen": "Use the parent event layout",
+  "Ordnername": "Folder name",
+  "Bestehende Fotosammlung übernehmen": "Adopt existing photo collection",
+  "Ordner hinzufügen": "Add folder",
   "Verbindung, Integrität und Schema sind bestätigt. Fachliche Vorgänge werden getrennt geprüft.": "Connection, integrity and schema are confirmed. Domain operations are checked separately.",
   "Die Datenbankprüfung meldet einen Fehler. Ursprüngliche Speicherorte und konsistenten Sicherungsstand prüfen; keine Datenbank zurücksetzen.": "Database checks report an error. Check the original storage locations and a consistent backup; do not reset the database.",
   "Aufnahmezeit belastbar": "Reliable capture time",
@@ -32,6 +43,13 @@ UI_TRANSLATIONS = {
   "Bibliotheken": "Libraries",
   "Sprache": "Language",
   "Sitzung": "Session",
+    "Bestehende Sammlung übernehmen": "Adopt an existing collection",
+    "Übernahmehistorie": "Adoption history",
+    "Schließe laufende Vorgänge oder offene Wiederherstellungen ab.": "Finish active operations or resolve pending recovery.",
+    "Schließe offene Archivänderungen ab.": "Finish open archive changes.",
+    "Schließe offene Import- und Hintergrundaufträge ab.": "Finish pending imports and background jobs.",
+    "Noch nicht vollständig archivierte Ereignisse": "Events that still need to be archived",
+  "Darstellung": "Appearance",
   "Hell": "Light",
   "Dunkel": "Dark",
   "System": "System",
@@ -271,6 +289,26 @@ UI_TRANSLATIONS = {
   "Aktualisieren": "Refresh",
   "Aktuelle Bibliothek": "Current library",
   "Archiv prüfen": "Verify archive",
+  "Alle prüfen": "Verify all",
+  "Alle Arbeitsbereiche freigeben": "Release all workspaces",
+  "Unterbrochene Freigabe fortsetzen": "Resume interrupted release",
+  "Unterbrochene Freigabe nach erneuter SHA-256-Prüfung fortsetzen?": "Resume the interrupted release after a fresh SHA-256 verification?",
+  "Für diesen Sammelauftrag gibt es keine eindeutig zugeordnete Freigabe zur Fortsetzung.": "There is no uniquely identified release to resume for this batch.",
+  "Gemeinsame Archivprüfung": "Archive verification batch",
+  "Gemeinsame Arbeitsbereich-Freigabe": "Workspace release batch",
+  "Einzelergebnisse": "Results by event",
+  "Mit Fehlern beendet": "Finished with errors",
+  "Übersprungen": "Skipped",
+  "Details stehen im Prüfnachweis.": "See the verification details.",
+  "Keine geeigneten Ereignisse zur Archivprüfung.": "No eligible events for archive verification.",
+  "Keine Arbeitsbereiche aus dieser Prüfung können freigegeben werden. Prüfe die Ereignisse erneut.": "No workspaces from this verification can be released. Verify the events again.",
+  "Das Ereignis kann derzeit nicht geprüft oder freigegeben werden.": "The event is currently ineligible for verification or release.",
+  "Die Archivprüfung ist nicht mehr aktuell. Prüfe das Ereignis erneut.": "The archive verification is out of date. Verify the event again.",
+  "Freigabe unterbrochen. Prüfe die verbleibenden Ereignisse und bestätige die Freigabe erneut.": "Release interrupted. Verify the remaining events and confirm release again.",
+  "Die Archivprüfung ist fehlgeschlagen. Der Arbeitsbereich wurde nicht freigegeben.": "Archive verification failed. The workspace was kept.",
+  "Ein Archiv-Sammelauftrag läuft bereits.": "An archive batch is already running.",
+  "Die Kennung der gemeinsamen Archivprüfung fehlt.": "The archive verification batch ID is missing.",
+  "Alle erfolgreich geprüften Arbeitsbereiche freigeben? Das Archiv wird erneut vollständig per SHA-256 geprüft.": "Release all successfully verified workspaces? Bibliothekar will fully verify the archive with SHA-256 again.",
   "Sortierung prüfen": "Verify sorting",
   "Ereignis bearbeiten": "Edit event",
   "Ereignis löschen": "Delete event",
@@ -458,7 +496,7 @@ UI_TRANSLATIONS.update({
   "Alle vorgesehenen alten Ordner sind bereits entfernt.": "All designated old folders have already been removed.",
   "Finder-Arbeit erledigt · weiter zu Prüfen": "Finder work complete · proceed to verification",
   "✓ Prüfung erfolgreich": "✓ Verification successful",
-  "Änderung abschließen & SSD freigeben": "Finish change & release SSD inventory",
+  "Änderung abschließen & Arbeitsbereich freigeben": "Complete archive change and release workspace",
   "Archivdateien werden geprüft und sicher auf die SSD kopiert …": "Checking archive files and safely copying them to the SSD…",
   "SSD-Kopien werden nach Größe und SHA-256 geprüft …": "Checking SSD copies by size and SHA-256…",
   "Alle SSD-Kopien sind vollständig geprüft.": "All SSD copies have been verified.",
@@ -925,6 +963,8 @@ UI_TRANSLATIONS.update({
   "Neuladen": "Reload",
   "Alle aktiven Sicherungen": "All active backups",
   "Day folder": "Day folder",
+  "Die gespeicherten „Ohne Ereignis“-Zeitsegmente sind ungültig.": "The saved No Event time segments are invalid.",
+  "Für „Ohne Ereignis“ fehlt mindestens ein Zeitsegment.": "At least one time segment is required for No Event.",
   "Weitere Aufnahmen aus ausgeblendeten Sicherungen": "More photos from hidden backups",
   "Neue Aufnahmen passen zu bestehenden Ereignissen": "New photos match existing events",
   "Keine aktiven Sicherungen.": "No active backups.",
@@ -1218,6 +1258,9 @@ UI_TRANSLATIONS.update({
 })
 
 UI_PATTERNS = [
+  ["^([0-9]+) von ([0-9]+) Ereignissen verarbeitet$", "$1 of $2 events processed"],
+  ["^([0-9]+) zur Freigabe bereit$", "$1 ready for release"],
+  ["^([0-9]+) fehlen; ([0-9]+) weichen ab\\.$", "$1 missing; $2 mismatched."],
   ["^Arbeitsbereich-Bestand für „(.+)“ freigeben\\? Die Kamerabibliothek wird erneut vollständig geprüft; erst danach werden ausschließlich die bestätigten Dateien im Arbeitsbereich entfernt\\.$", "Release workspace files for “$1”? The camera library will be fully reverified first. Only confirmed workspace files will then be removed."],
   ["^([0-9]+)/([0-9]+) Dateien bestätigt; ([0-9]+) fehlen; ([0-9]+) weichen ab\\.$", "$1/$2 files verified; $3 missing; $4 mismatched."],
   ["^([0-9]+) Dateien bestätigt; ([0-9]+) fehlen; ([0-9]+) weichen ab\\.$", "$1 files verified; $2 missing; $3 mismatched."],
@@ -1549,9 +1592,14 @@ UI_PATTERNS[:0]=RC14_PATTERNS
 
 from app.ui_pre import TRANSLATIONS as PRE_TRANSLATIONS, PATTERNS as PRE_PATTERNS
 UI_TRANSLATIONS.update(PRE_TRANSLATIONS)
+UI_TRANSLATIONS.update({
+    "Hilfe zum Exportordner": "Export folder help",
+    "Lege bearbeitete oder exportierte Aufnahmen im Exportordner ab. Mit dem Namenszusatz _Export vor der Dateiendung kann Bibliothekar sie dem passenden Original zuordnen.":
+        "Save edited or exported photos in the export folder. Add _Export before the file extension so Bibliothekar can match them to the corresponding original.",
+})
 UI_PATTERNS[:0]=PRE_PATTERNS
 
-I18N_UI_JS = r"""
+_I18N_UI_TEMPLATE = r"""
 (function () {
   "use strict";
   const dictionary = __DICTIONARY__;
@@ -1864,6 +1912,13 @@ I18N_UI_JS = r"""
     init();
   }
 })();
-""".replace("__DICTIONARY__", json.dumps(UI_TRANSLATIONS, ensure_ascii=False)).replace(
-    "__PATTERNS__", json.dumps(UI_PATTERNS, ensure_ascii=False)
-)
+"""
+
+
+def i18n_ui_js(translations=None, patterns=()):
+    return _I18N_UI_TEMPLATE.replace(
+        "__DICTIONARY__", json.dumps({**UI_TRANSLATIONS, **(translations or {})}, ensure_ascii=False),
+    ).replace("__PATTERNS__", json.dumps([*patterns, *UI_PATTERNS], ensure_ascii=False))
+
+
+I18N_UI_JS = i18n_ui_js()

@@ -1,0 +1,94 @@
+name: Publish qualified stable image
+
+on:
+  workflow_call:
+    inputs:
+      qualified_image_run:
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+  packages: write
+
+jobs:
+  promote:
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QUALIFIED_IMAGE_RUN: ${{ inputs.qualified_image_run }}
+      IMAGE: ghcr.io/heller-adrian/bibliothekar
+      TAG: v1.1.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify full QA, qualified container and merged source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$QUALIFIED_IMAGE_RUN" =~ ^[0-9]+$ ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+          test "v$(python -c 'from app import __version__; print(__version__)')" = "$TAG"
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_IMAGE_RUN")"
+          source="$(jq -er --arg repo "$GITHUB_REPOSITORY" '
+            select(.status == "completed" and .conclusion == "success" and .event == "workflow_dispatch"
+              and .path == ".github/workflows/publish-container.yml" and .head_repository.full_name == $repo
+              and .head_branch == "patch/1.0.1-legacy-adoption") | .head_sha' <<<"$run")"
+          [[ "$source" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/pulls/41" | jq -e --arg source "$source" --arg main "$GITHUB_SHA" '
+            .merged and .base.ref == "main" and .head.sha == $source and .merge_commit_sha == $main' >/dev/null
+          git merge-base --is-ancestor "$source" HEAD
+          test "$(git rev-parse "$source^{tree}")" = "$(git rev-parse 'HEAD^{tree}')"
+
+          evidence="$RUNNER_TEMP/stable-qualification"
+          gh run download "$QUALIFIED_IMAGE_RUN" --repo "$GITHUB_REPOSITORY" --name stable-1.1.0-qualified-image --dir "$evidence"
+          digest="$(jq -er --arg source "$source" --arg run "$QUALIFIED_IMAGE_RUN" --arg image "$IMAGE" --arg tag "$TAG" '
+            select(.source == $source and .image_run == $run and .image == $image and .tag == $tag)
+            | .digest | select(test("^sha256:[0-9a-f]{64}$"))' "$evidence/qualified-image.json")"
+          qa_run="$(jq -er '.qa_run | select(test("^[0-9]+$"))' "$evidence/qualified-image.json")"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$qa_run" |
+            jq -e --arg sha "$source" --arg repo "$GITHUB_REPOSITORY" '
+              .head_sha == $sha and .status == "completed" and .conclusion == "success"
+              and .event == "workflow_dispatch" and .path == ".github/workflows/qa-tests.yml"
+              and .head_branch == "patch/1.0.1-legacy-adoption" and .head_repository.full_name == $repo' >/dev/null
+          jq -e --arg sha "$source" 'select(.source == $sha and .status == "PASS" and .partitions == 8
+            and .tested_once == .collected and .collected >= 2768 and .read_only_mount == "PASS")' "$evidence/verified.json" >/dev/null
+          grep -Fxq 'Grouped manual SMB work verified the combined ZIP and resumed partial moves after a container restart on native ZFS.' "$evidence/container-smoke.log"
+          grep -Fxq 'Released script resumed after a container restart and controlled rollback restored the source on native ZFS.' "$evidence/container-smoke.log"
+          grep -Fxq 'Upgrade from RC22 retained the registered archive, receipt and SHA-256 on native ZFS.' "$evidence/container-smoke.log"
+          grep -Fxq 'Upgrade from 1.0.0 retained the existing library and normal Workspace access on native ZFS.' "$evidence/container-smoke.log"
+          {
+            echo "RELEASE_SOURCE=$source"
+            echo "RELEASE_DIGEST=$digest"
+            echo "RELEASE_EVIDENCE=$evidence"
+          } >> "$GITHUB_ENV"
+      - name: Publish stable image and release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA"
+          tag_ref="$(git ls-remote origin "refs/tags/$TAG" | cut -f1)"
+          test -z "$tag_ref" || test "$tag_ref" = "$RELEASE_SOURCE"
+
+          python qa/release/promote_stable_manifest.py version
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null 2>&1; then
+            cat >> "$RELEASE_EVIDENCE/release-notes.md" <<EOF
+
+          Stable image: \`$IMAGE:$TAG\`
+          Merged through PR #41 at \`$GITHUB_SHA\`.
+          EOF
+            gh release create "$TAG" "$RELEASE_EVIDENCE/qualified-image.json" \
+              --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SOURCE" --title "Bibliothekar $TAG" \
+              --notes-file "$RELEASE_EVIDENCE/release-notes.md" --latest
+          fi
+          test "$(git ls-remote origin "refs/tags/$TAG" | cut -f1)" = "$RELEASE_SOURCE"
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" |
+            jq -e --arg tag "$TAG" '.tag_name == $tag and .draft == false and .prerelease == false' >/dev/null
+          python qa/release/promote_stable_manifest.py latest
+          echo "${IMAGE}:${TAG} at ${RELEASE_DIGEST} from ${RELEASE_SOURCE}" >> "$GITHUB_STEP_SUMMARY"

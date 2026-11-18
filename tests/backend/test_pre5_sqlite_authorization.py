@@ -37,16 +37,30 @@ def test_current_schema_check_does_not_request_write_authority(ready,role,read_s
 
 @pytest.mark.parametrize('role',['catalogue','registry'])
 @pytest.mark.parametrize('damage',['missing_version_table','pending_migration'])
-def test_real_schema_changes_still_require_write_qualification(ready,role,damage):
+def test_real_schema_changes_still_require_write_qualification(ready,role,damage,tmp_path,monkeypatch):
     _,ws,reg,dbs,_=ready
     path,table,initialize=(dbs[0],'schema_versions',database.initialize_database) if role=='catalogue' else (reg,'registry_schema_versions',library_registry.initialize_library_registry)
     records=orphan(ws,dbs[0]);evidence={p:p.read_bytes() for p in records}
-    # Explicit external damage on disposable test data, not a production API
-    # bypass: an attacker/failed older process must not gain migration rights.
-    with closing(sqlite3.connect(path)) as c:
-        if damage=='missing_version_table':c.execute('DROP TABLE '+table)
-        else:c.execute(f'DELETE FROM {table} WHERE version=(SELECT max(version) FROM {table})')
-        c.commit()
+    if damage == 'missing_version_table':
+        # External damage on disposable data must not grant migration rights.
+        with closing(sqlite3.connect(path)) as c:
+            c.execute('DROP TABLE ' + table)
+            c.commit()
+    else:
+        # Use valid pending DDL. Replaying an already applied ALTER TABLE can
+        # fail on a duplicate column before SQLite asks its authorizer.
+        ddl = 'CREATE TABLE pending_test_migration(id INTEGER PRIMARY KEY);'
+        if role == 'catalogue':
+            migrations = database.available_migrations()
+            pending = tmp_path / 'pending.sql'
+            pending.write_text(ddl)
+            monkeypatch.setattr(database, 'available_migrations',
+                                lambda: [*migrations, (migrations[-1][0] + 1, pending)])
+        else:
+            migrations = library_registry.REGISTRY_MIGRATIONS
+            version = max(migrations) + 1
+            monkeypatch.setattr(library_registry, 'REGISTRY_MIGRATIONS', {**migrations, version: ddl})
+            monkeypatch.setattr(library_registry, 'REGISTRY_SCHEMA_VERSION', version)
     before=dump(path)
     with pytest.raises(sqlite3.DatabaseError,match='not authorized'):
         initialize(path)

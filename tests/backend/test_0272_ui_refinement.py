@@ -30,5 +30,5 @@ def test_0272_workspace_explanations_are_compact_and_readable():
 
 def test_0272_completion_message_is_not_misleading_counter_summary():
     source = (ROOT / "app" / "events_ui.py").read_text()
-    assert 'setStatus("Archivänderung abgeschlossen.", false, true)' in source
+    assert 'setStatus("Archivänderung abgeschlossen.",false,true)' in source
     assert "SSD-Dateien freigegeben ·" not in source

@@ -21,8 +21,10 @@ def test_rc2_delivered_web_assets_syntax(tmp_path):
              'login': _login_html(), 'setup': _library_onboarding_html()}
     from app.metadata_correction_ui import METADATA_CORRECTION_HTML
     from app.trash_ui import TRASH_HTML
+    from app.legacy_adoption_ui import wizard_html
     from app.ui_shell import apply_shell
     pages.update(metadata=apply_shell(METADATA_CORRECTION_HTML,active_area='metadata'),
-                 trash=apply_shell(TRASH_HTML,active_area='trash'))
+                 trash=apply_shell(TRASH_HTML,active_area='trash'),
+                 legacy_adoption=wizard_html('main'))
     result = check_pages(pages, tmp_path/'assets')
-    assert result['pages'] == 8 and result['scripts'] > 0 and result['styles'] > 0
+    assert result['pages'] == 9 and result['scripts'] > 0 and result['styles'] > 0

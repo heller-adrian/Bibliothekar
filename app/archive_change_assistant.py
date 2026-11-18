@@ -17,15 +17,11 @@ from app.archive_release_stock import describe_archive_release_stock
 from app.workspace_layout import shared_work_root
 
 
+from app.manual_file_operations import group_file_operations, topmost_directories, parent_directory as _parent_dir
+
+
 class ArchiveChangeAssistantError(RuntimeError):
     pass
-
-
-def _parent_dir(value: Any) -> str:
-    raw = str(value or "").replace("\\", "/").strip("/")
-    if not raw:
-        return ""
-    return PurePosixPath(raw).parent.as_posix()
 
 
 def _tree_lines(root: str, directories: list[str]) -> list[str]:
@@ -86,35 +82,6 @@ def _sha256_file(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
-
-
-def _collapse_copy_roots(
-    paths: list[str],
-    event_root: str,
-    archive_root: Path,
-) -> list[str]:
-    root = PurePosixPath(event_root)
-    if not root.parts:
-        return []
-    target_root = _safe_archive_path(archive_root, event_root)
-    candidates = [PurePosixPath(value) for value in paths if value]
-    if candidates and not target_root.is_dir():
-        return [root.as_posix()]
-    result: set[PurePosixPath] = set()
-    for path in candidates:
-        try:
-            suffix = path.relative_to(root)
-        except ValueError:
-            continue
-        if not suffix.parts:
-            continue
-        top_level = root / suffix.parts[0]
-        # A folder already present in the archive must NEVER be offered as a
-        # whole-folder copy: Finder could replace its existing contents.
-        # The individual incoming files will be listed by copy_files below.
-        if not _safe_archive_path(archive_root, top_level.as_posix()).is_dir():
-            result.add(top_level)
-    return sorted(path.as_posix() for path in result)
 
 
 def _scan_live_locations(
@@ -232,6 +199,12 @@ def build_archive_change_assistant(
     description = describe_archive_change_staging_for_request(
         database_path, archive_root, cr_id
     )
+    from app.archive_reversal import _manifest_path, _read_baseline
+    from app.archive_staging import staging_without_renamed_folders
+    renames = []
+    if _manifest_path(workspace_path, cr_id).is_file():
+        renames = _read_baseline(workspace_path, cr_id).get("directory_renames", [])
+        description = staging_without_renamed_folders(description, renames)
     release_stock = describe_archive_release_stock(database_path, cr_id)
     from app.managed_directory_names import directory_name
     from app.workspace_layout import backup_root
@@ -330,103 +303,73 @@ def build_archive_change_assistant(
     # Minimal user action: copy complete top-level prepared structures.
     # Bei Löschaufträgen gibt es bewusst keine neue SOLL-Struktur.
     if not delete_event:
-        # If the event root itself is new (rename), copy that root once instead.
-        request_helper_directories = list(
-            description.get("helper_directories") or missing
-        )
-        copy_roots = _collapse_copy_roots(
-            request_helper_directories,
-            target_root,
-            archive_root,
-        )
+        from app.archive_locations import ArchiveLocationError, archive_target_lookup
+        from app.archive_rename_guidance import layout_rename_state
 
-        covered_workspace_rows: set[tuple[str, int]] = set()
-        if copy_roots:
-            for root_value in copy_roots:
-                for row in workspace_rows:
-                    if _path_is_under(
-                        str(row.get("new_path") or ""), root_value
-                    ):
-                        covered_workspace_rows.add((
-                            str(row.get("review_kind") or "camera"),
-                            int(row["id"]),
-                        ))
+        for rename in renames:
+            source, target = rename["source"], rename["target"]
+            operations.append({
+                "kind": "rename_archive_folder",
+                "title": "Geprüften Ordner umbenennen",
+                "source": f"{archive_display_root}/{source}",
+                "target": f"{archive_display_root}/{target}",
+                "detail": "Benenne den geprüften Ordner am angegebenen Ort um. Ersetze keinen vorhandenen Ordner.",
+                "state": layout_rename_state(archive_root, rename),
+            })
+        obsolete = [path for path in obsolete if not any(path == rename["source"] for rename in renames)]
+        archive_rows = [row for row in archive_rows if not any(
+            _path_is_under(row["old_path"], rename["source"]) for rename in renames
+        )]
 
-            parent = (
-                PurePosixPath(target_root).parent.as_posix()
-                if copy_roots == [target_root]
-                else target_root
-            )
-            names = [_basename(value) for value in copy_roots]
-            copy_state = None
-            if scan_live:
-                directory_done = all(
-                    _safe_archive_path(archive_root, value).is_dir()
-                    for value in copy_roots
-                )
-                covered_rows = [
-                    row for row in workspace_rows
-                    if (
-                        str(row.get("review_kind") or "camera"),
-                        int(row["id"]),
-                    ) in covered_workspace_rows
-                ]
-                file_done = all(
-                    live_states.get(
-                        (str(row.get("review_kind") or "camera"), int(row["id"])),
-                        {},
-                    ).get("at_target")
-                    for row in covered_rows
-                ) if covered_rows else True
-                copy_state = "done" if directory_done and file_done else "pending"
+        existing = archive_target_lookup(archive_root)
+        copy_groups: dict[PurePosixPath, list[str]] = {}
+        copy_roots = []
+        for candidate in topmost_directories(missing):
+            root_value = candidate.as_posix()
+            try:
+                occupied = existing(root_value) is not None
+            except (ArchiveLocationError, OSError):
+                occupied = True
+            if occupied:
+                operations.append({
+                    "kind": "archive_conflict",
+                    "title": "Zielordner ist belegt",
+                    "protected_paths": [f"{archive_display_root}/{root_value}"],
+                    "detail": "Das Ziel ist bereits belegt. Ersetze dort keine vorhandenen Dateien oder Ordner.",
+                    "state": "blocked",
+                })
+                continue
+            copy_groups.setdefault(candidate.parent, []).append(root_value)
+            copy_roots.append(root_value)
 
-            helper_sources = [
-                f"{work_display_root}/{staging_name}/{value}"
-                for value in copy_roots
-            ]
-            helper_items = list(names)
-            includes_event_document = False
-            if event_document and copy_roots != [target_root]:
-                document_rel = str(event_document.get("target_relative_path") or "")
-                if document_rel:
-                    helper_sources.append(
-                        f"{work_display_root}/{staging_name}/{document_rel}"
-                    )
-                    helper_items.append("event.json")
-                    includes_event_document = True
-                    if scan_live:
-                        target_document = _safe_archive_path(archive_root, document_rel)
-                        document_done = (
-                            target_document.is_file()
-                            and not target_document.is_symlink()
-                            and int(target_document.stat().st_size)
-                                == int(event_document.get("size_bytes") or 0)
-                            and _sha256_file(target_document)
-                                == str(event_document.get("sha256") or "")
-                        )
-                        if not document_done:
-                            copy_state = "pending"
-
+        covered_workspace_rows = {
+            (str(row.get("review_kind") or "camera"), int(row["id"]))
+            for row in workspace_rows
+            if any(_path_is_under(str(row.get("new_path") or ""), root) for root in copy_roots)
+        }
+        document_rel = str(event_document.get("target_relative_path") or "") if event_document else ""
+        document_covered_by_root_copy = False
+        for parent, paths in sorted(copy_groups.items()):
+            sources = list(paths)
+            if document_rel and document_rel.startswith(parent.as_posix() + "/"):
+                document_parent = PurePosixPath(document_rel).parent
+                if document_parent == parent:
+                    sources.append(document_rel)
+                    document_covered_by_root_copy = True
+                elif document_parent.as_posix() in paths:
+                    document_covered_by_root_copy = True
             operations.append({
                 "kind": "copy_helper_folders",
-                "title": (
-                    f"Vorbereitete Struktur ins Archiv übernehmen"
-                    if len(helper_items) == 1
-                    else f"{len(helper_items)} vorbereitete Elemente ins Archiv übernehmen"
-                ),
-                "sources": helper_sources,
-                "items": helper_items,
-                "target": f"{archive_display_root}/{parent}",
+                "title": "Vorbereitete Struktur ins Archiv übernehmen",
+                "sources": [f"{work_display_root}/{staging_name}/{path}" for path in sources],
+                "items": [_basename(path) for path in sources],
+                "target": f"{archive_display_root}/{parent.as_posix()}",
                 "detail": (
-                    (
-                        "Die vorbereitete Struktur vollständig übernehmen. "
-                        "Dabei die vorhandene event.json im Ereignisordner durch die "
-                        "vorbereitete neue event.json ersetzen; keine zweite event.json daneben behalten."
-                    )
-                    if event_document
-                    else "Die vorbereiteten Ordner gemeinsam in einem Arbeitsschritt vollständig übernehmen."
+                    "Nur die genannten Ordner an das angegebene Ziel kopieren. Vorhandene Ordner nicht ersetzen."
+                    if document_rel not in sources else
+                    "Nur die genannten Ordner kopieren und die event.json durch die vorbereitete Fassung ersetzen."
                 ),
-                "state": copy_state,
+                "state": "pending" if scan_live else None,
             })
 
         remaining_workspace = [
@@ -436,15 +379,12 @@ def build_archive_change_assistant(
                 int(row["id"]),
             ) not in covered_workspace_rows
         ]
-        grouped_workspace: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        for row in remaining_workspace:
-            source = _parent_dir(
-                row.get("workspace_staging_path")
-                or f"{staging_name}/{row.get('new_path') or ''}"
-            )
-            target = _parent_dir(row.get("new_path"))
-            grouped_workspace.setdefault((source, target), []).append(row)
-        for (source, target), members in sorted(grouped_workspace.items()):
+        grouped_workspace = group_file_operations(
+            (row.get("workspace_staging_path") or f"{staging_name}/{row.get('new_path') or ''}",
+             row.get("new_path"), row)
+            for row in remaining_workspace
+        )
+        for (source, target), members in grouped_workspace:
             state = None
             pending_members = members
             if scan_live:
@@ -471,11 +411,6 @@ def build_archive_change_assistant(
                 "state": state,
             })
 
-        # The projected event.json is copied with the whole event root on a rename.
-        document_covered_by_root_copy = bool(
-            copy_roots == [target_root]
-            or (copy_roots and event_document)
-        )
         if event_document and not document_covered_by_root_copy:
             target_rel = str(event_document.get("target_relative_path") or "")
             target_abs = _safe_archive_path(archive_root, target_rel)
@@ -505,13 +440,11 @@ def build_archive_change_assistant(
                 "state": document_state,
             })
 
-        grouped_archive: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        for row in archive_rows:
-            source = _parent_dir(row.get("old_path"))
-            target = _parent_dir(row.get("new_path"))
-            grouped_archive.setdefault((source, target), []).append(row)
+        grouped_archive = group_file_operations(
+            (row.get("old_path"), row.get("new_path"), row) for row in archive_rows
+        )
 
-        for (planned_source, target), members in sorted(grouped_archive.items()):
+        for (planned_source, target), members in grouped_archive:
             state = None
             shown_members = members
             source_dirs = [planned_source]
@@ -599,11 +532,11 @@ def build_archive_change_assistant(
                 })
 
     # Presentation only: keep the existing physical completion verification.
-    if status != "aenderbar_vorschlagen" and not release_stock.get("required") and event_document:
-        from app.archive_reversal import _manifest_path, _read_json
+    if not renames and status != "aenderbar_vorschlagen" and not release_stock.get("required") and event_document:
+        from app.archive_reversal import _read_baseline
         from app.archive_rename_guidance import qualify_rename
         try:
-            baseline = _read_json(_manifest_path(workspace_path, cr_id))
+            baseline = _read_baseline(workspace_path, cr_id)
             compact = qualify_rename(
                 archive_root, rows, current_document=baseline.get("event_json"),
                 replacement=work_root / staging_name / str(event_document["target_relative_path"]),
@@ -615,6 +548,18 @@ def build_archive_change_assistant(
                 operations = compact
         except (OSError, ValueError, KeyError, RuntimeError):
             pass  # Missing/ambiguous evidence retains the detailed instructions.
+
+    if status == "aenderbar_bestaetigt":
+        from app.archive_reversal import incoming_archive_conflicts
+        conflicts = incoming_archive_conflicts(archive_root, workspace_path, cr_id, rows)
+        if conflicts:
+            operations = [{
+                "kind": "archive_conflict",
+                "title": "Archivdateien mit ungeklärter Herkunft",
+                "protected_paths": [archive_display_root + "/" + path for path in conflicts],
+                "detail": "Diese Pfade sind geschützt. Prüfe den Archivbestand vor einer erneuten Planung.",
+                "state": "blocked",
+            }]
 
     if status == "aenderbar_vorschlagen" and preparation_required:
         phase = "prepare"

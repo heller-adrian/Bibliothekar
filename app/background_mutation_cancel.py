@@ -132,8 +132,8 @@ def list_visible(database_path: Path, *, limit: int = 5) -> list[dict[str, Any]]
         rows = db.execute(
             """SELECT * FROM background_mutation_cancellations
                WHERE status IN ('queued','running','failed')
-                  OR completed_at >= datetime('now','-30 seconds')
-               ORDER BY created_at DESC,id DESC LIMIT ?""",
+                  OR (status='completed' AND julianday(completed_at) >= julianday('now','-10 minutes'))
+               ORDER BY (status='completed'),created_at DESC,id DESC LIMIT ?""",
             (limit,),
         ).fetchall()
         return [_public(row) for row in rows]

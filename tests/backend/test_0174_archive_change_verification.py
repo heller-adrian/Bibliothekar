@@ -45,11 +45,10 @@ def test_archive_reassignment_new_event_has_no_implicit_child_time_folder():
 
 def test_events_ui_has_visible_change_request_verification_feedback():
     source = Path("app/events_ui.py").read_text()
-    assert 'id="change-work-progress"' in source
-    assert 'Prüfung läuft …' in source
-    assert '✓ Prüfung erfolgreich' in source
-    assert '✕ Prüfung mit Problemen' in source
-    assert 'Fehlt am Ziel' in source
-    assert 'Liegt noch am alten Ort' in source
-    assert 'SHA-256 abweichend' in source
-    assert 'Änderung abschließen & SSD freigeben' in source
+    assert 'id="change-verify-summary" class="muted" role="status"' in source
+    assert 'bk0511EventLabel("Änderung wird geprüft …","Verifying change…"),"busy"' in source
+    assert 'bk0511EventLabel("Änderung vollständig abgeschlossen.","Archive change completed."),"success"' in source
+    assert 'bk0511EventLabel("Die Archivänderung ist noch nicht vollständig.","The archive change is incomplete."),"error"' in source
+    assert 'renderArchiveVerificationProblems(errors,archiveVerificationProblems(verification))' in source
+    assert 'problem.new_path || problem.path || problem.old_path' in source
+    assert 'Änderung abschließen & Arbeitsbereich freigeben' in source

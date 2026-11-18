@@ -20,7 +20,9 @@ import uuid
 
 from app.database import database_connection
 from app.event_access import event_file_rows, event_source_jobs
-from app.event_leaf_layouts import leaf_descriptors, stored_leaf_layouts, validate_leaf_choices, save_leaf_layouts
+from app.event_leaf_layouts import (
+    effective_leaf_layouts, layout_for_leaf, leaf_descriptors, save_leaf_layouts, validate_leaf_choices,
+)
 from app.event_inventory import scan_event_inventory, EventInventoryError
 from app.event_layout import get_event_layout, layout_paths, layout_role_paths, update_event_layout
 from app.event_document import build_event_document_from_db, EVENT_DOCUMENT_FILENAME
@@ -422,7 +424,7 @@ def _leaf_prefixes(connection: Any, event: dict[str, Any]) -> list[str]:
     prefixes: set[str] = set()
     for row in rows:
         parts: list[str] = []
-        if row["parent_event_id"] is not None:
+        if row["parent_event_id"] is not None and row["folder_name"]:
             parts.append(str(row["folder_name"]))
         if preserve:
             day = str(row["selected_capture_time"] or "")[:10]
@@ -571,7 +573,7 @@ def _snapshot_from_inventory(
     event_id = str(event["id"])
     leaves = _leaf_prefixes(connection, event)
     leaf_defs = leaf_descriptors(connection, event, leaves)
-    stored_leaves = stored_leaf_layouts(connection, event_id)
+    stored_leaves = effective_leaf_layouts(connection, event_id)
     dir_rows = connection.execute(
         """SELECT event_relative_path FROM event_inventory_directories
            WHERE event_id=? AND root_kind=? ORDER BY event_relative_path""",
@@ -868,11 +870,9 @@ def _snapshot_from_inventory(
     for leaf in leaf_defs:
         prefix = leaf["leaf_prefix"]
         paths = sorted(by_leaf.get(prefix, set()))
-        old_leaf = stored_leaves.get(leaf["leaf_key"])
-        prior_layout = old_leaf["layout"] if old_leaf else layout_state["layout"]
-        prior_input = str(
-            (old_leaf or layout_state).get("input_path") or ""
-        )
+        effective = layout_for_leaf(stored_leaves, leaf["leaf_key"], layout_state)
+        prior_layout = effective["layout"]
+        prior_input = str(effective.get("input_path") or "")
         prior_export = set(layout_role_paths(prior_layout, "export"))
         proposed_leaf_layout = _layout_from_paths(
             paths, role_paths={"export": prior_export}
@@ -899,9 +899,9 @@ def _snapshot_from_inventory(
     for leaf in leaf_defs:
         prefix = leaf["leaf_prefix"]
         if prefix:
-            expected_dirs.add(prefix)
-        old_leaf = stored_leaves.get(leaf["leaf_key"])
-        effective = old_leaf if old_leaf is not None else layout_state
+            path = PurePosixPath(prefix)
+            expected_dirs.update(parent.as_posix() for parent in (path, *path.parents) if parent.parts)
+        effective = layout_for_leaf(stored_leaves, leaf["leaf_key"], layout_state)
         expected_org = (
             layout_paths(effective["layout"])
             if effective.get("structure_enabled") else []

@@ -51,17 +51,73 @@ def response_for(request, workspace, registry, status):
 
 
 # Displayed on the existing pages. No navigation replacement or auth bypass.
-NOTICE = '''<script>(()=>{async function updateOperationNotice(){
-try{const r=await fetch('/api/operations/status',{credentials:'same-origin'});if(!r.ok)return;const s=await r.json();
-let box=document.getElementById('bibliothekar-operation-notice');if(s.writes_allowed){if(box)box.remove();return}
-if(!box){box=document.createElement('aside');box.id='bibliothekar-operation-notice';box.setAttribute('role','status');box.style.cssText='margin:12px;padding:14px;border:2px solid #bf852b;border-radius:10px;overflow-wrap:anywhere';document.body.prepend(box)}
-box.textContent='';const de=localStorage.getItem('bibliothekar-language')==='de';const message=document.createElement('p');
-message.textContent=s.workspace_writes_allowed
-?(de?'Ein Vorgang erfordert Prüfung. Nur die ausgewiesenen betroffenen Vorgänge sind angehalten; unabhängige Aktionen bleiben verfügbar.':'An operation requires review. Only the identified affected operations are paused; independent actions remain available.')
-:(de?'Ein Vorgang besitzt noch ungeklärte Schreibwirkungen. Schreibzugriffe sind bis zur Qualifikation gesperrt; Leseansichten und Diagnosen bleiben erreichbar.':'An operation has unresolved write effects. Writes remain protected until qualification; read views and diagnostics remain available.');
-box.append(message);const details=document.createElement('details');const title=document.createElement('summary');title.textContent=de?'Vorgänge und Diagnose':'Operations and diagnosis';details.append(title);const pre=document.createElement('pre');pre.style.whiteSpace='pre-wrap';pre.textContent=JSON.stringify(s,null,2);details.append(pre);box.append(details);
-const link=document.createElement('button');link.type='button';link.textContent=de?'Einstellungen und Wiederherstellung':'Settings and recovery';link.addEventListener('click',()=>document.querySelector('[data-bk-open-settings]')?.click());box.append(link);
-}catch(_){}}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',updateOperationNotice);else updateOperationNotice();})();</script>'''
+NOTICE = '''<script>(() => {
+  let status;
+  function startupOnly(s) {
+    return s.issues.length === 1 && s.issues[0].phase === 'recovery_in_progress'
+      && s.reservations.every(reservation => reservation.live === true);
+  }
+  function renderNotice() {
+    if (!status) return;
+    let box = document.getElementById('bibliothekar-operation-notice');
+    if (status.writes_allowed) {
+      box?.remove();
+      return;
+    }
+    const starting = startupOnly(status);
+    const de = localStorage.getItem('bibliothekar-language') === 'de';
+    // Keep open diagnostics and button focus during status polling.
+    if (box && box.dataset.notice === (starting ? 'startup' : 'recovery')
+        && box.dataset.language === String(de)) return;
+    if (!box) {
+      box = document.createElement('aside');
+      box.id = 'bibliothekar-operation-notice';
+      box.setAttribute('role', 'status');
+      box.style.cssText = 'margin:12px;padding:14px;border:2px solid #bf852b;border-radius:10px;overflow-wrap:anywhere';
+      document.body.prepend(box);
+    }
+    box.dataset.notice = starting ? 'startup' : 'recovery';
+    box.dataset.language = String(de);
+    box.style.borderColor = starting ? 'var(--border, currentColor)' : '#bf852b';
+    if (starting) {
+      box.textContent = de
+        ? 'Bibliothekar wird vorbereitet. Schreibzugriffe werden nach der Startprüfung freigegeben.'
+        : 'Bibliothekar is getting ready. Writes will be enabled after startup checks.';
+      return;
+    }
+    const message = document.createElement('p');
+    message.textContent = status.workspace_writes_allowed
+      ? (de ? 'Ein Vorgang erfordert Prüfung. Nur die ausgewiesenen betroffenen Vorgänge sind angehalten; unabhängige Aktionen bleiben verfügbar.'
+            : 'An operation requires review. Only the identified affected operations are paused; independent actions remain available.')
+      : (de ? 'Ein Vorgang besitzt noch ungeklärte Schreibwirkungen. Schreibzugriffe sind bis zur Qualifikation gesperrt; Leseansichten und Diagnosen bleiben erreichbar.'
+            : 'An operation has unresolved write effects. Writes remain protected until qualification; read views and diagnostics remain available.');
+    const details = document.createElement('details');
+    const title = document.createElement('summary');
+    title.textContent = de ? 'Vorgänge und Diagnose' : 'Operations and diagnosis';
+    const pre = document.createElement('pre');
+    pre.style.whiteSpace = 'pre-wrap';
+    pre.textContent = JSON.stringify(status, null, 2);
+    details.append(title, pre);
+    const link = document.createElement('button');
+    link.type = 'button';
+    link.textContent = de ? 'Einstellungen und Wiederherstellung' : 'Settings and recovery';
+    link.addEventListener('click', () => document.querySelector('[data-bk-open-settings]')?.click());
+    box.replaceChildren(message, details, link);
+  }
+  async function updateNotice() {
+    try {
+      const response = await fetch('/api/operations/status', {credentials:'same-origin', cache:'no-store'});
+      if (response.ok) {
+        status = await response.json();
+        renderNotice();
+      }
+    } catch (_) {}
+    if (status && !status.writes_allowed && startupOnly(status)) setTimeout(updateNotice, 1500);
+  }
+  window.addEventListener('bk-language-changed', renderNotice);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', updateNotice);
+  else updateNotice();
+})();</script>'''
 
 
 def trash_catalogue(registry):

@@ -4,6 +4,7 @@ from pathlib import Path, PurePosixPath
 from typing import Iterable
 import os
 import stat
+import unicodedata
 
 from app.database import database_connection
 
@@ -53,6 +54,42 @@ def archive_path_without_symlinks(archive_root: Path, relative_path: str) -> Pat
             )
 
     return candidate
+
+
+def archive_name_key(value: str) -> str:
+    """Match names as SMB clients do, including composed Unicode."""
+    return unicodedata.normalize("NFC", value).casefold()
+
+
+def archive_target_lookup(archive_root: Path):
+    """Read existing names for a planning pass. Never alias an ancestor."""
+    root = archive_root.expanduser().resolve(strict=True)
+    listings = {}
+
+    def existing(relative: str) -> Path | None:
+        candidate = archive_path_without_symlinks(root, relative)
+        parts = candidate.relative_to(root).parts
+        parent = root
+        for index, part in enumerate(parts):
+            if parent not in listings:
+                names = {}
+                for child in parent.iterdir():
+                    names.setdefault(archive_name_key(child.name), []).append(child)
+                listings[parent] = names
+            matches = listings[parent].get(archive_name_key(part), ())
+            if not matches:
+                return None
+            if len(matches) != 1 or matches[0].is_symlink():
+                raise ArchiveLocationError("Archivziel ist nicht eindeutig: " + relative)
+            match = matches[0]
+            if index == len(parts) - 1:
+                return match
+            if match.name != part or not match.is_dir():
+                raise ArchiveLocationError("Archiv-Zielordner kollidiert mit einem bestehenden Pfad: " + relative)
+            parent = match
+        return None
+
+    return existing
 
 
 def stable_anchor_from_file_path(relative_path: str) -> str:

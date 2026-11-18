@@ -160,7 +160,7 @@ def visible_release_tasks(db: Path, limit: int = 8) -> list[dict[str, Any]]:
             """SELECT job_id,event_id FROM ssd_release_tasks
                WHERE status IN ('queued','running','failed')
                   OR (status='completed' AND finished_at >= ?)
-               ORDER BY created_at DESC LIMIT ?""",
-               ((datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat(), limit)
+               ORDER BY (status='completed'),created_at DESC LIMIT ?""",
+               ((datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(), limit)
         ).fetchall()
     return [task for row in rows if (task := get_release_task(db, str(row["job_id"]), str(row["event_id"]))) is not None]

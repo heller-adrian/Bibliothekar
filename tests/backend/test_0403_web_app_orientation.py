@@ -1,6 +1,6 @@
 """0.47.3: iPhone-Web-App bleibt im Hochformat, Tablet und Website bleiben frei."""
 
-from tests.backend.release_contract import EXPECTED_RELEASE_VERSION
+from tests.backend.release_contract import EXPECTED_RELEASE_VERSION, EXPECTED_STABLE_VERSION
 import json
 from pathlib import Path
 
@@ -35,7 +35,7 @@ def test_0403_version_contract():
     assert PACKAGE_VERSION == EXPECTED_RELEASE_VERSION
     assert main.APP_VERSION == PACKAGE_VERSION
     assert main.DEPLOYMENT_VERSION == PACKAGE_VERSION
-    assert f'{EXPECTED_RELEASE_VERSION}' in Path("compose.example.yaml").read_text(encoding="utf-8")
+    assert f'ghcr.io/heller-adrian/bibliothekar:{EXPECTED_STABLE_VERSION}' in Path("compose.example.yaml").read_text(encoding="utf-8")
     assert f'Version <span data-bk-version>{EXPECTED_RELEASE_VERSION}</span>' in Path("app/ui_shell.py").read_text(encoding="utf-8")
 
 

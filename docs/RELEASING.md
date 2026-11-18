@@ -6,54 +6,27 @@ Es gibt genau zwei getrennte Containerkanäle. **Das Stable-Image `latest` darf 
 
 - Entwicklung auf einem `patch/*`-Branch; der Branch allein ist **keine** stabile Freigabe.
 - Die Backend-QA läuft für Pull Requests oder über `workflow_dispatch`. Ein beliebiger Quell-Push auf `patch/*` veröffentlicht **kein** Image.
-- Ein Patch-Image wird nur nach einer **neu angelegten oder ausdrücklich aktualisierten** Datei unter `.github/release-requests/` über `.github/workflows/publish-patch-request.yml` gebaut. Historische Anträge liegen ausschließlich unter [docs/history/release-requests](history/release-requests/) und lösen keine Builds aus.
+- Ein gewöhnliches Patch-Image wird nur nach einer **neu angelegten oder ausdrücklich aktualisierten** Datei unter `.github/release-requests/` über `.github/workflows/publish-patch-request.yml` gebaut. Historische Anträge liegen ausschließlich unter [docs/history/release-requests](history/release-requests/) und lösen keine Builds aus.
 - Das Image wird dann ausschließlich mit `patch-<version>` versehen; es überschreibt niemals `latest`.
 - Für den Archiv-E2E muss das Testimage aus **genau demselben Commit** gebaut und anhand des OCI-Labels `org.opencontainers.image.revision` kontrolliert werden.
 
-## Stand nach Release 1.0.0 (05.11.2026)
+## Stable-Freigabe 1.1.0
 
-Das erste stabile Release `v1.0.0` ist veröffentlicht und bleibt unverändert.
-**Ein Commit auf `main` startet nicht mehr automatisch die Image-Veröffentlichung.**
-Der vorhandene Stable-Publisher lässt sich ausschließlich durch einen expliziten
-`workflow_dispatch` auf `main` starten. Patch-Images verwenden weiterhin die
-separate, explizite Release-Request-Datei.
+1. Führe auf dem Entwicklungsbranch die vollständige **Backend QA** für den Freigabecommit aus. Alle acht Regressionsteile, die vollständige Testabdeckung und die nativen ZFS-Prüfungen müssen bestanden sein. Die P0-Prüfungen einschließlich SD-Karten-Import und Wiederanlauf bleiben Pflicht.
+2. Starte **Publish container image** auf dem Entwicklungsbranch mit der ID dieser Backend-QA. Der Workflow baut ein Image unter dem commitgebundenen Patch-Tag, prüft den Digest auf nativem ZFS und prüft das Upgrade von 1.0.0 und RC22 mit den veröffentlichten Images.
+3. Führe PR #41 nach bestandener Qualifizierung mit einem Merge-Commit nach `main`. Der geprüfte Commit bleibt Teil der Historie und sein Git-Baum muss mit dem Stand des Merge-Commits übereinstimmen.
+4. Starte **Publish container image** ausdrücklich auf `main` mit der ID des erfolgreichen Image-Laufs. Der Publisher prüft Merge, Quellcommit, Backend-Nachweis und Container-Digest. Er setzt die beiden Versions-Tags und veröffentlicht den Stable-Release mit dem geprüften Commit. Anschließend wird `latest` auf denselben Digest gesetzt.
 
-**Wichtige Übergangsgrenze:** Die Stable-Freigabeprüfung in
-`.github/workflows/publish-container.yml` ist gegenwärtig noch fest auf den
-vollständigen Abnahmelauf für **1.0.0** einschließlich Commit, Baum und Run-ID
-gebunden. Sie ist noch kein allgemeines Verfahren für **1.0.1 oder höher**.
-Vor dem nächsten stabilen Release müssen die Freigabeprüfung und der
-wiederverwendbare vollständige QA-Workflow geprüft, angepasst und erfolgreich
-gegen den dann tatsächlich auszuliefernden Commit ausgeführt werden.
-Bis dahin darf niemand die bisherige 1.0.0-Qualifikation für einen anderen
-Quellstand als ausreichend behandeln.
-
-Alte versionsgebundene Actions-Dateien sind anhand des unveränderten Tags
-`v1.0.0` weiter erreichbar; siehe [historische Workflows](history/ci-workflows.md).
-
-## Stable-Freigabe
-
-Vor dem Merge nach `main` **müssen** alle P0-Datenintegritäts-, Sicherheits- und Wiederanlauf-Gates einschließlich SD-Karten-Import erfüllt sein. Grün gemeldete gewöhnliche Backend-Tests ersetzen keine Crash-/Recovery-Abnahme.
-
-Ein genehmigter Stable-Publish:
-
-1. verlangt eine vollständige, quellstandsgenaue Freigabe einschließlich Compose- und Backend-/Recovery-Abnahme; der Publisher verifiziert diese Nachweise, statt bei jedem Stable-Publish selbst alle Tests erneut auszuführen;
-2. liest die neue SemVer aus `app/__init__.py`;
-3. bricht **vor dem Docker-Build** ab, wenn `v<version>` schon existiert;
-4. baut das Image aus dem freigegebenen Git-Commit;
-5. veröffentlicht `latest`, `<version>` und `v<version>` mit zugehörigem Image-Digest;
-6. erzeugt einen neuen **unveränderlichen** Git-Tag `v<version>` und anschließend den GitHub-Release. Bestehende Tags oder Releases dürfen nicht heimlich überschrieben werden.
-
-Achtung: Das Publizieren des Images und das Anlegen des Git-Tags sind technisch zwei Schritte. Schlägt der zweite Schritt fehl, muss der Release-Betreiber den Zustand prüfen und korrigieren; keinesfalls einen bereits veröffentlichten Versionstag mit `--force` verschieben.
+Der Publisher baut bei der Freigabe kein Image erneut. Bestehende Versionstags mit einem anderen Digest werden abgelehnt. Nach einem teilweise abgeschlossenen Lauf prüfe GitHub-Release und Registry-Tags, bevor du denselben freigegebenen Lauf erneut startest. Der Tag `v1.0.0` und die früheren Vorabversionen bleiben als historische Stände erhalten.
 
 ## Version und Testpflichten
 
 `app/__init__.py`, die `RELEASE_VERSION`- und `DEPLOYMENT_VERSION`-Konstanten in `app/main.py`, die sichtbare Versionsanzeige und das Compose-Beispiel müssen denselben Entwicklungsstand ausweisen.
 
-Beispiel für das unveränderte Stable-Release 1.0.0:
+Versionsnummer für diese Freigabe:
 
 ```python
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 ```
 
 Ein Entwicklungsbranch mit dieser Nummer ist **nicht** automatisch ein Release. Die Version gilt erst nach dem erfolgreichen Merge in `main` und dem eindeutigen Veröffentlichungslauf als stabil.
@@ -62,7 +35,7 @@ Ein Entwicklungsbranch mit dieser Nummer ist **nicht** automatisch ein Release. 
 
 Für installierte stable Custom Apps ist `ghcr.io/heller-adrian/bibliothekar:latest` vorgesehen. Für reproduzierbare Updates/Rollbacks möglichst einen geprüften Image-Digest bzw. festen Versionstag benutzen.
 
-**Neuinstallation 1.0.0:** Maßgeblich ist die aktuelle [Compose-Vorlage](../compose.example.yaml). Sie bindet den persistenten Appzustand nach `/appdata`, den Arbeitsbereich nach `/workspace` und das Kameraarchiv **read-only** nach `/main-library` ein. Optional kann ein NAS-Quellverzeichnis nur lesend unter `/sources/nas` eingebunden werden. Die Host-Path-Variablen heißen `BIBLIOTHEKAR_APPDATA_DIR`, `BIBLIOTHEKAR_WORKSPACE_DIR` und `BIBLIOTHEKAR_MAIN_LIBRARY_DIR`.
+**Neuinstallation:** Maßgeblich ist die aktuelle [Compose-Vorlage](../compose.example.yaml). Sie bindet den persistenten Appzustand nach `/appdata`, den Arbeitsbereich nach `/workspace` und das Kameraarchiv **read-only** nach `/main-library` ein. Optional kann ein NAS-Quellverzeichnis nur lesend unter `/sources/nas` eingebunden werden. Die Host-Path-Variablen heißen `BIBLIOTHEKAR_APPDATA_DIR`, `BIBLIOTHEKAR_WORKSPACE_DIR` und `BIBLIOTHEKAR_MAIN_LIBRARY_DIR`.
 
 **Bestehende ältere Installation:** Historische Konfigurationen können zusätzliche Pfade wie `/config`, `/database` oder `/logs` verwenden. Solche Installationen nicht blind auf die neue Compose-Vorlage umstellen oder gespeicherte Daten verschieben; zuerst tatsächliche Mounts, Datenbankpfade und Migrationsverfahren prüfen und sichern. Alte und neue Instanzen dürfen nicht gleichzeitig dieselbe SQLite-Datenbank öffnen.
 

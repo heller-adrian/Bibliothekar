@@ -26,7 +26,7 @@ def isolated_web_runtime(monkeypatch):
     """
     from app import main
 
-    thread_names = ('WORKER_THREAD', 'CANCEL_WORKER_THREAD', 'RELEASE_WORKER_THREAD')
+    thread_names = ('WORKER_THREAD', 'CANCEL_WORKER_THREAD', 'RELEASE_WORKER_THREAD', 'ADOPTION_STARTUP_THREAD')
     event_names = ('WORKER_STOP', 'CANCEL_WORKER_STOP', 'CANCEL_WORKER_WAKE',
                    'RELEASE_WORKER_STOP', 'RELEASE_WORKER_WAKE')
 

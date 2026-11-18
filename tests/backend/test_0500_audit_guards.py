@@ -39,13 +39,42 @@ def test_global_task_panel_escapes_untrusted_text(filename: str) -> None:
     assert "${String(task.detail||'')}" not in code
 
 
-def test_stable_release_workflow_never_force_retags() -> None:
-    code = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "publish-container.yml").read_text(
-        encoding="utf-8"
-    )
-    assert 'git tag -f' not in code
-    assert 'refs/tags/${TAG}" --force' not in code
-    assert 'Reject an existing stable version tag' in code
+def test_stable_release_workflow_never_force_retags(monkeypatch) -> None:
+    from urllib.error import HTTPError
+
+    from qa.release import promote_stable_manifest as publisher
+
+    workflows = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+    entry = (workflows / "publish-container.yml").read_text(encoding="utf-8")
+    stable = (workflows / "publish-qualified-stable.yml").read_text(encoding="utf-8")
+    assert "uses: ./.github/workflows/publish-qualified-stable.yml" in entry
+    assert "type=raw,value=latest" not in entry
+    assert 'git tag -f' not in stable and ' --force' not in stable
+    assert 'test -z "$tag_ref" || test "$tag_ref" = "$RELEASE_SOURCE"' in stable
+
+    source = "1" * 40
+    qualified = "sha256:" + "2" * 64
+    old = "sha256:" + "3" * 64
+    for key, value in {
+        "TAG": "v1.1.0", "RELEASE_SOURCE": source, "RELEASE_DIGEST": qualified,
+        "GITHUB_ACTOR": "test-actor", "GH_TOKEN": "unused-test-value",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    def read(ref, _bearer):
+        if ref == "1.1.0":
+            raise HTTPError("https://ghcr.io", 404, "missing", None, None)
+        digest = qualified if ref in (qualified, f"patch-1.1.0-{source}") else old
+        return digest, "application/vnd.oci.image.index.v1+json", b"manifest"
+
+    def unexpected_write(*args, **kwargs):
+        pytest.fail("Registry must remain unchanged when a version tag already differs")
+
+    monkeypatch.setattr(publisher, "token", lambda *args: "unused-test-token")
+    monkeypatch.setattr(publisher, "read", read)
+    monkeypatch.setattr(publisher, "manifest", unexpected_write)
+    with pytest.raises(AssertionError, match="Version tag v1.1.0 already has a different digest"):
+        publisher.main("version")
 
 
 def test_storage_rename_error_path_restores_confirmed_job_prefixes() -> None:
