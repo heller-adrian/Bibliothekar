@@ -1,0 +1,146 @@
+name: Publish stable 1.1.1 from qualified RC3
+on:
+  push:
+    branches: [release/1.1.1-qualified]
+    paths: ['.github/workflows/publish-v111-from-rc3.yml']
+permissions:
+  contents: write
+  actions: read
+  packages: write
+concurrency:
+  group: bibliothekar-release-stable-1.1.1
+  cancel-in-progress: false
+env:
+  SOURCE: d18afab745126aaddd8d2a586e62bcc034b42b51
+  MERGED_MAIN: f56fe2c3380ccac2b926753978bfc368d1c3bb2c
+  QA_RUN: '44499191559'
+  IMAGE_RUN: '44520031164'
+  QUALIFIED_DIGEST: sha256:b47c8422ea53c6c3ec890e8f182643ef4f144a03ec770d1ab979bdf5f9121520
+  IMAGE: ghcr.io/heller-adrian/bibliothekar
+  TAG: v1.1.1
+  GH_TOKEN: ${{ github.token }}
+  REGISTRY_ACTOR: ${{ github.actor }}
+  REGISTRY_CREDENTIAL: ${{ github.token }}
+jobs:
+  promote:
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/release/1.1.1-qualified'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify main has the exact qualified RC3 tree and valid release provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$MERGED_MAIN"
+          test "$(git rev-parse "$SOURCE^{tree}")" = "$(git rev-parse "$MERGED_MAIN^{tree}")"
+          git merge-base --is-ancestor "$SOURCE" "$MERGED_MAIN"
+          git merge-base --is-ancestor "$MERGED_MAIN" HEAD
+          test "$(git diff --name-only "$MERGED_MAIN" HEAD)" = "$(printf '.github/workflows/publish-v111-from-rc3.yml\nqa/release/promote_v111_qualified.py')"
+          test "$(python -c 'from app import __version__; print(__version__)')" = '1.1.1'
+          gh api "repos/$GITHUB_REPOSITORY/pulls/42" |
+            jq -e --arg source "$SOURCE" --arg main "$MERGED_MAIN" '
+              .merged == true and .base.ref == "main" and
+              .head.sha == $source and .merge_commit_sha == $main'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN" |
+            jq -e --arg sha "$SOURCE" --arg repo "$GITHUB_REPOSITORY" '
+              .status == "completed" and .conclusion == "success" and
+              .event == "workflow_dispatch" and .path == ".github/workflows/qa-tests.yml" and
+              .head_sha == $sha and .head_repository.full_name == $repo and
+              .head_branch == "patch/1.1.1-rc3-fujifilm-families"'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN/jobs?per_page=100" > "$RUNNER_TEMP/backend-jobs.json"
+          python - "$RUNNER_TEMP/backend-jobs.json" <<'PY'
+          import json, sys
+          jobs = json.load(open(sys.argv[1]))["jobs"]
+          expected = {"adoption-preflight", "backend-coverage"} | {f"backend-regression ({i})" for i in range(8)}
+          assert len(jobs) == 10 and {job["name"] for job in jobs} == expected
+          assert all(job["status"] == "completed" and job["conclusion"] == "success" for job in jobs)
+          PY
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$IMAGE_RUN" |
+            jq -e --arg sha "2e4e468f93cc8fb95b7c12c5d53c0dca39411de6" --arg repo "$GITHUB_REPOSITORY" '
+              .status == "completed" and .conclusion == "success" and .event == "push" and
+              .head_branch == "release/rc113-qualified" and .head_sha == $sha and
+              .head_repository.full_name == $repo'
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/v1.1.1-rc.3" |
+            jq -e --arg source "$SOURCE" '.prerelease == true and .draft == false and .target_commitish == $source'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v1.1.1-rc.3" --jq '.object.sha')" = "$SOURCE"
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" |
+            jq -e '.tag_name == "v1.1.0" and .prerelease == false'
+          previous="$(git ls-remote origin "refs/tags/$TAG" | cut -f1)"
+          test -z "$previous" || test "$previous" = "$SOURCE"
+          evidence="$RUNNER_TEMP/qualified-1.1.1"
+          mkdir -p "$evidence"
+          gh run download "$IMAGE_RUN" --repo "$GITHUB_REPOSITORY" --name rc113-qualified-image --dir "$evidence"
+          jq -e --arg tag "v1.1.1-rc.3" --arg source "$SOURCE" --arg image "$IMAGE" \
+            --arg digest "$QUALIFIED_DIGEST" --arg qa "$QA_RUN" --arg run "$IMAGE_RUN" '
+            .tag == $tag and .source == $source and .image == $image and
+            .digest == $digest and .qa_run == $qa and .image_run == $run' \
+            "$evidence/qualified-image.json"
+          jq -e --arg source "$SOURCE" '
+            .source == $source and .status == "PASS" and .partitions == 8 and
+            .tested_once == .collected and .read_only_mount == "PASS"' \
+            "$evidence/verified.json"
+          grep -Fxq 'Grouped manual SMB work verified the combined ZIP and resumed partial moves after a container restart on native ZFS.' "$evidence/container-smoke.log"
+          grep -Fxq 'Review batch preserved a complete RAW/JPEG/XMP family and read-only originals on native ZFS.' "$evidence/container-smoke.log"
+          grep -Fxq 'Native ZFS POSIX ACL inheritance preserved private review staging.' "$evidence/container-smoke.log"
+          grep -Fxq 'Upgrade from RC22 retained the registered archive, receipt and SHA-256 on native ZFS.' "$evidence/container-smoke.log"
+          grep -Fxq 'Upgrade from 1.0.0 retained the existing library and normal Workspace access on native ZFS.' "$evidence/container-smoke.log"
+          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "Source tree exactly matches qualified RC3; full QA and native ZFS image qualification verified." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Promote same qualified RC3 image digest to immutable stable version tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          python qa/release/promote_v111_qualified.py version
+
+      - name: Create official stable GitHub release from exact qualified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$MERGED_MAIN"
+          tag_sha="$(git ls-remote origin "refs/tags/$TAG" | cut -f1)"
+          test -z "$tag_sha" || test "$tag_sha" = "$SOURCE"
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          ## Bibliothekar v1.1.1 — stable
+
+          This release promotes the exact container qualified and field-tested as v1.1.1-rc.3, without rebuilding.
+
+          ### Changes
+          - Large existing-library adoption: substantially faster review, selection, event drafting and state recovery.
+          - Conservative RAW/JPEG/DNG/XMP family recognition across sibling format directories in adoption and ordinary imports, including Fuji files without capture IDs or subseconds.
+          - Maintained fail-closed identity and collision safeguards, integrity verification and controlled recovery.
+
+          ### Verified
+          - Source: $SOURCE
+          - Merged unchanged source tree through [PR #42](https://github.com/$GITHUB_REPOSITORY/pull/42), main commit $MERGED_MAIN
+          - [Full Backend QA](https://github.com/$GITHUB_REPOSITORY/actions/runs/$QA_RUN)
+          - [Native ZFS container qualification](https://github.com/$GITHUB_REPOSITORY/actions/runs/$IMAGE_RUN)
+          - Immutable qualified OCI image: $IMAGE@$QUALIFIED_DIGEST
+          - Stable image tags: $IMAGE:v1.1.1 and $IMAGE:1.1.1
+          - Latest channel updated only after stable release creation.
+
+          Previously released version tags and RC images are preserved.
+          EOF
+            gh release create "$TAG" "$EVIDENCE/qualified-image.json" \
+              --repo "$GITHUB_REPOSITORY" --target "$SOURCE" --title "Bibliothekar $TAG" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" --latest
+          fi
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')" = "$SOURCE"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" |
+            jq -e --arg source "$SOURCE" '.prerelease == false and .draft == false and .target_commitish == $source'
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" |
+            jq -e '.tag_name == "v1.1.1" and .prerelease == false'
+
+      - name: Advance latest to the exact stable manifest with no rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          python qa/release/promote_v111_qualified.py latest
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$MERGED_MAIN"
+          echo "Published stable v1.1.1: $IMAGE@$QUALIFIED_DIGEST (same image as RC3)" >> "$GITHUB_STEP_SUMMARY"
