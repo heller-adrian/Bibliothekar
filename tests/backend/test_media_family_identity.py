@@ -203,3 +203,45 @@ def test_fujifilm_coarse_context_rejects_ambiguous_or_conflicting_match(
     monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: rows)
     actual = analyze_import_tree(source)
     assert actual["summary"]["family_count"] == len(relative)
+
+
+def test_separate_raf_sidecar_can_join_only_its_unique_original(tmp_path, monkeypatch):
+    """An XMP without own capture metadata can identify its exact RAF by name."""
+    source = tmp_path / "photos"
+    paths = [
+        "2025/day/RAW/DSCF7545.RAF",
+        "2025/day/JPEG/DSCF7545.JPG",
+        "2025/day/XMP/DSCF7545.RAF.xmp",
+    ]
+    rows = []
+    for path_name in paths:
+        path = source / path_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(path_name)
+        row = {"SourceFile": str(path)}
+        if path.suffix.lower() != ".xmp":
+            row.update({
+                "EXIF:IFD0:Make": "FUJIFILM",
+                "EXIF:IFD0:Model": "X-H2S",
+                "EXIF:ExifIFD:DateTimeOriginal": "2025:01:28 17:11:52",
+            })
+        rows.append(row)
+    monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: rows)
+    result = analyze_import_tree(source)
+    assert result["summary"]["family_count"] == 1
+    assert set(result["families"][0]["members"]) == set(paths)
+
+    # A second RAW candidate under the same sibling scope makes ownership
+    # ambiguous. The sidecar must never be assigned to one arbitrarily.
+    other = "2025/day/RAF/DSCF7545.RAF"
+    file = source / other
+    file.parent.mkdir(parents=True)
+    file.write_text(other)
+    rows.append({
+        "SourceFile": str(file),
+        "EXIF:IFD0:Make": "FUJIFILM",
+        "EXIF:IFD0:Model": "X-H2S",
+        "EXIF:ExifIFD:DateTimeOriginal": "2025:01:28 17:11:52",
+    })
+    unsafe = analyze_import_tree(source)
+    assert unsafe["summary"]["family_count"] == 4
