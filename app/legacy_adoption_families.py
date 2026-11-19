@@ -31,6 +31,7 @@ def join_split_families(connection, job_id, draft, cancel):
     evidence_fields = (
         "media_type", "extension", "relative_path", "capture_identity", "camera_make", "camera_model",
         "selected_capture_time", "selected_capture_source", "review_required", "metadata_error",
+        "capture_settings",
     )
 
     def groups():
