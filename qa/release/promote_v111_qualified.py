@@ -28,7 +28,7 @@ def token(scope, credentials=None):
     with urlopen(request, timeout=30) as response:
         return json.load(response)["token"]
 
-def manifest(ref, bearer, *, content=None, media_type=None):
+def manifest(ref, bearer, *, content=None, media_type=None, create_only=True):
     request = Request(
         f"{REGISTRY}/v2/{PACKAGE}/manifests/{ref}",
         data=content,
@@ -38,7 +38,8 @@ def manifest(ref, bearer, *, content=None, media_type=None):
     request.add_unredirected_header("Authorization", "Bearer " + bearer)
     if content is not None:
         request.add_header("Content-Type", media_type)
-        request.add_header("If-None-Match", "*")
+        if create_only:
+            request.add_header("If-None-Match", "*")
     return urlopen(request, timeout=30)
 
 def read(ref, bearer):
@@ -100,7 +101,8 @@ def run(phase):
             )
         else:
             assert existing is None, f"Immutable version tag exists with unexpected digest: {tag}"
-        with manifest(tag, writer, content=content, media_type=media_type) as response:
+        with manifest(tag, writer, content=content, media_type=media_type,
+                      create_only=tag != "latest") as response:
             assert response.status == 201
             assert response.headers["Docker-Content-Digest"] == qualified
         assert read(tag, public)[0] == qualified, tag
