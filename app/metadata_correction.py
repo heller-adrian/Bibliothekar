@@ -23,7 +23,7 @@ import uuid
 from app.database import database_connection
 from app.metadata import (
     MetadataError,
-    analyze_tree,
+    analyze_import_tree as analyze_tree,
     classify_media,
     LOCAL_TIMEZONE,
     parse_exiftool_datetime,

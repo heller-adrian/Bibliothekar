@@ -11,13 +11,15 @@ from uuid import uuid4
 
 from app import legacy_adoption_dataset as dataset
 from app.database import catalogue_contains_sha256, database_connection
+from app.legacy_adoption_families import join_split_families
+from app.media_family_identity import IDENTITY_VERSION
 from app.legacy_adoption_paths import (
     AdoptionError, absolute_root, bound_child_directory, bound_directory,
     bound_file, bound_sha256, directory_identity, file_identity,
 )
 from app.library_context import LibraryContext
 from app.metadata import (
-    analyze_file_metadata, classify_media, family_key, read_bound_metadata,
+    analyze_file_metadata, classify_media, family_key, family_member_ending, read_bound_metadata,
     summarize_file_metadata,
 )
 from app.source_filter import IGNORED_SOURCE_DIRECTORIES, should_ignore_source_relative
@@ -105,6 +107,8 @@ def _inventory_groups(rows, source):
         members = [dict(row) for row in group]
         candidates = [row for row in members if row["disposition"] == "candidate"]
         files = [json.loads(row["metadata_json"]) for row in candidates if row["metadata_json"]]
+        for file in files:
+            file["family_key"] = key
         family = {"family_key": key, "status": "review_required"}
         if files:
             family = summarize_file_metadata(source, files)["families"][0]
@@ -241,8 +245,6 @@ def _identity_json(info) -> str:
 
 def _legacy_family_key(source, relative):
     path = source / relative
-    if path.suffix.lower() == ".xmp" and classify_media(path.with_suffix("")) not in {"other", "xmp"}:
-        path = path.with_suffix("")
     return family_key(source, path)
 
 
@@ -328,21 +330,26 @@ def _read_batch(directory, source, rows, cached, cancel):
             path = row["relative_path"]
             old = cached.get(path)
             bound = bound_file(directory, Path(path).name, tuple(json.loads(row["identity"])))
+            previous_hash = former_family = None
             try:
                 if old is not None and old["identity"] == row["identity"] and old["sha256"]:
-                    with bound:
-                        record = json.loads(old["metadata_json"])
+                    previous_hash = old["sha256"]
+                    record = json.loads(old["metadata_json"])
+                    former_family = record.get("adoption_family")
+                    if record.get("capture_identity_version") == IDENTITY_VERSION:
+                        with bound:
+                            pass
                         record["family_key"] = row["family_key"]
                         row.update(sha256=old["sha256"], metadata_json=json.dumps(record, ensure_ascii=False))
-                    continue
+                        continue
                 descriptor, _ = files.enter_context(bound)
             except (OSError, AdoptionError) as error:
                 row.update(sha256=None, metadata_json=None, error=str(error))
                 continue
-            pending.append((descriptor, row))
-        metadata = read_bound_metadata(tuple(fd for fd, _ in pending), cancel)
-        for descriptor, row in pending:
-            row["sha256"] = bound_sha256(descriptor, cancel)
+            pending.append((descriptor, row, previous_hash, former_family))
+        metadata = read_bound_metadata(tuple(fd for fd, _, _, _ in pending), cancel)
+        for descriptor, row, previous_hash, former_family in pending:
+            row["sha256"] = previous_hash or bound_sha256(descriptor, cancel)
             try:
                 record = analyze_file_metadata(
                     source, source / row["relative_path"], row["size_bytes"], metadata.get(descriptor, {}),
@@ -355,6 +362,8 @@ def _read_batch(directory, source, rows, cached, cancel):
                 record["metadata_error"] = str(reported_error)
                 record["review_required"] = True
             record["family_key"] = row["family_key"]
+            if former_family:
+                record["adoption_family"] = former_family
             row["metadata_json"] = json.dumps(record, ensure_ascii=False)
 
 
@@ -367,7 +376,7 @@ def registered_content(connection, registry, checksum):
 
 def _classify_inventory(connection, registry, job_id, cancel):
     rows = connection.execute(
-        """SELECT family_key, relative_path, sha256 FROM legacy_adoption_inventory
+        """SELECT family_key, relative_path, sha256, metadata_json FROM legacy_adoption_inventory
             WHERE job_id = ? AND family_key IS NOT NULL ORDER BY family_key, relative_path""",
         (job_id,),
     )
@@ -382,10 +391,16 @@ def _classify_inventory(connection, registry, job_id, cancel):
         registered_primary = primary & {path.as_posix().casefold() for path in duplicates}
         available = primary - registered_primary
         excluded = [(job_id, path.as_posix(), "duplicate") for path in duplicates]
-        for _, path in members:
-            referenced = path.with_suffix("").as_posix().casefold()
-            if (path not in duplicates and classify_media(path) == "xmp"
-                    and (not available or referenced in registered_primary)):
+        registered_names = {Path(path).name for path in registered_primary}
+        for row, path in members:
+            if path in duplicates or classify_media(path) != "xmp":
+                continue
+            owner = path.with_suffix("")
+            cross_directory = bool(json.loads(row["metadata_json"] or "{}").get("adoption_family"))
+            registered_owner = (owner.as_posix().casefold() in registered_primary
+                                or cross_directory and family_member_ending(path).count(".") > 1
+                                and owner.name.casefold() in registered_names)
+            if not available or registered_owner:
                 # A sidecar for an archived primary has no authorised target in this job.
                 excluded.append((job_id, path.as_posix(), "detached"))
         connection.executemany(
@@ -478,6 +493,8 @@ def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path 
                 "DELETE FROM legacy_adoption_inventory WHERE job_id = ? AND seen_generation != ?",
                 (job_id, generation),
             )
+            draft = json.loads(_job(connection, library.library_id, job_id)["draft_json"])
+            join_split_families(connection, job_id, draft, cancel)
             _classify_inventory(connection, registry, job_id, cancel)
             connection.execute("DELETE FROM legacy_adoption_families WHERE job_id = ?", (job_id,))
             rows = connection.execute(
@@ -485,7 +502,6 @@ def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path 
                     WHERE job_id = ? AND family_key IS NOT NULL ORDER BY family_key, relative_path""",
                 (job_id,),
             )
-            draft = json.loads(_job(connection, library.library_id, job_id)["draft_json"])
             pending = draft.get("metadata_review_pending", {})
             applied = draft.get("metadata_review_applied", {})
             decisions = len(pending) + len(applied)

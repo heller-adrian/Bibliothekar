@@ -195,6 +195,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     router = APIRouter(prefix="/api/legacy-adoption", tags=["Bestandsübernahme"])
     running = {}
     review_running = set()
+    metadata_running = set()
     running_lock = Lock()
 
     def source_path(root, relative):
@@ -402,6 +403,9 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def job(job_id: str):
         library = context()
         with _errors():
+            operation = key(library, job_id)
+            with running_lock:
+                metadata_was_running = operation in metadata_running
             result = inventory_status(library, job_id)
             result["plan"] = plan_status(library, job_id)
             with database_connection(library.database_path) as connection:
@@ -413,6 +417,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 result["review_count"] = review_count(connection, job_id, result["plan"].get("id"))
             with running_lock:
                 result["scan_running"] = key(library, job_id) in running
+                result["metadata_running"] = metadata_was_running or operation in metadata_running
         return result
 
     @router.post("/jobs/{job_id}/scan", status_code=202)
@@ -507,7 +512,14 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             require_adoption(request, library)
             require_inventory_idle(library, job_id)
             require_review_idle(library, job_id)
-            return apply_metadata(library, job_id, revision=payload.revision, allow_existing=is_later(request))
+            operation = key(library, job_id)
+            with running_lock:
+                metadata_running.add(operation)
+            try:
+                return apply_metadata(library, job_id, revision=payload.revision, allow_existing=is_later(request))
+            finally:
+                with running_lock:
+                    metadata_running.discard(operation)
 
     @router.get("/jobs/{job_id}/review/batch")
     def review_progress(job_id: str, details: bool = False):

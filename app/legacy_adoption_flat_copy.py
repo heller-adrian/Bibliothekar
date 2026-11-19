@@ -6,6 +6,7 @@ from pathlib import PurePosixPath
 from app import legacy_adoption_host as host
 from app.database import database_connection
 from app.legacy_adoption_inventory import _legacy_family_key
+from app.metadata import family_member_ending
 from app.legacy_adoption_paths import AdoptionError, bound_file, bound_sha256, directory_identity, target_key, validate_target
 from app.root_operations import validate_active_roots
 
@@ -51,9 +52,9 @@ def _choose_names(root, family_key, originals, reserved=()):
     occupied = {target_key(name) for name in names}
     stems = {target_key(_legacy_family_key(PurePosixPath("."), name)) for name in names}
     stem = PurePosixPath(family_key).name
-    if not all(name.startswith(stem) and name[len(stem):].startswith(".") for name in originals):
-        raise AdoptionError("Dateinamen der Prüffallfamilie stimmen nicht überein.")
-    endings = [name[len(stem):] for name in originals]
+    endings = [family_member_ending(name) for name in originals]
+    if not all(endings) or len({target_key(ending) for ending in endings}) != len(endings):
+        raise AdoptionError("Dateiendungen der Prüffallfamilie stimmen nicht überein.")
     for number in range(len(names) + 1):
         suffix = f"_{number}" if number else ""
         capacity = min(255, os.fpathconf(root, "PC_NAME_MAX")) - max(len(end.encode()) for end in endings) - len(suffix)

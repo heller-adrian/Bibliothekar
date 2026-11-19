@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable
+from app.media_family_identity import IDENTITY_TAGS, IDENTITY_VERSION, capture_identity, split_family_groups
 from app.source_filter import should_ignore_source_path
 from zoneinfo import ZoneInfo
 import json
@@ -76,16 +78,22 @@ def classify_media(path: Path) -> str:
     return "other"
 
 
+def family_member_ending(path: Path | str) -> str:
+    name = Path(path).name
+    member = Path(name)
+    if member.suffix.lower() == ".xmp" and classify_media(member.with_suffix("")) not in {"other", "xmp"}:
+        return member.with_suffix("").suffix + member.suffix
+    return member.suffix
+
+
 def family_key(
     source_root: Path,
     path: Path,
 ) -> str:
     relative = path.relative_to(source_root)
 
-    return (
-        relative.parent
-        / path.stem
-    ).as_posix()
+    ending = family_member_ending(path)
+    return (relative.parent / (path.name[:-len(ending)] if ending else path.name)).as_posix()
 
 
 def parse_exiftool_datetime(
@@ -236,6 +244,9 @@ def run_exiftool(
         "-SubSecTimeOriginal",
         "-SubSecTimeDigitized",
         "-OffsetTimeOriginal",
+        "-ExposureTime",
+        "-FNumber",
+        "-ISO",
         "-CreateDate",
         "-Make",
         "-Model",
@@ -252,6 +263,7 @@ def run_exiftool(
         "-FileName",
         "-Directory",
     ]
+    common.extend("-" + tag for tag in IDENTITY_TAGS)
 
     def execute(
         command: list[str],
@@ -676,11 +688,13 @@ def analyze_file_metadata(
         "camera_make": metadata.get("EXIF:IFD0:Make")
             or metadata.get("EXIF:ExifIFD:Make")
             or metadata.get("QuickTime:Keys:Make")
-            or metadata.get("QuickTime:Make"),
+            or metadata.get("QuickTime:Make")
+            or metadata.get("XMP:XMP-tiff:Make"),
         "camera_model": metadata.get("EXIF:IFD0:Model")
             or metadata.get("EXIF:ExifIFD:Model")
             or metadata.get("QuickTime:Keys:Model")
-            or metadata.get("QuickTime:Model"),
+            or metadata.get("QuickTime:Model")
+            or metadata.get("XMP:XMP-tiff:Model"),
         "inherited_from_family": False,
         "review_required": confidence in {
             "low",
@@ -688,6 +702,13 @@ def analyze_file_metadata(
             "missing",
         },
         "metadata_candidates": candidates,
+        "capture_identity": capture_identity(metadata),
+        "capture_identity_version": IDENTITY_VERSION,
+        "capture_settings": {
+            "exposure": metadata.get("EXIF:ExifIFD:ExposureTime"),
+            "aperture": metadata.get("EXIF:ExifIFD:FNumber"),
+            "iso": metadata.get("EXIF:ExifIFD:ISO"),
+        },
     }
 
 
@@ -695,6 +716,7 @@ def analyze_tree(
     source_root: Path,
     *,
     include_other: bool = True,
+    join_split: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
     cancellation_callback: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
@@ -744,9 +766,27 @@ def analyze_tree(
             {},
         )
 
-        files.append(analyze_file_metadata(source_root, path, path.stat().st_size, metadata))
+        record = analyze_file_metadata(source_root, path, path.stat().st_size, metadata)
+        if metadata.get("ExifTool:Error"):
+            record["metadata_error"] = str(metadata["ExifTool:Error"])
+        files.append(record)
 
+    if join_split:
+        local = defaultdict(list)
+        for record in files:
+            local[record["family_key"]].append(record)
+        groups = ((key, members, True) for key, members in local.items())
+        for key, _, members in split_family_groups(
+            groups, ending=family_member_ending, cancel=cancellation_callback or (lambda: None),
+        ):
+            for record in members:
+                record["family_key"] = key
+    for record in files:
+        del record["capture_identity"], record["capture_identity_version"]
     return summarize_file_metadata(source_root, files)
+
+
+analyze_import_tree = partial(analyze_tree, join_split=True)
 
 
 def summarize_file_metadata(
@@ -782,6 +822,9 @@ def summarize_file_metadata(
             member["selected_capture_time"]
             for member in strong_members
         }
+
+        if len(strong_times) > 1 and len({datetime.fromisoformat(value) for value in strong_times}) == 1:
+            strong_times = {min(strong_times)}
 
         # Camera pairs can share a second while only the RAW stores real
         # fractional EXIF seconds. Accept one unambiguous fractional value;

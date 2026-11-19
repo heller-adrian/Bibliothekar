@@ -121,7 +121,7 @@ jobs:
           node --check /tmp/bibliothekar-onboarding.js
           node -e 'for (const [source] of require("/tmp/bibliothekar-adoption-patterns.json")) new RegExp(source, "u")'
       - name: Build and verify the local container on synthetic ZFS
-        if: github.event_name == 'workflow_dispatch' && inputs.container_preflight && !inputs.full_backend
+        if: github.event_name == 'workflow_dispatch' && inputs.container_preflight
         run: |
           test "$(git rev-parse HEAD)" = "$QA_SOURCE"
           bash qa/release/install_runner_packages.sh acl
@@ -136,6 +136,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$QA_SOURCE"
           cat > "$RUNNER_TEMP/adoption-targets.json" <<'JSON'
           [
+            "tests/backend/test_media_family_identity.py",
+            "tests/backend/test_rc1_sd_reimport.py::test_confirmed_reimport_uses_real_worker_and_preserves_source",
             "tests/backend/test_legacy_adoption_inventory.py",
             "tests/backend/test_legacy_adoption_dataset.py",
             "tests/backend/test_legacy_adoption_host.py",
@@ -178,6 +180,9 @@ jobs:
               "test_adoption_reads_actual_read_only_archive",
               "test_upgrades_1_0_0_catalogue_and_registry_without_touching_existing_rows",
               "test_later_adoption_with_only_known_files_cannot_freeze_an_empty_event",
+              "test_large_adoption_restores_review_and_plans_from_saved_inventory[large-inventory]",
+              "test_separate_raw_jpeg_require_unique_identity_and_compatible_capture",
+              "test_verified_capture_families_share_import_targets",
               "test_regular_import_recognizes_adopted_file_family_before_any_regular_import[native-zfs]",
               "test_script_and_manual_plans_use_correct_family_names",
               "test_layout_only_change_stages_new_nested_branch_without_copying_its_parent",

@@ -32,7 +32,7 @@ from app.legacy_adoption_paths import (
     AdoptionError, bound_directory, bound_file, bound_sha256, file_identity, relative_parent,
     target_key, validate_target, verify_inventory_identity, walk_bound_files,
 )
-from app.metadata import LOCAL_TIMEZONE
+from app.metadata import LOCAL_TIMEZONE, family_member_ending
 from app.operation_health import read_session
 from app.released_ranges import merge_intervals
 from app.subevents import assignment_target, normalize_subevents
@@ -197,7 +197,7 @@ def _assigned_index(intervals, starts, capture):
     return intervals[at][2] if at >= 0 and time <= intervals[at][1] else None
 
 
-def preview_draft(library, job_id, draft, *, allow_existing=False):
+def preview_draft(library, job_id, draft, *, allow_existing=False, validate_only=False):
     """Read-only planning feedback, never a move/registration authority."""
     with database_connection(library.database_path) as connection:
         connection.execute('BEGIN')
@@ -241,6 +241,8 @@ def preview_draft(library, job_id, draft, *, allow_existing=False):
         prefixes = [target_key(str(event_root_relative(event))) for event in events]
         if len(set(prefixes)) != len(prefixes):
             raise AdoptionError('Mehrere Ereignisse beanspruchen denselben Zielordner.')
+        if validate_only:
+            return {'valid': True, 'conflicts': []}
         starts = [item[0] for item in intervals]
         counts = [{'families': 0, 'files': 0, 'days': set()} for _ in events]
         overrides = {key: _local_capture(value) for key, value in draft.get('capture_overrides', {}).items()}
@@ -256,7 +258,7 @@ def preview_draft(library, job_id, draft, *, allow_existing=False):
             archive_ends.append(max(end, archive_ends[-1]) if archive_ends else end)
         for row in connection.execute(
             """SELECT families.family_key, families.capture_time, families.review_required, copy.state AS review_copy,
-                      (SELECT count(*) FROM legacy_adoption_inventory AS member
+                      (SELECT count(*) FROM legacy_adoption_inventory AS member INDEXED BY legacy_adoption_inventory_family
                        WHERE member.job_id=families.job_id AND member.family_key=families.family_key
                          AND member.disposition = 'candidate') AS files
                FROM legacy_adoption_candidate_families families
@@ -566,7 +568,7 @@ def _family_targets(folder, key, family, override, archive_entry, registered, us
             raise AdoptionError("Der Zielname muss ein einzelner Dateiname ohne Endung sein.")
         validate_target(stem)
     # Preserve full compound endings, e.g. .RAF.xmp, for all members.
-    endings = [PurePosixPath(member["relative_path"]).name[len(original):] for member in family]
+    endings = [family_member_ending(member["relative_path"]) for member in family]
     proposed = [str(folder / (stem + ending)) for ending in endings]
     if len({target_key(ending) for ending in endings}) != len(endings):
         raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + proposed[0])
@@ -642,8 +644,7 @@ def _camera_tokens(families):
 
 
 def _automatic_family_targets(folder, key, family, capture, camera, same_second, names, stems, used):
-    original = PurePosixPath(key).name
-    endings = [PurePosixPath(member["relative_path"]).name[len(original):] for member in family]
+    endings = [family_member_ending(member["relative_path"]) for member in family]
     if len({target_key(ending) for ending in endings}) != len(endings):
         raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + key)
     base, index, _ = capture_stem(capture, camera, stems, same_second=same_second)

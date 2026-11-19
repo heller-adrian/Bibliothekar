@@ -193,7 +193,7 @@ def test_upgrades_1_0_0_catalogue_and_registry_without_touching_existing_rows(tm
         library_registry.register_source_backup(
             registry, backup_id="historic", source_kind="import", source_identity="old", backup_path="/synthetic",
         )
-    assert initialize_database(db)["newly_applied_versions"] == list(range(56, 72))
+    assert initialize_database(db)["newly_applied_versions"] == list(range(56, 73))
     assert library_registry.initialize_library_registry(registry)["newly_applied_versions"] == [4, 5, 6, 7, 8]
     assert library_registry.read_library_identity(db) == "historic"
     assert library_registry.get_source_backup(registry, "historic")["source_identity"] == "old"
@@ -225,10 +225,158 @@ def test_rc12_review_batch_upgrade_preserves_finished_and_pending_copies(tmp_pat
                 "INSERT INTO legacy_adoption_review_batch (job_id, family_key, state) VALUES ('job', ?, ?)",
                 [("ready", "copied"), ("pending", "pending")],
             )
-    assert initialize_database(db)["newly_applied_versions"] == [66, 67, 68, 69, 70, 71]
+    assert initialize_database(db)["newly_applied_versions"] == [66, 67, 68, 69, 70, 71, 72]
     with database.database_connection(db) as connection:
         rows = connection.execute(
             """SELECT family_key, state, bytes_total, bytes_verified FROM legacy_adoption_review_batch
                ORDER BY family_key""",
         )
         assert [tuple(row) for row in rows] == [("pending", "pending", 400, 0), ("ready", "copied", 200, 200)]
+
+
+def test_separate_raw_jpeg_require_unique_identity_and_compatible_capture(library, monkeypatch):
+    context, source = library
+    raw = source / "RAW"
+    jpeg = source / "JPEG"
+    other = source / "Other"
+    for directory in (raw, jpeg, other):
+        directory.mkdir()
+    valid_id = "00112233445566778899aabbccddeeff"
+    originals = {}
+    metadata = {}
+    for index, kind in enumerate(("pair", "no-id", "camera", "serial", "burst", "ambiguous", "sidecars"), 1):
+        for directory, extension in ((raw, ".DNG"), (jpeg, ".JPG")):
+            path = directory / (kind + extension)
+            data = path.relative_to(source).as_posix().encode()
+            originals[path] = data
+            path.write_bytes(data)
+            item = {"EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+                    "EXIF:IFD0:Make": "Synthetic", "EXIF:IFD0:Model": "Test Camera",
+                    "EXIF:ExifIFD:BodySerialNumber": "123456",
+                    "EXIF:ExifIFD:ImageUniqueID": f"{index:02x}" + valid_id[2:]}
+            if kind == "no-id":
+                item.pop("EXIF:ExifIFD:ImageUniqueID")
+            if kind == "camera" and directory == jpeg:
+                item["EXIF:IFD0:Model"] = "Another Camera"
+            if kind == "serial" and directory == jpeg:
+                item["EXIF:ExifIFD:BodySerialNumber"] = "999999"
+            if kind == "burst":
+                item["EXIF:ExifIFD:SubSecTimeOriginal"] = "100" if directory == jpeg else "250"
+            metadata[data] = item
+    for path in (raw / "pair.DNG.xmp", raw / "sidecars.xmp", jpeg / "sidecars.xmp", other / "ambiguous.JPG"):
+        data = originals[path] = path.relative_to(source).as_posix().encode()
+        path.write_bytes(data)
+        metadata[data] = metadata[b"JPEG/ambiguous.JPG"] if path.suffix == ".JPG" else {}
+
+    calls = []
+    def read(descriptors, _cancel):
+        calls.extend(descriptors)
+        return {fd: metadata[os.pread(fd, 256, 0)] for fd in descriptors}
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", read)
+    job = create_job(context, source)
+    assert scan_inventory(context, job)["files"] == len(originals)
+    families = {item["family_key"]: item for item in inventory_families(context, job)}
+    assert len(families) == 13
+    assert {member["relative_path"] for member in families["RAW/pair"]["files"]} == {
+        "RAW/pair.DNG", "RAW/pair.DNG.xmp", "JPEG/pair.JPG",
+    }
+    assert "JPEG/pair" not in families
+    assert set(item["family_key"] for item in families["RAW/pair"]["files"]) == {"RAW/pair"}
+    assert families["RAW/no-id"]["member_count"] == 2
+    assert "JPEG/no-id" not in families
+    assert all(families[f"{directory}/{kind}"]["member_count"] == (2 if kind == "sidecars" else 1)
+               for kind in ("camera", "serial", "burst", "ambiguous", "sidecars") for directory in ("RAW", "JPEG"))
+    assert families["Other/ambiguous"]["member_count"] == 1
+    calls.clear()
+    scan_inventory(context, job)
+    assert not calls
+    assert {item["family_key"] for item in inventory_families(context, job)} == set(families)
+    assert {path: path.read_bytes() for path in originals} == originals
+    assert not list(context.archive_root.iterdir())
+
+
+def test_saved_rc1_family_retains_members_when_new_capture_evidence_is_available(library, monkeypatch):
+    import json
+
+    from app.database import database_connection
+
+    context, source = library
+    proof = {
+        "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+        "EXIF:IFD0:Make": "Synthetic", "EXIF:IFD0:Model": "Camera",
+        "EXIF:ExifIFD:ImageUniqueID": "00112233445566778899aabbccddeeff",
+    }
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata",
+                        lambda descriptors, _cancel: {fd: proof for fd in descriptors})
+    original = ("day/RAW/frame.RAF", "day/JPEG/frame.JPG")
+    for relative in original:
+        path = source / relative
+        path.parent.mkdir(parents=True)
+        path.write_text(relative)
+    job = create_job(context, source)
+    scan_inventory(context, job)
+    anchor = "day/RAW/frame"
+    with database_connection(context.database_path) as connection:
+        draft = json.loads(connection.execute("SELECT draft_json FROM legacy_adoption_jobs WHERE id = ?", (job,)).fetchone()[0])
+        draft["target_stems"] = {anchor: "saved-name"}
+        connection.execute("UPDATE legacy_adoption_jobs SET draft_json = ? WHERE id = ?", (json.dumps(draft), job))
+        connection.execute(
+            "UPDATE legacy_adoption_inventory SET metadata_json = json_remove(metadata_json, '$.capture_identity_version') WHERE job_id = ?",
+            (job,),
+        )
+    converted = source / "day/DNG/frame.dng"
+    converted.parent.mkdir()
+    converted.write_text("third member")
+    scan_inventory(context, job)
+    families = {item["family_key"]: item["members"] for item in inventory_families(context, job)}
+    assert set(families[anchor]) == set(original)
+    assert families["day/DNG/frame"] == [converted.relative_to(source).as_posix()]
+
+
+def test_fujifilm_coarse_sibling_families_survive_adoption_rescan(library, monkeypatch):
+    """RC3: genuine Fuji camera metadata has no serial, UUID or subseconds."""
+    context, source = library
+    relative = (
+        "2025/01/28.01.2025/RAW/DSCF7545.RAF",
+        "2025/01/28.01.2025/JPEG/DSCF7545.JPG",
+        "2025/01/28.01.2025/DNG/DSCF7545.dng",
+    )
+    originals = {}
+    for path in relative:
+        target = source / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(path.encode())
+        originals[path.encode()] = path
+
+    def metadata(files, _cancel):
+        results = {}
+        for fd in files:
+            name = originals[os.pread(fd, 4096, 0)]
+            values = {
+                "EXIF:IFD0:Make": "FUJIFILM",
+                "EXIF:IFD0:Model": "X-H2S",
+                "EXIF:ExifIFD:DateTimeOriginal": "2025:01:28 17:11:52",
+                "EXIF:ExifIFD:ExposureTime": "1/250",
+                "EXIF:ExifIFD:FNumber": "4",
+                "EXIF:ExifIFD:ISO": "800",
+            }
+            if name.endswith(".dng"):
+                values["EXIF:IFD0:OriginalRawFileName"] = "DSCF7545.RAF"
+            results[fd] = values
+        return results
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    job = create_job(context, source)
+    for _ in range(2):
+        status = scan_inventory(context, job)
+        assert status["files"] == 3
+        assert status["families"] == 1
+        [family] = inventory_families(context, job)
+        assert family["status"] == "complete"
+        assert family["member_count"] == 3
+        assert {file["relative_path"] for file in family["files"]} == set(relative)
+        assert {path: (source / path).read_bytes() for path in relative} == {
+            path: path.encode() for path in relative
+        }
+    assert not list(context.archive_root.iterdir())

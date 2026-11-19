@@ -112,6 +112,7 @@ def stage_metadata(library, job_id, *, revision, keys, source, individual):
         overrides = draft.get("capture_overrides", {})
         if source is None:
             pending.pop(keys[0], None)
+            draft.pop("metadata_review_result", None)
             return {"revision": _save(connection, job, draft), "staged": 0, "rejected": {}}
         rejected = dict.fromkeys(keys, "unavailable")
         staged = 0
@@ -126,6 +127,8 @@ def stage_metadata(library, job_id, *, revision, keys, source, individual):
             pending[key] = {**choice, "fingerprint": inventory_fingerprint(members)}
             del rejected[key]
             staged += 1
+        if staged:
+            draft.pop("metadata_review_result", None)
         return {"revision": _save(connection, job, draft) if staged else revision,
                 "staged": staged, "rejected": rejected}
 
@@ -164,7 +167,8 @@ def apply_metadata(library, job_id, *, revision, allow_existing):
                 overrides[key] = decision["time"]
                 applied[key] = pending.pop(key)
             draft["exclude_families"] = [key for key in draft.get("exclude_families", []) if key not in verified]
-            if not preview_draft(library, job_id, draft, allow_existing=allow_existing)["valid"]:
+            if not preview_draft(library, job_id, draft, allow_existing=allow_existing, validate_only=True)["valid"]:
                 raise AdoptionError("Zeitkonflikt: Korrigiere die markierte Planung. Gespeicherte Entwürfe bleiben erhalten.")
+            draft["metadata_review_result"] = {"applied": len(verified), "remaining": len(rejected)}
         return {"revision": _save(connection, job, draft) if verified else revision,
                 "applied": len(verified), "rejected": rejected}

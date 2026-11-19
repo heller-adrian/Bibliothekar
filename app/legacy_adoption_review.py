@@ -86,10 +86,10 @@ _REVIEW_WHERE = """
        family.job_id = :job AND (
           family.review_required OR copy.family_key IS NOT NULL OR (
              :plan IS NOT NULL AND NOT EXISTS (
-                SELECT 1 FROM legacy_adoption_moves move
-                  JOIN legacy_adoption_inventory member
-                    ON member.job_id = family.job_id AND member.relative_path = move.relative_path
-                 WHERE move.plan_id = :plan AND member.family_key = family.family_key
+                SELECT 1 FROM legacy_adoption_inventory member INDEXED BY legacy_adoption_inventory_family
+                  CROSS JOIN legacy_adoption_moves move
+                    ON move.plan_id = :plan AND move.relative_path = member.relative_path
+                 WHERE member.job_id = family.job_id AND member.family_key = family.family_key
              )
           )
        )
@@ -142,8 +142,8 @@ def _copyable_cases(connection, job_id, job, plan):
                    AND (member.sha256 IS NULL OR member.identity IS NULL OR member.error IS NOT NULL)
             )
             AND NOT EXISTS (
-                SELECT 1 FROM legacy_adoption_inventory member
-                 JOIN legacy_adoption_moves move ON move.plan_id = :plan AND move.relative_path = member.relative_path
+                SELECT 1 FROM legacy_adoption_inventory member INDEXED BY legacy_adoption_inventory_family
+                 CROSS JOIN legacy_adoption_moves move ON move.plan_id = :plan AND move.relative_path = member.relative_path
                  WHERE member.job_id = family.job_id AND member.family_key = family.family_key
             )
             ORDER BY family.family_key""",
@@ -230,10 +230,10 @@ def review_cases(library, job_id, *, after=""):
 
 def _assigned(connection, job_id, plan_id, key):
     return connection.execute(
-        """SELECT 1 FROM legacy_adoption_moves move
-             JOIN legacy_adoption_inventory member ON member.job_id = ? AND member.relative_path = move.relative_path
-            WHERE move.plan_id = ? AND member.family_key = ? LIMIT 1""",
-        (job_id, plan_id, key),
+        """SELECT 1 FROM legacy_adoption_inventory member INDEXED BY legacy_adoption_inventory_family
+             CROSS JOIN legacy_adoption_moves move ON move.plan_id = ? AND move.relative_path = member.relative_path
+            WHERE member.job_id = ? AND member.family_key = ? LIMIT 1""",
+        (plan_id, job_id, key),
     ).fetchone()
 
 

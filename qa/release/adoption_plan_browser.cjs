@@ -464,9 +464,96 @@ async function checkReviewPlan(browser, language, width) {
   await page.close();
 }
 
+
+async function checkReloadAndReview(browser) {
+  const page = await browser.newPage();
+  const rows=cases.slice(0,26);
+  const keys=rows.map(item=>item.family_key);
+  const tag="EXIF:ExifIFD:DateTimeOriginal";
+  const otherTag="EXIF:ExifIFD:CreateDate";
+  let revision=0, running=false, applied=false, checkCount=0, applyCount=0;
+  let releasePreview, completeApply;
+  const pending={};
+  await page.addInitScript(id=>{
+    localStorage.setItem("bibliothekar-language","de");
+    if(sessionStorage.getItem("bk-adoption-period:"+id)===null)sessionStorage.setItem("bk-adoption-period:"+id,"review");
+  },jobId);
+  await page.route(origin+"/**",async route=>{
+    const path=new URL(route.request().url()).pathname;
+    const endpoint=path.split("/"+jobId).at(-1);
+    if(path==="/legacy-adoption")return route.fulfill({body:html,contentType:"text/html"});
+    if(endpoint==="")return route.fulfill({json:{plan:{},state:"inventoried",files:10347,families:10347,
+      errors:0,review_count:applied?0:26,draft_revision:revision,metadata_running:running,
+      draft:{metadata_review_pending:pending,metadata_review_result:applied?{applied:2,remaining:0}:null}}});
+    if(endpoint==="/review/batch")return route.fulfill({json:inactive});
+    if(endpoint==="/draft/check"){
+      if(++checkCount===1){
+        await new Promise(resolve=>{releasePreview=resolve;});
+        return route.fulfill({status:503,json:{detail:"Synthetischer Fehler"}});
+      }
+      const restored=applied?[{...segments[0],day_key:"2022-06-03",start_datetime:"2022-06-03T00:00:00",
+        end_datetime:"2022-06-03T23:59:59",families:2}]:[];
+      return route.fulfill({json:{valid:true,free_segments:[...restored,...segments],events:[]}});
+    }
+    if(endpoint==="/review")return route.fulfill({json:rows.map(item=>({...item,metadata_choices:[
+      {source:tag,time:"2022-06-03T12:00:00"},{source:otherTag,time:"2022-06-03T14:00:00"}]}))});
+    if(endpoint==="/review/selection")return route.fulfill({json:keys});
+    if(endpoint==="/families")return route.fulfill({json:[]});
+    if(endpoint==="/review/metadata"){
+      const command=route.request().postDataJSON();
+      assert.equal(command.revision,revision);
+      for(const key of command.family_keys)pending[key]={source:command.source};
+      return route.fulfill({json:{revision:++revision,staged:command.family_keys.length,rejected:{}}});
+    }
+    if(endpoint==="/review/metadata/apply"){
+      running=true;applyCount++;
+      await new Promise(resolve=>{completeApply=resolve;});
+      for(const key of Object.keys(pending))delete pending[key];
+      running=false;applied=true;
+      await route.fulfill({json:{revision:++revision,applied:2,rejected:{}}}).catch(()=>{});
+      return;
+    }
+    return route.fulfill({body:""});
+  });
+  const button=name=>page.getByRole("button",{name,exact:true});
+  await page.goto(origin+"/legacy-adoption?job="+jobId+"&step=plan");
+  await button("Änderungen verwerfen").waitFor();
+  await button("Zurück").waitFor();
+  await page.getByText("Ereignisplanung wird geladen …",{exact:true}).waitFor();
+  assert.ok(releasePreview);
+  releasePreview();
+  await button("Gespeicherten Auftrag erneut laden").click();
+  await page.locator(".adoption-review-row").nth(25).waitFor();
+  await button("Alle auswählen").click();
+  await page.locator("#review-selection").getByText("26 ausgewählt",{exact:true}).waitFor();
+  assert.equal(await page.locator(".adoption-review-row input:checked").count(),26);
+  await button("Auswahl aufheben").click();
+  assert.equal(await page.locator(".adoption-review-row input:checked").count(),0);
+  for(const [index,choice] of [[0,tag],[1,otherTag]]){
+    await page.locator(".adoption-metadata-source").nth(index).selectOption(choice);
+    await page.getByText("Metadatenquelle vorgemerkt · 1",{exact:true}).waitFor();
+  }
+  await Promise.all([page.waitForRequest(request=>request.url().endsWith("/review/metadata/apply")),
+    button("Änderungen anwenden").click()]);
+  await page.reload();
+  await page.getByText("Metadatenentscheidungen werden angewendet …",{exact:true}).waitFor();
+  assert.equal(await button("Änderungen verwerfen").count(),0);
+  assert.ok(completeApply);
+  completeApply();
+  await button("2022 (2)").waitFor();
+  await page.getByText("Aufnahmezeiten übernommen · 2",{exact:true}).waitFor();
+  await page.reload();
+  await button("2022 (2)").waitFor();
+  await button("Änderungen verwerfen").waitFor();
+  assert.equal(applyCount,1);
+  await page.close();
+}
+
 (async () => {
   const browser = await chromium.launch({executablePath: process.env.CHROMIUM_EXECUTABLE || undefined});
   try {
+    await checkReloadAndReview(browser);
+    console.log("Passed interrupted reload and 26 review cases");
     for (const variant of [[1400, 880, "light", "en"], [1024, 680, "dark", "de"], [768, 1024, "light", "en"], [390, 780, "dark", "de"]]) {
       await check(browser, ...variant);
       console.log("Passed", ...variant);
