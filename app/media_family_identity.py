@@ -102,10 +102,21 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
     """
     by_id, by_precision, by_context = defaultdict(set), defaultdict(set), defaultdict(set)
     candidates = {}
+    primary_by_name = defaultdict(set)
+    standalone_sidecars = {}
     for key, members, eligible in groups:
         cancel()
         primaries = [item for item in members if _role(item) in {"raw", "jpeg", "dng"}]
         evidence = primaries or [item for item in members if _role(item) == "xmp"]
+        # Keep explicit original.RAF.xmp sidecars discoverable even if the
+        # sidecar contains no own EXIF camera identity or shooting timestamp.
+        if not primaries and eligible and len(members) == 1 and _role(members[0]) == "xmp":
+            standalone_sidecars[key] = members[0]
+        for primary in primaries:
+            scope = _format_scope(primary)
+            if scope is not None:
+                name = _normalized(PurePosixPath(primary["relative_path"]).name)
+                primary_by_name[(scope, name)].add(key)
         if not evidence:
             continue
         # A local family with multiple media files is a single unit. Every
@@ -139,8 +150,47 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
         if has_proof:
             candidates[key] = (members, evidence, usable)
 
+    by_sidecar = {}
+    for key, sidecar in standalone_sidecars.items():
+        cancel()
+        path = PurePosixPath(sidecar["relative_path"])
+        original_name = path.stem if path.suffix.casefold() == ".xmp" else ""
+        if PurePosixPath(original_name).suffix.casefold() not in {
+            ".raf", ".nef", ".cr2", ".cr3", ".arw", ".orf", ".rw2",
+            ".dng", ".jpg", ".jpeg",
+        }:
+            continue
+        scope = _format_scope(sidecar)
+        owners = primary_by_name.get((scope, _normalized(original_name)), set())
+        if scope is None or len(owners) != 1:
+            continue
+        [owner] = owners
+        if owner not in candidates or not candidates[owner][2]:
+            continue
+        exact = [item for item in candidates[owner][0]
+                 if _normalized(PurePosixPath(item["relative_path"]).name) == _normalized(original_name)]
+        if len(exact) != 1:
+            continue
+        original = exact[0]
+        identity = sidecar.get("capture_identity") or {}
+        match = original.get("capture_identity") or {}
+        if identity.get("conflict") or any(identity.get(tag) and match.get(tag)
+                                           and identity[tag] != match[tag] for tag in ("id", "serial")):
+            continue
+        sidecar_camera = _camera(sidecar)
+        if any(sidecar_camera) and sidecar_camera != _camera(original):
+            continue
+        sidecar_time = _time(sidecar)
+        original_time = _time(original)
+        if sidecar_time is not None and (original_time is None
+                                         or sidecar_time.replace(microsecond=0)
+                                         != original_time.replace(microsecond=0)):
+            continue
+        candidates[key] = ([sidecar], [], True)
+        by_sidecar[key] = {key, owner}
+
     groups_by_key = defaultdict(list)
-    for bucket in chain(by_id.values(), by_precision.values(), by_context.values()):
+    for bucket in chain(by_id.values(), by_precision.values(), by_context.values(), by_sidecar.values()):
         if len(bucket) > 1:
             for key in bucket:
                 groups_by_key[key].append(bucket)
