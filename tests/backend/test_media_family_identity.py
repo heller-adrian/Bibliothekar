@@ -190,7 +190,7 @@ def test_fujifilm_coarse_context_rejects_ambiguous_or_conflicting_match(
         if difference == "different_aperture" and i == 1:
             metadata["EXIF:ExifIFD:FNumber"] = "5.6"
         if difference == "conflicting_ids":
-            metadata["EXIF:ExifIFD:ImageUniqueID"] = ("a" if i == 0 else "b") * 32
+            metadata["EXIF:ExifIFD:ImageUniqueID"] = ("00112233445566778899aabbccddeeff", "ffeeddccbbaa99887766554433221100")[i]
         if difference == "conflicting_serials":
             metadata["EXIF:ExifIFD:BodySerialNumber"] = "serial-a" if i == 0 else "serial-b"
         if difference == "different_subseconds":
