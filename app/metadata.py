@@ -244,6 +244,9 @@ def run_exiftool(
         "-SubSecTimeOriginal",
         "-SubSecTimeDigitized",
         "-OffsetTimeOriginal",
+        "-ExposureTime",
+        "-FNumber",
+        "-ISO",
         "-CreateDate",
         "-Make",
         "-Model",
@@ -701,6 +704,11 @@ def analyze_file_metadata(
         "metadata_candidates": candidates,
         "capture_identity": capture_identity(metadata),
         "capture_identity_version": IDENTITY_VERSION,
+        "capture_settings": {
+            "exposure": metadata.get("EXIF:ExifIFD:ExposureTime"),
+            "aperture": metadata.get("EXIF:ExifIFD:FNumber"),
+            "iso": metadata.get("EXIF:ExifIFD:ISO"),
+        },
     }
 
 
