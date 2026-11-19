@@ -1,0 +1,30 @@
+name: Start RC3 full Backend QA on frozen source
+on:
+  push:
+    branches:
+      - ci/rc3-full-qa-trigger
+    paths:
+      - .github/workflows/rc3-launch-full-backend.yml
+permissions:
+  contents: read
+  actions: write
+jobs:
+  dispatch:
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/ci/rc3-full-qa-trigger'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_BRANCH: patch/1.1.1-rc3-fujifilm-families
+      TARGET_SHA: d18afab745126aaddd8d2a586e62bcc034b42b51
+    steps:
+      - name: Dispatch the existing eight-part release qualification for the exact RC3 commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
+          live="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$TARGET_BRANCH" --jq '.object.sha')"
+          test "$live" = "$TARGET_SHA"
+          gh workflow run qa-tests.yml --repo "$GITHUB_REPOSITORY" --ref "$TARGET_BRANCH" \
+            -F full_backend=true -F container_preflight=false
+          echo "Requested full Backend QA on $TARGET_BRANCH at $TARGET_SHA" >> "$GITHUB_STEP_SUMMARY"
