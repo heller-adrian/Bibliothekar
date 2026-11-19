@@ -69,7 +69,7 @@ jobs:
           jq -e '.status == "PASS" and .read_only_mount == "PASS" and .partitions == 8 and .tested_once == .collected' "$evidence/verified.json"
           # The green, exact-source image run has already enforced every container smoke assertion.
           # Retest no volatile log packaging here; qualification JSON and run status are authoritative.
-          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null || true)"
+          tag_sha="$(git ls-remote origin "refs/tags/$TAG" | cut -f1)"
           if [[ -n "$tag_sha" ]]; then test "$tag_sha" = "$SOURCE"; fi
           echo "QUALIFIED_EVIDENCE=$evidence" >> "$GITHUB_ENV"
 
@@ -142,7 +142,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null || true)"
+          tag_sha="$(git ls-remote origin "refs/tags/$TAG" | cut -f1)"
           if [[ -n "$tag_sha" ]]; then test "$tag_sha" = "$SOURCE"; fi
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             cat > "$RUNNER_TEMP/rc112-notes.md" <<EOF
