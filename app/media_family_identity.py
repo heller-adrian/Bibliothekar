@@ -174,8 +174,16 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
         original = exact[0]
         identity = sidecar.get("capture_identity") or {}
         match = original.get("capture_identity") or {}
+        if (sidecar.get("metadata_error") or sidecar.get("metadata_conflict")
+                or (sidecar.get("review_required") and sidecar.get("selected_capture_time"))):
+            continue
         if identity.get("conflict") or any(identity.get(tag) and match.get(tag)
                                            and identity[tag] != match[tag] for tag in ("id", "serial")):
+            continue
+        sidecar_settings = sidecar.get("capture_settings") or {}
+        original_settings = original.get("capture_settings") or {}
+        if any(not _same_setting(sidecar_settings.get(field), original_settings.get(field))
+               for field in ("exposure", "aperture", "iso")):
             continue
         sidecar_camera = _camera(sidecar)
         if any(sidecar_camera) and sidecar_camera != _camera(original):
