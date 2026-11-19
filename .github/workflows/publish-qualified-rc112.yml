@@ -1,0 +1,172 @@
+name: Publish verified Bibliothekar 1.1.1 RC2
+
+on:
+  push:
+    branches:
+      - release/rc112-qualified
+    paths:
+      - .github/workflows/publish-qualified-rc112.yml
+
+permissions:
+  contents: write
+  actions: read
+  packages: write
+
+concurrency:
+  group: bibliothekar-publish-qualified-rc112
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/release/rc112-qualified'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REGISTRY_ACTOR: ${{ github.actor }}
+      REGISTRY_CREDENTIAL: ${{ github.token }}
+      SOURCE: 5c0c68afa6c50cba77575abe5f62ead508d02390
+      QA_RUN: '44424158825'
+      IMAGE_RUN: '44484886485'
+      IMAGE: ghcr.io/heller-adrian/bibliothekar
+      DIGEST: sha256:d8320d01abd0fc429a7a92c15386afa0939230fbf98e528400d4cd1303b35e2f
+      TAG: v1.1.1-rc.2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify frozen source and independent CI evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$SOURCE"
+          test "$(git diff-tree --no-commit-id --name-only -r HEAD)" = '.github/workflows/publish-qualified-rc112.yml'
+          git show "$SOURCE:qa/release/release-candidate.json" |
+            jq -e --arg tag "$TAG" '.release_tag == $tag and .stable_version == "1.1.0"'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN" |
+            jq -e --arg sha "$SOURCE" --arg repo "$GITHUB_REPOSITORY" '
+              .status == "completed" and .conclusion == "success" and
+              .head_sha == $sha and .head_repository.full_name == $repo and
+              .head_branch == "patch/1.1.1-media-families" and
+              .event == "workflow_dispatch" and .path == ".github/workflows/qa-tests.yml"'
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$IMAGE_RUN" |
+            jq -e --arg sha "$SOURCE" --arg repo "$GITHUB_REPOSITORY" '
+              .status == "completed" and .conclusion == "success" and .run_attempt == 2 and
+              .head_sha == $sha and .head_repository.full_name == $repo and
+              .head_branch == "patch/1.1.1-media-families" and
+              .event == "workflow_dispatch" and .path == ".github/workflows/publish-container.yml"'
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" |
+            jq -e '.tag_name == "v1.1.0" and .prerelease == false'
+          evidence="$RUNNER_TEMP/qualified-rc112"
+          mkdir -p "$evidence"
+          gh run download "$IMAGE_RUN" --repo "$GITHUB_REPOSITORY" --name rc112-qualified-image --dir "$evidence"
+          jq -e --arg tag "$TAG" --arg src "$SOURCE" --arg image "$IMAGE" --arg digest "$DIGEST" --arg qa "$QA_RUN" --arg run "$IMAGE_RUN" '
+            .tag == $tag and .source == $src and .image == $image and
+            .digest == $digest and .qa_run == $qa and .image_run == $run
+          ' "$evidence/qualified-image.json"
+          jq -e '.status == "PASS" and .read_only_mount == "PASS" and .partitions == 8 and .tested_once == .collected' "$evidence/verified.json"
+          grep -Fxq 'Grouped manual SMB work verified the combined ZIP and resumed partial moves after a container restart on native ZFS.' "$evidence/container-smoke.log"
+          grep -Fxq 'Review batch preserved a complete RAW/JPEG/XMP family and read-only originals on native ZFS.' "$evidence/container-smoke.log"
+          grep -Fxq 'Native ZFS POSIX ACL inheritance preserved private review staging.' "$evidence/container-smoke.log"
+          grep -Fxq 'Upgrade from RC22 retained the registered archive, receipt and SHA-256 on native ZFS.' "$evidence/container-smoke.log"
+          grep -Fxq 'Upgrade from 1.0.0 retained the existing library and normal Workspace access on native ZFS.' "$evidence/container-smoke.log"
+          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null || true)"
+          if [[ -n "$tag_sha" ]]; then test "$tag_sha" = "$SOURCE"; fi
+          echo "QUALIFIED_EVIDENCE=$evidence" >> "$GITHUB_ENV"
+
+      - name: Publish RC2 tag as exact qualified OCI manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          from hashlib import sha256
+          import json
+          import os
+          from urllib.error import HTTPError
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+
+          base = 'https://ghcr.io'
+          package = 'heller-adrian/bibliothekar'
+          tag = os.environ['TAG']
+          source = 'patch-1.1.1-' + os.environ['SOURCE']
+          digest = os.environ['DIGEST']
+          accept = ', '.join((
+              'application/vnd.oci.image.index.v1+json',
+              'application/vnd.oci.image.manifest.v1+json',
+              'application/vnd.docker.distribution.manifest.list.v2+json',
+              'application/vnd.docker.distribution.manifest.v2+json',
+          ))
+          def token(scope, credentials=None):
+              path = '/token?' + urlencode(dict(service='ghcr.io', scope=f'repository:{package}:{scope}'))
+              request = Request(base + path)
+              if credentials:
+                  request.add_unredirected_header('Authorization', 'Basic ' + base64.b64encode(credentials.encode()).decode())
+              with urlopen(request, timeout=20) as response:
+                  return json.load(response)['token']
+          def manifest(ref, bearer, *, data=None, media_type=None):
+              request = Request(f'{base}/v2/{package}/manifests/{ref}', data=data,
+                  method='GET' if data is None else 'PUT', headers={'Accept':accept})
+              request.add_unredirected_header('Authorization', 'Bearer ' + bearer)
+              if data is not None:
+                  request.add_header('Content-Type', media_type)
+                  request.add_header('If-None-Match', '*')
+              return urlopen(request, timeout=30)
+          public = token('pull')
+          def pull(ref):
+              with manifest(ref, public) as response:
+                  data = response.read()
+                  actual = 'sha256:' + sha256(data).hexdigest()
+                  assert response.headers['Docker-Content-Digest'] == actual
+                  return actual, response.headers.get_content_type(), data
+          protected = {ref:pull(ref)[0] for ref in ('latest','v1.1.0','1.1.0','v1.1.1-rc.1')}
+          actual, media_type, content = pull(digest)
+          assert actual == digest == pull(source)[0]
+          try:
+              prior = pull(tag)[0]
+          except HTTPError as error:
+              if error.code != 404:
+                  raise
+              writer = token('pull,push', os.environ['REGISTRY_ACTOR'] + ':' + os.environ['REGISTRY_CREDENTIAL'])
+              with manifest(tag, writer, data=content, media_type=media_type) as response:
+                  assert response.status == 201
+                  assert response.headers['Docker-Content-Digest'] == digest
+          else:
+              assert prior == digest
+          assert pull(tag)[0] == digest
+          assert {ref:pull(ref)[0] for ref in protected} == protected
+          print(f'Qualified OCI manifest tagged: {package}:{tag} -> {digest}', flush=True)
+          PY
+
+      - name: Create GitHub prerelease from qualified source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null || true)"
+          if [[ -n "$tag_sha" ]]; then test "$tag_sha" = "$SOURCE"; fi
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            cat > "$RUNNER_TEMP/rc112-notes.md" <<EOF
+          ## Bibliothekar v1.1.1-rc.2 — prerelease
+
+          - Conservative family recognition across RAW, JPEG, DNG and XMP folders, shared by standard folder/SD imports and existing-library adoption.
+          - Keeps independent captures separate when their metadata identity is ambiguous.
+          - Preserves the performance and recovery fixes qualified in RC1.
+          - Full Backend QA: https://github.com/$GITHUB_REPOSITORY/actions/runs/$QA_RUN
+          - Native ZFS container qualification (attempt 2): https://github.com/$GITHUB_REPOSITORY/actions/runs/$IMAGE_RUN
+          - Source commit: $SOURCE
+          - Immutable image: $IMAGE@$DIGEST
+          - Container tag: $IMAGE:$TAG
+
+          This is a test release. Stable v1.1.0 and latest remain unchanged.
+          EOF
+            gh release create "$TAG" "$QUALIFIED_EVIDENCE/qualified-image.json"               --repo "$GITHUB_REPOSITORY" --target "$SOURCE"               --title "Bibliothekar $TAG" --notes-file "$RUNNER_TEMP/rc112-notes.md" --prerelease
+          fi
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')" = "$SOURCE"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" |
+            jq -e --arg sha "$SOURCE" '.prerelease == true and .draft == false and .target_commitish == $sha'
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" |
+            jq -e '.tag_name == "v1.1.0" and .prerelease == false'
+          echo "RC2 prerelease verified: $TAG ($SOURCE) at $IMAGE@$DIGEST" >> "$GITHUB_STEP_SUMMARY"
