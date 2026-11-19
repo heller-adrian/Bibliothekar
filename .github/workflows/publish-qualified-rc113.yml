@@ -1,0 +1,227 @@
+name: Publish container image — qualified RC3
+on:
+  push:
+    branches: [release/rc113-qualified]
+    paths: ['.github/workflows/publish-qualified-rc113.yml']
+permissions:
+  actions: read
+  contents: write
+  packages: write
+concurrency:
+  group: bibliothekar-release-rc113
+  cancel-in-progress: false
+env:
+  SOURCE: d18afab745126aaddd8d2a586e62bcc034b42b51
+  QA_RUN: '44499191559'
+  IMAGE: ghcr.io/heller-adrian/bibliothekar
+  TAG: v1.1.1-rc.3
+  GH_TOKEN: ${{ github.token }}
+  REGISTRY_ACTOR: ${{ github.actor }}
+  REGISTRY_CREDENTIAL: ${{ github.token }}
+jobs:
+  qualify-and-release:
+    if: github.repository == 'heller-adrian/Bibliothekar' && github.ref == 'refs/heads/release/rc113-qualified'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d18afab745126aaddd8d2a586e62bcc034b42b51
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact frozen source and green complete Backend QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
+          test "$(git rev-parse HEAD)" = "$SOURCE"
+          test "$(python -c 'from app import __version__;print(__version__)')" = '1.1.1'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/patch/1.1.1-rc3-fujifilm-families" --jq '.object.sha')" = "$SOURCE"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo 'RC3 tag already exists; refusing to overwrite' >&2
+            exit 1
+          fi
+          evidence="$RUNNER_TEMP/rc113-qualification"
+          mkdir -p "$evidence"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN" > "$evidence/run.json"
+          attempt="$(jq -er --arg sha "$SOURCE" '
+            select(.status == "completed" and .conclusion == "success"
+              and .event == "workflow_dispatch" and .path == ".github/workflows/qa-tests.yml"
+              and .head_branch == "patch/1.1.1-rc3-fujifilm-families"
+              and .head_sha == $sha
+              and .head_repository.full_name == "heller-adrian/Bibliothekar") | .run_attempt
+            ' "$evidence/run.json")"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QA_RUN/attempts/$attempt/jobs?per_page=100" > "$evidence/jobs.json"
+          python - "$evidence/jobs.json" <<'PY'
+          import json, sys
+          jobs=json.load(open(sys.argv[1]))["jobs"]
+          required={"adoption-preflight","backend-coverage"} | {f"backend-regression ({i})" for i in range(8)}
+          assert len(jobs)==10 and {j["name"] for j in jobs}==required
+          assert all(j["status"]=="completed" and j["conclusion"]=="success" for j in jobs)
+          PY
+          gh run download "$QA_RUN" --repo "$GITHUB_REPOSITORY" --pattern 'backend-qa-part-*' --dir "$evidence"
+          gh run download "$QA_RUN" --repo "$GITHUB_REPOSITORY" --name "backend-coverage-$attempt" --dir "$evidence/published"
+          python qa/release/verify_backend_coverage.py "$evidence" "$evidence/verified.json"
+          diff -u "$evidence/published/coverage-summary.json" "$evidence/verified.json"
+          jq -e --arg source "$SOURCE" '
+            .source == $source and .status == "PASS" and .partitions == 8
+            and .read_only_mount == "PASS" and .tested_once == .collected
+          ' "$evidence/verified.json"
+          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+          echo "Verified exact RC3 SHA and complete backend qualification" >> "$GITHUB_STEP_SUMMARY"
+      - name: Validate TrueNAS compose
+        env:
+          BIBLIOTHEKAR_APPDATA_DIR: /tmp/bibliothekar/appdata
+          BIBLIOTHEKAR_WORKSPACE_DIR: /tmp/bibliothekar/workspace
+          BIBLIOTHEKAR_MAIN_LIBRARY_DIR: /tmp/bibliothekar/main-library
+          BIBLIOTHEKAR_ADMIN_PASSWORD: synthetic-qualification-only
+        run: docker compose -f compose.example.yaml config -q
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push source-identified candidate image
+        id: publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            SOURCE_REVISION=${{ env.SOURCE }}
+          tags: ghcr.io/heller-adrian/bibliothekar:patch-1.1.1-${{ env.SOURCE }}
+          labels: |
+            org.opencontainers.image.revision=${{ env.SOURCE }}
+      - name: Verify immutable candidate image on native synthetic ZFS
+        shell: bash
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE"
+          if ! command -v setfacl >/dev/null; then
+            bash qa/release/install_runner_packages.sh acl
+          fi
+          previous="$IMAGE@sha256:c9c2077374643d0598dbadbf976f26da76a9958343e6d39c221efb411b38ac36"
+          bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh \
+            "$IMAGE@$DIGEST" "$SOURCE" "$previous" | tee "$EVIDENCE/container-smoke.log"
+          grep -Fxq 'Grouped manual SMB work verified the combined ZIP and resumed partial moves after a container restart on native ZFS.' "$EVIDENCE/container-smoke.log"
+          grep -Fxq 'Review batch preserved a complete RAW/JPEG/XMP family and read-only originals on native ZFS.' "$EVIDENCE/container-smoke.log"
+          grep -Fxq 'Native ZFS POSIX ACL inheritance preserved private review staging.' "$EVIDENCE/container-smoke.log"
+          grep -Fxq 'Upgrade from RC22 retained the registered archive, receipt and SHA-256 on native ZFS.' "$EVIDENCE/container-smoke.log"
+          grep -Fxq 'Upgrade from 1.0.0 retained the existing library and normal Workspace access on native ZFS.' "$EVIDENCE/container-smoke.log"
+          jq -n --arg tag "$TAG" --arg source "$SOURCE" --arg image "$IMAGE" \
+            --arg digest "$DIGEST" --arg qa "$QA_RUN" --arg run "$GITHUB_RUN_ID" \
+            '{tag:$tag,source:$source,image:$image,digest:$digest,qa_run:$qa,image_run:$run}' \
+            > "$EVIDENCE/qualified-image.json"
+          echo "QUALIFIED_DIGEST=$DIGEST" >> "$GITHUB_ENV"
+          cat "$EVIDENCE/qualified-image.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Tag exact previously tested OCI manifest as RC3
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          from hashlib import sha256
+          import json
+          import os
+          from urllib.error import HTTPError
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+
+          base='https://ghcr.io'
+          package='heller-adrian/bibliothekar'
+          tag=os.environ['TAG']
+          source='patch-1.1.1-'+os.environ['SOURCE']
+          digest=os.environ['QUALIFIED_DIGEST']
+          accept=', '.join((
+              'application/vnd.oci.image.index.v1+json',
+              'application/vnd.oci.image.manifest.v1+json',
+              'application/vnd.docker.distribution.manifest.list.v2+json',
+              'application/vnd.docker.distribution.manifest.v2+json',
+          ))
+          def token(scope, credentials=None):
+              path='/token?'+urlencode(dict(service='ghcr.io',scope=f'repository:{package}:{scope}'))
+              request=Request(base+path)
+              if credentials:
+                  request.add_unredirected_header('Authorization','Basic '+base64.b64encode(credentials.encode()).decode())
+              with urlopen(request,timeout=20) as response:
+                  return json.load(response)['token']
+          def manifest(ref,bearer,*,data=None,media_type=None):
+              request=Request(f'{base}/v2/{package}/manifests/{ref}',data=data,
+                              method='GET' if data is None else 'PUT',headers={'Accept':accept})
+              request.add_unredirected_header('Authorization','Bearer '+bearer)
+              if data is not None:
+                  request.add_header('Content-Type',media_type)
+                  request.add_header('If-None-Match','*')
+              return urlopen(request,timeout=30)
+          public=token('pull')
+          def pull(ref):
+              with manifest(ref,public) as response:
+                  data=response.read()
+                  actual='sha256:'+sha256(data).hexdigest()
+                  assert response.headers['Docker-Content-Digest']==actual
+                  return actual,response.headers.get_content_type(),data
+          protected={ref:pull(ref)[0] for ref in ('latest','v1.1.0','1.1.0',
+                                                 'v1.1.1-rc.1','v1.1.1-rc.2')}
+          actual,media_type,content=pull(digest)
+          assert actual==digest==pull(source)[0]
+          try:
+              prior=pull(tag)[0]
+          except HTTPError as error:
+              if error.code!=404: raise
+              writer=token('pull,push',os.environ['REGISTRY_ACTOR']+':'+os.environ['REGISTRY_CREDENTIAL'])
+              with manifest(tag,writer,data=content,media_type=media_type) as response:
+                  assert response.status==201
+                  assert response.headers['Docker-Content-Digest']==digest
+          else:
+              assert prior==digest
+          assert pull(tag)[0]==digest
+          assert {ref:pull(ref)[0] for ref in protected}==protected
+          print(f'Qualified RC3: {package}:{tag} at {digest}',flush=True)
+          PY
+      - name: Create GitHub RC3 prerelease on exact source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing="$(git ls-remote origin "refs/tags/$TAG" | cut -f1)"
+          if [[ -n "$existing" ]]; then test "$existing" = "$SOURCE"; fi
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            cat > "$RUNNER_TEMP/rc113-notes.md" <<EOF
+          ## Bibliothekar v1.1.1-rc.3 — prerelease
+
+          - Recognizes conservatively verified RAW/JPEG/DNG families across sibling directories even without camera serial numbers, unique image IDs or subseconds.
+          - Includes Fujifilm X-H2S regression coverage and negative tests for conflicting metadata, competing candidates and XMP sidecars.
+          - Family matching is shared by normal imports and existing-collection adoption.
+          - Full Backend QA: https://github.com/$GITHUB_REPOSITORY/actions/runs/$QA_RUN
+          - Native ZFS container qualification: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          - Exact source commit: $SOURCE
+          - Immutable qualified image: $IMAGE@$QUALIFIED_DIGEST
+          - Container image tag: $IMAGE:$TAG
+
+          Prerelease for real collection testing. Stable v1.1.0 and latest stay unchanged.
+          EOF
+            gh release create "$TAG" "$EVIDENCE/qualified-image.json" \
+              --repo "$GITHUB_REPOSITORY" --target "$SOURCE" \
+              --title "Bibliothekar $TAG" --notes-file "$RUNNER_TEMP/rc113-notes.md" --prerelease
+          fi
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')" = "$SOURCE"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" |
+            jq -e --arg source "$SOURCE" '.prerelease == true and .draft == false and .target_commitish == $source'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')" = 'v1.1.0'
+          echo "Released $TAG ($SOURCE) at $IMAGE@$QUALIFIED_DIGEST" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rc113-qualified-image
+          path: |
+            ${{ runner.temp }}/rc113-qualification/qualified-image.json
+            ${{ runner.temp }}/rc113-qualification/verified.json
+            ${{ runner.temp }}/rc113-qualification/container-smoke.log
+          if-no-files-found: warn
+          retention-days: 30
