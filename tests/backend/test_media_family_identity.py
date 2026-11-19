@@ -53,12 +53,16 @@ def test_verified_capture_families_share_import_targets(tmp_path, monkeypatch):
 
     monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: exif)
     result = analyze_import_tree(source)
-    assert result["summary"]["family_count"] == 16
+    assert result["summary"]["family_count"] == 14
     families = {family["family_key"]: set(family["members"]) for family in result["families"]}
     complete = {entry["relative_path"] for entry in entries[:5]}
     assert families["day/RAW/DSCF7545"] == complete
     assert families["day/RAW/twin"] == {"day/RAW/twin.NEF", "day/JPEG/twin.JPG"}
-    assert all(len(family) == 1 for key, family in families.items() if key not in {"day/RAW/twin", "day/RAW/DSCF7545"})
+    assert families["day/RAW/coarse"] == {"day/RAW/coarse.RAF", "day/JPEG/coarse.JPG"}
+    assert families["day/RAW/no-serial"] == {"day/RAW/no-serial.RAF", "day/JPEG/no-serial.JPG"}
+    assert all(len(family) == 1 for key, family in families.items()
+               if key not in {"day/RAW/twin", "day/RAW/DSCF7545",
+                              "day/RAW/coarse", "day/RAW/no-serial"})
 
     plan, excluded, _ = build_folder_import_plan(entries, result, tmp_path / "workspace")
     assert not excluded
@@ -89,3 +93,113 @@ def test_ambiguous_identity_does_not_merge_any_subset(tmp_path, monkeypatch, rol
         })
     monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: metadata)
     assert analyze_import_tree(tmp_path)["summary"]["family_count"] == 4
+
+
+def test_fujifilm_xh2s_coarse_time_raw_jpeg_dng_and_import(tmp_path, monkeypatch):
+    """Regression fixture based on the real X-H2S DSCF7545 metadata."""
+    source = tmp_path / "source"
+    day = "2025/01/28.01.2025"
+    paths = [
+        f"{day}/RAW/DSCF7545.RAF",
+        f"{day}/JPEG/DSCF7545.JPG",
+        f"{day}/DNG/DSCF7545.dng",
+    ]
+    rows, entries = [], []
+    for relative in paths:
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = relative.encode()
+        path.write_bytes(payload)
+        entries.append(dict(relative_path=relative, sha256=sha256(payload).hexdigest(),
+                            size_bytes=len(payload)))
+        metadata = {
+            "SourceFile": str(path),
+            "EXIF:IFD0:Make": "FUJIFILM",
+            "EXIF:IFD0:Model": "X-H2S",
+            "EXIF:ExifIFD:DateTimeOriginal": "2025:01:28 17:11:52",
+            "EXIF:ExifIFD:ExposureTime": "1/250",
+            "EXIF:ExifIFD:FNumber": "4",
+            "EXIF:ExifIFD:ISO": "800",
+        }
+        if relative.endswith(".dng"):
+            metadata["EXIF:IFD0:OriginalRawFileName"] = "DSCF7545.RAF"
+        rows.append(metadata)
+
+    monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: rows)
+    result = analyze_import_tree(source)
+    assert result["summary"]["file_count"] == 3
+    assert result["summary"]["family_count"] == 1
+    [family] = result["families"]
+    assert set(family["members"]) == set(paths)
+    assert family["family_key"] == f"{day}/RAW/DSCF7545"
+    assert all(record["family_key"] == family["family_key"] for record in result["files"])
+    plan, excluded, _ = build_folder_import_plan(entries, result, tmp_path / "workspace")
+    assert not excluded
+    assert len(plan) == 3
+    assert len({row["destination_relative_path"] for row in plan}) == 3
+    assert {Path(row["destination_relative_path"]).suffix.lower() for row in plan} == {".raf", ".jpg", ".dng"}
+
+
+@pytest.mark.parametrize("difference", [
+    "other_camera",
+    "other_second",
+    "other_day",
+    "different_exposure",
+    "different_iso",
+    "different_aperture",
+    "conflicting_ids",
+    "conflicting_serials",
+    "different_subseconds",
+    "fallback_date_only",
+    "different_original_raw",
+    "duplicate_raw_candidate",
+])
+def test_fujifilm_coarse_context_rejects_ambiguous_or_conflicting_match(
+    tmp_path, monkeypatch, difference,
+):
+    source = tmp_path / "source"
+    relative = ["2025/day/RAW/DSCF7545.RAF", "2025/day/JPEG/DSCF7545.JPG"]
+    if difference == "other_day":
+        relative[1] = "2025/another/JPEG/DSCF7545.JPG"
+    if difference == "duplicate_raw_candidate":
+        relative.append("2025/day/RAF/DSCF7545.RAF")
+    if difference == "different_original_raw":
+        relative.append("2025/day/DNG/DSCF7545.dng")
+    rows = []
+    for i, filename in enumerate(relative):
+        path = source / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(filename.encode())
+        metadata = {
+            "SourceFile": str(path),
+            "EXIF:IFD0:Make": "FUJIFILM",
+            "EXIF:IFD0:Model": "X-H2S",
+            "EXIF:ExifIFD:DateTimeOriginal": "2025:01:28 17:11:52",
+            "EXIF:ExifIFD:ExposureTime": "1/250",
+            "EXIF:ExifIFD:FNumber": "4",
+            "EXIF:ExifIFD:ISO": "800",
+        }
+        if difference == "other_camera" and i == 1:
+            metadata["EXIF:IFD0:Model"] = "X-T5"
+        if difference == "other_second" and i == 1:
+            metadata["EXIF:ExifIFD:DateTimeOriginal"] = "2025:01:28 17:11:53"
+        if difference == "different_exposure" and i == 1:
+            metadata["EXIF:ExifIFD:ExposureTime"] = "1/500"
+        if difference == "different_iso" and i == 1:
+            metadata["EXIF:ExifIFD:ISO"] = "1600"
+        if difference == "different_aperture" and i == 1:
+            metadata["EXIF:ExifIFD:FNumber"] = "5.6"
+        if difference == "conflicting_ids":
+            metadata["EXIF:ExifIFD:ImageUniqueID"] = ("a" if i == 0 else "b") * 32
+        if difference == "conflicting_serials":
+            metadata["EXIF:ExifIFD:BodySerialNumber"] = "serial-a" if i == 0 else "serial-b"
+        if difference == "different_subseconds":
+            metadata["EXIF:ExifIFD:SubSecTimeOriginal"] = "125" if i == 0 else "875"
+        if difference == "fallback_date_only" and i == 1:
+            metadata["EXIF:ExifIFD:CreateDate"] = metadata.pop("EXIF:ExifIFD:DateTimeOriginal")
+        if difference == "different_original_raw" and filename.endswith(".dng"):
+            metadata["EXIF:IFD0:OriginalRawFileName"] = "DSCF9999.RAF"
+        rows.append(metadata)
+    monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: rows)
+    actual = analyze_import_tree(source)
+    assert actual["summary"]["family_count"] == len(relative)
