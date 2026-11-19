@@ -372,8 +372,8 @@ def test_fujifilm_coarse_sibling_families_survive_adoption_rescan(library, monke
         status = scan_inventory(context, job)
         assert status["files"] == 3
         assert status["families"] == 1
-        assert status["review_count"] == 0
         [family] = inventory_families(context, job)
+        assert family["status"] == "complete"
         assert family["member_count"] == 3
         assert {file["relative_path"] for file in family["files"]} == set(relative)
         assert {path: (source / path).read_bytes() for path in relative} == {
