@@ -11,6 +11,7 @@ concurrency:
   group: bibliothekar-release-rc113
   cancel-in-progress: false
 env:
+  QA_SOURCE: d18afab745126aaddd8d2a586e62bcc034b42b51
   SOURCE: d18afab745126aaddd8d2a586e62bcc034b42b51
   QA_RUN: '44499191559'
   IMAGE: ghcr.io/heller-adrian/bibliothekar
