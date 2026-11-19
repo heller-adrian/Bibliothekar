@@ -2,13 +2,14 @@
 from collections import defaultdict
 from datetime import datetime, timezone
 from itertools import chain
+from fractions import Fraction
 from pathlib import PurePosixPath
 import re
 import unicodedata
 
 
 IDENTITY_TAGS = ("ImageUniqueID", "BodySerialNumber", "OriginalRawFileName")
-IDENTITY_VERSION = 1
+IDENTITY_VERSION = 2
 FORMAT_DIRECTORIES = {"raw", "raf", "nef", "cr2", "cr3", "arw", "orf", "rw2",
                       "jpeg", "jpg", "dng", "xmp", "sidecar", "sidecars"}
 
@@ -59,6 +60,16 @@ def _format_scope(record):
     return None
 
 
+def _same_setting(left, right):
+    """Reject contradictory exposure evidence; accept equivalent numeric forms."""
+    if left in (None, "") or right in (None, ""):
+        return True
+    try:
+        return Fraction(str(left).strip()) == Fraction(str(right).strip())
+    except (ValueError, ZeroDivisionError):
+        return _normalized(left) == _normalized(right)
+
+
 def _compatible(first, second):
     a, b = first["capture_identity"], second["capture_identity"]
     if a["id"] and b["id"] and a["id"] != b["id"]:
@@ -69,6 +80,11 @@ def _compatible(first, second):
     if left is None or right is None or left.replace(microsecond=0) != right.replace(microsecond=0):
         return False
     if left.microsecond and right.microsecond and left != right:
+        return False
+    a_settings = first.get("capture_settings") or {}
+    b_settings = second.get("capture_settings") or {}
+    if any(not _same_setting(a_settings.get(field), b_settings.get(field))
+           for field in ("exposure", "aperture", "iso")):
         return False
     for converted, original in ((first, second), (second, first)):
         original_name = converted["capture_identity"].get("original_raw")
@@ -84,7 +100,7 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
     Each input supplies its local family key, its member records and eligibility.
     False eligibility still contributes to ambiguity (e.g. already owned files).
     """
-    by_id, by_precision = defaultdict(set), defaultdict(set)
+    by_id, by_precision, by_context = defaultdict(set), defaultdict(set), defaultdict(set)
     candidates = {}
     for key, members, eligible in groups:
         cancel()
@@ -104,20 +120,27 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
             if identity["id"]:
                 by_id[(camera, identity["id"])].add(key)
                 has_proof = True
-            if not identity["serial"]:
-                continue
             instant = _time(item)
             scope = _format_scope(item)
             source = item.get("selected_capture_source") or ""
-            if (identity["serial"] and instant and instant.microsecond and scope is not None
-                    and source.endswith(":DateTimeOriginal") and _role(item) != "xmp"):
-                by_precision[(camera, identity["serial"], scope, _normalized(PurePosixPath(key).name), instant)].add(key)
+            if (instant and scope is not None and source.endswith(":DateTimeOriginal")
+                    and _role(item) in {"raw", "jpeg", "dng"}):
+                # Real camera RAW/JPEG/DNG triplets may have neither ImageUniqueID,
+                # serial nor subsecond time. Accept a *candidate* only inside the
+                # same format-folder sibling scope, with the exact camera stem.
+                # Final merging still requires all members to agree, with no
+                # competing same-role candidate or metadata contradiction.
+                by_context[(camera, scope, _normalized(PurePosixPath(key).name),
+                            instant.replace(microsecond=0))].add(key)
                 has_proof = True
+                if identity["serial"] and instant.microsecond:
+                    by_precision[(camera, identity["serial"], scope,
+                                  _normalized(PurePosixPath(key).name), instant)].add(key)
         if has_proof:
             candidates[key] = (members, evidence, usable)
 
     groups_by_key = defaultdict(list)
-    for bucket in chain(by_id.values(), by_precision.values()):
+    for bucket in chain(by_id.values(), by_precision.values(), by_context.values()):
         if len(bucket) > 1:
             for key in bucket:
                 groups_by_key[key].append(bucket)
