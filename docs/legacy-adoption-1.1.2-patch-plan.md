@@ -37,9 +37,11 @@ source; it does NOT yet permit copying both byte-identical physical occurrences
 into different archive events. That behavior needs a separate, compatible
 extension of source-occurrence versus canonical-content registration.
 
-**Limitation:** Unnecessary _Adopted_ suffixes from RAW/JPEG that are still
-separate families remain unresolved. More real metadata evidence is needed
-before relaxing conservative association rules.
+**Limitation:** Unnecessary _Adopted_ suffixes from still-unverified RAW/JPEG
+pairs remain possible by design. The concrete `Export/Foto-Export` folder case
+is now handled under evidence-gated matching; additional historic layouts must
+be proved from real metadata before expanding the scope. The final count of
+renames against the user's full dataset has not been measured after this fix.
 
 ## Required implementation gates
 
@@ -72,7 +74,9 @@ associated with private paths, credentials or the complete production DB.
 
 ## Current branch status
 
-The initial characterization test is deliberately marked `xfail(strict=True)`
-for the confirmed name-allocation problem. It is **evidence**, not a fix.
-Do not publish or deploy this branch until the gates above are implemented and
-the xfail has been converted to a passing regression test.
+The allocator's deliberately conservative behavior for **unverified**
+RAW/JPEG pairs is now checked with a passing regression test. Separately,
+the verified `DSCF4762` RAW/DNG/nested-export JPEG case is tested end-to-end
+without unnecessary renaming, while alternate DNG variants retain their names.
+This is not evidence that every historical folder layout is supported.
+Do not publish or deploy until the full qualification gates pass.
