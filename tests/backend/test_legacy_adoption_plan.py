@@ -59,6 +59,23 @@ def test_read_only_draft_preview_identifies_conflicting_event(inventory, case):
         assert connection.execute('SELECT draft_revision FROM legacy_adoption_jobs WHERE id=?', (job,)).fetchone()[0] == 0
 
 
+
+def test_prepared_plan_reports_exact_collision_rename_totals(inventory):
+    context, source, registry = inventory
+    for folder, content in (("RAW", b"first source photo"), ("SECOND", b"second source photo")):
+        (source / folder).mkdir()
+        (source / folder / "DSCF1111.JPG").write_bytes(content)
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft())
+    assert plan["move_files"] == 2
+    assert plan["rename_files"] == 1
+    assert plan["rename_families"] == 1
+    moves = plan_moves(context, job, renamed=True)
+    assert len(moves) == 1
+    assert "_Adopted_001.JPG" in moves[0]["target"]
+
+
+
 def test_draft_preview_counts_the_same_eligible_families_as_the_move_plan(inventory):
     from app.legacy_adoption_plan import preview_draft
     context, source, _ = inventory
