@@ -10,8 +10,6 @@ import unicodedata
 
 IDENTITY_TAGS = ("ImageUniqueID", "BodySerialNumber", "OriginalRawFileName")
 IDENTITY_VERSION = 2
-FORMAT_DIRECTORIES = {"raw", "raf", "nef", "cr2", "cr3", "arw", "orf", "rw2",
-                      "jpeg", "jpg", "dng", "xmp", "sidecar", "sidecars"}
 
 
 def _normalized(value):
@@ -51,20 +49,6 @@ def _time(record):
     if not value or record.get("review_required") or record.get("metadata_error"):
         return None
     return datetime.fromisoformat(value).astimezone(timezone.utc)
-
-
-def _format_scope(record):
-    parent = PurePosixPath(record["relative_path"]).parent
-    if parent.name.casefold() in FORMAT_DIRECTORIES:
-        return parent.parent
-    # Historical Lightroom exports may live in a nested folder within the
-    # same shooting-day directory. Treat only this recognised export layout
-    # as a sibling format scope; never infer capture identity from an
-    # arbitrary folder called "Export".
-    if (parent.name.casefold() == "foto-export"
-            and parent.parent.name.casefold() == "export"):
-        return parent.parent.parent
-    return None
 
 
 def _same_setting(left, right):
@@ -120,10 +104,10 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
         if not primaries and eligible and len(members) == 1 and _role(members[0]) == "xmp":
             standalone_sidecars[key] = members[0]
         for primary in primaries:
-            scope = _format_scope(primary)
-            if scope is not None:
-                name = _normalized(PurePosixPath(primary["relative_path"]).name)
-                primary_by_name[(scope, name)].add(key)
+            # A sidecar can point to its media by exact filename without
+            # assuming RAW/JPEG/XMP directories or any historic folder layout.
+            name = _normalized(PurePosixPath(primary["relative_path"]).name)
+            primary_by_name[name].add(key)
         if not evidence:
             continue
         # A local family with multiple media files is a single unit. Every
@@ -139,20 +123,19 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
                 by_id[(camera, identity["id"])].add(key)
                 has_proof = True
             instant = _time(item)
-            scope = _format_scope(item)
             source = item.get("selected_capture_source") or ""
-            if (instant and scope is not None and source.endswith(":DateTimeOriginal")
+            if (instant and source.endswith(":DateTimeOriginal")
                     and _role(item) in {"raw", "jpeg", "dng"}):
-                # Real camera RAW/JPEG/DNG triplets may have neither ImageUniqueID,
-                # serial nor subsecond time. Accept a *candidate* only inside the
-                # same format-folder sibling scope, with the exact camera stem.
-                # Final merging still requires all members to agree, with no
-                # competing same-role candidate or metadata contradiction.
-                by_context[(camera, scope, _normalized(PurePosixPath(key).name),
+                # Folder names are not part of capture identity. Use camera,
+                # the original camera filename stem and the EXIF capture instant
+                # to assemble *candidates* anywhere in the scanned collection.
+                # The component validator then requires compatible exposures,
+                # unique media roles and no competing same-role candidates.
+                by_context[(camera, _normalized(PurePosixPath(key).name),
                             instant.replace(microsecond=0))].add(key)
                 has_proof = True
                 if identity["serial"] and instant.microsecond:
-                    by_precision[(camera, identity["serial"], scope,
+                    by_precision[(camera, identity["serial"],
                                   _normalized(PurePosixPath(key).name), instant)].add(key)
         if has_proof:
             candidates[key] = (members, evidence, usable)
@@ -167,9 +150,11 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
             ".dng", ".jpg", ".jpeg",
         }:
             continue
-        scope = _format_scope(sidecar)
-        owners = primary_by_name.get((scope, _normalized(original_name)), set())
-        if scope is None or len(owners) != 1:
+        owners = primary_by_name.get(_normalized(original_name), set())
+        # Sidecars with no independent capture identity are linked only when
+        # there is one possible original in the *whole* scan. Ambiguity never
+        # gets resolved by guessing from directory labels.
+        if len(owners) != 1:
             continue
         [owner] = owners
         if owner not in candidates or not candidates[owner][2]:
