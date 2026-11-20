@@ -103,6 +103,52 @@ def test_historical_raw_dng_and_export_jpeg_keep_original_stem(inventory, monkey
     assert targets == {Path(name).name for name in filenames}
 
 
+def test_arbitrary_archive_folders_share_proven_capture_name_without_adopted_suffix(
+    inventory, monkeypatch,
+):
+    """End-to-end plan: media matching must not depend on directory labels."""
+    import os
+
+    context, source, registry = inventory
+    paths = (
+        "unclassified/old-camera/DSCF4762.RAF",
+        "my-export/location/DSCF4762.JPG",
+        "conversions/nested/DSCF4762.dng",
+        "editing/metadata/DSCF4762.RAF.xmp",
+    )
+    for relative in paths:
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(relative.encode())
+
+    def metadata(descriptors, _cancel):
+        rows = {}
+        for fd in descriptors:
+            name = os.pread(fd, 500, 0).decode()
+            row = {
+                "EXIF:IFD0:Make": "FUJIFILM",
+                "EXIF:IFD0:Model": "X-H2S",
+                "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+                "EXIF:ExifIFD:ExposureTime": "1/4",
+                "EXIF:ExifIFD:FNumber": "4",
+                "EXIF:ExifIFD:ISO": "1600",
+            }
+            if name.endswith(".dng"):
+                row["EXIF:IFD0:OriginalRawFileName"] = "DSCF4762.RAF"
+            rows[fd] = row
+        return rows
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft())
+    assert plan["move_files"] == 4
+    assert plan["move_families"] == 1
+    assert plan["rename_files"] == 0
+    assert {Path(row["target_path"]).name for row in plan_moves(context, job)} == {
+        Path(name).name for name in paths
+    }
+
+
 def test_historical_duplicate_jpeg_prefers_complete_raw_jpeg_family(inventory):
     context, source, registry = inventory
     base = source / "2025" / "04" / "16.04.2025"
