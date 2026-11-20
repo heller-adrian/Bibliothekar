@@ -1,4 +1,5 @@
 """Persist resumable legacy inventory in the selected library's catalogue."""
+from collections import Counter, defaultdict
 from contextlib import closing, ExitStack
 import hashlib
 from itertools import groupby
@@ -374,6 +375,72 @@ def registered_content(connection, registry, checksum):
     )
 
 
+def _classify_local_duplicate_media(connection, job_id, cancel):
+    """Exclude identical *primary media* copies within the same legacy scan.
+
+    This runs after conservative cross-directory family reconciliation and
+    before global-registration duplicate classification.  Prefer a source
+    family containing more unique media, so a complete RAW/JPEG family wins
+    over an isolated copied JPEG.  Do not deduplicate XMP by checksum:
+    identical sidecar bytes need not mean the same owner.  A sidecar whose
+    only primary was excluded remains at the source as a detached review item.
+    """
+    rows = [dict(row) for row in connection.execute(
+        """SELECT family_key, relative_path, sha256, metadata_json
+             FROM legacy_adoption_inventory
+            WHERE job_id = ? AND disposition = 'candidate' AND sha256 IS NOT NULL
+            ORDER BY family_key, relative_path""", (job_id,),
+    )]
+    family_media = defaultdict(set)
+    by_hash = defaultdict(list)
+    for row in rows:
+        cancel()
+        if classify_media(Path(row["relative_path"])) == "xmp":
+            continue
+        family_media[row["family_key"]].add(row["sha256"])
+        by_hash[row["sha256"]].append(row)
+    excluded = set()
+    for siblings in by_hash.values():
+        if len(siblings) < 2:
+            continue
+        if len({item["family_key"] for item in siblings}) < 2:
+            # Duplicate checksum inside one family is an ambiguous family
+            # composition, not evidence that one path can be dropped.
+            continue
+        # Deterministic selection prefers a more complete source family.
+        keeper = min(siblings, key=lambda row: (
+            -len(family_media[row["family_key"]]), row["relative_path"]
+        ))
+        excluded.update(item["relative_path"] for item in siblings if item is not keeper)
+    if not excluded:
+        return
+    connection.executemany(
+        """UPDATE legacy_adoption_inventory SET disposition = 'duplicate'
+            WHERE job_id = ? AND relative_path = ?""",
+        [(job_id, path) for path in sorted(excluded)],
+    )
+    # A non-identical XMP is never discarded as a byte duplicate.  If its
+    # family no longer has any primary media, retain it for explicit review.
+    orphan_keys = {
+        row["family_key"] for row in rows if row["relative_path"] in excluded
+    }
+    for key in sorted(orphan_keys):
+        still_owned = connection.execute(
+            """SELECT 1 FROM legacy_adoption_inventory
+                WHERE job_id = ? AND family_key = ? AND disposition = 'candidate'
+                  AND lower(substr(relative_path, -4)) != '.xmp'
+                LIMIT 1""", (job_id, key),
+        ).fetchone()
+        if still_owned:
+            continue
+        connection.execute(
+            """UPDATE legacy_adoption_inventory SET disposition = 'detached'
+                WHERE job_id = ? AND family_key = ? AND disposition = 'candidate'
+                  AND lower(substr(relative_path, -4)) = '.xmp'""",
+            (job_id, key),
+        )
+
+
 def _classify_inventory(connection, registry, job_id, cancel):
     rows = connection.execute(
         """SELECT family_key, relative_path, sha256, metadata_json FROM legacy_adoption_inventory
@@ -495,6 +562,7 @@ def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path 
             )
             draft = json.loads(_job(connection, library.library_id, job_id)["draft_json"])
             join_split_families(connection, job_id, draft, cancel)
+            _classify_local_duplicate_media(connection, job_id, cancel)
             _classify_inventory(connection, registry, job_id, cancel)
             connection.execute("DELETE FROM legacy_adoption_families WHERE job_id = ?", (job_id,))
             rows = connection.execute(
