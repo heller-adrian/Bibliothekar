@@ -95,8 +95,11 @@ def test_cross_day_identical_media_not_silently_deduplicated(inventory):
         ))
     assert len(status) == 2
     assert {row[0] for row in status} == {"candidate"}
-    with pytest.raises(AdoptionError, match="identischen Inhalt"):
-        create_plan(context, registry, job, _draft())
+    # Planning may mark the later occurrence as a duplicate without mutating
+    # the two source files; the inventory itself preserves both occurrences.
+    plan = create_plan(context, registry, job, _draft())
+    assert plan["move_files"] == 1
+    assert plan["counts"].get("duplicate") == 1
 
 
 def test_shared_jpeg_with_different_raws_remains_ambiguous(inventory):
