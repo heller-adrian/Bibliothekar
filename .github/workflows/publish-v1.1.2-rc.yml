@@ -1,0 +1,132 @@
+name: Publish Bibliothekar v1.1.2-rc.1
+
+on:
+  push:
+    branches:
+      - patch/1.1.2-adoption-duplicate-family-targets
+    paths:
+      - '.github/rc-requests/v1.1.2-rc.1.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bibliothekar-rc-1.1.2-1
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    uses: ./.github/workflows/qa-tests.yml
+    with:
+      full_backend: true
+      container_preflight: true
+    permissions:
+      contents: read
+
+  publish:
+    needs: qualify
+    if: needs.qualify.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    permissions:
+      actions: read
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IMAGE: ghcr.io/heller-adrian/bibliothekar
+      TAG: v1.1.2-rc.1
+    steps:
+      - name: Checkout exactly qualified source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify explicit request, version and immutable tag vacancy
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "heller-adrian/Bibliothekar"
+          test "$GITHUB_REF" = "refs/heads/patch/1.1.2-adoption-duplicate-family-targets"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          request=.github/rc-requests/v1.1.2-rc.1.txt
+          test "$(git diff-tree --no-commit-id --name-only -r HEAD)" = "$request"
+          test "$(sed -n '1p' "$request")" = "$TAG"
+          test "$(sed -n '2p' "$request")" = "$(git rev-parse HEAD^)"
+          test "$(python3 -c 'from pathlib import Path; import re; text=Path("app/__init__.py").read_text(); print(re.search(r"__version__ = \"([^\"]+)\"",text).group(1))')" = "1.1.2"
+          test -z "$(git ls-remote --tags origin "refs/tags/$TAG")"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "A release already exists; refusing to overwrite." >&2
+            exit 1
+          fi
+
+      - name: Install native ZFS test requirements
+        run: bash qa/release/install_runner_packages.sh acl
+
+      - name: Build candidate image from qualified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --build-arg "SOURCE_REVISION=$GITHUB_SHA" --tag "$IMAGE:$TAG" .
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE:$TAG")" = "$GITHUB_SHA"
+
+      - name: Native ZFS verification of actual candidate image
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash qa/release/with_synthetic_zfs.sh \
+            bash qa/release/smoke_legacy_adoption.sh "$IMAGE:$TAG" "$GITHUB_SHA" \
+            | tee "$RUNNER_TEMP/rc-zfs-smoke.log"
+
+      - name: Publish candidate image by unique tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$TAG" | tee "$RUNNER_TEMP/rc-image-push.log"
+          digest="$(sed -nE 's/.*digest: (sha256:[a-f0-9]{64}).*/\1/p' "$RUNNER_TEMP/rc-image-push.log" | tail -1)"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "IMAGE_DIGEST=$digest" >> "$GITHUB_ENV"
+
+      - name: Create immutable RC tag and prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git ls-remote --tags origin "refs/tags/$TAG")"
+          jq -n --arg tag "$TAG" --arg source "$GITHUB_SHA" \
+            --arg image "$IMAGE" --arg digest "$IMAGE_DIGEST" \
+            --arg qa_run "$GITHUB_RUN_ID" \
+            '{tag:$tag,source:$source,image:$image,digest:$digest,qa_run:$qa_run}' \
+            > "$RUNNER_TEMP/qualified-image.json"
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          Bibliothekar $TAG — legacy adoption duplicate and family-name candidate.
+
+          - Source commit: `$GITHUB_SHA`
+          - Container: `$IMAGE:$TAG`
+          - Digest: `$IMAGE_DIGEST`
+          - Full eight-part Backend QA, native read-only adoption tests and ZFS
+            candidate-container smoke: [qualification](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)
+          - This is a prerelease. The stable v1.1.1 image is unchanged.
+          EOF
+          gh release create "$TAG" "$RUNNER_TEMP/qualified-image.json" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Bibliothekar $TAG" --prerelease \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" \
+            | jq -e --arg sha "$GITHUB_SHA" '.object.sha == $sha and .object.type == "commit"'
+          echo "$IMAGE:$TAG @ $IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain release verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc112-release-evidence
+          path: |
+            ${{ runner.temp }}/rc-zfs-smoke.log
+            ${{ runner.temp }}/rc-image-push.log
+            ${{ runner.temp }}/qualified-image.json
+            ${{ runner.temp }}/release-notes.md
+          if-no-files-found: ignore
+          retention-days: 30
