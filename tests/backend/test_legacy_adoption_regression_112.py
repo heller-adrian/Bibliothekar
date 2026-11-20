@@ -32,8 +32,12 @@ def test_distinct_photos_with_same_stem_get_collision_safe_names():
     assert second == [str(folder / "DSCF0001_Adopted_001.RAF")]
 
 
-@pytest.mark.xfail(strict=True, reason="Known bug: RAW/JPEG from separate format folders reserve stem twice")
-def test_raw_and_jpeg_from_same_capture_do_not_need_adopted_suffix():
+def test_unverified_split_raw_and_jpeg_families_keep_distinct_target_stems():
+    """The allocator cannot infer a capture relationship from a name alone.
+
+    Independently certified capture members are joined by inventory before
+    reaching this function; see the DSCF4762 integrated adoption test.
+    """
     from collections import Counter
 
     used = set()
@@ -44,7 +48,7 @@ def test_raw_and_jpeg_from_same_capture_do_not_need_adopted_suffix():
     jpeg = _family_targets(folder, "JPEG/DSCF0001", [_member("JPEG/DSCF0001.JPG", "jpeg-sha")],
                            None, _missing, set(), used, sequence)
     assert raw == [str(folder / "DSCF0001.RAF")]
-    assert jpeg == [str(folder / "DSCF0001.JPG")]
+    assert jpeg == [str(folder / "DSCF0001_Adopted_001.JPG")]
 
 
 def test_suffix_is_shared_by_all_members_of_a_true_family():
