@@ -62,8 +62,9 @@ def test_read_only_draft_preview_identifies_conflicting_event(inventory, case):
 
 def test_historical_duplicate_jpeg_prefers_complete_raw_jpeg_family(inventory):
     context, source, registry = inventory
-    solo = source / "Serie Rotkelchen"
-    complete = source / "Voegel mit Rotkelchen"
+    base = source / "2025" / "04" / "16.04.2025"
+    solo = base / "Serie Rotkelchen"
+    complete = base / "Voegel mit Rotkelchen"
     solo.mkdir()
     complete.mkdir()
     (solo / "DSCF2922.JPG").write_bytes(b"identical JPEG image")
@@ -74,9 +75,9 @@ def test_historical_duplicate_jpeg_prefers_complete_raw_jpeg_family(inventory):
         rows = {row["relative_path"]: row["disposition"] for row in connection.execute(
             "SELECT relative_path, disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
         )}
-    assert rows["Serie Rotkelchen/DSCF2922.JPG"] == "duplicate"
-    assert rows["Voegel mit Rotkelchen/DSCF2922.JPG"] == "candidate"
-    assert rows["Voegel mit Rotkelchen/DSCF2922.RAF"] == "candidate"
+    assert rows["2025/04/16.04.2025/Serie Rotkelchen/DSCF2922.JPG"] == "duplicate"
+    assert rows["2025/04/16.04.2025/Voegel mit Rotkelchen/DSCF2922.JPG"] == "candidate"
+    assert rows["2025/04/16.04.2025/Voegel mit Rotkelchen/DSCF2922.RAF"] == "candidate"
     plan = create_plan(context, registry, job, _draft())
     assert (plan["move_files"], plan["inventory_duplicates"]) == (2, 1)
 
@@ -100,8 +101,8 @@ def test_shared_jpeg_with_different_raws_remains_ambiguous(inventory):
 
 def test_historical_duplicate_raw_preserves_distinct_xmp_as_detached(inventory):
     context, source, registry = inventory
-    folder = source / "RAW"
-    folder.mkdir()
+    folder = source / "2025" / "06" / "18.06.2025" / "RAW"
+    folder.mkdir(parents=True)
     (folder / "DSCF0302.RAF").write_bytes(b"identical RAW media")
     (folder / "DSCF0302_1.raf").write_bytes(b"identical RAW media")
     (folder / "DSCF0302.xmp").write_bytes(b"original XMP edits")
@@ -111,10 +112,10 @@ def test_historical_duplicate_raw_preserves_distinct_xmp_as_detached(inventory):
         rows = {row["relative_path"]: row["disposition"] for row in connection.execute(
             "SELECT relative_path, disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
         )}
-    assert rows["RAW/DSCF0302.RAF"] == "candidate"
-    assert rows["RAW/DSCF0302_1.raf"] == "duplicate"
-    assert rows["RAW/DSCF0302.xmp"] == "candidate"
-    assert rows["RAW/DSCF0302_1.xmp"] == "detached"
+    assert rows["2025/06/18.06.2025/RAW/DSCF0302.RAF"] == "candidate"
+    assert rows["2025/06/18.06.2025/RAW/DSCF0302_1.raf"] == "duplicate"
+    assert rows["2025/06/18.06.2025/RAW/DSCF0302.xmp"] == "candidate"
+    assert rows["2025/06/18.06.2025/RAW/DSCF0302_1.xmp"] == "detached"
     plan = create_plan(context, registry, job, _draft())
     assert (plan["move_files"], plan["inventory_duplicates"]) == (2, 1)
     # The alternate XMP is not silently destroyed or falsely registered.
