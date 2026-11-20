@@ -403,9 +403,11 @@ def _classify_local_duplicate_media(connection, job_id, cancel):
     for siblings in by_hash.values():
         if len(siblings) < 2:
             continue
-        if len({item["family_key"] for item in siblings}) < 2:
-            # Duplicate checksum inside one family is an ambiguous family
-            # composition, not evidence that one path can be dropped.
+        family_keys = [item["family_key"] for item in siblings]
+        if len(set(family_keys)) < 2 or len(set(family_keys)) != len(family_keys):
+            # Duplicate checksum *inside* a family is an ambiguous composition,
+            # even when the same content appears in another source directory.
+            # Do not guess which intrafamily member to remove.
             continue
         # Deterministic selection prefers a more complete source family.
         keeper = min(siblings, key=lambda row: (
