@@ -409,23 +409,11 @@ def _classify_local_duplicate_media(connection, job_id, cancel):
             # even when the same content appears in another source directory.
             # Do not guess which intrafamily member to remove.
             continue
-        # Deterministic selection prefers a more complete source family.
-        # Only eliminate a redundant copy within the same calendar-day
-        # collection. Two byte-identical occurrences on different source
-        # days may be intentional placements in distinct historic events.
-        # Their ownership requires a separate explicit review policy.
-        def source_day(row):
-            parts = Path(row["relative_path"]).parts
-            for part in parts:
-                if len(part) == 10 and part[2] == "." and part[5] == ".":
-                    date = part[:2] + part[3:5] + part[6:10]
-                    if date.isdigit():
-                        return part
-            return None
-
-        days = {source_day(row) for row in siblings}
-        if len(days) != 1 or None in days:
-            continue
+        # SHA-256 proves byte equality independently of directory layout.
+        # Preserve all source occurrences physically; only one eligible
+        # canonical copy is selected for the move plan. Historical placement
+        # across events remains visible as skipped duplicate inventory rows.
+        # Never infer family equivalence from a matching *subset* alone.
         keeper = min(siblings, key=lambda row: (
             -len(family_media[row["family_key"]]), row["relative_path"]
         ))
