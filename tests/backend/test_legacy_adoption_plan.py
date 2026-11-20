@@ -65,8 +65,8 @@ def test_historical_duplicate_jpeg_prefers_complete_raw_jpeg_family(inventory):
     base = source / "2025" / "04" / "16.04.2025"
     solo = base / "Serie Rotkelchen"
     complete = base / "Voegel mit Rotkelchen"
-    solo.mkdir()
-    complete.mkdir()
+    solo.mkdir(parents=True)
+    complete.mkdir(parents=True)
     (solo / "DSCF2922.JPG").write_bytes(b"identical JPEG image")
     (complete / "DSCF2922.JPG").write_bytes(b"identical JPEG image")
     (complete / "DSCF2922.RAF").write_bytes(b"unique RAW image")
