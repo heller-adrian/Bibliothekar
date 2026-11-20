@@ -125,24 +125,53 @@ def test_historical_duplicate_jpeg_prefers_complete_raw_jpeg_family(inventory):
     assert (plan["move_files"], plan["inventory_duplicates"]) == (2, 1)
 
 
-def test_cross_day_identical_media_not_silently_deduplicated(inventory):
+def test_cross_day_identical_media_are_detected_without_source_deletion(inventory):
     context, source, registry = inventory
+    paths = []
     for day in ("16.04.2025", "17.04.2025"):
         folder = source / "2025" / "04" / day / "JPEG"
         folder.mkdir(parents=True)
-        (folder / "DSCF2922.JPG").write_bytes(b"same historical file")
+        path = folder / "DSCF2922.JPG"
+        path.write_bytes(b"same historical file")
+        paths.append(path)
     job = _scan(context, source)
     with database_connection(context.database_path) as connection:
-        status = list(connection.execute(
+        rows = list(connection.execute(
             "SELECT disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
         ))
-    assert len(status) == 2
-    assert {row[0] for row in status} == {"candidate"}
-    # Planning may mark the later occurrence as a duplicate without mutating
-    # the two source files; the inventory itself preserves both occurrences.
+    assert len(rows) == 2
+    assert sorted(row[0] for row in rows) == ["candidate", "duplicate"]
+    assert all(path.read_bytes() == b"same historical file" for path in paths)
     plan = create_plan(context, registry, job, _draft())
     assert plan["move_files"] == 1
-    assert plan["counts"].get("duplicate") == 1
+    assert plan["inventory_duplicates"] == 1
+
+
+def test_identical_media_across_undated_arbitrary_directories_are_detected(inventory):
+    context, source, registry = inventory
+    original = source / "collection-A" / "unprocessed" / "DSCF2922.JPG"
+    complete = source / "completely-unrelated-folder" / "DSCF2922.JPG"
+    raw = complete.with_suffix(".RAF")
+    for path in (original, complete, raw):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    original.write_bytes(b"same JPEG bytes")
+    complete.write_bytes(b"same JPEG bytes")
+    raw.write_bytes(b"distinct camera raw")
+    job = _scan(context, source)
+    with database_connection(context.database_path) as connection:
+        rows = {
+            row["relative_path"]: row["disposition"]
+            for row in connection.execute(
+                "SELECT relative_path, disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
+            )
+        }
+    assert rows["collection-A/unprocessed/DSCF2922.JPG"] == "duplicate"
+    assert rows["completely-unrelated-folder/DSCF2922.JPG"] == "candidate"
+    assert rows["completely-unrelated-folder/DSCF2922.RAF"] == "candidate"
+    assert original.read_bytes() == complete.read_bytes()
+    plan = create_plan(context, registry, job, _draft())
+    assert plan["move_files"] == 2
+    assert plan["inventory_duplicates"] == 1
 
 
 def test_shared_jpeg_with_different_raws_remains_ambiguous(inventory):
