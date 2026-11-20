@@ -164,11 +164,14 @@ def test_historical_duplicate_jpeg_prefers_complete_raw_jpeg_family(inventory):
         rows = {row["relative_path"]: row["disposition"] for row in connection.execute(
             "SELECT relative_path, disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
         )}
-    assert rows["2025/04/16.04.2025/Serie Rotkelchen/DSCF2922.JPG"] == "duplicate"
+    assert rows["2025/04/16.04.2025/Serie Rotkelchen/DSCF2922.JPG"] == "candidate"
     assert rows["2025/04/16.04.2025/Voegel mit Rotkelchen/DSCF2922.JPG"] == "candidate"
     assert rows["2025/04/16.04.2025/Voegel mit Rotkelchen/DSCF2922.RAF"] == "candidate"
     plan = create_plan(context, registry, job, _draft())
-    assert (plan["move_files"], plan["inventory_duplicates"]) == (2, 1)
+    assert (plan["move_files"], plan["inventory_duplicates"]) == (3, 0)
+    targets = [Path(row["target"]).name for row in plan_moves(context, job)]
+    assert "DSCF2922_Duplicate_001.JPG" in targets
+    assert "DSCF2922_Duplicate_002.JPG" in targets
 
 
 def test_cross_day_identical_media_are_detected_without_source_deletion(inventory):
@@ -186,11 +189,14 @@ def test_cross_day_identical_media_are_detected_without_source_deletion(inventor
             "SELECT disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
         ))
     assert len(rows) == 2
-    assert sorted(row[0] for row in rows) == ["candidate", "duplicate"]
+    assert sorted(row[0] for row in rows) == ["candidate", "candidate"]
     assert all(path.read_bytes() == b"same historical file" for path in paths)
     plan = create_plan(context, registry, job, _draft())
-    assert plan["move_files"] == 1
-    assert plan["inventory_duplicates"] == 1
+    assert plan["move_files"] == 2
+    assert plan["inventory_duplicates"] == 0
+    assert {Path(row["target"]).name for row in plan_moves(context, job)} == {
+        "DSCF2922_Duplicate_001.JPG", "DSCF2922_Duplicate_002.JPG"
+    }
 
 
 def test_identical_media_across_undated_arbitrary_directories_are_detected(inventory):
@@ -211,13 +217,16 @@ def test_identical_media_across_undated_arbitrary_directories_are_detected(inven
                 "SELECT relative_path, disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
             )
         }
-    assert rows["collection-A/unprocessed/DSCF2922.JPG"] == "duplicate"
+    assert rows["collection-A/unprocessed/DSCF2922.JPG"] == "candidate"
     assert rows["completely-unrelated-folder/DSCF2922.JPG"] == "candidate"
     assert rows["completely-unrelated-folder/DSCF2922.RAF"] == "candidate"
     assert original.read_bytes() == complete.read_bytes()
     plan = create_plan(context, registry, job, _draft())
-    assert plan["move_files"] == 2
-    assert plan["inventory_duplicates"] == 1
+    assert plan["move_files"] == 3
+    assert plan["inventory_duplicates"] == 0
+    targets = [Path(row["target"]).name for row in plan_moves(context, job)]
+    assert "DSCF2922_Duplicate_001.JPG" in targets
+    assert "DSCF2922_Duplicate_002.JPG" in targets
 
 
 def test_shared_jpeg_with_different_raws_remains_ambiguous(inventory):
@@ -233,8 +242,9 @@ def test_shared_jpeg_with_different_raws_remains_ambiguous(inventory):
             "SELECT disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
         ))
     assert all(row[0] == "candidate" for row in rows)
-    with pytest.raises(AdoptionError, match="Einzelne Mitglieder einer Dateifamilie"):
-        create_plan(context, registry, job, _draft())
+    plan = create_plan(context, registry, job, _draft())
+    assert plan["move_files"] == 4
+    assert plan["inventory_duplicates"] == 0
 
 
 def test_historical_duplicate_raw_preserves_distinct_xmp_as_detached(inventory):
@@ -251,12 +261,13 @@ def test_historical_duplicate_raw_preserves_distinct_xmp_as_detached(inventory):
             "SELECT relative_path, disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
         )}
     assert rows["2025/06/18.06.2025/RAW/DSCF0302.RAF"] == "candidate"
-    assert rows["2025/06/18.06.2025/RAW/DSCF0302_1.raf"] == "duplicate"
+    assert rows["2025/06/18.06.2025/RAW/DSCF0302_1.raf"] == "candidate"
     assert rows["2025/06/18.06.2025/RAW/DSCF0302.xmp"] == "candidate"
-    assert rows["2025/06/18.06.2025/RAW/DSCF0302_1.xmp"] == "detached"
+    assert rows["2025/06/18.06.2025/RAW/DSCF0302_1.xmp"] == "candidate"
     plan = create_plan(context, registry, job, _draft())
-    assert (plan["move_files"], plan["inventory_duplicates"]) == (2, 1)
-    # The alternate XMP is not silently destroyed or falsely registered.
+    assert (plan["move_files"], plan["inventory_duplicates"]) == (4, 0)
+    assert sum(Path(row["target"]).suffix.lower() == ".xmp"
+               for row in plan_moves(context, job)) == 2
 
 
 def test_prepared_plan_reports_exact_collision_rename_totals(inventory):
@@ -267,11 +278,13 @@ def test_prepared_plan_reports_exact_collision_rename_totals(inventory):
     job = _scan(context, source)
     plan = create_plan(context, registry, job, _draft())
     assert plan["move_files"] == 2
-    assert plan["rename_files"] == 1
-    assert plan["rename_families"] == 1
+    assert plan["rename_files"] == 2
+    assert plan["rename_families"] == 2
     moves = plan_moves(context, job, renamed=True)
-    assert len(moves) == 1
-    assert "_Adopted_001.JPG" in moves[0]["target"]
+    assert len(moves) == 2
+    assert {Path(row["target"]).name for row in moves} == {
+        "DSCF1111_001.JPG", "DSCF1111_002.JPG"
+    }
 
 
 
@@ -389,12 +402,14 @@ def test_later_extension_rejects_collision_with_archived_original(inventory):
     archived.write_bytes(b"archived original")
     (source / "same.raf").write_bytes(b"different capture with the same name")
     job = _scan(context, source)
-    with pytest.raises(AdoptionError, match="Zieldatei existiert bereits"):
-        create_plan(context, registry, job, {"events": [{"existing_id": event_id}]}, allow_existing=True)
+    plan = create_plan(context, registry, job, {"events": [{"existing_id": event_id}]}, allow_existing=True)
+    assert plan["move_files"] == 1
+    [move] = plan_moves(context, job)
+    assert Path(move["target"]).name == "same_001.raf"
     assert archived.read_bytes() == b"archived original"
     assert (source / "same.raf").read_bytes() == b"different capture with the same name"
     with database_connection(context.database_path) as connection:
-        assert connection.execute("SELECT count(*) FROM legacy_adoption_plans").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM legacy_adoption_plans").fetchone()[0] == 1
 
 
 @pytest.mark.parametrize(
@@ -488,7 +503,7 @@ def test_explicit_target_name_conflict_and_exact_global_duplicates(inventory):
         (source / directory).mkdir()
         (source / directory / "same.jpg").write_bytes(content)
     job = _scan(context, source)
-    with pytest.raises(AdoptionError, match="dieselbe Zieldatei"):
+    with pytest.raises(AdoptionError, match="Expliziter Zielname kollidiert"):
         create_plan(context, registry, job, {**_draft(), "target_stems": {"second/same": "same"}})
     register_source_backup(
         registry, backup_id="older", source_kind="import", source_identity="older", backup_path="/synthetic/older",
@@ -551,7 +566,7 @@ def test_repeated_camera_names_in_large_plan_get_stable_unique_targets(inventory
         folder = source / f"camera-{index:04d}"
         folder.mkdir()
         (folder / "capture.JPG").write_bytes(str(index).encode())
-    # A different extension alone cannot distinguish two camera families.
+    # A different extension alone does not collide with the full target filename.
     (source / "camera-0001" / "capture.JPG").rename(source / "camera-0001" / "CAPTURE.RAF")
     job = _scan(context, source)
     plan = create_plan(context, registry, job, _draft())
@@ -560,8 +575,8 @@ def test_repeated_camera_names_in_large_plan_get_stable_unique_targets(inventory
         moves.extend(page)
     assert plan["move_families"] == len(moves) == 436
     assert len({Path(move["target"]).stem.casefold() for move in moves}) == 436
-    assert Path(moves[1]["target"]).name == "CAPTURE_Adopted_001.RAF"
-    assert Path(moves[-1]["target"]).name == "capture_Adopted_435.JPG"
+    assert Path(moves[1]["target"]).name == "CAPTURE.RAF"
+    assert Path(moves[-1]["target"]).name == "capture_435.JPG"
     reopen_plan(context, job)
     create_plan(context, registry, job, _draft())
     assert {move["target"] for move in plan_moves(context, job, limit=200)} == {

@@ -96,27 +96,47 @@ def _register_global(connection, registry, registry_path, library, job, plan, fi
         } for row in rows]
         for member in members:
             sha = member["sha256"]
-            if registry.execute("SELECT 1 FROM source_media WHERE sha256 = ? LIMIT 1", (sha,)).fetchone():
+            # A second occurrence in *this same adoption backup* is not a new
+            # canonical content. Source-media IDs include the source path and
+            # remain distinct. Prior library registrations stay protected.
+            existing_media = registry.execute(
+                "SELECT backup_id FROM source_media WHERE sha256 = ? LIMIT 1", (sha,)
+            ).fetchone()
+            if existing_media is not None and existing_media["backup_id"] != backup:
                 raise _RegistrationConflict("Die Prüfsumme wurde seit der Planung global registriert: " +
                                             member["relative_path"])
         content_fingerprint = family_content_fingerprint(members)
-        if registry.execute(
-            """SELECT 1 FROM canonical_families canonical JOIN family_claims claim USING (canonical_family_id)
-                WHERE canonical.content_fingerprint = ? LIMIT 1""", (content_fingerprint,),
-        ).fetchone():
-            raise _RegistrationConflict("Die Dateifamilie besitzt bereits eine globale Zuordnung: " + key)
+        existing_claim = registry.execute(
+            """SELECT claim.library_id, claim.event_id, claim.claim_state
+                 FROM canonical_families canonical
+                 JOIN family_claims claim USING (canonical_family_id)
+                WHERE canonical.content_fingerprint = ? LIMIT 1""",
+            (content_fingerprint,),
+        ).fetchone()
+        if existing_claim is not None and existing_claim["library_id"] != library.library_id:
+            raise _RegistrationConflict("Die Dateifamilie besitzt bereits eine Zuordnung in "
+                                        "einer anderen Bibliothek: " + key)
+        if existing_claim is not None and existing_claim["claim_state"] != "owned":
+            raise _RegistrationConflict("Der kanonische Inhalt ist noch in einer Reservierung: " + key)
         source_family = occurrence_key(library.library_id, job_id, key)
+        # Each occurrence retains its own source family, physical paths and
+        # event assignment even if the canonical fingerprint is the same.
         register_source_family(
             registry_path, source_family_key=source_family, backup_id=backup, family_key=key,
-            content_fingerprint=content_fingerprint, metadata=metadata, **args,
+            content_fingerprint=content_fingerprint,
+            metadata={**metadata, "occurrence_event_id": rows[0]["parent_event_id"],
+                      "duplicate_occurrence": existing_claim is not None}, **args,
         )
         media_ids = [register_source_media(registry_path, backup_id=backup, **member, **args)["media_id"]
                      for member in members]
         register_source_family_members(registry_path, source_family_key=source_family, media_ids=media_ids, **args)
-        claim_source_family(
-            registry_path, source_family_key=source_family, library_id=library.library_id,
-            event_id=rows[0]["parent_event_id"], claim_state="owned", **args,
-        )
+        if existing_claim is None:
+            # Keep one canonical ownership claim; never rewrite its event_id
+            # when publishing a second physical copy in another event.
+            claim_source_family(
+                registry_path, source_family_key=source_family, library_id=library.library_id,
+                event_id=rows[0]["parent_event_id"], claim_state="owned", **args,
+            )
     registry.execute(
         "INSERT INTO legacy_adoption_receipts VALUES (?, ?, ?, ?, ?)",
         (plan["id"], library.library_id, job_id, fingerprint, plan["documents_at"]),

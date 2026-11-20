@@ -1,99 +1,64 @@
-# 1.1.2 legacy adoption: safe duplicate and filename-collision repair
+# Bibliothekar 1.1.2: library-adoption duplicate occurrence and naming patch
 
-Development branch from the qualified 1.1.1 mainline. **Not production-ready.**
+Development only. Not qualified for release until the exact commit passes the
+full eight-part Backend QA, synthetic native ZFS smoke and manual review.
 
-## Observed failures
+## Contract: existing libraries only
 
-1. Legacy family keys use source-relative directories. A RAW and JPEG from distinct
-   old format folders can be planned as separate families even when they represent
-   one camera capture. The target-name allocator reserves complete stems; it then
-   assigns `_Adopted_001` to a non-conflicting extension.
-2. The planner raises `Einzelne Mitglieder einer Dateifamilie ...` when one member
-   is registered and another is new, or two members share one checksum.
-3. Historic archives may intentionally contain content-identical copies. Releasing
-   the planner's guard alone is **not safe**: global content uniqueness, source
-   ownership, and event identity need explicit multi-occurrence semantics.
+The normal camera/folder-import Burst implementation is **unchanged**.
+Legacy adoption reuses its existing `capture_stem()` helper to format actual
+EXIF SubSecTimeOriginal milliseconds when two captures share a second.
+Never invent missing milliseconds.
 
-## Implemented development changes (not yet release-qualified)
+- Capture identity comes from camera metadata, capture time, camera filename
+  and corroborating identity / exposure evidence, never named source folders.
+- Same SHA-256: byte-identical *physical occurrences*, not two different
+  canonical contents. All occurrences participating in a new adoption batch
+  keep their own source and eventual archive paths.
+- Manual adoption: unchanged file names when there is no target filename
+  collision; different bytes with the same complete target filename receive
+  `_001`, `_002`, etc. for **all** members of the conflicting set.
+  Matching byte-identical media receive `_Duplicate_001`,
+  `_Duplicate_002`, etc., also for the first physical occurrence.
+  RAW/JPEG/DNG with distinct endings need no suffix merely because their
+  stems are equal. Associated XMP sidecars follow the family suffix.
+- Script adoption: canonical date/time/camera naming remains in effect.
+  Real distinct milliseconds are appended to the time as before.
+  When different contents still have the same generated millisecond stem,
+  *every* affected family gets `_001`, `_002`, etc.
+  Real duplicate copies receive `_Duplicate_001`, `_Duplicate_002`, etc.
+  No first copy is arbitrarily called an unsuffixed original.
+- Prior registered archive media remain protected against accidental
+  re-import; new duplicate occurrence handling is for multiple physical
+  copies selected in the **same** initial library adoption.
+  Explicit user destination overrides are not silently changed.
+- Reused SHA-256 contents in a single adoption are separate source occurrences
+  while the global registry keeps the single canonical-family ownership claim.
+  Each source-family registration records its individual assigned event.
+- No archive overwrites, no automatic source-file deletion. All transfers
+  must still pass the existing FD-bound source-identity and SHA-256 verification.
 
-- Local SHA-256 duplicate copies are now classified during inventory, before
-  event planning, when the losing family is a content subset (or exact
-  content match) of a deterministic canonical family, regardless of directories. A complete RAW/JPEG
-  family wins over an isolated copied JPEG.
-- Differently edited XMP files are never silently deduplicated by media hash.
-  When their only primary media copy is excluded they are kept at the source
-  and reported as detached.
-- A JPEG shared by two families whose RAW checksums disagree is **not**
-  automatically collapsed; the conservative protection remains.
-- The plan summary now explicitly counts renamed files and affected families,
-  rather than requiring manual traversal of paginated results.
-- The previously conflated mixed-registration and intrafamily-hash failures
-  now have different explanatory messages.
-- Real-device evidence is captured in isolated synthetic tests. Production
-  images, databases and archive remain untouched.
+## Remaining safety boundary
 
-**Limitation:** The current change skips exact redundant primary media at the
-source; it does NOT yet permit copying both byte-identical physical occurrences
-into different archive events. That behavior needs a separate, compatible
-extension of source-occurrence versus canonical-content registration.
+Multiple byte-identical *members within the same already-grouped local family*
+that demand the exact same extension/target path, or conflicts between
+already-registered media and a partly new family, remain blocked for review.
+The normal import workflow and other libraries' ownership must not be
+weakened to conceal these special cases.
 
-**Current fix:** RAW/JPEG/DNG family candidates are now identified using
-camera make/model, precise EXIF capture time, camera filename stem, optional
-identifiers/serials/original-RAW reference, and compatible exposure settings.
-**No directory name is required**, including `RAW`, `JPEG`, `Export`,
-`Foto-Export` or a date-based folder. Ambiguous same-role candidates and
-conflicting metadata remain separate for review. Binary-exact primary-media
-duplicates are classified by SHA-256 across any source directory; source files
-are never deleted. Sidecars without their own metadata are paired only when
-their referenced original media name is unambiguous across the inventory.
+## Qualification before RC
 
-**Limitation:** Unnecessary _Adopted_ suffixes from still-unverified RAW/JPEG
-pairs remain possible by design; the destination stem reservation is still
-conservative. The final number of renames against the user's complete
-historic inventory must be remeasured in a new read-only plan. The present
-work is not grounds for a stable release before user acceptance.
+- Verify arbitrary nested source folders, camera-family identity and sidecars.
+- Verify two, three and more identical copies: all numbered from 001; each
+  physically retained and correctly catalogued under one canonical identity.
+- Verify same second with differing real milliseconds; exact same
+  millisecond with differing bytes; missing SubSecTime; prior archived names.
+- Verify manual and scripted execution, interruption/retry, global registration,
+  subsequent normal imports, cross-library conflicts and source retention.
+- Verify 8k+ source files and report actual collisions and duplicate counts
+  from a new read-only archive plan.
+- Publish only after all regression and native ZFS checks succeed on the
+  *exact* source commit through the existing `publish-container.yml`.
 
-## Required implementation gates
-
-- [ ] Inventory metadata: model candidate family matching across source format
-      folders, preserving exposure/date/camera contradictions as review cases.
-      Never join solely by shared camera filename.
-- [ ] Name planner: reserve actual targets and verified capture identities.
-      Distinct captures with colliding stems still need one unique family suffix.
-      RAW/JPEG/XMP of one verified capture use one common stem.
-- [ ] Duplicate occurrences: define source occurrence vs canonical content,
-      and handle mixed registered/new members, identical hashes, and intentional
-      copies without inventing a second canonical media identity.
-- [ ] Preserve explicit user destination overrides and existing archive file
-      reservations. No overwrites, no automatic modification of read-only archive.
-- [ ] Preflight all blocking cases before manual event planning, and support
-      regenerating a plan from an unchanged draft.
-- [ ] Tests for source RAW/JPEG split, XMP ownership, conflicting capture metadata,
-      same stem/different capture, content-identical historical copies,
-      existing global claims across two libraries, idempotent re-run,
-      8k-file planning and source/target drift.
-- [ ] Run focused tests and complete 8-way Backend QA + synthetic ZFS preflight.
-      Publish container image **only after** full qualification.
-
-## Real system evidence
-
-No TrueNAS mutation or reset is required now. If a minimal real-data diagnostic
-is later needed, use only read-only queries from an explicitly identified
-container and library database. Never upload personal images, image hashes
-associated with private paths, credentials or the complete production DB.
-
-## Current branch status
-
-The first branch revision relied on a hardcoded `Export/Foto-Export` path
-exception and calendar-day directory labels. Those constraints were rejected
-because Bibliothekar must work on arbitrary archive structures. Both were
-removed in the metadata-driven patch. The prior complete QA run is **not**
-release evidence for these new changes; requalification is mandatory.
-
-
-The allocator's deliberately conservative behavior for **unverified**
-RAW/JPEG pairs is now checked with a passing regression test. Separately,
-the verified `DSCF4762` RAW/DNG/nested-export JPEG case is tested end-to-end
-without unnecessary renaming, while alternate DNG variants retain their names.
-This is not evidence that every historical folder layout is supported.
-Do not publish or deploy until the full qualification gates pass.
+No production TrueNAS source, archive, application state or stable v1.1.1
+release has been modified by this development branch.

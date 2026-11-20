@@ -2233,7 +2233,7 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
     root = archive / event_root_relative(event)
     assert root.parent.name == "2025"
     stems = ("20250701_120000_Fuji-X-T5", "20260101_100000_Fuji-X-T5") if execution == "script" else (
-        "DSCF0763", "DSCF0763_Adopted_001",
+        "DSCF0763_001", "DSCF0763_002",
     )
     assert set(paths.values()) == {
         str((root / "All" / "JPG" / (stem + extension)).relative_to(archive))
@@ -2257,7 +2257,7 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
     assert extension["inventory_duplicates"] == len(extensions)
     assert {path: path.read_bytes() for path in duplicated} == duplicated
     assert {Path(target).name for target in new_paths.values()} == {
-        ("20260101_110000_Fuji-X-T5" if execution == "script" else "dscf0763_Adopted_002") + suffix
+        ("20260101_110000_Fuji-X-T5" if execution == "script" else "dscf0763") + suffix
         for suffix in extensions
     }
     paths.update(new_paths)
