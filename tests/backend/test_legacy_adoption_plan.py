@@ -947,3 +947,58 @@ def test_script_and_manual_plans_use_correct_family_names(inventory, monkeypatch
         assert by_source[f"capture-00.{ending}"] == f"20260721_120000107_Fuji-X-E5.{ending}"
     assert by_source["capture-01.MOV"] == "20260721_120000_Fuji-X-E5_Burst_001.MOV"
     assert len(set(by_source.values())) == len(moves)
+
+
+@pytest.mark.parametrize("scenario,expected", [
+    ("distinct_milliseconds", {
+        "20260721_120000125_Fuji-X-E5.JPG",
+        "20260721_120000875_Fuji-X-E5.JPG",
+    }),
+    ("identical_millisecond_different_bytes", {
+        "20260721_120000425_Fuji-X-E5_001.JPG",
+        "20260721_120000425_Fuji-X-E5_002.JPG",
+    }),
+    ("byte_identical_copies", {
+        "20260721_120000425_Fuji-X-E5_Duplicate_001.JPG",
+        "20260721_120000425_Fuji-X-E5_Duplicate_002.JPG",
+    }),
+    ("missing_milliseconds", {
+        "20260721_120000_Fuji-X-E5_Burst_001.JPG",
+        "20260721_120000_Fuji-X-E5_Burst_002.JPG",
+    }),
+])
+def test_script_adoption_precise_burst_vs_real_duplicates(
+    inventory, monkeypatch, scenario, expected,
+):
+    import os
+
+    context, source, registry = inventory
+    a = source / "anywhere-A" / "FIRST0001.JPG"
+    b = source / "different" / "nested" / "SECOND0001.JPG"
+    for path in (a, b):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    a.write_bytes(b"photo-one")
+    b.write_bytes(b"photo-one" if scenario == "byte_identical_copies" else b"photo-two")
+
+    def metadata(descriptors, _cancel):
+        result = {}
+        for fd in descriptors:
+            content = os.pread(fd, 32, 0)
+            row = {
+                "EXIF:IFD0:Make": "FUJIFILM",
+                "EXIF:IFD0:Model": "X-E5",
+                "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+            }
+            if scenario != "missing_milliseconds":
+                row["EXIF:ExifIFD:SubSecTimeOriginal"] = (
+                    "125" if scenario == "distinct_milliseconds" and content == b"photo-one"
+                    else "875" if scenario == "distinct_milliseconds" else "425"
+                )
+            result[fd] = row
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft(), filename_method="script")
+    assert plan["move_files"] == 2
+    assert {Path(item["target"]).name for item in plan_moves(context, job)} == expected
