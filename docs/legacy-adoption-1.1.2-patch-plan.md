@@ -14,6 +14,33 @@ Development branch from the qualified 1.1.1 mainline. **Not production-ready.**
    the planner's guard alone is **not safe**: global content uniqueness, source
    ownership, and event identity need explicit multi-occurrence semantics.
 
+## Implemented development changes (not yet release-qualified)
+
+- Local SHA-256 duplicate copies are now classified during inventory, before
+  event planning, when the losing family is a strict content subset (or exact
+  content match) of a deterministic canonical family. A complete RAW/JPEG
+  family wins over an isolated copied JPEG.
+- Differently edited XMP files are never silently deduplicated by media hash.
+  When their only primary media copy is excluded they are kept at the source
+  and reported as detached.
+- A JPEG shared by two families whose RAW checksums disagree is **not**
+  automatically collapsed; the conservative protection remains.
+- The plan summary now explicitly counts renamed files and affected families,
+  rather than requiring manual traversal of paginated results.
+- The previously conflated mixed-registration and intrafamily-hash failures
+  now have different explanatory messages.
+- Real-device evidence is captured in isolated synthetic tests. Production
+  images, databases and archive remain untouched.
+
+**Limitation:** The current change skips exact redundant primary media at the
+source; it does NOT yet permit copying both byte-identical physical occurrences
+into different archive events. That behavior needs a separate, compatible
+extension of source-occurrence versus canonical-content registration.
+
+**Limitation:** Unnecessary _Adopted_ suffixes from RAW/JPEG that are still
+separate families remain unresolved. More real metadata evidence is needed
+before relaxing conservative association rules.
+
 ## Required implementation gates
 
 - [ ] Inventory metadata: model candidate family matching across source format
