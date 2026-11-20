@@ -60,6 +60,49 @@ def test_read_only_draft_preview_identifies_conflicting_event(inventory, case):
 
 
 
+def test_historical_raw_dng_and_export_jpeg_keep_original_stem(inventory, monkeypatch):
+    import os
+
+    context, source, registry = inventory
+    base = "2024/12/17.12.2024"
+    filenames = [
+        f"{base}/RAW/DSCF4762.RAF",
+        f"{base}/DNG/DSCF4762.dng",
+        f"{base}/Export/Foto-Export/DSCF4762.jpg",
+        f"{base}/DNG/DSCF4762-2.dng",
+        f"{base}/DNG/DSCF4762-Enhanced-NR.dng",
+    ]
+    for name in filenames:
+        file = source / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(name.encode())
+
+    def metadata(descriptors, _cancel):
+        result = {}
+        for fd in descriptors:
+            name = os.pread(fd, 400, 0).decode()
+            result[fd] = {
+                "EXIF:IFD0:Make": "FUJIFILM",
+                "EXIF:IFD0:Model": "X-H2S",
+                "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+                "EXIF:ExifIFD:ExposureTime": "1/4",
+                "EXIF:ExifIFD:FNumber": "4.0",
+                "EXIF:ExifIFD:ISO": "1600",
+            }
+            if name.endswith(("-2.dng", "-Enhanced-NR.dng")):
+                result[fd]["EXIF:IFD0:OriginalRawFileName"] = "DSCF4762.RAF"
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft())
+    assert plan["move_files"] == 5
+    assert plan["move_families"] == 3
+    assert plan["rename_files"] == 0
+    targets = {Path(item["target_path"]).name for item in plan_moves(context, job)}
+    assert targets == {Path(name).name for name in filenames}
+
+
 def test_historical_duplicate_jpeg_prefers_complete_raw_jpeg_family(inventory):
     context, source, registry = inventory
     base = source / "2025" / "04" / "16.04.2025"
