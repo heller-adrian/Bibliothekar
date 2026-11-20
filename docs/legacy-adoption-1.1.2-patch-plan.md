@@ -17,8 +17,8 @@ Development branch from the qualified 1.1.1 mainline. **Not production-ready.**
 ## Implemented development changes (not yet release-qualified)
 
 - Local SHA-256 duplicate copies are now classified during inventory, before
-  event planning, when the losing family is a strict content subset (or exact
-  content match) of a deterministic canonical family. A complete RAW/JPEG
+  event planning, when the losing family is a content subset (or exact
+  content match) of a deterministic canonical family, regardless of directories. A complete RAW/JPEG
   family wins over an isolated copied JPEG.
 - Differently edited XMP files are never silently deduplicated by media hash.
   When their only primary media copy is excluded they are kept at the source
@@ -37,11 +37,21 @@ source; it does NOT yet permit copying both byte-identical physical occurrences
 into different archive events. That behavior needs a separate, compatible
 extension of source-occurrence versus canonical-content registration.
 
+**Current fix:** RAW/JPEG/DNG family candidates are now identified using
+camera make/model, precise EXIF capture time, camera filename stem, optional
+identifiers/serials/original-RAW reference, and compatible exposure settings.
+**No directory name is required**, including `RAW`, `JPEG`, `Export`,
+`Foto-Export` or a date-based folder. Ambiguous same-role candidates and
+conflicting metadata remain separate for review. Binary-exact primary-media
+duplicates are classified by SHA-256 across any source directory; source files
+are never deleted. Sidecars without their own metadata are paired only when
+their referenced original media name is unambiguous across the inventory.
+
 **Limitation:** Unnecessary _Adopted_ suffixes from still-unverified RAW/JPEG
-pairs remain possible by design. The concrete `Export/Foto-Export` folder case
-is now handled under evidence-gated matching; additional historic layouts must
-be proved from real metadata before expanding the scope. The final count of
-renames against the user's full dataset has not been measured after this fix.
+pairs remain possible by design; the destination stem reservation is still
+conservative. The final number of renames against the user's complete
+historic inventory must be remeasured in a new read-only plan. The present
+work is not grounds for a stable release before user acceptance.
 
 ## Required implementation gates
 
@@ -73,6 +83,13 @@ container and library database. Never upload personal images, image hashes
 associated with private paths, credentials or the complete production DB.
 
 ## Current branch status
+
+The first branch revision relied on a hardcoded `Export/Foto-Export` path
+exception and calendar-day directory labels. Those constraints were rejected
+because Bibliothekar must work on arbitrary archive structures. Both were
+removed in the metadata-driven patch. The prior complete QA run is **not**
+release evidence for these new changes; requalification is mandatory.
+
 
 The allocator's deliberately conservative behavior for **unverified**
 RAW/JPEG pairs is now checked with a passing regression test. Separately,
