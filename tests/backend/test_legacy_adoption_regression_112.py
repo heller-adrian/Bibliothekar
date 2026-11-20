@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app.legacy_adoption_plan import _family_targets
+from app.legacy_adoption_plan import _family_duplicate_conflict, _family_targets
 
 
 def _missing(_path):
@@ -64,3 +64,26 @@ def test_suffix_is_shared_by_all_members_of_a_true_family():
         str(folder / "DSCF0001_Adopted_001.RAF"),
         str(folder / "DSCF0001_Adopted_001.JPG"),
     ]
+
+@pytest.mark.parametrize(
+    "checksums, known, expected",
+    [
+        (["raw", "jpeg"], [False, False], None),
+        (["raw", "jpeg"], [True, True], None),
+        (["raw", "jpeg"], [True, False], "Nur ein Teil"),
+        (["raw", "jpeg"], [False, True], "Nur ein Teil"),
+        (["same", "same"], [False, False], "denselben SHA-256"),
+        (["same", "same"], [True, False], "denselben SHA-256"),
+    ],
+)
+def test_historic_family_duplicate_conflicts_are_distinguished(checksums, known, expected):
+    conflict = _family_duplicate_conflict(checksums, known)
+    if expected is None:
+        assert conflict is None
+    else:
+        assert expected in conflict
+
+
+def test_historic_family_duplicate_conflict_rejects_missing_registration_states():
+    with pytest.raises(ValueError, match="equal length"):
+        _family_duplicate_conflict(["a", "b"], [False])
