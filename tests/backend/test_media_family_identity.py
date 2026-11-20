@@ -284,3 +284,35 @@ def test_historical_fujifilm_export_joins_primary_capture_without_swallowing_dng
     assert families[f"{base}/DNG/DSCF4762-Enhanced-NR"] == {paths[4]}
     assert result["summary"]["file_count"] == 5
     assert result["summary"]["family_count"] == 3
+
+
+@pytest.mark.parametrize("different", ["time", "camera", "exposure"])
+def test_historical_export_never_joins_contradictory_source(tmp_path, monkeypatch, different):
+    source = tmp_path / "historic"
+    day = "2024/12/17.12.2024"
+    names = (f"{day}/RAW/DSCF4762.RAF", f"{day}/Export/Foto-Export/DSCF4762.jpg")
+    exif = []
+    for index, name in enumerate(names):
+        file = source / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(name.encode())
+        tags = {
+            "SourceFile": str(file),
+            "EXIF:IFD0:Make": "FUJIFILM",
+            "EXIF:IFD0:Model": "X-H2S",
+            "EXIF:ExifIFD:DateTimeOriginal": "2024:12:17 17:36:43",
+            "EXIF:ExifIFD:ExposureTime": "1/4",
+            "EXIF:ExifIFD:FNumber": "4.0",
+            "EXIF:ExifIFD:ISO": "1600",
+        }
+        if index == 1:
+            if different == "time":
+                tags["EXIF:ExifIFD:DateTimeOriginal"] = "2024:12:17 17:36:44"
+            elif different == "camera":
+                tags["EXIF:IFD0:Model"] = "X-T5"
+            else:
+                tags["EXIF:ExifIFD:ExposureTime"] = "1/250"
+        exif.append(tags)
+    monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: exif)
+    result = analyze_import_tree(source)
+    assert result["summary"]["family_count"] == 2
