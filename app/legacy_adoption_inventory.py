@@ -1,4 +1,5 @@
 """Persist resumable legacy inventory in the selected library's catalogue."""
+from collections import defaultdict
 from contextlib import closing, ExitStack
 import hashlib
 from itertools import groupby
@@ -495,6 +496,8 @@ def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path 
             )
             draft = json.loads(_job(connection, library.library_id, job_id)["draft_json"])
             join_split_families(connection, job_id, draft, cancel)
+            # Do not discard source occurrences merely because their bytes match.
+            # The move planner labels every member of a duplicate group.
             _classify_inventory(connection, registry, job_id, cancel)
             connection.execute("DELETE FROM legacy_adoption_families WHERE job_id = ?", (job_id,))
             rows = connection.execute(

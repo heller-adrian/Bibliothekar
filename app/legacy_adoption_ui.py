@@ -1892,6 +1892,8 @@ function renderPlan(host) {
   for (const [title,value] of [
     ["Zu übernehmende Dateien",format.format(plan.move_files)],
     ["Dateifamilien im Verschiebeplan",format.format(plan.move_families)],
+    ["Geplante Dateiumbenennungen",format.format(plan.rename_files ?? 0)],
+    ["Betroffene Dateifamilien",format.format(plan.rename_families ?? 0)],
     ["Datenvolumen",format.format(plan.move_bytes / 1024**power)+" "+unit[power]],
     ["Zielbibliothek",plan.library_name],
     ["Neue Ereignisse und Sammelordner",format.format(plan.events.filter(event=>!event.existing).length)],

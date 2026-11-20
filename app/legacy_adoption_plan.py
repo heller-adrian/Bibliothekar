@@ -1,6 +1,6 @@
 """Build and persist manual legacy moves without changing the archive catalogue."""
 from bisect import bisect_left, bisect_right
-from collections import Counter
+from collections import Counter, defaultdict
 from contextlib import closing, ExitStack
 from datetime import datetime
 from functools import lru_cache
@@ -508,14 +508,26 @@ def _archive_probe(root_fd, *, registered=None):
     return lookup
 
 
+def _family_duplicate_conflict(checksums, already_known):
+    """Explain a blocked historic family without weakening content ownership.
+
+    An identical checksum *within* a candidate family and a partial match to
+    already-owned material are different situations. Neither may silently be
+    turned into a second canonical media registration.
+    """
+    if len(checksums) != len(already_known):
+        raise ValueError("Checksum and registration lists must have equal length")
+    if len(set(checksums)) != len(checksums):
+        return "Mehrere Mitglieder dieser Familie besitzen denselben SHA-256-Inhalt"
+    if any(already_known) and not all(already_known):
+        return "Nur ein Teil der Familienmitglieder ist bereits registriert oder im Plan enthalten"
+    return None
+
+
 def _known_content(connection, registry, plan_id, checksum):
-    return bool(
-        registered_content(connection, registry, checksum)
-        or connection.execute(
-            "SELECT 1 FROM legacy_adoption_moves WHERE plan_id = ? AND sha256 = ? LIMIT 1",
-            (plan_id, checksum),
-        ).fetchone()
-    )
+    # Same-plan occurrences are intentional physical copies. Only an already
+    # registered prior import is excluded from this new adoption plan.
+    return bool(registered_content(connection, registry, checksum))
 
 
 def _suggest_folder_moves(connection, plan_id, source_fd, archive_entry, candidates, target_counts):
@@ -560,54 +572,113 @@ def _registered_archive_paths(connection, plan_id, event_id):
     )}
 
 
-def _family_targets(folder, key, family, override, archive_entry, registered, used, sequences):
+def _family_targets(folder, key, family, override, archive_entry, registered, used, sequences,
+                    *, duplicate_index=None, collision_index=None, occupied_paths=None):
+    """Retain original names unless a *real target path* is already reserved.
+
+    A byte-identical source occurrence always gets a _Duplicate_NNN label,
+    including the first one. Two different physical occurrences contending
+    for the same full target name both get _001, _002, etc. Different formats
+    may share their unchanged stem without creating a false collision.
+    """
     original = PurePosixPath(key).name
     stem = override if override is not None else original
     if override is not None:
         if "/" in stem:
             raise AdoptionError("Der Zielname muss ein einzelner Dateiname ohne Endung sein.")
         validate_target(stem)
-    # Preserve full compound endings, e.g. .RAF.xmp, for all members.
+    if override is not None and (duplicate_index is not None or collision_index is not None):
+        raise AdoptionError("Expliziter Zielname kollidiert mit einer weiteren Aufnahme: " + stem)
+
     endings = [family_member_ending(member["relative_path"]) for member in family]
-    proposed = [str(folder / (stem + ending)) for ending in endings]
     if len({target_key(ending) for ending in endings}) != len(endings):
-        raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + proposed[0])
-    occupied = False
-    for path in proposed:
-        validate_target(path)
-        entry = archive_entry(path)
-        if entry is not None:
-            if override is not None or target_key(path) not in registered or not stat.S_ISREG(entry.st_mode):
-                raise AdoptionError("Zieldatei existiert bereits: " + path)
-            occupied = True
+        raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + str(folder / stem))
 
-    family_key = target_key(str(folder / stem))
-    if family_key not in used and not occupied:
-        used.add(family_key)
-        return proposed
-    if override is not None:
-        raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + proposed[0])
-
-    # The marker keeps the new stem distinct from OS copy suffix aliases used
-    # for sidecar/export matching. One sequence covers the whole family.
-    index = sequences[family_key]
+    reserved = used if occupied_paths is None else occupied_paths
+    number = duplicate_index if duplicate_index is not None else (collision_index or 0)
     while True:
-        index += 1
-        suffix = numbered_stem("_Adopted", index)
-        max_stem_bytes = 255 - len(suffix) - max(len(ending.encode("utf-8")) for ending in endings)
-        short_stem = stem.encode("utf-8")[:max_stem_bytes].decode("utf-8", errors="ignore")
-        unique = short_stem + suffix
-        candidate = target_key(str(folder / unique))
-        if candidate in used:
-            continue
-        targets = [str(folder / (unique + ending)) for ending in endings]
+        if number > 999999:
+            raise AdoptionError("Zu viele gleichnamige Dateien im Zielordner: " + stem)
+        suffix = (f"_Duplicate_{number:03d}" if duplicate_index is not None
+                  else f"_{number:03d}" if number else "")
+        max_stem_bytes = 255 - len(suffix.encode("utf-8")) - max(
+            len(ending.encode("utf-8")) for ending in endings
+        )
+        if max_stem_bytes <= 0:
+            raise AdoptionError("Dateiname ist zu lang: " + stem)
+        safe_stem = stem.encode("utf-8")[:max_stem_bytes].decode("utf-8", errors="ignore") + suffix
+        targets = [str(folder / (safe_stem + ending)) for ending in endings]
         for path in targets:
             validate_target(path)
-            if archive_entry(path) is not None:
-                raise AdoptionError("Zieldatei existiert bereits: " + path)
-        used.add(candidate)
-        sequences[family_key] = index
-        return targets
+        if all(target_key(path) not in reserved and archive_entry(path) is None
+               for path in targets):
+            for path in targets:
+                reserved.add(target_key(path))
+            used.add(target_key(str(folder / safe_stem)))
+            sequences[target_key(str(folder / stem))] = number
+            return targets
+        if override is not None:
+            raise AdoptionError("Zieldatei existiert bereits: " + targets[0])
+        number += 1
+
+
+def _adoption_occurrence_sequences(selections, target_stems):
+    """Number *all* members of duplicate or colliding family groups.
+
+    SHA-256 groups are global to the inventory, independent of source path.
+    Naming collisions, by contrast, use the actual complete destination
+    filename in the selected event. Stable family keys determine the indices;
+    no family is arbitrarily labelled the unnumbered original.
+    """
+    by_hash, by_target = defaultdict(set), defaultdict(set)
+    keys = set()
+    for key, members, _capture, _event, (_assigned, leaf, _leaf_key, layout) in selections:
+        keys.add(key)
+        folder = _destination_folder(leaf, layout)
+        stem = target_stems.get(key, PurePosixPath(key).name)
+        for member in members:
+            ending = family_member_ending(member["relative_path"])
+            by_target[target_key(str(folder / (stem + ending)))].add(key)
+            media_type = json.loads(member["metadata_json"] or "{}").get("media_type")
+            if media_type != "xmp":
+                by_hash[member["sha256"]].add(key)
+
+    def ordered_components(buckets):
+        parent = {key: key for key in keys}
+
+        def root(key):
+            while key != parent[key]:
+                parent[key] = parent[parent[key]]
+                key = parent[key]
+            return key
+
+        for bucket in buckets.values():
+            if len(bucket) < 2:
+                continue
+            ordered = sorted(bucket)
+            first = root(ordered[0])
+            for key in ordered[1:]:
+                parent[root(key)] = first
+        components = defaultdict(list)
+        for key in sorted(keys):
+            components[root(key)].append(key)
+        return {key: index for members in components.values() if len(members) > 1
+                for index, key in enumerate(sorted(members), 1)}
+
+    return ordered_components(by_hash), ordered_components(by_target)
+
+
+def _exact_script_collisions(selections, camera_tokens, burst_counts):
+    """Only same generated millisecond name needs _001 from the first family."""
+    candidates = Counter()
+    for key, members, capture, _event, (_assigned, leaf, _leaf_key, layout) in selections:
+        camera, group = camera_tokens[key]
+        base, index, _ = capture_stem(
+            capture, camera, set(), same_second=burst_counts[group] > 1,
+        )
+        if index == 0:
+            candidates[(target_key(str(_destination_folder(leaf, layout))), base.casefold())] += 1
+    return candidates
 
 
 def _assigned_families(rows, draft, events, intervals, seen):
@@ -643,14 +714,26 @@ def _camera_tokens(families):
     return tokens, groups
 
 
-def _automatic_family_targets(folder, key, family, capture, camera, same_second, names, stems, used):
+def _automatic_family_targets(folder, key, family, capture, camera, same_second, names, stems, used,
+                              *, duplicate_index=None, number_all=False):
     endings = [family_member_ending(member["relative_path"]) for member in family]
     if len({target_key(ending) for ending in endings}) != len(endings):
         raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + key)
+    # Reuse exactly the same real-EXIF-millisecond Burst implementation as the
+    # normal folder import. Neither invented subseconds nor directory patterns.
     base, index, _ = capture_stem(capture, camera, stems, same_second=same_second)
+    if duplicate_index is not None:
+        base += "_Duplicate"
+        index = duplicate_index
+    elif number_all and index == 0:
+        index = 1
     while True:
         suffix = numbered_stem("", index)
-        max_bytes = 255 - len(suffix) - max(len(ending.encode("utf-8")) for ending in endings)
+        max_bytes = 255 - len(suffix.encode("utf-8")) - max(
+            len(ending.encode("utf-8")) for ending in endings
+        )
+        if max_bytes <= 0:
+            raise AdoptionError("Dateiname ist zu lang: " + key)
         stem = base.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore") + suffix
         prefix = target_key(str(folder / stem))
         targets = [str(folder / (stem + ending)) for ending in endings]
@@ -692,10 +775,22 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             WHERE inventory.job_id = ? ORDER BY family_key, relative_path""",
         (job["id"],),
     )
-    selections = _assigned_families(rows, draft, events, intervals, seen_draft_keys)
+    selections = list(_assigned_families(rows, draft, events, intervals, seen_draft_keys))
+    # Existing global media are skipped entirely, not participants in a new
+    # destination collision or duplicate numbering set. Only physical copies
+    # which will actually be newly moved can require an indexed target name.
+    # Do not discard partially registered families here: the existing
+    # _family_duplicate_conflict guard must still reject their unsafe merge.
+    new_selections = [
+        selected for selected in selections
+        if not all(registered_content(connection, registry, member["sha256"])
+                   for member in selected[1])
+    ]
+    duplicate_indices, collision_indices = _adoption_occurrence_sequences(new_selections, target_stems)
+    occupied_targets = set()
     if filename_method == "script":
-        selections = list(selections)
         cameras, bursts = _camera_tokens(selections)
+        exact_collisions = _exact_script_collisions(new_selections, cameras, bursts)
     @lru_cache(maxsize=128)
     def existing_names(folder):
         names = archive_entry.names(folder)
@@ -710,9 +805,10 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
 
         checksums = [member["sha256"] for member in family]
         duplicate = [_known_content(connection, registry, plan_id, checksum) for checksum in checksums]
-        if (any(duplicate) and not all(duplicate)) or len(set(checksums)) != len(checksums):
+        conflict = _family_duplicate_conflict(checksums, duplicate)
+        if conflict:
             raise AdoptionError("Einzelne Mitglieder einer Dateifamilie sind bereits registriert "
-                                "oder haben identischen Inhalt: " + key)
+                                "oder haben identischen Inhalt: " + key + " (" + conflict + ")")
 
         new_family = not all(duplicate)
         folder = _destination_folder(leaf, layout)
@@ -720,14 +816,24 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             targets = [None] * len(family)
         elif filename_method == "script" and key not in target_stems:
             camera, burst_group = cameras[key]
+            generated_stem, generated_index, _ = capture_stem(
+                capture, camera, set(), same_second=bursts[burst_group] > 1,
+            )
+            number_all = generated_index == 0 and exact_collisions[
+                (target_key(str(folder)), generated_stem.casefold())
+            ] > 1
             targets = _automatic_family_targets(
                 folder, key, family, capture, camera, bursts[burst_group] > 1,
                 *existing_names(str(folder)), used_stems,
+                duplicate_index=duplicate_indices.get(key), number_all=number_all,
             )
         else:
             targets = _family_targets(
                 folder, key, family, target_stems.get(key), archive_entry, registered_keys,
                 used_stems, filename_sequences,
+                duplicate_index=duplicate_indices.get(key),
+                collision_index=collision_indices.get(key),
+                occupied_paths=occupied_targets,
             )
         for member, target in zip(family, targets, strict=True):
             source = member["relative_path"]
@@ -873,7 +979,18 @@ def plan_status(library, job_id: str) -> dict:
                 WHERE move.plan_id = ? AND move.target_path IS NOT NULL""",
             (job_id, plan["id"]),
         ).fetchone()
+        renamed = connection.execute(
+            """SELECT count(*), count(DISTINCT inventory.family_key)
+                 FROM legacy_adoption_moves move
+                 JOIN legacy_adoption_inventory inventory
+                   ON inventory.job_id = ? AND inventory.relative_path = move.relative_path
+                WHERE move.plan_id = ? AND move.target_path IS NOT NULL
+                  AND substr(move.target_path, -1 - length(json_extract(inventory.metadata_json, '$.filename')))
+                      != '/' || json_extract(inventory.metadata_json, '$.filename')""",
+            (job_id, plan["id"]),
+        ).fetchone()
         return {
+            "rename_files": renamed[0], "rename_families": renamed[1],
             "id": plan["id"], "state": plan["state"], "counts": counts, "filename_method": plan["filename_method"],
             "execution": dict(execution) if execution else None,
             "inventory_duplicates": connection.execute(

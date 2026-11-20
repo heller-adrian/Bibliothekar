@@ -103,6 +103,8 @@ Image: ghcr.io/heller-adrian/bibliothekar:1.1.0
 Web UI: http://<your-truenas-host>:30044
 ```
 
+**Release candidate version:** 1.1.2 (development source only; not yet published or qualified).
+
 **Stable version:** 1.1.0. Verify that the [GitHub Release](https://github.com/heller-adrian/Bibliothekar/releases) and the corresponding GHCR image have actually been published before installing it. For reproducible deployments, pin a numbered image tag or digest. The floating image tag is `ghcr.io/heller-adrian/bibliothekar:latest`.
 
 | Container path | Use | Mount |

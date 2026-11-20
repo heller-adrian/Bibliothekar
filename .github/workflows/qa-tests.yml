@@ -142,6 +142,7 @@ jobs:
             "tests/backend/test_legacy_adoption_dataset.py",
             "tests/backend/test_legacy_adoption_host.py",
             "tests/backend/test_legacy_adoption_plan.py",
+            "tests/backend/test_legacy_adoption_regression_112.py",
             "tests/backend/test_legacy_adoption_integration.py",
             "tests/backend/test_rc2_archive_finish_recovery.py",
             "tests/backend/test_0271_archive_assistant.py::test_layout_only_change_stages_new_nested_branch_without_copying_its_parent",

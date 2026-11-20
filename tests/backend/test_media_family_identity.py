@@ -179,6 +179,10 @@ def test_fujifilm_coarse_context_rejects_ambiguous_or_conflicting_match(
             "EXIF:ExifIFD:FNumber": "4",
             "EXIF:ExifIFD:ISO": "800",
         }
+        if difference == "other_day" and i == 1:
+            # Different EXIF capture date is a conflict; directory changes
+            # alone must never block matching.
+            metadata["EXIF:ExifIFD:DateTimeOriginal"] = "2025:01:29 17:11:52"
         if difference == "other_camera" and i == 1:
             metadata["EXIF:IFD0:Model"] = "X-T5"
         if difference == "other_second" and i == 1:
@@ -245,3 +249,139 @@ def test_separate_raf_sidecar_can_join_only_its_unique_original(tmp_path, monkey
     })
     unsafe = analyze_import_tree(source)
     assert unsafe["summary"]["family_count"] == 4
+
+
+def test_historical_fujifilm_export_joins_primary_capture_without_swallowing_dng_variants(
+    tmp_path, monkeypatch,
+):
+    source = tmp_path / "historical"
+    base = "2024/12/17.12.2024"
+    paths = (
+        f"{base}/RAW/DSCF4762.RAF",
+        f"{base}/DNG/DSCF4762.dng",
+        f"{base}/Export/Foto-Export/DSCF4762.jpg",
+        f"{base}/DNG/DSCF4762-2.dng",
+        f"{base}/DNG/DSCF4762-Enhanced-NR.dng",
+    )
+    metadata = []
+    for name in paths:
+        path = source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(name.encode("utf-8"))
+        tags = {
+            "SourceFile": str(path),
+            "EXIF:IFD0:Make": "FUJIFILM",
+            "EXIF:IFD0:Model": "X-H2S",
+            "EXIF:ExifIFD:DateTimeOriginal": "2024:12:17 17:36:43",
+            "EXIF:ExifIFD:ExposureTime": "1/4",
+            "EXIF:ExifIFD:FNumber": "4.0",
+            "EXIF:ExifIFD:ISO": "1600",
+        }
+        if name.endswith(("-2.dng", "-Enhanced-NR.dng")):
+            tags["EXIF:IFD0:OriginalRawFileName"] = "DSCF4762.RAF"
+        metadata.append(tags)
+    monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: metadata)
+    result = analyze_import_tree(source)
+    families = {family["family_key"]: set(family["members"]) for family in result["families"]}
+    assert families[f"{base}/RAW/DSCF4762"] == set(paths[:3])
+    assert families[f"{base}/DNG/DSCF4762-2"] == {paths[3]}
+    assert families[f"{base}/DNG/DSCF4762-Enhanced-NR"] == {paths[4]}
+    assert result["summary"]["file_count"] == 5
+    assert result["summary"]["family_count"] == 3
+
+
+@pytest.mark.parametrize("different", ["time", "camera", "exposure"])
+def test_historical_export_never_joins_contradictory_source(tmp_path, monkeypatch, different):
+    source = tmp_path / "historic"
+    day = "2024/12/17.12.2024"
+    names = (f"{day}/RAW/DSCF4762.RAF", f"{day}/Export/Foto-Export/DSCF4762.jpg")
+    exif = []
+    for index, name in enumerate(names):
+        file = source / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(name.encode())
+        tags = {
+            "SourceFile": str(file),
+            "EXIF:IFD0:Make": "FUJIFILM",
+            "EXIF:IFD0:Model": "X-H2S",
+            "EXIF:ExifIFD:DateTimeOriginal": "2024:12:17 17:36:43",
+            "EXIF:ExifIFD:ExposureTime": "1/4",
+            "EXIF:ExifIFD:FNumber": "4.0",
+            "EXIF:ExifIFD:ISO": "1600",
+        }
+        if index == 1:
+            if different == "time":
+                tags["EXIF:ExifIFD:DateTimeOriginal"] = "2024:12:17 17:36:44"
+            elif different == "camera":
+                tags["EXIF:IFD0:Model"] = "X-T5"
+            else:
+                tags["EXIF:ExifIFD:ExposureTime"] = "1/250"
+        exif.append(tags)
+    monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: exif)
+    result = analyze_import_tree(source)
+    assert result["summary"]["family_count"] == 2
+
+
+@pytest.mark.parametrize("raw_folder,jpeg_folder,dng_folder", [
+    ("camera-originals", "finished-photos", "processing/converted"),
+    ("random-folder/alpha", "another-collection/deep/nested", "third-place"),
+    ("2024/collection-A", "2024/unrelated-name", "backup/unrecognised-folder"),
+])
+def test_capture_matching_is_independent_of_any_directory_names(
+    tmp_path, monkeypatch, raw_folder, jpeg_folder, dng_folder,
+):
+    """Same file evidence must produce the same family in arbitrary layouts."""
+    root = tmp_path / "source"
+    cases = [
+        (f"{raw_folder}/DSCF4762.RAF", "raw"),
+        (f"{jpeg_folder}/DSCF4762.JPG", "jpeg"),
+        (f"{dng_folder}/DSCF4762.dng", "dng"),
+    ]
+    exif = []
+    for relative, kind in cases:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(relative.encode("utf-8"))
+        row = {
+            "SourceFile": str(path),
+            "EXIF:IFD0:Make": "FUJIFILM",
+            "EXIF:IFD0:Model": "X-H2S",
+            "EXIF:ExifIFD:DateTimeOriginal": "2024:12:17 17:36:43",
+            "EXIF:ExifIFD:ExposureTime": "1/4",
+            "EXIF:ExifIFD:FNumber": "4.0",
+            "EXIF:ExifIFD:ISO": "1600",
+        }
+        if kind == "dng":
+            row["EXIF:IFD0:OriginalRawFileName"] = "DSCF4762.RAF"
+        exif.append(row)
+    monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: exif)
+    result = analyze_import_tree(root)
+    assert result["summary"]["family_count"] == 1
+    [family] = result["families"]
+    assert set(family["members"]) == {name for name, _ in cases}
+
+
+def test_reused_camera_name_with_incompatible_metadata_stays_separate_without_folder_hints(
+    tmp_path, monkeypatch,
+):
+    root = tmp_path / "source"
+    paths = [
+        ("one-unknown-folder/DSCF1234.RAF", "2024:12:17 17:36:43", "1/4"),
+        ("totally-different/DSCF1234.JPG", "2024:12:17 17:36:43", "1/250"),
+    ]
+    exif = []
+    for relative, shot, exposure in paths:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(relative.encode())
+        exif.append({
+            "SourceFile": str(path),
+            "EXIF:IFD0:Make": "FUJIFILM",
+            "EXIF:IFD0:Model": "X-H2S",
+            "EXIF:ExifIFD:DateTimeOriginal": shot,
+            "EXIF:ExifIFD:ExposureTime": exposure,
+            "EXIF:ExifIFD:FNumber": "4",
+            "EXIF:ExifIFD:ISO": "1600",
+        })
+    monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: exif)
+    assert analyze_import_tree(root)["summary"]["family_count"] == 2
