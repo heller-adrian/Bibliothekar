@@ -82,6 +82,23 @@ def test_historical_duplicate_jpeg_prefers_complete_raw_jpeg_family(inventory):
     assert (plan["move_files"], plan["inventory_duplicates"]) == (2, 1)
 
 
+def test_cross_day_identical_media_not_silently_deduplicated(inventory):
+    context, source, registry = inventory
+    for day in ("16.04.2025", "17.04.2025"):
+        folder = source / "2025" / "04" / day / "JPEG"
+        folder.mkdir(parents=True)
+        (folder / "DSCF2922.JPG").write_bytes(b"same historical file")
+    job = _scan(context, source)
+    with database_connection(context.database_path) as connection:
+        status = list(connection.execute(
+            "SELECT disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
+        ))
+    assert len(status) == 2
+    assert {row[0] for row in status} == {"candidate"}
+    with pytest.raises(AdoptionError, match="identischen Inhalt"):
+        create_plan(context, registry, job, _draft())
+
+
 def test_shared_jpeg_with_different_raws_remains_ambiguous(inventory):
     context, source, registry = inventory
     for folder, raw in (("A", b"raw photo A"), ("B", b"raw photo B")):
