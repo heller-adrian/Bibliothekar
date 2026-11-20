@@ -1,5 +1,5 @@
 """Persist resumable legacy inventory in the selected library's catalogue."""
-from collections import Counter, defaultdict
+from collections import defaultdict
 from contextlib import closing, ExitStack
 import hashlib
 from itertools import groupby
