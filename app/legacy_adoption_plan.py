@@ -508,6 +508,22 @@ def _archive_probe(root_fd, *, registered=None):
     return lookup
 
 
+def _family_duplicate_conflict(checksums, already_known):
+    """Explain a blocked historic family without weakening content ownership.
+
+    An identical checksum *within* a candidate family and a partial match to
+    already-owned material are different situations. Neither may silently be
+    turned into a second canonical media registration.
+    """
+    if len(checksums) != len(already_known):
+        raise ValueError("Checksum and registration lists must have equal length")
+    if len(set(checksums)) != len(checksums):
+        return "Mehrere Mitglieder dieser Familie besitzen denselben SHA-256-Inhalt"
+    if any(already_known) and not all(already_known):
+        return "Nur ein Teil der Familienmitglieder ist bereits registriert oder im Plan enthalten"
+    return None
+
+
 def _known_content(connection, registry, plan_id, checksum):
     return bool(
         registered_content(connection, registry, checksum)
@@ -710,9 +726,10 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
 
         checksums = [member["sha256"] for member in family]
         duplicate = [_known_content(connection, registry, plan_id, checksum) for checksum in checksums]
-        if (any(duplicate) and not all(duplicate)) or len(set(checksums)) != len(checksums):
+        conflict = _family_duplicate_conflict(checksums, duplicate)
+        if conflict:
             raise AdoptionError("Einzelne Mitglieder einer Dateifamilie sind bereits registriert "
-                                "oder haben identischen Inhalt: " + key)
+                                "oder haben identischen Inhalt: " + key + " (" + conflict + ")")
 
         new_family = not all(duplicate)
         folder = _destination_folder(leaf, layout)
