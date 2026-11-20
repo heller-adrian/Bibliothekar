@@ -1,5 +1,15 @@
 name: Backend QA
 on:
+  workflow_call:
+    inputs:
+      full_backend:
+        type: boolean
+        default: false
+        required: true
+      container_preflight:
+        type: boolean
+        default: false
+        required: true
   # PRs run the focused adoption gate. Full release qualification is explicit.
   pull_request:
     paths:
@@ -36,8 +46,8 @@ permissions:
 env:
   QA_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
 concurrency:
-  group: bibliothekar-qa-${{ github.event_name == 'workflow_dispatch' && inputs.full_backend && 'release' || 'development' }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || !inputs.full_backend }}
+  group: bibliothekar-qa-${{ inputs.full_backend && 'release' || 'development' }}-${{ github.ref }}
+  cancel-in-progress: ${{ !inputs.full_backend }}
 jobs:
   adoption-preflight:
     outputs:
@@ -121,7 +131,7 @@ jobs:
           node --check /tmp/bibliothekar-onboarding.js
           node -e 'for (const [source] of require("/tmp/bibliothekar-adoption-patterns.json")) new RegExp(source, "u")'
       - name: Build and verify the local container on synthetic ZFS
-        if: github.event_name == 'workflow_dispatch' && inputs.container_preflight
+        if: inputs.container_preflight
         run: |
           test "$(git rev-parse HEAD)" = "$QA_SOURCE"
           bash qa/release/install_runner_packages.sh acl
@@ -131,7 +141,7 @@ jobs:
       - name: Verify adoption including the kernel read-only bind mount
         if: steps.scope.outputs.request-only != 'true'
         env:
-          RECOVERY_PROBE: ${{ github.event_name == 'workflow_dispatch' }}
+          RECOVERY_PROBE: ${{ inputs.full_backend }}
         run: |
           test "$(git rev-parse HEAD)" = "$QA_SOURCE"
           cat > "$RUNNER_TEMP/adoption-targets.json" <<'JSON'
@@ -228,7 +238,7 @@ jobs:
   # Public pull requests must never execute their code on a self-hosted runner.
   backend-regression:
     needs: adoption-preflight
-    if: github.event_name == 'workflow_dispatch' && inputs.full_backend && needs.adoption-preflight.outputs.request-only != 'true'
+    if: inputs.full_backend && needs.adoption-preflight.outputs.request-only != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 58
     strategy:
@@ -282,7 +292,7 @@ jobs:
           retention-days: 14
 
   backend-coverage:
-    if: always() && github.event_name == 'workflow_dispatch' && inputs.full_backend && needs.adoption-preflight.result == 'success' && needs.adoption-preflight.outputs.request-only != 'true'
+    if: always() && inputs.full_backend && needs.adoption-preflight.result == 'success' && needs.adoption-preflight.outputs.request-only != 'true'
     needs: [adoption-preflight, backend-regression]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
