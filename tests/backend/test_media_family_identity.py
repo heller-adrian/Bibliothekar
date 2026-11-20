@@ -245,3 +245,42 @@ def test_separate_raf_sidecar_can_join_only_its_unique_original(tmp_path, monkey
     })
     unsafe = analyze_import_tree(source)
     assert unsafe["summary"]["family_count"] == 4
+
+
+def test_historical_fujifilm_export_joins_primary_capture_without_swallowing_dng_variants(
+    tmp_path, monkeypatch,
+):
+    source = tmp_path / "historical"
+    base = "2024/12/17.12.2024"
+    paths = (
+        f"{base}/RAW/DSCF4762.RAF",
+        f"{base}/DNG/DSCF4762.dng",
+        f"{base}/Export/Foto-Export/DSCF4762.jpg",
+        f"{base}/DNG/DSCF4762-2.dng",
+        f"{base}/DNG/DSCF4762-Enhanced-NR.dng",
+    )
+    metadata = []
+    for name in paths:
+        path = source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(name.encode("utf-8"))
+        tags = {
+            "SourceFile": str(path),
+            "EXIF:IFD0:Make": "FUJIFILM",
+            "EXIF:IFD0:Model": "X-H2S",
+            "EXIF:ExifIFD:DateTimeOriginal": "2024:12:17 17:36:43",
+            "EXIF:ExifIFD:ExposureTime": "1/4",
+            "EXIF:ExifIFD:FNumber": "4.0",
+            "EXIF:ExifIFD:ISO": "1600",
+        }
+        if name.endswith(("-2.dng", "-Enhanced-NR.dng")):
+            tags["EXIF:IFD0:OriginalRawFileName"] = "DSCF4762.RAF"
+        metadata.append(tags)
+    monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: metadata)
+    result = analyze_import_tree(source)
+    families = {family["family_key"]: set(family["members"]) for family in result["families"]}
+    assert families[f"{base}/RAW/DSCF4762"] == set(paths[:3])
+    assert families[f"{base}/DNG/DSCF4762-2"] == {paths[3]}
+    assert families[f"{base}/DNG/DSCF4762-Enhanced-NR"] == {paths[4]}
+    assert result["summary"]["file_count"] == 5
+    assert result["summary"]["family_count"] == 3
