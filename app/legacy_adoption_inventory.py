@@ -413,6 +413,11 @@ def _classify_local_duplicate_media(connection, job_id, cancel):
         keeper = min(siblings, key=lambda row: (
             -len(family_media[row["family_key"]]), row["relative_path"]
         ))
+        canonical_media = family_media[keeper["family_key"]]
+        if any(not family_media[item["family_key"]].issubset(canonical_media) for item in siblings):
+            # Matching JPEG alone cannot prove that two different RAW files
+            # belong to the same capture. Keep both families for review.
+            continue
         excluded.update(item["relative_path"] for item in siblings if item is not keeper)
     if not excluded:
         return
