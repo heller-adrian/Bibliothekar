@@ -57,6 +57,13 @@ def _format_scope(record):
     parent = PurePosixPath(record["relative_path"]).parent
     if parent.name.casefold() in FORMAT_DIRECTORIES:
         return parent.parent
+    # Historical Lightroom exports may live in a nested folder within the
+    # same shooting-day directory. Treat only this recognised export layout
+    # as a sibling format scope; never infer capture identity from an
+    # arbitrary folder called "Export".
+    if (parent.name.casefold() == "foto-export"
+            and parent.parent.name.casefold() == "export"):
+        return parent.parent.parent
     return None
 
 
