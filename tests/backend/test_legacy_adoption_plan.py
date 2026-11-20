@@ -81,6 +81,23 @@ def test_historical_duplicate_jpeg_prefers_complete_raw_jpeg_family(inventory):
     assert (plan["move_files"], plan["inventory_duplicates"]) == (2, 1)
 
 
+def test_shared_jpeg_with_different_raws_remains_ambiguous(inventory):
+    context, source, registry = inventory
+    for folder, raw in (("A", b"raw photo A"), ("B", b"raw photo B")):
+        directory = source / folder
+        directory.mkdir()
+        (directory / "DSCF2222.JPG").write_bytes(b"shared JPEG")
+        (directory / "DSCF2222.RAF").write_bytes(raw)
+    job = _scan(context, source)
+    with database_connection(context.database_path) as connection:
+        rows = list(connection.execute(
+            "SELECT disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
+        ))
+    assert all(row[0] == "candidate" for row in rows)
+    with pytest.raises(AdoptionError, match="Einzelne Mitglieder einer Dateifamilie"):
+        create_plan(context, registry, job, _draft())
+
+
 def test_historical_duplicate_raw_preserves_distinct_xmp_as_detached(inventory):
     context, source, registry = inventory
     folder = source / "RAW"
