@@ -890,7 +890,18 @@ def plan_status(library, job_id: str) -> dict:
                 WHERE move.plan_id = ? AND move.target_path IS NOT NULL""",
             (job_id, plan["id"]),
         ).fetchone()
+        renamed = connection.execute(
+            """SELECT count(*), count(DISTINCT inventory.family_key)
+                 FROM legacy_adoption_moves move
+                 JOIN legacy_adoption_inventory inventory
+                   ON inventory.job_id = ? AND inventory.relative_path = move.relative_path
+                WHERE move.plan_id = ? AND move.target_path IS NOT NULL
+                  AND substr(move.target_path, -1 - length(json_extract(inventory.metadata_json, '$.filename')))
+                      != '/' || json_extract(inventory.metadata_json, '$.filename')""",
+            (job_id, plan["id"]),
+        ).fetchone()
         return {
+            "rename_files": renamed[0], "rename_families": renamed[1],
             "id": plan["id"], "state": plan["state"], "counts": counts, "filename_method": plan["filename_method"],
             "execution": dict(execution) if execution else None,
             "inventory_duplicates": connection.execute(
