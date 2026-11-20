@@ -776,11 +776,21 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
         (job["id"],),
     )
     selections = list(_assigned_families(rows, draft, events, intervals, seen_draft_keys))
-    duplicate_indices, collision_indices = _adoption_occurrence_sequences(selections, target_stems)
+    # Existing global media are skipped entirely, not participants in a new
+    # destination collision or duplicate numbering set. Only physical copies
+    # which will actually be newly moved can require an indexed target name.
+    # Do not discard partially registered families here: the existing
+    # _family_duplicate_conflict guard must still reject their unsafe merge.
+    new_selections = [
+        selected for selected in selections
+        if not all(registered_content(connection, registry, member["sha256"])
+                   for member in selected[1])
+    ]
+    duplicate_indices, collision_indices = _adoption_occurrence_sequences(new_selections, target_stems)
     occupied_targets = set()
     if filename_method == "script":
         cameras, bursts = _camera_tokens(selections)
-        exact_collisions = _exact_script_collisions(selections, cameras, bursts)
+        exact_collisions = _exact_script_collisions(new_selections, cameras, bursts)
     @lru_cache(maxsize=128)
     def existing_names(folder):
         names = archive_entry.names(folder)

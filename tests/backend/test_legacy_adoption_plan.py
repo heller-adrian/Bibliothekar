@@ -516,6 +516,9 @@ def test_explicit_target_name_conflict_and_exact_global_duplicates(inventory):
     assert plan["counts"] == {"duplicate": 1, "pending": 1}
     old, new = plan_moves(context, job)
     assert old["target"] is None
+    # The SHA already registered by a previous import is excluded from
+    # destination collision groups. The only newly accepted source should
+    # keep its unchanged original filename.
     assert Path(new["target"]).name == "same.jpg"
 
 
