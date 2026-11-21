@@ -38,6 +38,16 @@ def _fingerprint(connection, plan):
     ):
         for row in connection.execute(query, (plan["id"],)):
             digest.update(json.dumps(tuple(row)).encode("utf-8") + b"\n")
+    # Preserve old receipts bit-for-bit: only plans with actual XMP
+    # transformations add extra fingerprint material.
+    for row in connection.execute(
+        """SELECT relative_path, current_sha256, current_size_bytes,
+                  xmp_old_raw_name, xmp_new_raw_name
+             FROM legacy_adoption_moves
+            WHERE plan_id=? AND current_sha256 IS NOT NULL
+            ORDER BY relative_path""", (plan["id"],),
+    ):
+        digest.update(json.dumps(tuple(row)).encode("utf-8") + b"\n")
     return digest.hexdigest()
 
 

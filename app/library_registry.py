@@ -11,7 +11,7 @@ import os
 import sqlite3
 
 
-REGISTRY_SCHEMA_VERSION = 8
+REGISTRY_SCHEMA_VERSION = 9
 MAIN_LIBRARY_ID = "main"
 
 
@@ -205,6 +205,13 @@ REGISTRY_MIGRATIONS: dict[int, str] = {
         ALTER TABLE legacy_adoption_active ADD COLUMN access_kind TEXT NOT NULL DEFAULT 'legacy'
             CHECK (access_kind IN ('legacy', 'initial', 'library'));
         ALTER TABLE initial_library_setup ADD COLUMN completed_plan_id TEXT REFERENCES legacy_adoption_receipts(plan_id);
+    """,
+    9: """
+        -- Existing installations remain compatible. New first-library setup
+        -- explicitly starts at the preferences page.
+        ALTER TABLE initial_library_setup
+        ADD COLUMN preferences_completed INTEGER NOT NULL DEFAULT 1
+            CHECK (preferences_completed IN (0, 1));
     """,
 }
 
@@ -588,7 +595,7 @@ def register_library(
         )
         if initial_setup:
             connection.execute(
-                "INSERT INTO initial_library_setup (singleton, library_id, decision) VALUES (1, ?, 'choice')", (clean_id,),
+                "INSERT INTO initial_library_setup (singleton, library_id, decision, preferences_completed) VALUES (1, ?, 'choice', 0)", (clean_id,),
             )
         connection.commit()
     except sqlite3.IntegrityError as error:

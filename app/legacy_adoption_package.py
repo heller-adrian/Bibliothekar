@@ -17,6 +17,8 @@ from app.legacy_adoption_inventory import _job
 from app.legacy_adoption_paths import AdoptionError, bound_file, bound_sha256, relative_parent, verify_inventory_identity
 from app.legacy_adoption_plan import _roots
 from app.legacy_adoption_verify import _plan, move_rows
+from app.legacy_adoption_xmp_plan import MAX_XMP_BYTES
+from app.xmp_raw_filename import rewrite_raw_filename, XmpReferenceError
 from app.private_storage_security import qualified
 
 
@@ -262,7 +264,7 @@ def _bound_proof(root, path, size, expected, *, inventory_identity=None):
             return {"stamp": host.stamp(info), "sha256": expected}
 
 
-def prepare_manifest(connection, library, job, plan, probe_digest):
+def prepare_manifest(connection, library, job, plan, probe_digest, *, progress=None):
     plan_id = plan["id"]
     with ExitStack() as stack:
         descriptor = stack.enter_context(_package(_probe_package(job["id"], plan_id)))
@@ -275,6 +277,21 @@ def prepare_manifest(connection, library, job, plan, probe_digest):
             "SELECT relative_path FROM legacy_adoption_directories WHERE plan_id = ? ORDER BY relative_path",
             (plan_id,),
         )]
+        # Hashing the actual source bytes may take many minutes. The durable
+        # confirmation progress file is updated outside SQLite so the browser
+        # can poll even while the prepared-plan transaction is held.
+        totals = connection.execute(
+            """SELECT count(*), coalesce(sum(inventory.size_bytes), 0)
+               FROM legacy_adoption_moves AS move
+               JOIN legacy_adoption_inventory AS inventory
+                 ON inventory.job_id=? AND inventory.relative_path=move.relative_path
+              WHERE move.plan_id=? AND move.target_path IS NOT NULL""",
+            (job["id"], plan_id),
+        ).fetchone()
+        total_files, total_bytes = int(totals[0]), int(totals[1])
+        done_bytes = 0
+        if progress:
+            progress(descriptor, 0, total_files, 0, total_bytes)
         moves = []
         for row in move_rows(connection, job["id"], plan_id):
             original = row["relative_path"]
@@ -282,6 +299,38 @@ def prepare_manifest(connection, library, job, plan, probe_digest):
                 "source": original, "target": row["target_path"],
                 **_bound_proof(source, original, row["size_bytes"], row["sha256"],
                                inventory_identity=json.loads(row["identity"])),
+            })
+            done_bytes += int(row["size_bytes"])
+            if progress and (len(moves) % 32 == 0 or len(moves) == total_files):
+                progress(descriptor, len(moves), total_files, done_bytes, total_bytes)
+        # The updated sidecar bytes are fully determined by the frozen plan.
+        # Re-verify the original and rederive the approved new SHA before
+        # embedding them in the host-bound manifest. No source is modified.
+        xmp_edits = []
+        for row in move_rows(connection, job["id"], plan_id):
+            if not row["current_sha256"]:
+                continue
+            original_path = row["relative_path"]
+            with relative_parent(source, original_path) as (parent, name):
+                with bound_file(parent, name) as (fd, info):
+                    if info.st_size > MAX_XMP_BYTES or info.st_size != row["size_bytes"]:
+                        raise AdoptionError("XMP-Inhalt ist zu groß oder wurde verändert: " + original_path)
+                    content = os.pread(fd, info.st_size, 0)
+                    if len(content) != info.st_size or _sha(content) != row["sha256"]:
+                        raise AdoptionError("XMP-Original stimmt nicht mehr mit dem Plan überein: " + original_path)
+            try:
+                rewritten = rewrite_raw_filename(
+                    content, row["xmp_old_raw_name"], row["xmp_new_raw_name"],
+                )
+            except XmpReferenceError as error:
+                raise AdoptionError("Die geplante XMP-Umbenennung ist nicht mehr gültig: " + original_path) from error
+            if len(rewritten) != row["current_size_bytes"] or _sha(rewritten) != row["current_sha256"]:
+                raise AdoptionError("Der bestätigte XMP-Zielinhalt weicht von der Planung ab: " + original_path)
+            xmp_edits.append({
+                "source": original_path, "target": row["target_path"],
+                "original_sha256": row["sha256"], "sha256": row["current_sha256"],
+                "size_bytes": row["current_size_bytes"],
+                "content": base64.b64encode(rewritten).decode("ascii"),
             })
         documents = []
         for row in connection.execute(
@@ -294,7 +343,9 @@ def prepare_manifest(connection, library, job, plan, probe_digest):
             original = _bound_proof(archive, path, old_size, old_digest) if old_digest else None
             documents.append({"path": path, "original": original, "sha256": digest,
                               "content": base64.b64encode(content).decode("ascii")})
-        manifest = {**probe, "format": 1, "directories": directories, "moves": moves, "documents": documents}
+        manifest = {**probe, "format": 2 if xmp_edits else 1,
+                    "directories": directories, "moves": moves, "documents": documents,
+                    **({"xmp_edits": xmp_edits} if xmp_edits else {})}
         host.validate_plan(manifest)
         if _read_json(descriptor, "permission.json") is not None:
             raise AdoptionError("Das Paket wurde bereits zur Ausführung freigegeben.")

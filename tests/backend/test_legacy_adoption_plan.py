@@ -242,9 +242,10 @@ def test_shared_jpeg_with_different_raws_remains_ambiguous(inventory):
             "SELECT disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
         ))
     assert all(row[0] == "candidate" for row in rows)
-    plan = create_plan(context, registry, job, _draft())
-    assert plan["move_files"] == 4
-    assert plan["inventory_duplicates"] == 0
+    # A shared JPEG checksum is not proof that different RAWs are the same
+    # capture. Do not create an executable move plan for such ambiguity.
+    with pytest.raises(AdoptionError, match="Widersprüchliche RAW-Aufnahmen in Duplikatfamilien"):
+        create_plan(context, registry, job, _draft())
 
 
 def test_historical_duplicate_raw_preserves_distinct_xmp_as_detached(inventory):
@@ -1002,3 +1003,193 @@ def test_script_adoption_precise_burst_vs_real_duplicates(
     plan = create_plan(context, registry, job, _draft(), filename_method="script")
     assert plan["move_files"] == 2
     assert {Path(item["target"]).name for item in plan_moves(context, job)} == expected
+
+
+def test_rc2_true_raf_jpeg_xmp_sidecar_shared_script_target_stem(inventory, monkeypatch):
+    """Real DSCF2915 regression: a sidecar in Sonstiges must keep the RAW stem."""
+    import os
+
+    context, source, registry = inventory
+    items = [
+        "2025/04/16.04.2025/Vögel/Roh/DSCF2915.RAF",
+        "2025/04/16.04.2025/Vögel/Bilder/DSCF2915.JPG",
+        "2025/04/16.04.2025/Vögel/Sonstiges/DSCF2915.xmp",
+    ]
+    original_xmp = (
+        b'<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+        b'<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        b'<rdf:Description xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"'
+        b' crs:RawFileName="DSCF2915.RAF" crs:Exposure2012="+0.8"/>'
+        b'</rdf:RDF></x:xmpmeta>'
+    )
+    for item in items:
+        path = source / item
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(original_xmp if item.endswith(".xmp") else path.name.encode())
+
+    def bound_metadata(descriptors, _cancel):
+        result = {}
+        for fd in descriptors:
+            beginning = os.pread(fd, 256, 0)
+            if beginning.startswith(b"<x:xmpmeta"):
+                result[fd] = {
+                    "XMP:XMP-exif:DateTimeOriginal": "2025:04:16 19:37:26+02:00",
+                    "XMP:XMP-tiff:Make": "FUJIFILM",
+                    "XMP:XMP-tiff:Model": "X-H2S",
+                    "XMP:XMP-crs:RawFileName": "DSCF2915.RAF",
+                }
+            else:
+                result[fd] = {
+                    "EXIF:ExifIFD:DateTimeOriginal": "2025:04:16 19:37:26",
+                    "EXIF:IFD0:Make": "FUJIFILM",
+                    "EXIF:IFD0:Model": "X-H2S",
+                    "EXIF:ExifIFD:ExposureTime": "1/50",
+                    "EXIF:ExifIFD:FNumber": "5.6",
+                    "EXIF:ExifIFD:ISO": "3200",
+                }
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", bound_metadata)
+    job = _scan(context, source)
+    plan = create_plan(
+        context, registry, job,
+        {"events": [{"name": "Vögel", "start_date": "2025-04-16", "end_date": "2025-04-16"}]},
+        filename_method="script",
+    )
+    assert plan["move_files"] == 3
+    moves = plan_moves(context, job)
+    assert {row["relative_path"] for row in moves} == set(items)
+    targets = {row["relative_path"]: Path(row["target"]).name for row in moves}
+    stems = {name.rsplit(".", 1)[0] for name in targets.values()}
+    assert len(stems) == 1
+    assert all("_Burst_" not in name for name in targets.values())
+    assert {Path(name).suffix.lower() for name in targets.values()} == {".raf", ".jpg", ".xmp"}
+    xmp_row = next(row for row in moves if row["relative_path"].endswith(".xmp"))
+    import hashlib
+    expected = original_xmp.replace(b'RawFileName="DSCF2915.RAF"',
+                                    ('RawFileName="' + targets[items[0]] + '"').encode())
+    assert xmp_row["sha256"] == hashlib.sha256(original_xmp).hexdigest()
+    assert xmp_row["current_sha256"] == hashlib.sha256(expected).hexdigest()
+    assert xmp_row["current_size_bytes"] == len(expected)
+    assert xmp_row["xmp_old_raw_name"] == "DSCF2915.RAF"
+    assert xmp_row["xmp_new_raw_name"] == targets[items[0]]
+
+
+
+def test_rc2_duplicate_numbers_are_separate_from_filename_collisions():
+    """Two independent SHA groups cannot consume one another's suffixes."""
+    from app.legacy_adoption_plan import _adoption_occurrence_sequences
+
+    def record(name, checksum):
+        return {
+            "relative_path": name, "sha256": checksum,
+            "metadata_json": '{"media_type": "jpg"}',
+        }
+
+    def candidate(key, name, digest, stem):
+        return (
+            key, [record(name, digest)], "2025-04-16T19:37:26", None,
+            (None, Path("2025/Urlaub"), "", {"structure_enabled": False, "input_path": ""}),
+        )
+
+    selected = [
+        candidate("A", "A/a.jpg", "sha-1", "S1"),
+        candidate("B", "B/b.jpg", "sha-1", "S2"),
+        candidate("C", "C/c.jpg", "sha-2", "S2"),
+        candidate("D", "D/d.jpg", "sha-2", "S3"),
+    ]
+    duplicate, collision = _adoption_occurrence_sequences(
+        selected, {"A": "S1", "B": "S2", "C": "S2", "D": "S3"},
+    )
+    assert duplicate == {"A": 1, "B": 2, "C": 1, "D": 2}
+    assert collision == {"B": 1, "C": 2}
+
+
+def test_rc2_conflicting_duplicate_membership_requires_review():
+    from app.legacy_adoption_plan import _adoption_occurrence_sequences
+
+    def member(name, sha):
+        return {"relative_path": name, "sha256": sha,
+                "metadata_json": '{"media_type": "raw"}'}
+
+    folder = (None, Path("Album"), "", {"structure_enabled": False, "input_path": ""})
+    selections = [
+        ("A", [member("a.A", "hash-a"), member("a.B", "hash-b")], "2025-04-16", None, folder),
+        ("B", [member("b.A", "hash-a")], "2025-04-16", None, folder),
+        ("C", [member("c.B", "hash-b")], "2025-04-16", None, folder),
+    ]
+    with pytest.raises(AdoptionError, match="Duplikatfamilien"):
+        _adoption_occurrence_sequences(selections, {})
+
+
+def test_rc2_same_second_distinct_captures_with_two_copies_each_use_contiguous_suffixes(
+    inventory, monkeypatch,
+):
+    """A/A-copy and B/B-copy use Burst 001/002 and Duplicate 001/002, not 1/3 and 2/4."""
+    import os
+
+    context, source, registry = inventory
+    fixtures = {
+        "camera-one/AAAA1001.JPG": b"capture-A",
+        "copies/ZZZZ9001.JPG": b"capture-A",
+        "camera-two/BBBB2002.JPG": b"capture-B",
+        "copies/YYYY8002.JPG": b"capture-B",
+    }
+    for relative, content in fixtures.items():
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    def common_camera(descriptors, _cancel):
+        return {
+            fd: {
+                "EXIF:IFD0:Make": "FUJIFILM",
+                "EXIF:IFD0:Model": "X-E5",
+                "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+            } for fd in descriptors
+        }
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", common_camera)
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft(), filename_method="script")
+    assert plan["move_files"] == 4
+    moves = plan_moves(context, job)
+    by_hash = {}
+    for row in moves:
+        by_hash.setdefault(row["sha256"], set()).add(Path(row["target"]).name)
+    assert len(by_hash) == 2
+    assert sorted(sorted(files) for files in by_hash.values()) == [
+        [
+            "20260721_120000_Fuji-X-E5_Burst_001_Duplicate_001.JPG",
+            "20260721_120000_Fuji-X-E5_Burst_001_Duplicate_002.JPG",
+        ],
+        [
+            "20260721_120000_Fuji-X-E5_Burst_002_Duplicate_001.JPG",
+            "20260721_120000_Fuji-X-E5_Burst_002_Duplicate_002.JPG",
+        ],
+    ]
+
+
+
+def test_rc2_identical_jpeg_with_different_raw_masters_is_not_a_duplicate_capture():
+    """Shared JPEG content cannot override conflicting actual RAW capture bytes."""
+    from app.legacy_adoption_plan import _adoption_occurrence_sequences
+
+    folder = (None, Path("2025/Album"), "", {
+        "structure_enabled": False, "input_path": "",
+    })
+
+    def item(relative, digest, kind):
+        return {
+            "relative_path": relative, "sha256": digest,
+            "metadata_json": '{"media_type": "' + kind + '"}',
+        }
+
+    selections = [
+        ("A", [item("A.RAF", "raw-1", "raw"), item("A.JPG", "same-jpeg", "jpeg")],
+         "2025-04-16T19:37:26", None, folder),
+        ("B", [item("B.RAF", "raw-2", "raw"), item("B.JPG", "same-jpeg", "jpeg")],
+         "2025-04-16T19:37:26", None, folder),
+    ]
+    with pytest.raises(AdoptionError, match="Widersprüchliche RAW"):
+        _adoption_occurrence_sequences(selections, {})

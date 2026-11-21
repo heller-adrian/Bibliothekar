@@ -9,7 +9,7 @@ import unicodedata
 
 
 IDENTITY_TAGS = ("ImageUniqueID", "BodySerialNumber", "OriginalRawFileName")
-IDENTITY_VERSION = 2
+IDENTITY_VERSION = 3
 
 
 def _normalized(value):
@@ -31,6 +31,7 @@ def capture_identity(metadata):
         "serial": next(iter(serials)) if len(serials) == 1 else "",
         "original_raw": _normalized(metadata.get("DNG:IFD0:OriginalRawFileName")
                                     or metadata.get("EXIF:IFD0:OriginalRawFileName")),
+        "sidecar_raw": _normalized(metadata.get("XMP:XMP-crs:RawFileName")),
         "conflict": len(ids) > 1 or len(serials) > 1,
     }
 
@@ -94,6 +95,7 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
     by_id, by_precision, by_context = defaultdict(set), defaultdict(set), defaultdict(set)
     candidates = {}
     primary_by_name = defaultdict(set)
+    primary_by_stem = defaultdict(set)
     standalone_sidecars = {}
     for key, members, eligible in groups:
         cancel()
@@ -108,6 +110,7 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
             # assuming RAW/JPEG/XMP directories or any historic folder layout.
             name = _normalized(PurePosixPath(primary["relative_path"]).name)
             primary_by_name[name].add(key)
+            primary_by_stem[_normalized(PurePosixPath(primary["relative_path"]).stem)].add(key)
         if not evidence:
             continue
         # A local family with multiple media files is a single unit. Every
@@ -144,50 +147,103 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
     for key, sidecar in standalone_sidecars.items():
         cancel()
         path = PurePosixPath(sidecar["relative_path"])
-        original_name = path.stem if path.suffix.casefold() == ".xmp" else ""
-        if PurePosixPath(original_name).suffix.casefold() not in {
+        if path.suffix.casefold() != ".xmp":
+            continue
+        original_name = _normalized(path.stem)
+        identity = sidecar.get("capture_identity") or {}
+        raw_hint = identity.get("sidecar_raw") or ""
+        named_extension = PurePosixPath(original_name).suffix.casefold()
+        exact_named = named_extension in {
             ".raf", ".nef", ".cr2", ".cr3", ".arw", ".orf", ".rw2",
             ".dng", ".jpg", ".jpeg",
-        }:
-            continue
-        owners = primary_by_name.get(_normalized(original_name), set())
-        # Sidecars with no independent capture identity are linked only when
-        # there is one possible original in the *whole* scan. Ambiguity never
-        # gets resolved by guessing from directory labels.
-        if len(owners) != 1:
-            continue
-        [owner] = owners
-        if owner not in candidates or not candidates[owner][2]:
-            continue
-        exact = [item for item in candidates[owner][0]
-                 if _normalized(PurePosixPath(item["relative_path"]).name) == _normalized(original_name)]
-        if len(exact) != 1:
-            continue
-        original = exact[0]
-        identity = sidecar.get("capture_identity") or {}
-        match = original.get("capture_identity") or {}
+        }
+        # An explicit RAW filename is authoritative about the *name*, not
+        # globally unique capture identity. Resolve it against the entire
+        # inventory and require a single, corroborated capture.
+        if raw_hint:
+            if exact_named and original_name != raw_hint:
+                continue
+            owners = primary_by_name.get(raw_hint, set())
+        elif exact_named:
+            owners = primary_by_name.get(original_name, set())
+        else:
+            # Adobe's common DSCF1234.xmp sidecar has no extension hint.
+            # Only corroborating camera AND capture time can qualify it.
+            owners = primary_by_stem.get(original_name, set())
+
         if (sidecar.get("metadata_error") or sidecar.get("metadata_conflict")
-                or (sidecar.get("review_required") and sidecar.get("selected_capture_time"))):
-            continue
-        if identity.get("conflict") or any(identity.get(tag) and match.get(tag)
-                                           and identity[tag] != match[tag] for tag in ("id", "serial")):
-            continue
-        sidecar_settings = sidecar.get("capture_settings") or {}
-        original_settings = original.get("capture_settings") or {}
-        if any(not _same_setting(sidecar_settings.get(field), original_settings.get(field))
-               for field in ("exposure", "aperture", "iso")):
+                or identity.get("conflict")):
             continue
         sidecar_camera = _camera(sidecar)
-        if any(sidecar_camera) and sidecar_camera != _camera(original):
+        # XMP CreateDate can describe a later edit or sidecar creation;
+        # only DateTimeOriginal is an independently usable capture instant.
+        sidecar_source = str(sidecar.get("selected_capture_source") or "")
+        sidecar_time = (_time(sidecar) if sidecar_source.endswith(":DateTimeOriginal")
+                        else None)
+        if not raw_hint and not exact_named:
+            if sidecar_time is None or not all(sidecar_camera):
+                continue
+        if sidecar.get("review_required") and sidecar.get("selected_capture_time"):
             continue
-        sidecar_time = _time(sidecar)
-        original_time = _time(original)
-        if sidecar_time is not None and (original_time is None
-                                         or sidecar_time.replace(microsecond=0)
-                                         != original_time.replace(microsecond=0)):
+
+        qualified = {}
+        for owner in owners:
+            if owner not in candidates or not candidates[owner][2]:
+                continue
+            primaries = candidates[owner][0]
+            exact = [
+                item for item in primaries
+                if _normalized(PurePosixPath(item["relative_path"]).name) == raw_hint
+            ] if raw_hint else [
+                item for item in primaries
+                if (_normalized(PurePosixPath(item["relative_path"]).name) == original_name
+                    if exact_named else
+                    _normalized(PurePosixPath(item["relative_path"]).stem) == original_name)
+            ]
+            for original in exact:
+                match = original.get("capture_identity") or {}
+                if any(identity.get(tag) and match.get(tag)
+                       and identity[tag] != match[tag] for tag in ("id", "serial")):
+                    continue
+                if any(sidecar_camera) and sidecar_camera != _camera(original):
+                    continue
+                original_time = _time(original)
+                if (sidecar_time is not None
+                        and (original_time is None
+                             or sidecar_time.replace(microsecond=0)
+                             != original_time.replace(microsecond=0))):
+                    continue
+                if not raw_hint:
+                    # Without an explicit RAW reference, original capture
+                    # settings provide an additional conservative fence.
+                    settings = sidecar.get("capture_settings") or {}
+                    original_settings = original.get("capture_settings") or {}
+                    if any(not _same_setting(settings.get(field), original_settings.get(field))
+                           for field in ("exposure", "aperture", "iso")):
+                        continue
+                qualified[(owner, original["relative_path"])] = original
+
+        if not qualified:
             continue
+        # Two RAW files can reuse the same name, even in different folders.
+        # Never choose arbitrarily; leave ambiguous cases for review.
+        unique_owners = {owner for owner, _ in qualified}
+        if raw_hint or exact_named:
+            if len(qualified) != 1:
+                continue
+        else:
+            raw_candidates = {
+                (owner, name) for (owner, name), item in qualified.items()
+                if _role(item) == "raw"
+            }
+            if len(raw_candidates) > 1 or (not raw_candidates and len(unique_owners) != 1):
+                continue
+            # When RAW/JPEG are in separate folders, their proven same-stem
+            # and same-second context may connect them as a single family.
+            if len(unique_owners) > 2:
+                continue
         candidates[key] = ([sidecar], [], True)
-        by_sidecar[key] = {key, owner}
+        by_sidecar[key] = {key, *unique_owners}
 
     groups_by_key = defaultdict(list)
     for bucket in chain(by_id.values(), by_precision.values(), by_context.values(), by_sidecar.values()):

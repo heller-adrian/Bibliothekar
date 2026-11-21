@@ -71,7 +71,7 @@ def fresh_main(tmp_path, monkeypatch, request):
     return workspace, database, registry, archive
 
 
-def _onboard(fresh_main):
+def _onboard(fresh_main, *, confirm_preferences=True):
     _, _, registry, archive = fresh_main
     main.startup_database()
     assert main.DATABASE_INITIALIZATION_ERROR is None
@@ -84,6 +84,8 @@ def _onboard(fresh_main):
     })
     assert result["library"]["library_id"] == "main"
     assert pending_initial_setup(registry) == {"library_id": "main", "decision": "choice"}
+    if confirm_preferences:
+        assert _json(client, "POST", "/api/setup/preferences/continue") == {"next": "/setup/adoption"}
     return client
 
 
@@ -375,7 +377,13 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
             for fd in descriptors
         },
     )
-    client = _onboard(fresh_main)
+    client = _onboard(fresh_main, confirm_preferences=False)
+    original_naming = _json(client, "GET", "/api/settings/event-naming")
+    editable_naming = {key: value for key, value in original_naming.items() if key != "library_id"}
+    editable_naming["no_event_label"] = "Meine archivierten Aufnahmen"
+    _json(client, "PUT", "/api/settings/event-naming", json=editable_naming)
+    preserved_folder_layout = _json(client, "GET", "/api/settings/event-folder-layout")
+    assert _json(client, "POST", "/api/setup/preferences/continue")["next"] == "/setup/adoption"
     assert _adopt(client) == {"next": "/legacy-adoption"}
     library = resolve_library_context(registry, "main")
     wizard = client.get("/legacy-adoption?library=second")
@@ -464,6 +472,10 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
     assert pending_initial_setup(registry) is None
     assert _json(client, "GET", job, status=409)["code"] == "legacy_adoption_inactive"
     assert client.get("/workspace").status_code == 200
+    # This is a real verified adoption + finalize/recovery, not just a
+    # preference preview. The normal settings APIs must retain the values.
+    assert _json(client, "GET", "/api/settings/event-naming")["no_event_label"] == "Meine archivierten Aufnahmen"
+    assert _json(client, "GET", "/api/settings/event-folder-layout") == preserved_folder_layout
 
     def startup_blocks_write_validation():
         # Startup can begin after request admission while the client repeats a
@@ -1114,7 +1126,9 @@ def test_script_host_proof_release_and_independent_archive_verification(
 
     assert external(probe["command"]) == 0
     assert _json(client, "GET", job + "/script/probe")["verified"]
-    assert _json(client, "POST", job + "/confirm", json=confirm)["execution"]["phase"] == "script_prepared"
+    assert _json(client, "POST", job + "/confirm", json=confirm, status=202)["accepted"]
+    assert _json(client, "GET", job + "/preparation")["state"] == "completed"
+    assert _json(client, "GET", job)["plan"]["execution"]["phase"] == "script_prepared"
     assert not _json(client, "GET", job + "/script").get("command")
     assert _json(client, "GET", job + "/download/documents", status=409)["detail"]
     apply = _json(client, "POST", job + "/script/release", json=command)["command"]
@@ -1741,6 +1755,8 @@ def test_container_probe_creates_main_library_once_after_lock_release(fresh_main
     assert responses == [409, 201]
     assert result["library"]["library_id"] == "main"
     assert pending_initial_setup(registry) == {"library_id": "main", "decision": "choice"}
+    assert client.get("/").headers["location"] == "/setup/preferences"
+    assert _json(client, "POST", "/api/setup/preferences/continue") == {"next": "/setup/adoption"}
     assert _json(client, "POST", "/api/setup/adoption", json={"decision": "skipped"}) == {"next": "/"}
     assert client.get("/").status_code == 200
 
@@ -2203,9 +2219,10 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
             options = ["--package", str(package_path), "--source", str(source), "--archive", str(archive),
                        "--package-device", str(device), "--package-inode", str(inode)]
             assert host.main(["probe", *options, "--sha256", probe["sha256"]]) == 0
-            _json(client, "POST", job + "/confirm", json={
+            assert _json(client, "POST", job + "/confirm", status=202, json={
                 **command, "acknowledged": True, "method": "script", "probe_sha256": probe["sha256"],
-            })
+            })["accepted"]
+            assert _json(client, "GET", job + "/preparation")["state"] == "completed"
             _json(client, "POST", job + "/script/release", json=command)
             released = json.loads((package_path / "permission.json").read_text())
             manifest = json.loads((package_path / "manifest.json").read_text())

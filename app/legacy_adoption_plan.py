@@ -28,6 +28,7 @@ from app.free_time import free_ranges_for_day
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps, normalize_no_event_segments, normal_event_ranges
 from app.legacy_adoption_inventory import _job, _legacy_family_key, registered_content
 from app.legacy_adoption_mode import require_no_managed_data
+from app.legacy_adoption_xmp_plan import MAX_XMP_BYTES, XmpPlanError, planned_edit
 from app.legacy_adoption_paths import (
     AdoptionError, bound_directory, bound_file, bound_sha256, file_identity, relative_parent,
     target_key, validate_target, verify_inventory_identity, walk_bound_files,
@@ -623,17 +624,22 @@ def _family_targets(folder, key, family, override, archive_entry, registered, us
 
 
 def _adoption_occurrence_sequences(selections, target_stems):
-    """Number *all* members of duplicate or colliding family groups.
+    """Keep true SHA-256 copy sequences separate from path collision sequences.
 
-    SHA-256 groups are global to the inventory, independent of source path.
-    Naming collisions, by contrast, use the actual complete destination
-    filename in the selected event. Stable family keys determine the indices;
-    no family is arbitrarily labelled the unnumbered original.
+    A collision between two *different* originals must not consume a number
+    in a separate SHA-identical duplicate group. Resolve each hash bucket
+    independently; overlapping but nonidentical duplicate buckets cannot
+    safely receive a single family suffix and therefore require review.
     """
     by_hash, by_target = defaultdict(set), defaultdict(set)
+    raw_hashes_by_key = {}
     keys = set()
     for key, members, _capture, _event, (_assigned, leaf, _leaf_key, layout) in selections:
         keys.add(key)
+        raw_hashes_by_key[key] = frozenset(
+            item["sha256"] for item in members
+            if json.loads(item["metadata_json"] or "{}").get("media_type") == "raw"
+        )
         folder = _destination_folder(leaf, layout)
         stem = target_stems.get(key, PurePosixPath(key).name)
         for member in members:
@@ -643,30 +649,64 @@ def _adoption_occurrence_sequences(selections, target_stems):
             if media_type != "xmp":
                 by_hash[member["sha256"]].add(key)
 
-    def ordered_components(buckets):
-        parent = {key: key for key in keys}
+    # Do NOT apply graph connectivity to real duplicates. A family may contain
+    # two media hashes shared with distinct sets of other families; arbitrarily
+    # merging their transitive closure makes duplicate indices skip values.
+    duplicate_indices = {}
+    membership = {}
+    seen_groups = set()
+    for bucket in by_hash.values():
+        if len(bucket) < 2:
+            continue
+        members = frozenset(bucket)
+        # A copied JPEG must not falsely collapse two distinct RAW captures
+        # merely because the JPEGs happen to have identical bytes.
+        raw_signatures = {
+            raw_hashes_by_key[key] for key in members if raw_hashes_by_key[key]
+        }
+        if len(raw_signatures) > 1:
+            raise AdoptionError(
+                "Widersprüchliche RAW-Aufnahmen in Duplikatfamilien (gemeinsame Begleitmedien): " +
+                ", ".join(sorted(members))
+            )
+        if members in seen_groups:
+            continue
+        seen_groups.add(members)
+        for index, key in enumerate(sorted(members), 1):
+            previous = membership.get(key)
+            if previous is not None and previous != members:
+                raise AdoptionError(
+                    "Überlappende, uneinheitliche Duplikatfamilien erfordern eine manuelle Prüfung: " + key
+                )
+            membership[key] = members
+            duplicate_indices[key] = index
 
-        def root(key):
-            while key != parent[key]:
-                parent[key] = parent[parent[key]]
-                key = parent[key]
-            return key
+    # Collision numbering is separate: several different file extensions in
+    # one family can still clash with other families' complete target names.
+    parent = {key: key for key in keys}
 
-        for bucket in buckets.values():
-            if len(bucket) < 2:
-                continue
-            ordered = sorted(bucket)
-            first = root(ordered[0])
-            for key in ordered[1:]:
-                parent[root(key)] = first
-        components = defaultdict(list)
-        for key in sorted(keys):
-            components[root(key)].append(key)
-        return {key: index for members in components.values() if len(members) > 1
-                for index, key in enumerate(sorted(members), 1)}
+    def root(key):
+        while key != parent[key]:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
 
-    return ordered_components(by_hash), ordered_components(by_target)
-
+    for bucket in by_target.values():
+        if len(bucket) < 2:
+            continue
+        ordered = sorted(bucket)
+        first = root(ordered[0])
+        for key in ordered[1:]:
+            parent[root(key)] = first
+    components = defaultdict(list)
+    for key in sorted(keys):
+        components[root(key)].append(key)
+    collision_indices = {
+        key: index
+        for members in components.values() if len(members) > 1
+        for index, key in enumerate(sorted(members), 1)
+    }
+    return duplicate_indices, collision_indices
 
 def _exact_script_collisions(selections, camera_tokens, burst_counts):
     """Only same generated millisecond name needs _001 from the first family."""
@@ -714,14 +754,61 @@ def _camera_tokens(families):
     return tokens, groups
 
 
+def _script_capture_ordinals(selections, cameras):
+    """Assign a stable burst position to each *distinct* capture, not each copy.
+
+    SHA-identical occurrences are the same capture for burst numbering, but
+    still receive their own _Duplicate_NNN occurrence suffix. Different
+    exposures at the same second never borrow each other's duplicate index.
+    """
+    by_hash = defaultdict(set)
+    for key, members, *_ in selections:
+        for item in members:
+            if json.loads(item["metadata_json"] or "{}").get("media_type") != "xmp":
+                by_hash[item["sha256"]].add(key)
+    cohorts = {}
+    for bucket in by_hash.values():
+        if len(bucket) < 2:
+            continue
+        identity = frozenset(bucket)
+        for key in bucket:
+            previous = cohorts.get(key)
+            if previous is not None and previous != identity:
+                raise AdoptionError("Mehrdeutige, überlappende Aufnahme-Duplikatgruppen: " + key)
+            cohorts[key] = identity
+
+    unique_by_group = defaultdict(set)
+    no_subsec_by_group = defaultdict(set)
+    for key, _members, capture, *_ in selections:
+        group = cameras[key][1]
+        cohort = cohorts.get(key, frozenset({key}))
+        unique_by_group[group].add(cohort)
+        if capture[19:20] != ".":
+            no_subsec_by_group[group].add(cohort)
+    distinct = {group: len(cohorts) for group, cohorts in unique_by_group.items()}
+
+    def order(cohort):
+        return min((PurePosixPath(key).name.casefold(), key) for key in cohort)
+
+    burst_ordinals = {}
+    for group, captures in no_subsec_by_group.items():
+        for index, cohort in enumerate(sorted(captures, key=order), 1):
+            for key in cohort:
+                burst_ordinals[key] = index
+    return distinct, burst_ordinals
+
+
 def _automatic_family_targets(folder, key, family, capture, camera, same_second, names, stems, used,
-                              *, duplicate_index=None, number_all=False):
+                              *, duplicate_index=None, number_all=False, burst_ordinal=None):
     endings = [family_member_ending(member["relative_path"]) for member in family]
     if len({target_key(ending) for ending in endings}) != len(endings):
         raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + key)
     # Reuse exactly the same real-EXIF-millisecond Burst implementation as the
     # normal folder import. Neither invented subseconds nor directory patterns.
     base, index, _ = capture_stem(capture, camera, stems, same_second=same_second)
+    if index > 0 and base.endswith("_Burst") and burst_ordinal is not None:
+        base += f"_{burst_ordinal:03d}"
+        index = 0
     if duplicate_index is not None:
         base += "_Duplicate"
         index = duplicate_index
@@ -790,6 +877,7 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
     occupied_targets = set()
     if filename_method == "script":
         cameras, bursts = _camera_tokens(selections)
+        distinct, burst_ordinals = _script_capture_ordinals(new_selections, cameras)
         exact_collisions = _exact_script_collisions(new_selections, cameras, bursts)
     @lru_cache(maxsize=128)
     def existing_names(folder):
@@ -816,16 +904,19 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             targets = [None] * len(family)
         elif filename_method == "script" and key not in target_stems:
             camera, burst_group = cameras[key]
+            same_second = (distinct[burst_group] > 1 or
+                           (bursts[burst_group] > 1 and capture[19:20] == "."))
             generated_stem, generated_index, _ = capture_stem(
-                capture, camera, set(), same_second=bursts[burst_group] > 1,
+                capture, camera, set(), same_second=same_second,
             )
             number_all = generated_index == 0 and exact_collisions[
                 (target_key(str(folder)), generated_stem.casefold())
             ] > 1
             targets = _automatic_family_targets(
-                folder, key, family, capture, camera, bursts[burst_group] > 1,
+                folder, key, family, capture, camera, same_second,
                 *existing_names(str(folder)), used_stems,
                 duplicate_index=duplicate_indices.get(key), number_all=number_all,
+                burst_ordinal=burst_ordinals.get(key),
             )
         else:
             targets = _family_targets(
@@ -839,9 +930,28 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             source = member["relative_path"]
             if source.strip() != source or "\\" in source:
                 raise AdoptionError("Der Quellpfad ist für die globale Registry ungeeignet: " + source)
+            xmp_edit = None
             with relative_parent(source_fd, source) as (directory, name):
                 with bound_file(directory, name) as (fd, info):
                     verify_inventory_identity(fd, info, json.loads(member["identity"]), member["sha256"])
+                    metadata = json.loads(member["metadata_json"] or "{}")
+                    raw_hint = (metadata.get("capture_identity") or {}).get("sidecar_raw")
+                    if (filename_method == "script" and target is not None
+                            and metadata.get("media_type") == "xmp" and raw_hint):
+                        if info.st_size > MAX_XMP_BYTES:
+                            raise AdoptionError("XMP-Datei erfordert eine separate Prüfung (zu groß): " + source)
+                        payload = os.pread(fd, info.st_size, 0)
+                        if len(payload) != info.st_size:
+                            raise AdoptionError("XMP-Datei wurde während der Planung verändert: " + source)
+                        try:
+                            xmp_edit = planned_edit(family, targets, payload)
+                            if (xmp_edit and xmp_edit["xmp_old_raw_name"].casefold() != raw_hint):
+                                raise XmpPlanError("Der RAW-Verweis weicht von den inventarisierten XMP-Metadaten ab.")
+                        except XmpPlanError as error:
+                            raise AdoptionError(
+                                "Die XMP-Referenz kann nicht sicher mitbenannt werden: " + source +
+                                " (" + str(error) + ")"
+                            ) from error
             if target is not None:
                 source_dir = PurePosixPath(source).parent
                 target_dir = str(PurePosixPath(target).parent)
@@ -861,6 +971,16 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                 )
             except sqlite3.IntegrityError as error:
                 raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + str(target)) from error
+            if xmp_edit is not None:
+                connection.execute(
+                    """UPDATE legacy_adoption_moves
+                          SET current_sha256=?, current_size_bytes=?,
+                              xmp_old_raw_name=?, xmp_new_raw_name=?
+                        WHERE plan_id=? AND relative_path=?""",
+                    (xmp_edit["current_sha256"], xmp_edit["current_size_bytes"],
+                     xmp_edit["xmp_old_raw_name"], xmp_edit["xmp_new_raw_name"],
+                     plan_id, source),
+                )
         if not new_family:
             continue
         if (event["id"], leaf_key) not in planned_directories:

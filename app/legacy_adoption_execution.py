@@ -23,7 +23,7 @@ def set_phase(connection, plan_id, phase):
     )
 
 
-def confirm_plan(library, job_id, plan_id, method, *, acknowledged, probe_digest=None):
+def confirm_plan(library, job_id, plan_id, method, *, acknowledged, probe_digest=None, progress=None):
     if acknowledged is not True or method not in {"manual", "script"}:
         raise AdoptionError("Bestätige die Sicherheitsbedingungen und wähle eine verfügbare Methode.")
     with database_connection(library.database_path) as connection:
@@ -38,7 +38,8 @@ def confirm_plan(library, job_id, plan_id, method, *, acknowledged, probe_digest
             if plan["filename_method"] not in {None, method}:
                 raise AdoptionError("Wähle zuerst die Durchführungsmethode für den angezeigten Verschiebeplan.")
             _catalogue_unchanged(connection, job_id, json.loads(plan["events_json"]))
-            assert_original_layout(connection, library, job, plan)
+            assert_original_layout(connection, library, job, plan,
+                                   defer_source_hash=(method == "script"))
             connection.execute(
                 "INSERT INTO legacy_adoption_execution (plan_id, method, phase) VALUES (?, ?, ?)",
                 (plan_id, method, "manual" if method == "manual" else "script_prepared"),
@@ -47,7 +48,7 @@ def confirm_plan(library, job_id, plan_id, method, *, acknowledged, probe_digest
                 record_missing_directories(connection, library, job, plan)
             else:
                 from app.legacy_adoption_package import prepare_manifest
-                prepare_manifest(connection, library, job, plan, probe_digest)
+                prepare_manifest(connection, library, job, plan, probe_digest, progress=progress)
         elif existing["method"] != method:
             raise AdoptionError("Die bestätigte Methode kann nicht geändert werden.")
     return plan_status(library, job_id)
