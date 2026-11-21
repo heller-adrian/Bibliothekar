@@ -32,7 +32,8 @@ from app.legacy_adoption_package import (
     inspect_runner, locked_script, permit, prepare_probe, probe_details, read_manifest, script_details, script_status,
 )
 from app.legacy_adoption_preparation import (
-    exclusive_preparation_worker, preparation_status, record_preparation, reserve_preparation,
+    exclusive_preparation_worker, preparation_status, preparation_worker_active,
+    record_preparation, reserve_preparation,
 )
 from app.legacy_adoption_paths import AdoptionError, bound_directory
 from app.legacy_adoption_mode import (
