@@ -262,7 +262,7 @@ def _bound_proof(root, path, size, expected, *, inventory_identity=None):
             return {"stamp": host.stamp(info), "sha256": expected}
 
 
-def prepare_manifest(connection, library, job, plan, probe_digest):
+def prepare_manifest(connection, library, job, plan, probe_digest, *, progress=None):
     plan_id = plan["id"]
     with ExitStack() as stack:
         descriptor = stack.enter_context(_package(_probe_package(job["id"], plan_id)))
@@ -275,6 +275,21 @@ def prepare_manifest(connection, library, job, plan, probe_digest):
             "SELECT relative_path FROM legacy_adoption_directories WHERE plan_id = ? ORDER BY relative_path",
             (plan_id,),
         )]
+        # Hashing the actual source bytes may take many minutes. The durable
+        # confirmation progress file is updated outside SQLite so the browser
+        # can poll even while the prepared-plan transaction is held.
+        totals = connection.execute(
+            """SELECT count(*), coalesce(sum(inventory.size_bytes), 0)
+               FROM legacy_adoption_moves AS move
+               JOIN legacy_adoption_inventory AS inventory
+                 ON inventory.job_id=? AND inventory.relative_path=move.relative_path
+              WHERE move.plan_id=? AND move.target_path IS NOT NULL""",
+            (job["id"], plan_id),
+        ).fetchone()
+        total_files, total_bytes = int(totals[0]), int(totals[1])
+        done_bytes = 0
+        if progress:
+            progress(descriptor, 0, total_files, 0, total_bytes)
         moves = []
         for row in move_rows(connection, job["id"], plan_id):
             original = row["relative_path"]
@@ -283,6 +298,9 @@ def prepare_manifest(connection, library, job, plan, probe_digest):
                 **_bound_proof(source, original, row["size_bytes"], row["sha256"],
                                inventory_identity=json.loads(row["identity"])),
             })
+            done_bytes += int(row["size_bytes"])
+            if progress and (len(moves) % 32 == 0 or len(moves) == total_files):
+                progress(descriptor, len(moves), total_files, done_bytes, total_bytes)
         documents = []
         for row in connection.execute(
             """SELECT new.relative_path, new.content, new.sha256, old.size_bytes, old.sha256
