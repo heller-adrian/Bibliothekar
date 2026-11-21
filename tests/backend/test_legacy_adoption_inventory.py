@@ -193,7 +193,7 @@ def test_upgrades_1_0_0_catalogue_and_registry_without_touching_existing_rows(tm
         library_registry.register_source_backup(
             registry, backup_id="historic", source_kind="import", source_identity="old", backup_path="/synthetic",
         )
-    assert initialize_database(db)["newly_applied_versions"] == list(range(56, 73))
+    assert initialize_database(db)["newly_applied_versions"] == list(range(56, 74))
     assert library_registry.initialize_library_registry(registry)["newly_applied_versions"] == [4, 5, 6, 7, 8, 9]
     assert library_registry.read_library_identity(db) == "historic"
     assert library_registry.get_source_backup(registry, "historic")["source_identity"] == "old"
@@ -225,7 +225,7 @@ def test_rc12_review_batch_upgrade_preserves_finished_and_pending_copies(tmp_pat
                 "INSERT INTO legacy_adoption_review_batch (job_id, family_key, state) VALUES ('job', ?, ?)",
                 [("ready", "copied"), ("pending", "pending")],
             )
-    assert initialize_database(db)["newly_applied_versions"] == [66, 67, 68, 69, 70, 71, 72]
+    assert initialize_database(db)["newly_applied_versions"] == [66, 67, 68, 69, 70, 71, 72, 73]
     with database.database_connection(db) as connection:
         rows = connection.execute(
             """SELECT family_key, state, bytes_total, bytes_verified FROM legacy_adoption_review_batch
