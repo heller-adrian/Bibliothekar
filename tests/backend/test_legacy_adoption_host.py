@@ -368,3 +368,92 @@ def test_review_cancel_returns_a_file_replaced_during_detachment(tmp_path, monke
     assert target.read_bytes() == b"another user's file"
     assert (general / "externally moved").read_bytes() == b"the working copy"
     assert not list(holding.iterdir())
+
+
+def _rc2_edit_fixture(package):
+    """Create a format-2 host manifest with a real Camera Raw reference."""
+    private, source, archive, plan, _binding = package
+    old_xmp = (
+        b'<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+        b'<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        b'<rdf:Description xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"'
+        b' crs:RawFileName="photo.raf" crs:Exposure2012="+0.45"/></rdf:RDF></x:xmpmeta>'
+    )
+    new_xmp = old_xmp.replace(b'crs:RawFileName="photo.raf"',
+                              b'crs:RawFileName="20260721_120000_Fuji.raf"')
+    sidecar = source / "photo.raf.xmp"
+    sidecar.write_bytes(old_xmp)
+    plan["format"] = 2
+    for row in plan["moves"]:
+        if row["source"] == "photo.raf":
+            row["target"] = "event/all/20260721_120000_Fuji.raf"
+        elif row["source"] == "photo.raf.xmp":
+            row["target"] = "event/all/20260721_120000_Fuji.xmp"
+        row.update(_proof(source / row["source"]))
+    plan["xmp_edits"] = [{
+        "source": "photo.raf.xmp", "target": "event/all/20260721_120000_Fuji.xmp",
+        "original_sha256": _sha(old_xmp), "sha256": _sha(new_xmp),
+        "size_bytes": len(new_xmp),
+        "content": base64.b64encode(new_xmp).decode("ascii"),
+    }]
+    encoded = host.json_bytes(plan)
+    binding = _sha(encoded)
+    (private / "manifest.json").write_bytes(encoded)
+    return (private, source, archive, plan, binding), old_xmp, new_xmp
+
+
+def test_rc2_xmp_edit_apply_and_rollback_are_byte_exact(package):
+    edited, original, updated = _rc2_edit_fixture(package)
+    private, source, archive, plan, _ = edited
+    _permit(edited, "apply")
+    assert host.main(_command(edited, "apply")) == 0
+    assert (archive / "event/all/20260721_120000_Fuji.raf").read_bytes() == b"raw"
+    assert (archive / "event/all/20260721_120000_Fuji.xmp").read_bytes() == updated
+    backup = archive / ("." + "bibliothekar-adoption-" + plan["plan_id"])
+    assert (backup / "original-xmp-0.xmp").read_bytes() == original
+    assert not (source / "photo.raf.xmp").exists()
+    _permit(edited, "rollback")
+    assert host.main(_command(edited, "rollback")) == 0
+    assert (source / "photo.raf.xmp").read_bytes() == original
+    assert (source / "photo.raf").read_bytes() == b"raw"
+    assert not (archive / "event/all/20260721_120000_Fuji.xmp").exists()
+
+
+@pytest.mark.parametrize("interrupt_name", [
+    "new-xmp-0.xmp",
+    "20260721_120000_Fuji.xmp",
+])
+def test_rc2_xmp_edit_resumes_after_crash_between_intent_and_rename(package, monkeypatch,
+                                                                  interrupt_name):
+    edited, original, updated = _rc2_edit_fixture(package)
+    _, source, archive, _plan, _ = edited
+    _permit(edited, "apply")
+    actual = host.rename_noreplace
+    fired = False
+
+    def interrupted(src, name, dst, new_name):
+        nonlocal fired
+        actual(src, name, dst, new_name)
+        if name == interrupt_name and not fired:
+            fired = True
+            raise KeyboardInterrupt
+
+    with monkeypatch.context() as before_crash:
+        before_crash.setattr(host, "rename_noreplace", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            host.main(_command(edited, "apply"))
+    assert fired
+    assert host.main(_command(edited, "apply")) == 0
+    assert (archive / "event/all/20260721_120000_Fuji.xmp").read_bytes() == updated
+    _permit(edited, "rollback")
+    assert host.main(_command(edited, "rollback")) == 0
+    assert (source / "photo.raf.xmp").read_bytes() == original
+
+
+def test_rc2_host_rejects_modified_xmp_payload_before_moving_files(package):
+    edited, original, updated = _rc2_edit_fixture(package)
+    _private, source, _archive, plan, _binding = edited
+    plan["xmp_edits"][0]["content"] = base64.b64encode(updated + b"x").decode("ascii")
+    with pytest.raises(host.ExecutionError, match="checksum"):
+        host.validate_plan(plan)
+    assert (source / "photo.raf.xmp").read_bytes() == original
