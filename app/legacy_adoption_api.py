@@ -853,7 +853,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 # Repeated acknowledgements after successful preparation are
                 # idempotent and cannot start a second worker.
                 if (plan.get("id") == command.plan_id and
-                        plan.get("execution", {}).get("method") == "script"):
+                        (plan.get("execution") or {}).get("method") == "script"):
                     return plan
                 raise AdoptionError("Nur der aktuell vorbereitete Skriptplan darf bestätigt werden.")
             proof = probe_details(library, job_id, command.plan_id)
