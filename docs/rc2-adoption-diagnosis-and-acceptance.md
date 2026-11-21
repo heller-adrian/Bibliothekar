@@ -33,10 +33,14 @@ Development branch based exactly on `v1.1.2-rc.1` / PR #43 head `4d6b1eb`.
 - Idempotent start, no duplicate second worker, interruption/resumption policy, and cancellation semantics consistent with journal/host-identity proof.
 - Avoid redundant rehashes; preserve before-application protection against changed file bytes, replacing long SQLite IMMEDIATE locks with short durable state transitions where safety allows.
 
-### 4. Initial setup preferences (release blocker)
-- Before choosing existing vs empty library, show existing event naming and folder-structure settings with defaults and **Weiter**.
-- Reuse exactly the existing persistence/validation/source-of-truth for `event_naming` and `event_folder_layout_default` (plus any actually present collection/subevent options).
-- No duplicate settings table, no silent rename of existing events. Existing installations remain unaffected.
+### 4. Initial setup preferences — including AFTER adoption (release blocker)
+- Before the existing "take over an existing collection / start with empty library" decision, present the existing **Ordnerstruktur und Benennung** settings with saved defaults and a **Weiter** action that requires no changes.
+- Reuse the actual editor controls, validation logic, read/write APIs and source-of-truth of the settings dialog rather than making an independent imitation: `/api/settings/event-naming` (`library_registry.settings_json.event_naming`) and `/api/settings/event-folder-layout` (catalogue `app_settings.event_folder_layout_default`), including normal-event, subevent and collection-name controls that already exist.
+- The current first-setup middleware rejects normal settings routes while `initial_library_setup.decision=choice`. Add a **narrowly scoped, setup-only admission exception** for the genuine existing naming/layout endpoints; no general bypass of adoption or recovery protections. The initial preferences route should not be shown for an existing/complete installation.
+- **Persistence is mandatory:** choosing custom values, refreshing the browser, proceeding through either the "empty" or "existing" choice, finishing the 35-event adoption, opening the normal settings dialog, and later creating/importing events must all use exactly the same persisted values. Completing the adoption must not reset these preferences to defaults.
+- Preference changes must not silently rename previously planned or archived event paths. Show explicit effects on newly created events, previews and the current adoption draft; do not invalidate an immutable prepared package behind the user's back.
+- Acceptance tests must cover (1) defaults rendered and **Weiter** with no modifications, (2) changing naming and folder layout before the choice, (3) saving and reloading before choosing, (4) choosing **both** empty and legacy-adoption paths, (5) read-after-finalize and ordinary post-adoption event creation preserving the values, and (6) no access to setup-only preference write routes when installation is complete.
+- No duplicate settings database/table and no independent configuration state; backward-compatible with already configured installations.
 
 ### 5. Keep the saved user setup and prove upgrade safety
 - User's saved **35 event definitions** and import decision must not be thrown away. RC1's confirmed immutable script package cannot simply be rewritten.
