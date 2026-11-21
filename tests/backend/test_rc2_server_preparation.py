@@ -86,3 +86,29 @@ def test_preparation_worker_lock_is_exclusive_across_open_file_descriptors(priva
     assert preparation.preparation_worker_active(job) is False
     with preparation.exclusive_preparation_worker(job) as recovered:
         assert recovered is True
+
+
+
+def test_failed_preparation_can_be_reset_but_not_active_or_released(private_package):
+    library, job, plan, place = private_package
+    digest = "d" * 64
+    preparation.reserve_preparation(library, job, plan, digest)
+    preparation.record_preparation(library, job, plan, digest, "failed",
+                                   error="synthetic interrupted hash")
+    assert preparation.abandon_failed_preparation(library, job, plan) is True
+    assert preparation.preparation_status(library, job, plan) is None
+
+    preparation.reserve_preparation(library, job, plan, digest)
+    with preparation.exclusive_preparation_worker(job) as active:
+        assert active
+        with pytest.raises(AdoptionError, match="noch aktiv"):
+            preparation.abandon_failed_preparation(library, job, plan)
+
+    (place / "permission.json").write_text('{"mode":"apply","manifest":"old"}')
+    with pytest.raises(AdoptionError, match="Hostbefehl"):
+        preparation.abandon_failed_preparation(library, job, plan)
+    (place / "permission.json").unlink()
+    (place / "journal.jsonl").write_bytes(b'{"operation":"media:old","state":"forward_intent"}\n')
+    with pytest.raises(AdoptionError, match="Hostjournal"):
+        preparation.abandon_failed_preparation(library, job, plan)
+    assert preparation.preparation_status(library, job, plan)["state"] == "queued"
