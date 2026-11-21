@@ -1191,5 +1191,5 @@ def test_rc2_identical_jpeg_with_different_raw_masters_is_not_a_duplicate_captur
         ("B", [item("B.RAF", "raw-2", "raw"), item("B.JPG", "same-jpeg", "jpeg")],
          "2025-04-16T19:37:26", None, folder),
     ]
-    with pytest.raises(AdoptionError, match="widersprüchliche RAW"):
+    with pytest.raises(AdoptionError, match="Widersprüchliche RAW"):
         _adoption_occurrence_sequences(selections, {})
