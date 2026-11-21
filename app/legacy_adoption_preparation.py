@@ -12,13 +12,23 @@ import fcntl
 import os
 import stat
 
-from app.appdata import root as appdata_root
+from app import legacy_adoption_package as package
 from app.legacy_adoption_package import PACKAGE_ROOT, _package, _read_json
 from app import legacy_adoption_host as host
 from app.legacy_adoption_paths import AdoptionError
 
 
 _PROGRESS_FILE = "preparation.json"
+
+
+def appdata_root():
+    """Use the same configured AppData root as the immutable host package.
+
+    The package may be explicitly bound to another root during isolated QA;
+    reading a different root would incorrectly report an accepted preparation
+    as 'not_started' even when its on-disk progress record exists.
+    """
+    return package.appdata_root()
 
 
 @contextmanager
