@@ -1167,3 +1167,28 @@ def test_rc2_same_second_distinct_captures_with_two_copies_each_use_contiguous_s
             "20260721_120000_Fuji-X-E5_Burst_002_Duplicate_002.JPG",
         ],
     ]
+
+
+
+def test_rc2_identical_jpeg_with_different_raw_masters_is_not_a_duplicate_capture():
+    """Shared JPEG content cannot override conflicting actual RAW capture bytes."""
+    from app.legacy_adoption_plan import _adoption_occurrence_sequences
+
+    folder = (None, Path("2025/Album"), "", {
+        "structure_enabled": False, "input_path": "",
+    })
+
+    def item(relative, digest, kind):
+        return {
+            "relative_path": relative, "sha256": digest,
+            "metadata_json": '{"media_type": "' + kind + '"}',
+        }
+
+    selections = [
+        ("A", [item("A.RAF", "raw-1", "raw"), item("A.JPG", "same-jpeg", "jpeg")],
+         "2025-04-16T19:37:26", None, folder),
+        ("B", [item("B.RAF", "raw-2", "raw"), item("B.JPG", "same-jpeg", "jpeg")],
+         "2025-04-16T19:37:26", None, folder),
+    ]
+    with pytest.raises(AdoptionError, match="widersprüchliche RAW"):
+        _adoption_occurrence_sequences(selections, {})
