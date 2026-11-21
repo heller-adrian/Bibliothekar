@@ -739,14 +739,61 @@ def _camera_tokens(families):
     return tokens, groups
 
 
+def _script_capture_ordinals(selections, cameras):
+    """Assign a stable burst position to each *distinct* capture, not each copy.
+
+    SHA-identical occurrences are the same capture for burst numbering, but
+    still receive their own _Duplicate_NNN occurrence suffix. Different
+    exposures at the same second never borrow each other's duplicate index.
+    """
+    by_hash = defaultdict(set)
+    for key, members, *_ in selections:
+        for item in members:
+            if json.loads(item["metadata_json"] or "{}").get("media_type") != "xmp":
+                by_hash[item["sha256"]].add(key)
+    cohorts = {}
+    for bucket in by_hash.values():
+        if len(bucket) < 2:
+            continue
+        identity = frozenset(bucket)
+        for key in bucket:
+            previous = cohorts.get(key)
+            if previous is not None and previous != identity:
+                raise AdoptionError("Mehrdeutige, überlappende Aufnahme-Duplikatgruppen: " + key)
+            cohorts[key] = identity
+
+    unique_by_group = defaultdict(set)
+    no_subsec_by_group = defaultdict(set)
+    for key, _members, capture, *_ in selections:
+        group = cameras[key][1]
+        cohort = cohorts.get(key, frozenset({key}))
+        unique_by_group[group].add(cohort)
+        if capture[19:20] != ".":
+            no_subsec_by_group[group].add(cohort)
+    distinct = {group: len(cohorts) for group, cohorts in unique_by_group.items()}
+
+    def order(cohort):
+        return min((PurePosixPath(key).name.casefold(), key) for key in cohort)
+
+    burst_ordinals = {}
+    for group, captures in no_subsec_by_group.items():
+        for index, cohort in enumerate(sorted(captures, key=order), 1):
+            for key in cohort:
+                burst_ordinals[key] = index
+    return distinct, burst_ordinals
+
+
 def _automatic_family_targets(folder, key, family, capture, camera, same_second, names, stems, used,
-                              *, duplicate_index=None, number_all=False):
+                              *, duplicate_index=None, number_all=False, burst_ordinal=None):
     endings = [family_member_ending(member["relative_path"]) for member in family]
     if len({target_key(ending) for ending in endings}) != len(endings):
         raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + key)
     # Reuse exactly the same real-EXIF-millisecond Burst implementation as the
     # normal folder import. Neither invented subseconds nor directory patterns.
     base, index, _ = capture_stem(capture, camera, stems, same_second=same_second)
+    if index > 0 and base.endswith("_Burst") and burst_ordinal is not None:
+        base += f"_{burst_ordinal:03d}"
+        index = 0
     if duplicate_index is not None:
         base += "_Duplicate"
         index = duplicate_index
@@ -815,6 +862,7 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
     occupied_targets = set()
     if filename_method == "script":
         cameras, bursts = _camera_tokens(selections)
+        distinct, burst_ordinals = _script_capture_ordinals(new_selections, cameras)
         exact_collisions = _exact_script_collisions(new_selections, cameras, bursts)
     @lru_cache(maxsize=128)
     def existing_names(folder):
@@ -841,16 +889,19 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             targets = [None] * len(family)
         elif filename_method == "script" and key not in target_stems:
             camera, burst_group = cameras[key]
+            same_second = (distinct[burst_group] > 1 or
+                           (bursts[burst_group] > 1 and capture[19:20] == "."))
             generated_stem, generated_index, _ = capture_stem(
-                capture, camera, set(), same_second=bursts[burst_group] > 1,
+                capture, camera, set(), same_second=same_second,
             )
             number_all = generated_index == 0 and exact_collisions[
                 (target_key(str(folder)), generated_stem.casefold())
             ] > 1
             targets = _automatic_family_targets(
-                folder, key, family, capture, camera, bursts[burst_group] > 1,
+                folder, key, family, capture, camera, same_second,
                 *existing_names(str(folder)), used_stems,
                 duplicate_index=duplicate_indices.get(key), number_all=number_all,
+                burst_ordinal=burst_ordinals.get(key),
             )
         else:
             targets = _family_targets(
