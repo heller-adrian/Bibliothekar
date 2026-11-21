@@ -377,7 +377,13 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
             for fd in descriptors
         },
     )
-    client = _onboard(fresh_main)
+    client = _onboard(fresh_main, confirm_preferences=False)
+    original_naming = _json(client, "GET", "/api/settings/event-naming")
+    editable_naming = {key: value for key, value in original_naming.items() if key != "library_id"}
+    editable_naming["no_event_label"] = "Meine archivierten Aufnahmen"
+    _json(client, "PUT", "/api/settings/event-naming", json=editable_naming)
+    preserved_folder_layout = _json(client, "GET", "/api/settings/event-folder-layout")
+    assert _json(client, "POST", "/api/setup/preferences/continue")["next"] == "/setup/adoption"
     assert _adopt(client) == {"next": "/legacy-adoption"}
     library = resolve_library_context(registry, "main")
     wizard = client.get("/legacy-adoption?library=second")
@@ -466,6 +472,10 @@ def test_wizard_and_f14_recovery_in_main_library(fresh_main, monkeypatch, synthe
     assert pending_initial_setup(registry) is None
     assert _json(client, "GET", job, status=409)["code"] == "legacy_adoption_inactive"
     assert client.get("/workspace").status_code == 200
+    # This is a real verified adoption + finalize/recovery, not just a
+    # preference preview. The normal settings APIs must retain the values.
+    assert _json(client, "GET", "/api/settings/event-naming")["no_event_label"] == "Meine archivierten Aufnahmen"
+    assert _json(client, "GET", "/api/settings/event-folder-layout") == preserved_folder_layout
 
     def startup_blocks_write_validation():
         # Startup can begin after request admission while the client repeats a
