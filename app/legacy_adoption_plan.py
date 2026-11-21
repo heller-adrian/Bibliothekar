@@ -666,7 +666,7 @@ def _adoption_occurrence_sequences(selections, target_stems):
         }
         if len(raw_signatures) > 1:
             raise AdoptionError(
-                "Gleiche Begleitmedien, aber widersprüchliche RAW-Aufnahmen: " +
+                "Widersprüchliche RAW-Aufnahmen in Duplikatfamilien (gemeinsame Begleitmedien): " +
                 ", ".join(sorted(members))
             )
         if members in seen_groups:
