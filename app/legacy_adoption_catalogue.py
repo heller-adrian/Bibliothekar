@@ -123,7 +123,8 @@ def _store_file(connection, job_id, family_id, row, record, capture, manually_re
                capture_time_confidence, review_status, created_at, updated_at
            ) VALUES (?, ?, ?, ?, 'camera_archive', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (job_id, family_id, row["relative_path"], row["target_path"], record["filename"], record["extension"],
-         record["media_type"], row["size_bytes"], row["size_bytes"], row["sha256"], row["sha256"],
+         record["media_type"], row["current_size_bytes"] or row["size_bytes"], row["size_bytes"],
+         row["sha256"], row["current_sha256"] or row["sha256"],
          selected_time, source, confidence, "confirmed" if manually_reviewed else "not_required", now, now),
     )
     file_id = result.lastrowid
