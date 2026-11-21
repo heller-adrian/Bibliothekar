@@ -244,6 +244,17 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         if status["running"] or status["pending"] or status.get("state") in {"active", "cancelling"}:
             raise AdoptionError("Schließe den Kopierauftrag zuerst ab.")
 
+    def require_preparation_idle(library, job_id):
+        plan = plan_status(library, job_id)
+        if not plan.get("id") or plan.get("execution"):
+            return
+        progress = preparation_status(library, job_id, plan["id"])
+        if progress is not None:
+            raise AdoptionError(
+                "Die Skriptvorbereitung ist gespeichert. Setze sie zuerst fort "
+                "oder nutze den kontrollierten Rücksetzweg für einen anderen Plan."
+            )
+
     def run_copies(library, job_id, registry):
         def copy_family(family_key):
             with admission(library):
@@ -662,6 +673,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         with _errors(), adoption_execution_access(registry_path()), admission(library):
             require_adoption(request, library)
             require_review_idle(library, job_id)
+            require_preparation_idle(library, job_id)
             with database_connection(library.database_path) as connection:
                 require_no_partial_publication(connection, job_id)
             create_plan(
@@ -690,6 +702,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def documents(job_id: str):
         library = context()
         with _errors(), admission(library):
+            require_preparation_idle(library, job_id)
             return prepare_documents(library, job_id)
 
     @router.get("/jobs/{job_id}/manual-work")
@@ -740,6 +753,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def script_probe(job_id: str, command: ScriptHost):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
+            require_preparation_idle(library, job_id)
             return prepare_probe(library, job_id, command.plan_id, command.appdata, command.source, command.archive)
 
     @router.get("/jobs/{job_id}/script/manifest")
@@ -970,6 +984,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         library = context()
         with _errors(), admission(library):
             require_review_idle(library, job_id)
+            require_preparation_idle(library, job_id)
             reopen_plan(library, job_id)
         return {"reopened": True}
 
@@ -977,6 +992,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def discard(job_id: str):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
+            require_preparation_idle(library, job_id)
             if copy_status(library, job_id)["running"]:
                 raise AdoptionError("Schließe den Kopierauftrag zuerst ab.")
             with database_connection(library.database_path) as connection:
