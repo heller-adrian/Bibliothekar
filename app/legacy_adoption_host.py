@@ -377,6 +377,67 @@ def apply_document(journal, item, archive, holding, prefix, index, check_roots, 
     move(journal, install, archive, ready, archive, current, proof, check_roots)
 
 
+def apply_xmp_edit(journal, item, original_move, archive, holding, prefix, index,
+                   check_roots, *, reverse=False):
+    """Journal a two-way, byte-preserving XMP content swap.
+
+    The original inode/bytes are kept under the protected archive holding
+    directory until verification or rollback. The revised file is installed
+    by no-replace rename; nothing is overwritten in place.
+    """
+    stage = f"xmp-stage:{index}"
+    save = f"media:xmp-save:{index}"
+    install = f"media:xmp-install:{index}"
+    ready_name = f"new-xmp-{index}.xmp"
+    saved_name = f"original-xmp-{index}.xmp"
+    ready = prefix + "/" + ready_name
+    saved = prefix + "/" + saved_name
+    target = item["target"]
+    original = {"stamp": original_move["stamp"], "sha256": original_move["sha256"]}
+    staged = journal.proofs.get(stage)
+
+    if reverse:
+        if journal.latest.get(save) is None and journal.latest.get(install) is None:
+            return
+        if staged is None:
+            raise ExecutionError("XMP staging proof missing during rollback: " + target)
+        if journal.latest.get(install) is not None:
+            if journal.latest.get(save) in {"reverse_intent", "reverse_done"}:
+                verify_file(holding, ready_name, staged, allow_ctime_change=True)
+            else:
+                move(journal, install, archive, target, archive, ready,
+                     staged, check_roots, reverse=True)
+        if journal.latest.get(save) is not None:
+            move(journal, save, archive, saved, archive, target,
+                 original, check_roots, reverse=True)
+        return
+
+    if staged is None:
+        content = base64.b64decode(item["content"], validate=True)
+        if len(content) != item["size_bytes"] or hashlib.sha256(content).hexdigest() != item["sha256"]:
+            raise ExecutionError("Approved XMP content proof differs from manifest: " + target)
+        check_roots()
+        write_document(holding, ready_name, content)
+        with file_at(holding, ready_name) as (fd, info):
+            if info.st_size != item["size_bytes"] or hash_fd(fd) != item["sha256"]:
+                raise ExecutionError("Staged XMP content has changed: " + target)
+            staged = {"stamp": stamp(info), "sha256": item["sha256"]}
+        journal.append(stage, "xmp_staged", proof=staged)
+    elif journal.latest.get(install) is None:
+        verify_file(holding, ready_name, staged, allow_ctime_change=True)
+
+    if journal.latest.get(save) != "forward_done":
+        move(journal, save, archive, target, archive, saved,
+             original, check_roots)
+    else:
+        verify_file(holding, saved_name, original, allow_ctime_change=True)
+
+    # If the install intent was journaled but the rename crashed, move()
+    # reconciles the existing name before a new operation is attempted.
+    move(journal, install, archive, ready, archive, target, staged, check_roots)
+    verify_file(holding, saved_name, original, allow_ctime_change=True)
+
+
 def validate_plan(plan):
     if plan["format"] != 1 or not re.fullmatch(r"[0-9a-f]{32}", plan["plan_id"]):
         raise ExecutionError("Unknown adoption package format.")
