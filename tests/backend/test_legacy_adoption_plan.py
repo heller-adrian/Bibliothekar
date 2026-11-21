@@ -1002,3 +1002,57 @@ def test_script_adoption_precise_burst_vs_real_duplicates(
     plan = create_plan(context, registry, job, _draft(), filename_method="script")
     assert plan["move_files"] == 2
     assert {Path(item["target"]).name for item in plan_moves(context, job)} == expected
+
+
+def test_rc2_true_raf_jpeg_xmp_sidecar_shared_script_target_stem(inventory, monkeypatch):
+    """Real DSCF2915 regression: a sidecar in Sonstiges must keep the RAW stem."""
+    import os
+
+    context, source, registry = inventory
+    items = [
+        "2025/04/16.04.2025/Vögel/Roh/DSCF2915.RAF",
+        "2025/04/16.04.2025/Vögel/Bilder/DSCF2915.JPG",
+        "2025/04/16.04.2025/Vögel/Sonstiges/DSCF2915.xmp",
+    ]
+    for item in items:
+        path = source / item
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(path.name.encode())
+
+    def bound_metadata(descriptors, _cancel):
+        result = {}
+        for fd in descriptors:
+            filename = os.pread(fd, 64, 0).decode()
+            if filename.endswith(".xmp"):
+                result[fd] = {
+                    "XMP:XMP-exif:DateTimeOriginal": "2025:04:16 19:37:26+02:00",
+                    "XMP:XMP-tiff:Make": "FUJIFILM",
+                    "XMP:XMP-tiff:Model": "X-H2S",
+                    "XMP:XMP-crs:RawFileName": "DSCF2915.RAF",
+                }
+            else:
+                result[fd] = {
+                    "EXIF:ExifIFD:DateTimeOriginal": "2025:04:16 19:37:26",
+                    "EXIF:IFD0:Make": "FUJIFILM",
+                    "EXIF:IFD0:Model": "X-H2S",
+                    "EXIF:ExifIFD:ExposureTime": "1/50",
+                    "EXIF:ExifIFD:FNumber": "5.6",
+                    "EXIF:ExifIFD:ISO": "3200",
+                }
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", bound_metadata)
+    job = _scan(context, source)
+    plan = create_plan(
+        context, registry, job,
+        {"events": [{"name": "Vögel", "start_date": "2025-04-16", "end_date": "2025-04-16"}]},
+        filename_method="script",
+    )
+    assert plan["move_files"] == 3
+    moves = plan_moves(context, job)
+    assert {row["relative_path"] for row in moves} == set(items)
+    targets = {row["relative_path"]: Path(row["target"]).name for row in moves}
+    stems = {name.rsplit(".", 1)[0] for name in targets.values()}
+    assert len(stems) == 1
+    assert all("_Burst_" not in name for name in targets.values())
+    assert {Path(name).suffix.lower() for name in targets.values()} == {".raf", ".jpg", ".xmp"}
