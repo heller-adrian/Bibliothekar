@@ -71,7 +71,7 @@ def fresh_main(tmp_path, monkeypatch, request):
     return workspace, database, registry, archive
 
 
-def _onboard(fresh_main):
+def _onboard(fresh_main, *, confirm_preferences=True):
     _, _, registry, archive = fresh_main
     main.startup_database()
     assert main.DATABASE_INITIALIZATION_ERROR is None
@@ -84,6 +84,8 @@ def _onboard(fresh_main):
     })
     assert result["library"]["library_id"] == "main"
     assert pending_initial_setup(registry) == {"library_id": "main", "decision": "choice"}
+    if confirm_preferences:
+        assert _json(client, "POST", "/api/setup/preferences/continue") == {"next": "/setup/adoption"}
     return client
 
 
