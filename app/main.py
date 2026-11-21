@@ -14529,8 +14529,10 @@ async def adoption_access_middleware(request: Request, call_next):
                 # The library already exists and owns both settings stores.
                 # Only these real per-library settings are accessible before
                 # the adoption decision; never allow general app operations.
-                if initial_choice and preference_endpoint:
+                if initial_choice and needs_preferences and preference_endpoint:
                     return await call_next(request)
+                if initial_choice and not needs_preferences and (method, path) == ("GET", "/setup/preferences"):
+                    return RedirectResponse("/setup/adoption", status_code=303)
                 if (not needs_preferences and (
                         (method == "GET" and path == "/setup/adoption") or decision)
                     ) or (
