@@ -1119,3 +1119,51 @@ def test_rc2_conflicting_duplicate_membership_requires_review():
     ]
     with pytest.raises(AdoptionError, match="Duplikatfamilien"):
         _adoption_occurrence_sequences(selections, {})
+
+
+def test_rc2_same_second_distinct_captures_with_two_copies_each_use_contiguous_suffixes(
+    inventory, monkeypatch,
+):
+    """A/A-copy and B/B-copy use Burst 001/002 and Duplicate 001/002, not 1/3 and 2/4."""
+    import os
+
+    context, source, registry = inventory
+    fixtures = {
+        "camera-one/FILE0001.JPG": b"capture-A",
+        "copies/FILE0001-copy.JPG": b"capture-A",
+        "camera-two/FILE0002.JPG": b"capture-B",
+        "copies/FILE0002-copy.JPG": b"capture-B",
+    }
+    for relative, content in fixtures.items():
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    def common_camera(descriptors, _cancel):
+        return {
+            fd: {
+                "EXIF:IFD0:Make": "FUJIFILM",
+                "EXIF:IFD0:Model": "X-E5",
+                "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+            } for fd in descriptors
+        }
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", common_camera)
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft(), filename_method="script")
+    assert plan["move_files"] == 4
+    moves = plan_moves(context, job)
+    by_hash = {}
+    for row in moves:
+        by_hash.setdefault(row["sha256"], set()).add(Path(row["target"]).name)
+    assert len(by_hash) == 2
+    assert sorted(sorted(files) for files in by_hash.values()) == [
+        [
+            "20260721_120000_Fuji-X-E5_Burst_001_Duplicate_001.JPG",
+            "20260721_120000_Fuji-X-E5_Burst_001_Duplicate_002.JPG",
+        ],
+        [
+            "20260721_120000_Fuji-X-E5_Burst_002_Duplicate_001.JPG",
+            "20260721_120000_Fuji-X-E5_Burst_002_Duplicate_002.JPG",
+        ],
+    ]
