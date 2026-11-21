@@ -33,7 +33,8 @@ from app.legacy_adoption_package import (
 )
 from app.legacy_adoption_paths import AdoptionError, bound_directory
 from app.legacy_adoption_mode import (
-    adoption_execution_access, choose_initial_setup, later_adoption_blockers, require_initial_adoption,
+    adoption_execution_access, choose_initial_setup, complete_initial_preferences,
+    later_adoption_blockers, require_initial_adoption,
     require_later_adoption, reserve_adoption,
 )
 from app.legacy_adoption_plan import MAX_PLAN_ITEMS, create_plan, plan_directories, plan_moves, plan_status
@@ -191,6 +192,7 @@ def _download(factory, filename, *, media_type="application/zip"):
 
 def install_legacy_adoption_routes(app, *, context, registry_path, source_root_path):
     from app.legacy_adoption_ui import setup_choice_html, wizard_html
+    from app.initial_library_preferences_ui import preferences_html
 
     router = APIRouter(prefix="/api/legacy-adoption", tags=["Bestandsübernahme"])
     running = {}
@@ -278,6 +280,21 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 return
             review_running.add(run_key)
         tasks.add_task(run_copies, library, job_id, registry)
+
+    @app.get("/setup/preferences", response_class=HTMLResponse, include_in_schema=False)
+    def setup_preferences(request: Request):
+        library = context()
+        return HTMLResponse(
+            preferences_html(library.display_name),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/api/setup/preferences/continue")
+    def confirm_setup_preferences():
+        library = context()
+        with _errors(), admission(library):
+            complete_initial_preferences(registry_path(), library)
+        return {"next": "/setup/adoption"}
 
     @app.get("/setup/adoption", response_class=HTMLResponse, include_in_schema=False)
     def setup_choice(request: Request):
