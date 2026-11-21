@@ -85,6 +85,41 @@ def pending_initial_setup(registry_path):
         return {"library_id": setup["library_id"], "decision": setup["decision"]}
 
 
+def initial_preferences_required(registry_path) -> bool:
+    """Only the newly registered first library must acknowledge its defaults.
+
+    Existing installations have preferences_completed=1 after migration.
+    Read through the same registry that identifies the first library.
+    """
+    if not Path(registry_path).exists():
+        return False
+    with closing(_read(registry_path)) as registry:
+        if not registry.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='initial_library_setup'"
+        ).fetchone():
+            return False
+        row = registry.execute(
+            "SELECT decision, preferences_completed FROM initial_library_setup WHERE singleton=1"
+        ).fetchone()
+        return bool(row and row["decision"] == "choice" and not row["preferences_completed"])
+
+
+def complete_initial_preferences(registry_path, library) -> None:
+    """Advance only after a real library exists; never change its defaults."""
+    setup = pending_initial_setup(registry_path)
+    if (not setup or setup["library_id"] != library.library_id
+            or setup["decision"] != "choice" or active_adoption(registry_path)):
+        raise AdoptionError("Einstellungen können nur vor der ersten Einrichtungsentscheidung bestätigt werden.")
+    with source_registry_transaction(registry_path) as registry:
+        updated = registry.execute(
+            """UPDATE initial_library_setup SET preferences_completed=1
+               WHERE singleton=1 AND library_id=? AND decision='choice'""",
+            (library.library_id,),
+        )
+        if updated.rowcount != 1:
+            raise AdoptionError("Die Einstellungsbestätigung ist nicht mehr verfügbar.")
+
+
 def require_no_managed_data(connection):
     for table in ("events", "jobs", "files", "file_families"):
         if connection.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone():
@@ -110,6 +145,8 @@ def choose_initial_setup(registry_path, library, decision):
     setup = pending_initial_setup(registry_path)
     if not setup or setup["library_id"] != library.library_id or active_adoption(registry_path):
         raise AdoptionError("Die Einrichtungsentscheidung ist in diesem Zustand gesperrt.")
+    if initial_preferences_required(registry_path):
+        raise AdoptionError("Bitte zunächst Ordnerstruktur und Benennung dieser Bibliothek bestätigen.")
     if decision == "adopting":
         require_empty_catalogue(library)
     with source_registry_transaction(registry_path) as registry:
