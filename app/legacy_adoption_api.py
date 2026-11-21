@@ -9,7 +9,7 @@ from threading import Event, Lock
 from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from app.database import database_connection
@@ -30,6 +30,9 @@ from app.legacy_adoption_inventory import (
 )
 from app.legacy_adoption_package import (
     inspect_runner, locked_script, permit, prepare_probe, probe_details, read_manifest, script_details, script_status,
+)
+from app.legacy_adoption_preparation import (
+    preparation_status, record_preparation, reserve_preparation,
 )
 from app.legacy_adoption_paths import AdoptionError, bound_directory
 from app.legacy_adoption_mode import (
@@ -198,6 +201,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     running = {}
     review_running = set()
     metadata_running = set()
+    preparing = set()
     running_lock = Lock()
 
     def source_path(root, relative):
@@ -770,14 +774,104 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                          from_phases={"script_prepared", "repair"})
             return {"command": permit(descriptor, script, "apply")}
 
-    @router.post("/jobs/{job_id}/confirm")
-    def confirm(job_id: str, command: Confirm, request: Request):
+    def run_script_preparation(library, job_id, plan_id, probe_digest):
+        """Independent server-owned worker; progress resides on disk, not a socket."""
+        try:
+            with adoption_execution_access(registry_path()), admission(library):
+                record_preparation(
+                    library, job_id, plan_id, probe_digest, "running", phase="hashing",
+                )
+
+                def checkpoint(package, processed, total, bytes_processed, bytes_total):
+                    record_preparation(
+                        library, job_id, plan_id, probe_digest, "running",
+                        phase="hashing", processed=processed, total=total,
+                        bytes_processed=bytes_processed, bytes_total=bytes_total,
+                        descriptor=package,
+                    )
+
+                confirm_plan(
+                    library, job_id, plan_id, "script", acknowledged=True,
+                    probe_digest=probe_digest, progress=checkpoint,
+                )
+                record_preparation(
+                    library, job_id, plan_id, probe_digest, "completed",
+                    phase="manifest_ready",
+                )
+        except Exception as error:
+            logging.getLogger(__name__).exception(
+                "Legacy adoption script preparation failed for %s", job_id,
+            )
+            try:
+                record_preparation(
+                    library, job_id, plan_id, probe_digest, "failed",
+                    phase="attention_required", error=str(error)[:500],
+                )
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Cannot persist failed legacy preparation for %s", job_id,
+                )
+        finally:
+            with running_lock:
+                preparing.discard(key(library, job_id))
+
+    @router.get("/jobs/{job_id}/preparation")
+    def preparation(job_id: str):
         library = context()
-        with _errors(), adoption_execution_access(registry_path()), admission(library):
+        with _errors():
+            plan = plan_status(library, job_id)
+            if not plan.get("id"):
+                return {"state": "not_started"}
+            result = preparation_status(library, job_id, plan["id"])
+            if not result:
+                return {"state": "not_started"}
+            with running_lock:
+                local_running = key(library, job_id) in preparing
+            # A persisted "running" record after process restart may be
+            # retried explicitly. Do not treat that as successful completion.
+            return {**result, "worker_local": local_running}
+
+    @router.post("/jobs/{job_id}/confirm")
+    def confirm(job_id: str, command: Confirm, request: Request, tasks: BackgroundTasks):
+        library = context()
+        if command.method != "script":
+            with _errors(), adoption_execution_access(registry_path()), admission(library):
+                require_adoption(request, library)
+                require_review_idle(library, job_id)
+                return confirm_plan(library, job_id, command.plan_id, command.method,
+                                    acknowledged=command.acknowledged, probe_digest=command.probe_sha256)
+        # Script preparation may read hundreds of gigabytes; never keep the
+        # confirmation HTTP request open while checksums are computed.
+        with _errors(), admission(library):
             require_adoption(request, library)
             require_review_idle(library, job_id)
-            return confirm_plan(library, job_id, command.plan_id, command.method,
-                                acknowledged=command.acknowledged, probe_digest=command.probe_sha256)
+            if not command.acknowledged or not command.probe_sha256:
+                raise AdoptionError("Bestätige die Sicherheitsbedingungen und den Hostnachweis.")
+            plan = plan_status(library, job_id)
+            if (plan.get("id") != command.plan_id or plan.get("filename_method") != "script"
+                    or plan.get("state") != "prepared"):
+                # Repeated acknowledgements after successful preparation are
+                # idempotent and cannot start a second worker.
+                if (plan.get("id") == command.plan_id and
+                        plan.get("execution", {}).get("method") == "script"):
+                    return plan
+                raise AdoptionError("Nur der aktuell vorbereitete Skriptplan darf bestätigt werden.")
+            proof = probe_details(library, job_id, command.plan_id)
+            if not proof.get("verified") or proof.get("sha256") != command.probe_sha256:
+                raise AdoptionError("Der bestätigte Hostpfadnachweis fehlt oder ist veraltet.")
+            with running_lock:
+                current_key = key(library, job_id)
+                if current_key not in preparing:
+                    record = reserve_preparation(library, job_id, command.plan_id, command.probe_sha256)
+                    if record.get("state") != "completed":
+                        preparing.add(current_key)
+                        tasks.add_task(
+                            run_script_preparation, library, job_id, command.plan_id, command.probe_sha256,
+                        )
+            return JSONResponse(
+                {"accepted": True, "preparation": preparation_status(library, job_id, command.plan_id)},
+                status_code=202,
+            )
 
     script_completion_phases = {"script_prepared", "operations_done", "verifying", "repair", "registration_pending"}
 
