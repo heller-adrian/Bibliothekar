@@ -130,3 +130,19 @@ def test_rawfilename_is_recorded_in_capture_identity():
     from app.media_family_identity import capture_identity
     result = capture_identity({"XMP:XMP-crs:RawFileName": "DSCF2915.RAF"})
     assert result["sidecar_raw"] == "dscf2915.raf"
+
+
+def test_explicit_rawfilename_works_when_xmp_create_date_is_an_edit_timestamp(tmp_path, monkeypatch):
+    """An XMP edit timestamp must not be compared to the camera shutter time."""
+    files = {"raw/DSCF2915.RAF", "edit/DSCF2915.xmp"}
+    sidecar = {
+        "XMP:XMP-tiff:Make": "FUJIFILM",
+        "XMP:XMP-tiff:Model": "X-H2S",
+        "XMP:XMP-xmp:CreateDate": "2026:11:21 15:03:00+01:00",
+        "XMP:XMP-crs:RawFileName": "DSCF2915.RAF",
+    }
+    families, _, _ = _analyse(tmp_path, monkeypatch, [
+        ("raw/DSCF2915.RAF", _camera()),
+        ("edit/DSCF2915.xmp", sidecar),
+    ])
+    assert families == [files]
