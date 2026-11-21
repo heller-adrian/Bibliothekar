@@ -332,7 +332,7 @@ if(later) {
   $("choice").href=librarySettings;
 }
 let job = null, draft = {}, draftRevision = 0, year = "", day = null;
-let familyCursor = "", moveCursor = "", timer = 0, scriptTimer = 0, reviewTimer = 0;
+let familyCursor = "", moveCursor = "", timer = 0, scriptTimer = 0, preparationTimer = 0, reviewTimer = 0;
 let reviewSelection = new Set(), reviewOpened = new Set(), reviewBatch = {}, reviewSubmitting = false, reviewCancelling = false;
 let reviewMetadataSaving=false, reviewMetadataFeedback=null;
 let reviewSelectionVersion=0;
@@ -650,6 +650,7 @@ async function startInventory(){
 async function refresh() {
   clearTimeout(timer);
   clearTimeout(scriptTimer);
+  clearTimeout(preparationTimer);
   if (!jobId) return;
   const requested=jobId;
   const version=++refreshVersion;
@@ -683,6 +684,9 @@ async function restoreJob(current) {
   draft={events:[],capture_overrides:{},exclude_families:[],target_stems:{},...state.draft};
   render();
   scheduleReviewPoll();
+  if(job.plan.id && !job.plan.execution && job.plan.filename_method==="script"){
+    await pollPreparation();
+  }
   if(job.scan_running || job.metadata_running){
     if(job.metadata_running)report("Metadatenentscheidungen werden angewendet …","busy");
     timer=setTimeout(()=>refresh().catch(()=>{}),2000);
@@ -712,6 +716,61 @@ async function restoreJob(current) {
   if(applied)report(t("Aufnahmezeiten übernommen")+" · "+applied+
     (remaining?" · "+t("Noch zu prüfen")+" · "+remaining:""),remaining?"error":"success");
   else report();
+}
+async function pollPreparation(){
+  if(!job?.plan?.id || job.plan.execution)return;
+  const originalJob = jobId;
+  const result = await api(jobPath("/preparation"));
+  if(originalJob!==jobId || job.plan.execution)return;
+  const old=document.getElementById("preparation-progress");
+  old?.remove();
+  if(result.state==="not_started")return;
+  const section=node("div",undefined,"adoption-status adoption-progress");
+  section.id="preparation-progress";
+  section.setAttribute("role","status");
+  section.setAttribute("aria-live","polite");
+  section.append(node("strong",result.state==="completed"?"Skriptvorbereitung abgeschlossen":
+    result.state==="failed"?"Vorbereitung unterbrochen":
+    "Skriptmanifest wird serverseitig vorbereitet"));
+  const total=Number(result.total || 0), done=Number(result.processed || 0);
+  if(total>0){
+    const bar=node("progress");
+    bar.max=total;
+    bar.value=Math.min(total,done);
+    bar.setAttribute("aria-label","Geprüfte Dateien");
+    section.append(bar,line(done+" / "+total+" Dateien geprüft · "+
+      Math.round(Number(result.bytes_processed || 0)/1048576)+" / "+
+      Math.round(Number(result.bytes_total || 0)/1048576)+" MiB"));
+  }else{
+    section.append(line("Der Auftrag ist gespeichert und kann nach einem erneuten Öffnen fortgesetzt werden."));
+  }
+  if(result.error)section.append(line(result.error));
+  if(result.state==="failed" || (!result.worker_local &&
+      ["queued","running"].includes(result.state))){
+    const retry=action("Vorbereitung fortsetzen",async()=>{
+      retry.disabled=true;
+      try {
+        const proof=await api(jobPath("/script/probe"));
+        if(!proof.verified || !proof.sha256)throw Error("Der Hostnachweis muss erneut geprüft werden.");
+        await api(jobPath("/confirm"),"POST",{
+          plan_id:job.plan.id,method:"script",acknowledged:true,probe_sha256:proof.sha256
+        });
+        await refresh();
+      }catch(error){
+        report(error.message,"error");
+        retry.disabled=false;
+      }
+    });
+    section.append(retry);
+  }
+  $("top-actions").append(section);
+  // A terminal preparation record is not equivalent to a verified adoption.
+  // Re-fetch the plan to display its registered execution phase.
+  if(result.state==="completed"){
+    preparationTimer=setTimeout(()=>refresh().catch(()=>{}),500);
+  }else if(["queued","running"].includes(result.state)){
+    preparationTimer=setTimeout(()=>pollPreparation().catch(()=>{}),3000);
+  }
 }
 async function finishAdoption(){
   if(finishing)return;
