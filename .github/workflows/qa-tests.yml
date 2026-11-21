@@ -137,6 +137,7 @@ jobs:
           cat > "$RUNNER_TEMP/adoption-targets.json" <<'JSON'
           [
             "tests/backend/test_media_family_identity.py",
+            "tests/backend/test_rc2_xmp_family_matching.py",
             "tests/backend/test_rc1_sd_reimport.py::test_confirmed_reimport_uses_real_worker_and_preserves_source",
             "tests/backend/test_legacy_adoption_inventory.py",
             "tests/backend/test_legacy_adoption_dataset.py",
