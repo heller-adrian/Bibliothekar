@@ -1129,10 +1129,10 @@ def test_rc2_same_second_distinct_captures_with_two_copies_each_use_contiguous_s
 
     context, source, registry = inventory
     fixtures = {
-        "camera-one/FILE0001.JPG": b"capture-A",
-        "copies/FILE0001-copy.JPG": b"capture-A",
-        "camera-two/FILE0002.JPG": b"capture-B",
-        "copies/FILE0002-copy.JPG": b"capture-B",
+        "camera-one/AAAA1001.JPG": b"capture-A",
+        "copies/ZZZZ9001.JPG": b"capture-A",
+        "camera-two/BBBB2002.JPG": b"capture-B",
+        "copies/YYYY8002.JPG": b"capture-B",
     }
     for relative, content in fixtures.items():
         path = source / relative
