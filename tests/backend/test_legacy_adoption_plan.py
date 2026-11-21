@@ -1056,3 +1056,50 @@ def test_rc2_true_raf_jpeg_xmp_sidecar_shared_script_target_stem(inventory, monk
     assert len(stems) == 1
     assert all("_Burst_" not in name for name in targets.values())
     assert {Path(name).suffix.lower() for name in targets.values()} == {".raf", ".jpg", ".xmp"}
+
+
+
+def test_rc2_duplicate_numbers_are_separate_from_filename_collisions():
+    """Two independent SHA groups cannot consume one another's suffixes."""
+    from app.legacy_adoption_plan import _adoption_occurrence_sequences
+
+    def record(name, checksum):
+        return {
+            "relative_path": name, "sha256": checksum,
+            "metadata_json": '{"media_type": "jpg"}',
+        }
+
+    def candidate(key, name, digest, stem):
+        return (
+            key, [record(name, digest)], "2025-04-16T19:37:26", None,
+            (None, Path("2025/Urlaub"), "", {"structure_enabled": False, "input_path": ""}),
+        )
+
+    selected = [
+        candidate("A", "A/a.jpg", "sha-1", "S1"),
+        candidate("B", "B/b.jpg", "sha-1", "S2"),
+        candidate("C", "C/c.jpg", "sha-2", "S2"),
+        candidate("D", "D/d.jpg", "sha-2", "S3"),
+    ]
+    duplicate, collision = _adoption_occurrence_sequences(
+        selected, {"A": "S1", "B": "S2", "C": "S2", "D": "S3"},
+    )
+    assert duplicate == {"A": 1, "B": 2, "C": 1, "D": 2}
+    assert collision == {"B": 1, "C": 2}
+
+
+def test_rc2_conflicting_duplicate_membership_requires_review():
+    from app.legacy_adoption_plan import _adoption_occurrence_sequences
+
+    def member(name, sha):
+        return {"relative_path": name, "sha256": sha,
+                "metadata_json": '{"media_type": "raw"}'}
+
+    folder = (None, Path("Album"), "", {"structure_enabled": False, "input_path": ""})
+    selections = [
+        ("A", [member("a.A", "hash-a"), member("a.B", "hash-b")], "2025-04-16", None, folder),
+        ("B", [member("b.A", "hash-a")], "2025-04-16", None, folder),
+        ("C", [member("c.B", "hash-b")], "2025-04-16", None, folder),
+    ]
+    with pytest.raises(AdoptionError, match="Duplikatfamilien"):
+        _adoption_occurrence_sequences(selections, {})
