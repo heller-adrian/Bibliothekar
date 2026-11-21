@@ -95,11 +95,14 @@ def preparation_status(library, job_id, plan_id):
 
 def _active_worker(package):
     """Check for a worker in any process without trusting HTTP-local state."""
-    fd = os.open(
-        "preparation-worker.lock",
-        os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
-        0o600, dir_fd=package,
-    )
+    try:
+        fd = os.open(
+            "preparation-worker.lock",
+            os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=package,
+        )
+    except FileNotFoundError:
+        return False
     try:
         host.check_child(package, "preparation-worker.lock", fd)
         if not stat.S_ISREG(os.fstat(fd).st_mode):
@@ -112,6 +115,15 @@ def _active_worker(package):
         return False
     finally:
         os.close(fd)
+
+
+def preparation_worker_active(job_id):
+    """Inspect the OS worker lock without creating files or trusting local RAM."""
+    appdata = appdata_root()
+    if appdata is None or not (appdata / PACKAGE_ROOT / job_id).is_dir():
+        return False
+    with _package(job_id) as descriptor:
+        return _active_worker(descriptor)
 
 
 def reserve_preparation(library, job_id, plan_id, probe_digest):
