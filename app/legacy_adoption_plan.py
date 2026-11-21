@@ -647,6 +647,7 @@ def _adoption_occurrence_sequences(selections, target_stems):
     # two media hashes shared with distinct sets of other families; arbitrarily
     # merging their transitive closure makes duplicate indices skip values.
     duplicate_indices = {}
+    membership = {}
     seen_groups = set()
     for bucket in by_hash.values():
         if len(bucket) < 2:
@@ -656,11 +657,12 @@ def _adoption_occurrence_sequences(selections, target_stems):
             continue
         seen_groups.add(members)
         for index, key in enumerate(sorted(members), 1):
-            previous = duplicate_indices.get(key)
-            if previous is not None and previous != index:
+            previous = membership.get(key)
+            if previous is not None and previous != members:
                 raise AdoptionError(
                     "Überlappende, uneinheitliche Duplikatfamilien erfordern eine manuelle Prüfung: " + key
                 )
+            membership[key] = members
             duplicate_indices[key] = index
 
     # Collision numbering is separate: several different file extensions in
