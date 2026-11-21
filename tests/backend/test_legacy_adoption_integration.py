@@ -1126,7 +1126,9 @@ def test_script_host_proof_release_and_independent_archive_verification(
 
     assert external(probe["command"]) == 0
     assert _json(client, "GET", job + "/script/probe")["verified"]
-    assert _json(client, "POST", job + "/confirm", json=confirm)["execution"]["phase"] == "script_prepared"
+    assert _json(client, "POST", job + "/confirm", json=confirm, status=202)["accepted"]
+    assert _json(client, "GET", job + "/preparation")["state"] == "completed"
+    assert _json(client, "GET", job)["plan"]["execution"]["phase"] == "script_prepared"
     assert not _json(client, "GET", job + "/script").get("command")
     assert _json(client, "GET", job + "/download/documents", status=409)["detail"]
     apply = _json(client, "POST", job + "/script/release", json=command)["command"]
@@ -2217,9 +2219,10 @@ def test_repeated_camera_names_survive_cross_year_adoption_and_archive_lifecycle
             options = ["--package", str(package_path), "--source", str(source), "--archive", str(archive),
                        "--package-device", str(device), "--package-inode", str(inode)]
             assert host.main(["probe", *options, "--sha256", probe["sha256"]]) == 0
-            _json(client, "POST", job + "/confirm", json={
+            assert _json(client, "POST", job + "/confirm", status=202, json={
                 **command, "acknowledged": True, "method": "script", "probe_sha256": probe["sha256"],
-            })
+            })["accepted"]
+            assert _json(client, "GET", job + "/preparation")["state"] == "completed"
             _json(client, "POST", job + "/script/release", json=command)
             released = json.loads((package_path / "permission.json").read_text())
             manifest = json.loads((package_path / "manifest.json").read_text())
