@@ -868,8 +868,10 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             with relative_parent(source_fd, source) as (directory, name):
                 with bound_file(directory, name) as (fd, info):
                     verify_inventory_identity(fd, info, json.loads(member["identity"]), member["sha256"])
+                    metadata = json.loads(member["metadata_json"] or "{}")
+                    raw_hint = (metadata.get("capture_identity") or {}).get("sidecar_raw")
                     if (filename_method == "script" and target is not None
-                            and json.loads(member["metadata_json"] or "{}").get("media_type") == "xmp"):
+                            and metadata.get("media_type") == "xmp" and raw_hint):
                         if info.st_size > MAX_XMP_BYTES:
                             raise AdoptionError("XMP-Datei erfordert eine separate Prüfung (zu groß): " + source)
                         payload = os.pread(fd, info.st_size, 0)
@@ -877,6 +879,8 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                             raise AdoptionError("XMP-Datei wurde während der Planung verändert: " + source)
                         try:
                             xmp_edit = planned_edit(family, targets, payload)
+                            if (xmp_edit and xmp_edit["xmp_old_raw_name"].casefold() != raw_hint):
+                                raise XmpPlanError("Der RAW-Verweis weicht von den inventarisierten XMP-Metadaten ab.")
                         except XmpPlanError as error:
                             raise AdoptionError(
                                 "Die XMP-Referenz kann nicht sicher mitbenannt werden: " + source +
