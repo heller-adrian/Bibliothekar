@@ -745,7 +745,7 @@ async function pollPreparation(){
     section.append(line("Der Auftrag ist gespeichert und kann nach einem erneuten Öffnen fortgesetzt werden."));
   }
   if(result.error)section.append(line(result.error));
-  if(result.state==="failed" || (!result.worker_local &&
+  if(result.state==="failed" || (!result.worker_active &&
       ["queued","running"].includes(result.state))){
     const retry=action("Vorbereitung fortsetzen",async()=>{
       retry.disabled=true;
