@@ -848,9 +848,11 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 return {"state": "not_started"}
             with running_lock:
                 local_running = key(library, job_id) in preparing
-            # A persisted "running" record after process restart may be
-            # retried explicitly. Do not treat that as successful completion.
-            return {**result, "worker_local": local_running}
+            # Distinguish a genuinely active process anywhere on the server
+            # from a stale running record left after a restart.
+            return {**result, "worker_active": (
+                preparation_worker_active(job_id) or local_running
+            )}
 
     @router.post("/jobs/{job_id}/confirm")
     def confirm(job_id: str, command: Confirm, request: Request, tasks: BackgroundTasks):
