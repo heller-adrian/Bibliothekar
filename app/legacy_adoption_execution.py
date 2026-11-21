@@ -38,7 +38,8 @@ def confirm_plan(library, job_id, plan_id, method, *, acknowledged, probe_digest
             if plan["filename_method"] not in {None, method}:
                 raise AdoptionError("Wähle zuerst die Durchführungsmethode für den angezeigten Verschiebeplan.")
             _catalogue_unchanged(connection, job_id, json.loads(plan["events_json"]))
-            assert_original_layout(connection, library, job, plan)
+            assert_original_layout(connection, library, job, plan,
+                                   defer_source_hash=(method == "script"))
             connection.execute(
                 "INSERT INTO legacy_adoption_execution (plan_id, method, phase) VALUES (?, ?, ?)",
                 (plan_id, method, "manual" if method == "manual" else "script_prepared"),
