@@ -632,9 +632,14 @@ def _adoption_occurrence_sequences(selections, target_stems):
     safely receive a single family suffix and therefore require review.
     """
     by_hash, by_target = defaultdict(set), defaultdict(set)
+    raw_hashes_by_key = {}
     keys = set()
     for key, members, _capture, _event, (_assigned, leaf, _leaf_key, layout) in selections:
         keys.add(key)
+        raw_hashes_by_key[key] = frozenset(
+            item["sha256"] for item in members
+            if json.loads(item["metadata_json"] or "{}").get("media_type") == "raw"
+        )
         folder = _destination_folder(leaf, layout)
         stem = target_stems.get(key, PurePosixPath(key).name)
         for member in members:
@@ -654,6 +659,16 @@ def _adoption_occurrence_sequences(selections, target_stems):
         if len(bucket) < 2:
             continue
         members = frozenset(bucket)
+        # A copied JPEG must not falsely collapse two distinct RAW captures
+        # merely because the JPEGs happen to have identical bytes.
+        raw_signatures = {
+            raw_hashes_by_key[key] for key in members if raw_hashes_by_key[key]
+        }
+        if len(raw_signatures) > 1:
+            raise AdoptionError(
+                "Gleiche Begleitmedien, aber widersprüchliche RAW-Aufnahmen: " +
+                ", ".join(sorted(members))
+            )
         if members in seen_groups:
             continue
         seen_groups.add(members)
