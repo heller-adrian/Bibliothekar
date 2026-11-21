@@ -745,6 +745,13 @@ async function pollPreparation(){
     section.append(line("Der Auftrag ist gespeichert und kann nach einem erneuten Öffnen fortgesetzt werden."));
   }
   if(result.error)section.append(line(result.error));
+  if(result.state==="failed" && !result.worker_active){
+    section.append(action("Fehlgeschlagene Vorbereitung zurücksetzen",async()=>{
+      if(!confirm("Nur den fehlgeschlagenen Vorbereitungsversuch zurücksetzen? Der Ereignisentwurf und die Originaldateien bleiben erhalten."))return;
+      await api(jobPath("/preparation/abandon"),"POST");
+      await refresh();
+    }));
+  }
   if(result.state==="failed" || (!result.worker_active &&
       ["queued","running"].includes(result.state))){
     const retry=action("Vorbereitung fortsetzen",async()=>{
