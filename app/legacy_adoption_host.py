@@ -439,7 +439,7 @@ def apply_xmp_edit(journal, item, original_move, archive, holding, prefix, index
 
 
 def validate_plan(plan):
-    if plan["format"] != 1 or not re.fullmatch(r"[0-9a-f]{32}", plan["plan_id"]):
+    if plan["format"] not in {1, 2} or not re.fullmatch(r"[0-9a-f]{32}", plan["plan_id"]):
         raise ExecutionError("Unknown adoption package format.")
     if not re.fullmatch(r"[0-9a-f]{32}", plan["job_id"]) or not plan["library_id"]:
         raise ExecutionError("Missing adoption or library identity.")
@@ -458,6 +458,31 @@ def validate_plan(plan):
         if parts[-1] != "event.json" or document["path"] in paths["target"]:
             raise ExecutionError("Invalid event document destination.")
         paths["target"].add(document["path"])
+    edits = plan.get("xmp_edits", [])
+    if not isinstance(edits, list) or (plan["format"] == 1 and edits):
+        raise ExecutionError("Invalid XMP extension in the approved manifest.")
+    original_moves = {item["source"]: item for item in plan["moves"]}
+    seen_edits = set()
+    for edit in edits:
+        source, destination = edit["source"], edit["target"]
+        path_parts(source)
+        path_parts(destination)
+        original = original_moves.get(source)
+        if (original is None or original["target"] != destination
+                or not destination.casefold().endswith(".xmp")
+                or source in seen_edits or
+                edit["original_sha256"] != original["sha256"]):
+            raise ExecutionError("XMP rewrite does not match one approved source move.")
+        seen_edits.add(source)
+        expected_size = edit["size_bytes"]
+        if not isinstance(expected_size, int) or not 0 <= expected_size <= 16 * 1024 * 1024:
+            raise ExecutionError("XMP rewrite exceeds the supported size limit.")
+        data = base64.b64decode(edit["content"], validate=True)
+        if (len(data) != expected_size or
+                hashlib.sha256(data).hexdigest() != edit["sha256"]):
+            raise ExecutionError("Approved XMP rewrite checksum is inconsistent.")
+    if plan["format"] == 2 and not edits:
+        raise ExecutionError("The extended manifest has no bound XMP edits.")
     reserved = ".bibliothekar-adoption-" + plan["plan_id"]
     if any(path.split("/", 1)[0] == reserved for path in (*paths["target"], *plan["directories"])):
         raise ExecutionError("A planned path overlaps the protected document holding area.")
@@ -480,7 +505,7 @@ def execute(package, binding, plan, source_path, archive_path, *, reverse):
 
     def status(state, processed, *, error=None):
         result = {"manifest": binding, "state": state, "mode": direction, "processed": processed,
-                  "total": len(plan["moves"]) + len(plan["documents"])}
+                  "total": len(plan["moves"]) + len(plan["documents"]) + len(plan.get("xmp_edits", []))}
         if error:
             result["error"] = str(error)
         write_atomic(package, "status.json", json_bytes(result))
@@ -514,7 +539,7 @@ def execute(package, binding, plan, source_path, archive_path, *, reverse):
 
             holding = None
             prefix = ".bibliothekar-adoption-" + plan["plan_id"]
-            if plan["documents"]:
+            if plan["documents"] or plan.get("xmp_edits"):
                 holding_state = journal.latest.get("holding")
                 current = info_at(archive, prefix)
                 if holding_state is None and not reverse:
@@ -551,8 +576,38 @@ def execute(package, binding, plan, source_path, archive_path, *, reverse):
                     processed += 1
                     status("running", processed)
 
+            edits = plan.get("xmp_edits", [])
+            move_by_source = {item["source"]: item for item in plan["moves"]}
+            edited_sources = {item["source"] for item in edits}
+
+            def xmp_edits():
+                nonlocal processed
+                if holding is None:
+                    if edits:
+                        raise ExecutionError("The XMP backup holding directory is missing.")
+                    return
+                indexes = range(len(edits))
+                for index in reversed(indexes) if reverse else indexes:
+                    item = edits[index]
+                    original_operation = "media:" + item["source"]
+                    # After rollback of a complete XMP swap, the original
+                    # media is at its source name; never replay the swap.
+                    if reverse and journal.latest.get(original_operation) in {
+                        "reverse_intent", "reverse_done"
+                    }:
+                        continue
+                    check_roots()
+                    check_holding()
+                    apply_xmp_edit(
+                        journal, item, move_by_source[item["source"]],
+                        archive, holding, prefix, index, check_roots, reverse=reverse,
+                    )
+                    processed += 1
+                    status("running", processed)
+
             if reverse:
                 documents()
+                xmp_edits()
             items = reversed(plan["moves"]) if reverse else plan["moves"]
             for item in items:
                 check_roots()
@@ -561,10 +616,21 @@ def execute(package, binding, plan, source_path, archive_path, *, reverse):
                     move(journal, operation, archive, item["target"], source, item["source"],
                          item, check_roots, reverse=True)
                 else:
-                    move(journal, operation, source, item["source"], archive, item["target"], item, check_roots)
+                    # The unmodified sidecar is now saved in the recovery
+                    # holding directory (or its swap has completed). Replaying
+                    # the original move would compare it to the edited bytes.
+                    edit_index = next(
+                        (i for i, entry in enumerate(edits)
+                         if entry["source"] == item["source"]), None,
+                    )
+                    if (edit_index is None or
+                            journal.latest.get(f"media:xmp-save:{edit_index}") is None):
+                        move(journal, operation, source, item["source"],
+                             archive, item["target"], item, check_roots)
                 processed += 1
                 status("running", processed)
             if not reverse:
+                xmp_edits()
                 documents()
             check_roots()
             journal.append(None, completed)
