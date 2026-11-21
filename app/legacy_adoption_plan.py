@@ -28,6 +28,7 @@ from app.free_time import free_ranges_for_day
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps, normalize_no_event_segments, normal_event_ranges
 from app.legacy_adoption_inventory import _job, _legacy_family_key, registered_content
 from app.legacy_adoption_mode import require_no_managed_data
+from app.legacy_adoption_xmp_plan import MAX_XMP_BYTES, XmpPlanError, planned_edit
 from app.legacy_adoption_paths import (
     AdoptionError, bound_directory, bound_file, bound_sha256, file_identity, relative_parent,
     target_key, validate_target, verify_inventory_identity, walk_bound_files,
@@ -863,9 +864,24 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             source = member["relative_path"]
             if source.strip() != source or "\\" in source:
                 raise AdoptionError("Der Quellpfad ist für die globale Registry ungeeignet: " + source)
+            xmp_edit = None
             with relative_parent(source_fd, source) as (directory, name):
                 with bound_file(directory, name) as (fd, info):
                     verify_inventory_identity(fd, info, json.loads(member["identity"]), member["sha256"])
+                    if (filename_method == "script" and target is not None
+                            and json.loads(member["metadata_json"] or "{}").get("media_type") == "xmp"):
+                        if info.st_size > MAX_XMP_BYTES:
+                            raise AdoptionError("XMP-Datei erfordert eine separate Prüfung (zu groß): " + source)
+                        payload = os.pread(fd, info.st_size, 0)
+                        if len(payload) != info.st_size:
+                            raise AdoptionError("XMP-Datei wurde während der Planung verändert: " + source)
+                        try:
+                            xmp_edit = planned_edit(family, targets, payload)
+                        except XmpPlanError as error:
+                            raise AdoptionError(
+                                "Die XMP-Referenz kann nicht sicher mitbenannt werden: " + source +
+                                " (" + str(error) + ")"
+                            ) from error
             if target is not None:
                 source_dir = PurePosixPath(source).parent
                 target_dir = str(PurePosixPath(target).parent)
@@ -885,6 +901,16 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                 )
             except sqlite3.IntegrityError as error:
                 raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + str(target)) from error
+            if xmp_edit is not None:
+                connection.execute(
+                    """UPDATE legacy_adoption_moves
+                          SET current_sha256=?, current_size_bytes=?,
+                              xmp_old_raw_name=?, xmp_new_raw_name=?
+                        WHERE plan_id=? AND relative_path=?""",
+                    (xmp_edit["current_sha256"], xmp_edit["current_size_bytes"],
+                     xmp_edit["xmp_old_raw_name"], xmp_edit["xmp_new_raw_name"],
+                     plan_id, source),
+                )
         if not new_family:
             continue
         if (event["id"], leaf_key) not in planned_directories:
