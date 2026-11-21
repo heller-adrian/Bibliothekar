@@ -1753,6 +1753,8 @@ def test_container_probe_creates_main_library_once_after_lock_release(fresh_main
     assert responses == [409, 201]
     assert result["library"]["library_id"] == "main"
     assert pending_initial_setup(registry) == {"library_id": "main", "decision": "choice"}
+    assert client.get("/").headers["location"] == "/setup/preferences"
+    assert _json(client, "POST", "/api/setup/preferences/continue") == {"next": "/setup/adoption"}
     assert _json(client, "POST", "/api/setup/adoption", json={"decision": "skipped"}) == {"next": "/"}
     assert client.get("/").status_code == 200
 
