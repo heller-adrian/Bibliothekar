@@ -44,13 +44,16 @@ def _verify_move(source, archive, row, stamp):
             with bound_file(directory, name) as (descriptor, info):
                 if info.st_dev != os.fstat(archive).st_dev:
                     return "unsafe"
-                if info.st_size != row["size_bytes"]:
+                expected_size = row["current_size_bytes"] or row["size_bytes"]
+                expected_sha256 = row["current_sha256"] or row["sha256"]
+                if info.st_size != expected_size:
                     return "size_mismatch"
-                if bound_sha256(descriptor) != row["sha256"]:
+                if bound_sha256(descriptor) != expected_sha256:
                     return "sha256_mismatch"
         if original is not None:
             return "source_present"
-        if file_identity(info)[:2] != tuple(json.loads(row["identity"])[:2]):
+        if (not row["current_sha256"] and
+                file_identity(info)[:2] != tuple(json.loads(row["identity"])[:2])):
             return "identity_mismatch"
         stamp(row["target_path"], file_identity(info))
         return "verified"
