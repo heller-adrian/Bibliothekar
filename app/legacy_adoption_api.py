@@ -32,7 +32,7 @@ from app.legacy_adoption_package import (
     inspect_runner, locked_script, permit, prepare_probe, probe_details, read_manifest, script_details, script_status,
 )
 from app.legacy_adoption_preparation import (
-    preparation_status, record_preparation, reserve_preparation,
+    exclusive_preparation_worker, preparation_status, record_preparation, reserve_preparation,
 )
 from app.legacy_adoption_paths import AdoptionError, bound_directory
 from app.legacy_adoption_mode import (
@@ -789,42 +789,48 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             return {"command": permit(descriptor, script, "apply")}
 
     def run_script_preparation(library, job_id, plan_id, probe_digest):
-        """Independent server-owned worker; progress resides on disk, not a socket."""
+        """Independent OS-locked worker; progress resides on disk, not a socket."""
         try:
-            with adoption_execution_access(registry_path()), admission(library):
-                record_preparation(
-                    library, job_id, plan_id, probe_digest, "running", phase="hashing",
-                )
+            with exclusive_preparation_worker(job_id) as exclusive:
+                if not exclusive:
+                    # Another process is already hashing this exact package.
+                    # Never mark its shared progress record as a failure.
+                    return
+                try:
+                    with adoption_execution_access(registry_path()), admission(library):
+                        record_preparation(
+                            library, job_id, plan_id, probe_digest, "running", phase="hashing",
+                        )
 
-                def checkpoint(package, processed, total, bytes_processed, bytes_total):
-                    record_preparation(
-                        library, job_id, plan_id, probe_digest, "running",
-                        phase="hashing", processed=processed, total=total,
-                        bytes_processed=bytes_processed, bytes_total=bytes_total,
-                        descriptor=package,
+                        def checkpoint(package, processed, total, bytes_processed, bytes_total):
+                            record_preparation(
+                                library, job_id, plan_id, probe_digest, "running",
+                                phase="hashing", processed=processed, total=total,
+                                bytes_processed=bytes_processed, bytes_total=bytes_total,
+                                descriptor=package,
+                            )
+
+                        confirm_plan(
+                            library, job_id, plan_id, "script", acknowledged=True,
+                            probe_digest=probe_digest, progress=checkpoint,
+                        )
+                        record_preparation(
+                            library, job_id, plan_id, probe_digest, "completed",
+                            phase="manifest_ready",
+                        )
+                except Exception as error:
+                    logging.getLogger(__name__).exception(
+                        "Legacy adoption script preparation failed for %s", job_id,
                     )
-
-                confirm_plan(
-                    library, job_id, plan_id, "script", acknowledged=True,
-                    probe_digest=probe_digest, progress=checkpoint,
-                )
-                record_preparation(
-                    library, job_id, plan_id, probe_digest, "completed",
-                    phase="manifest_ready",
-                )
-        except Exception as error:
-            logging.getLogger(__name__).exception(
-                "Legacy adoption script preparation failed for %s", job_id,
-            )
-            try:
-                record_preparation(
-                    library, job_id, plan_id, probe_digest, "failed",
-                    phase="attention_required", error=str(error)[:500],
-                )
-            except Exception:
-                logging.getLogger(__name__).exception(
-                    "Cannot persist failed legacy preparation for %s", job_id,
-                )
+                    try:
+                        record_preparation(
+                            library, job_id, plan_id, probe_digest, "failed",
+                            phase="attention_required", error=str(error)[:500],
+                        )
+                    except Exception:
+                        logging.getLogger(__name__).exception(
+                            "Cannot persist failed legacy preparation for %s", job_id,
+                        )
         finally:
             with running_lock:
                 preparing.discard(key(library, job_id))
