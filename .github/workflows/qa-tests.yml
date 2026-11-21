@@ -101,6 +101,7 @@ jobs:
           from app.main import _library_onboarding_html
           from app.legacy_adoption_i18n import PATTERNS
           from app.legacy_adoption_ui import setup_choice_html, wizard_html
+          from app.initial_library_preferences_ui import preferences_html
           import json
           import re
           scripts=re.findall(r'<script[^>]*>(.*?)</script>',EVENTS_HTML,flags=re.S)
@@ -108,6 +109,7 @@ jobs:
           Path("/tmp/bibliothekar-events.js").write_text("\n".join(scripts))
           Path("/tmp/bibliothekar-shell.js").write_text(FOLDER_LAYOUT_JS + "\n" + BIBLIOTHEKAR_JS)
           for name, html in (("adoption", wizard_html("main")), ("choice", setup_choice_html("choice")),
+                             ("preferences", preferences_html("Synthetic Main")),
                              ("onboarding", _library_onboarding_html())):
               scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
               assert scripts
@@ -118,6 +120,7 @@ jobs:
           node --check /tmp/bibliothekar-events.js
           node --check /tmp/bibliothekar-adoption.js
           node --check /tmp/bibliothekar-choice.js
+          node --check /tmp/bibliothekar-preferences.js
           node --check /tmp/bibliothekar-onboarding.js
           node -e 'for (const [source] of require("/tmp/bibliothekar-adoption-patterns.json")) new RegExp(source, "u")'
       - name: Build and verify the local container on synthetic ZFS
