@@ -1014,16 +1014,23 @@ def test_rc2_true_raf_jpeg_xmp_sidecar_shared_script_target_stem(inventory, monk
         "2025/04/16.04.2025/Vögel/Bilder/DSCF2915.JPG",
         "2025/04/16.04.2025/Vögel/Sonstiges/DSCF2915.xmp",
     ]
+    original_xmp = (
+        b'<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+        b'<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        b'<rdf:Description xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"'
+        b' crs:RawFileName="DSCF2915.RAF" crs:Exposure2012="+0.8"/>'
+        b'</rdf:RDF></x:xmpmeta>'
+    )
     for item in items:
         path = source / item
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(path.name.encode())
+        path.write_bytes(original_xmp if item.endswith(".xmp") else path.name.encode())
 
     def bound_metadata(descriptors, _cancel):
         result = {}
         for fd in descriptors:
-            filename = os.pread(fd, 64, 0).decode()
-            if filename.endswith(".xmp"):
+            beginning = os.pread(fd, 256, 0)
+            if beginning.startswith(b"<x:xmpmeta"):
                 result[fd] = {
                     "XMP:XMP-exif:DateTimeOriginal": "2025:04:16 19:37:26+02:00",
                     "XMP:XMP-tiff:Make": "FUJIFILM",
@@ -1056,6 +1063,15 @@ def test_rc2_true_raf_jpeg_xmp_sidecar_shared_script_target_stem(inventory, monk
     assert len(stems) == 1
     assert all("_Burst_" not in name for name in targets.values())
     assert {Path(name).suffix.lower() for name in targets.values()} == {".raf", ".jpg", ".xmp"}
+    xmp_row = next(row for row in moves if row["relative_path"].endswith(".xmp"))
+    import hashlib
+    expected = original_xmp.replace(b'RawFileName="DSCF2915.RAF"',
+                                    ('RawFileName="' + targets[items[0]] + '"').encode())
+    assert xmp_row["sha256"] == hashlib.sha256(original_xmp).hexdigest()
+    assert xmp_row["current_sha256"] == hashlib.sha256(expected).hexdigest()
+    assert xmp_row["current_size_bytes"] == len(expected)
+    assert xmp_row["xmp_old_raw_name"] == "DSCF2915.RAF"
+    assert xmp_row["xmp_new_raw_name"] == targets[items[0]]
 
 
 
