@@ -6,7 +6,11 @@ catalogue write lock. It never authorizes filesystem moves by itself.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
+import fcntl
+import os
+import stat
 
 from app.appdata import root as appdata_root
 from app.legacy_adoption_package import PACKAGE_ROOT, _package, _read_json
@@ -15,6 +19,36 @@ from app.legacy_adoption_paths import AdoptionError
 
 
 _PROGRESS_FILE = "preparation.json"
+
+
+@contextmanager
+def exclusive_preparation_worker(job_id):
+    """Only one OS process can execute a long hash-bound preparation at once.
+
+    Keep this separate from the short package metadata lock, which progress
+    checkpoint writers need to acquire while the job is hashing files.
+    """
+    with _package(job_id) as package:
+        fd = os.open(
+            "preparation-worker.lock",
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+            0o600, dir_fd=package,
+        )
+        try:
+            host.check_child(package, "preparation-worker.lock", fd)
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise AdoptionError("Der Sperrnachweis zur Vorbereitung ist keine reguläre Datei.")
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False
+                return
+            try:
+                yield True
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def _time():
@@ -59,6 +93,27 @@ def preparation_status(library, job_id, plan_id):
     return None
 
 
+def _active_worker(package):
+    """Check for a worker in any process without trusting HTTP-local state."""
+    fd = os.open(
+        "preparation-worker.lock",
+        os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+        0o600, dir_fd=package,
+    )
+    try:
+        host.check_child(package, "preparation-worker.lock", fd)
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise AdoptionError("Ungültige Vorbereitungs-Sperrdatei.")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
+
+
 def reserve_preparation(library, job_id, plan_id, probe_digest):
     """Durably record an accepted attempt; lock the immutable host package."""
     with _package(job_id) as descriptor, host.package_lock(descriptor):
@@ -67,7 +122,7 @@ def reserve_preparation(library, job_id, plan_id, probe_digest):
             _assert_identity(record, library, job_id, plan_id)
             if record.get("probe_sha256") != probe_digest:
                 raise AdoptionError("Der Hostnachweis passt nicht zum bereits begonnenen Auftrag.")
-            if record.get("state") == "completed":
+            if record.get("state") == "completed" or _active_worker(descriptor):
                 return {key: value for key, value in record.items() if key != "probe_sha256"}
         initial = _base(library, job_id, plan_id, probe_digest)
         _write(descriptor, initial)
