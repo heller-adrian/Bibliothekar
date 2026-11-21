@@ -72,3 +72,17 @@ def test_restart_retry_and_failure_have_durable_identity(private_package):
         preparation.preparation_status(library, job, "f" * 32)
     with pytest.raises(AdoptionError, match="anderen Übernahmeplan"):
         preparation.preparation_status(SimpleNamespace(library_id="second"), job, plan)
+
+
+
+def test_preparation_worker_lock_is_exclusive_across_open_file_descriptors(private_package):
+    _library, job, _plan, _place = private_package
+    assert preparation.preparation_worker_active(job) is False
+    with preparation.exclusive_preparation_worker(job) as first:
+        assert first is True
+        assert preparation.preparation_worker_active(job) is True
+        with preparation.exclusive_preparation_worker(job) as second:
+            assert second is False
+    assert preparation.preparation_worker_active(job) is False
+    with preparation.exclusive_preparation_worker(job) as recovered:
+        assert recovered is True
