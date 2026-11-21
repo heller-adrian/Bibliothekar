@@ -175,7 +175,11 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
                 or identity.get("conflict")):
             continue
         sidecar_camera = _camera(sidecar)
-        sidecar_time = _time(sidecar)
+        # XMP CreateDate can describe a later edit or sidecar creation;
+        # only DateTimeOriginal is an independently usable capture instant.
+        sidecar_source = str(sidecar.get("selected_capture_source") or "")
+        sidecar_time = (_time(sidecar) if sidecar_source.endswith(":DateTimeOriginal")
+                        else None)
         if not raw_hint and not exact_named:
             if sidecar_time is None or not all(sidecar_camera):
                 continue
