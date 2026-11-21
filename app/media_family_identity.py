@@ -8,7 +8,7 @@ import re
 import unicodedata
 
 
-IDENTITY_TAGS = ("ImageUniqueID", "BodySerialNumber", "OriginalRawFileName", "RawFileName")
+IDENTITY_TAGS = ("ImageUniqueID", "BodySerialNumber", "OriginalRawFileName")
 IDENTITY_VERSION = 3
 
 
