@@ -623,12 +623,12 @@ def _family_targets(folder, key, family, override, archive_entry, registered, us
 
 
 def _adoption_occurrence_sequences(selections, target_stems):
-    """Number *all* members of duplicate or colliding family groups.
+    """Keep true SHA-256 copy sequences separate from path collision sequences.
 
-    SHA-256 groups are global to the inventory, independent of source path.
-    Naming collisions, by contrast, use the actual complete destination
-    filename in the selected event. Stable family keys determine the indices;
-    no family is arbitrarily labelled the unnumbered original.
+    A collision between two *different* originals must not consume a number
+    in a separate SHA-identical duplicate group. Resolve each hash bucket
+    independently; overlapping but nonidentical duplicate buckets cannot
+    safely receive a single family suffix and therefore require review.
     """
     by_hash, by_target = defaultdict(set), defaultdict(set)
     keys = set()
@@ -643,30 +643,52 @@ def _adoption_occurrence_sequences(selections, target_stems):
             if media_type != "xmp":
                 by_hash[member["sha256"]].add(key)
 
-    def ordered_components(buckets):
-        parent = {key: key for key in keys}
+    # Do NOT apply graph connectivity to real duplicates. A family may contain
+    # two media hashes shared with distinct sets of other families; arbitrarily
+    # merging their transitive closure makes duplicate indices skip values.
+    duplicate_indices = {}
+    seen_groups = set()
+    for bucket in by_hash.values():
+        if len(bucket) < 2:
+            continue
+        members = frozenset(bucket)
+        if members in seen_groups:
+            continue
+        seen_groups.add(members)
+        for index, key in enumerate(sorted(members), 1):
+            previous = duplicate_indices.get(key)
+            if previous is not None and previous != index:
+                raise AdoptionError(
+                    "Überlappende, uneinheitliche Duplikatfamilien erfordern eine manuelle Prüfung: " + key
+                )
+            duplicate_indices[key] = index
 
-        def root(key):
-            while key != parent[key]:
-                parent[key] = parent[parent[key]]
-                key = parent[key]
-            return key
+    # Collision numbering is separate: several different file extensions in
+    # one family can still clash with other families' complete target names.
+    parent = {key: key for key in keys}
 
-        for bucket in buckets.values():
-            if len(bucket) < 2:
-                continue
-            ordered = sorted(bucket)
-            first = root(ordered[0])
-            for key in ordered[1:]:
-                parent[root(key)] = first
-        components = defaultdict(list)
-        for key in sorted(keys):
-            components[root(key)].append(key)
-        return {key: index for members in components.values() if len(members) > 1
-                for index, key in enumerate(sorted(members), 1)}
+    def root(key):
+        while key != parent[key]:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
 
-    return ordered_components(by_hash), ordered_components(by_target)
-
+    for bucket in by_target.values():
+        if len(bucket) < 2:
+            continue
+        ordered = sorted(bucket)
+        first = root(ordered[0])
+        for key in ordered[1:]:
+            parent[root(key)] = first
+    components = defaultdict(list)
+    for key in sorted(keys):
+        components[root(key)].append(key)
+    collision_indices = {
+        key: index
+        for members in components.values() if len(members) > 1
+        for index, key in enumerate(sorted(members), 1)
+    }
+    return duplicate_indices, collision_indices
 
 def _exact_script_collisions(selections, camera_tokens, burst_counts):
     """Only same generated millisecond name needs _001 from the first family."""
