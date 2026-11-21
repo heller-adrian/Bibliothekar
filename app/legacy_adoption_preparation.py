@@ -141,6 +141,36 @@ def reserve_preparation(library, job_id, plan_id, probe_digest):
         return {key: value for key, value in initial.items() if key != "probe_sha256"}
 
 
+def abandon_failed_preparation(library, job_id, plan_id):
+    """Retire an unapproved failed attempt without touching source media.
+
+    There must be no active host worker, no released command, no execution
+    journal and no DB execution (checked by the caller). The immutable draft
+    and event definitions are retained.
+    """
+    with _package(job_id) as descriptor, host.package_lock(descriptor):
+        record = _read_json(descriptor, _PROGRESS_FILE)
+        if not record:
+            return False
+        _assert_identity(record, library, job_id, plan_id)
+        if record.get("state") not in {"failed", "queued", "running"}:
+            raise AdoptionError("Eine abgeschlossene Vorbereitung kann nicht zurückgesetzt werden.")
+        if _active_worker(descriptor):
+            raise AdoptionError("Der serverseitige Vorbereitungsauftrag ist noch aktiv.")
+        permission = _read_json(descriptor, "permission.json")
+        if permission is not None:
+            raise AdoptionError("Ein bestätigter Hostbefehl kann nicht als Entwurf verworfen werden.")
+        try:
+            journal = host.read_bytes(descriptor, "journal.jsonl")
+        except FileNotFoundError:
+            journal = b""
+        if journal:
+            raise AdoptionError("Das Hostjournal ist nicht leer; verwende die kontrollierte Wiederherstellung.")
+        os.unlink(_PROGRESS_FILE, dir_fd=descriptor)
+        os.fsync(descriptor)
+        return True
+
+
 def record_preparation(library, job_id, plan_id, probe_digest, state, *,
                        phase=None, processed=None, total=None,
                        bytes_processed=None, bytes_total=None, error=None,
