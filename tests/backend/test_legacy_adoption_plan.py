@@ -242,9 +242,10 @@ def test_shared_jpeg_with_different_raws_remains_ambiguous(inventory):
             "SELECT disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
         ))
     assert all(row[0] == "candidate" for row in rows)
-    plan = create_plan(context, registry, job, _draft())
-    assert plan["move_files"] == 4
-    assert plan["inventory_duplicates"] == 0
+    # A shared JPEG checksum is not proof that different RAWs are the same
+    # capture. Do not create an executable move plan for such ambiguity.
+    with pytest.raises(AdoptionError, match="Widersprüchliche RAW-Aufnahmen in Duplikatfamilien"):
+        create_plan(context, registry, job, _draft())
 
 
 def test_historical_duplicate_raw_preserves_distinct_xmp_as_detached(inventory):
