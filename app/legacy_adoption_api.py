@@ -32,8 +32,8 @@ from app.legacy_adoption_package import (
     inspect_runner, locked_script, permit, prepare_probe, probe_details, read_manifest, script_details, script_status,
 )
 from app.legacy_adoption_preparation import (
-    exclusive_preparation_worker, preparation_status, preparation_worker_active,
-    record_preparation, reserve_preparation,
+    abandon_failed_preparation, exclusive_preparation_worker, preparation_status,
+    preparation_worker_active, record_preparation, reserve_preparation,
 )
 from app.legacy_adoption_paths import AdoptionError, bound_directory
 from app.legacy_adoption_mode import (
@@ -853,6 +853,21 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             return {**result, "worker_active": (
                 preparation_worker_active(job_id) or local_running
             )}
+
+    @router.post("/jobs/{job_id}/preparation/abandon")
+    def abandon_preparation(job_id: str, request: Request):
+        library = context()
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
+            require_adoption(request, library)
+            plan = plan_status(library, job_id)
+            if not plan.get("id") or plan.get("execution"):
+                raise AdoptionError("Nur eine nicht bestätigte Skriptvorbereitung darf zurückgesetzt werden.")
+            with running_lock:
+                if key(library, job_id) in preparing:
+                    raise AdoptionError("Die Vorbereitung ist noch aktiv.")
+            return {
+                "abandoned": abandon_failed_preparation(library, job_id, plan["id"]),
+            }
 
     @router.post("/jobs/{job_id}/confirm")
     def confirm(job_id: str, command: Confirm, request: Request, tasks: BackgroundTasks):
