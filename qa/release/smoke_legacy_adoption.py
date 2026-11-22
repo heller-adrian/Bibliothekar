@@ -154,6 +154,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
     # The initial preferences wizard intentionally permits reading this setting,
     # while general application operations remain gated until setup is complete.
     assert isinstance(api("/api/settings/event-folder-layout"), dict)
+    assert api("/api/setup/preferences/continue", method="POST") == {"next": "/setup/adoption"}
     if method == "skip":
         assert api("/api/setup/adoption", method="POST", payload={"decision": "skipped"}) == {"next": "/"}
         assert b'id="bk-settings-dialog"' in request("/")
