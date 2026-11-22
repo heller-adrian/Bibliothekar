@@ -9,7 +9,7 @@ from threading import Event, Lock
 from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from app.database import database_connection
@@ -29,14 +29,22 @@ from app.legacy_adoption_inventory import (
     inventory_status, qualify_source, scan_inventory,
 )
 from app.legacy_adoption_package import (
-    inspect_runner, locked_script, permit, prepare_probe, probe_details, read_manifest, script_details, script_status,
+    assert_unstarted_release_current, inspect_runner, locked_script, permit, prepare_probe, probe_details,
+    read_manifest, retire_unstarted_package, script_details, script_journal_started, script_status,
+)
+from app.legacy_adoption_preparation import (
+    abandon_failed_preparation, exclusive_preparation_worker, preparation_status,
+    preparation_worker_active, record_preparation, reserve_preparation,
 )
 from app.legacy_adoption_paths import AdoptionError, bound_directory
 from app.legacy_adoption_mode import (
-    adoption_execution_access, choose_initial_setup, later_adoption_blockers, require_initial_adoption,
+    adoption_execution_access, choose_initial_setup, complete_initial_preferences,
+    later_adoption_blockers, require_initial_adoption,
     require_later_adoption, reserve_adoption,
 )
-from app.legacy_adoption_plan import MAX_PLAN_ITEMS, create_plan, plan_directories, plan_moves, plan_status
+from app.legacy_adoption_plan import (
+    MAX_PLAN_ITEMS, ManualXmpRenameConflict, create_plan, plan_directories, plan_moves, plan_status,
+)
 from app.legacy_adoption_registration import assert_completed_adoption, finalize_adoption
 from app.legacy_adoption_review import (
     begin_review_batch, check_review_staging, copy_review, fail_pending_review_batch, finish_review_cancellation,
@@ -164,6 +172,8 @@ def _errors():
         raise HTTPException(404, "Der gewählte Pfad ist nicht erreichbar.") from error
     except PermissionError as error:
         raise HTTPException(403, "Für den gewählten Ordner fehlt die Leseberechtigung.") from error
+    except ManualXmpRenameConflict as error:
+        raise HTTPException(409, {"code": "manual_xmp_rename_conflict", "message": str(error)}) from error
     except (AdoptionError, DatasetError, ExecutionError, LibraryRegistryError,
             RootOperationError, OSError, ValueError, TypeError, KeyError) as error:
         raise HTTPException(409, str(error)) from error
@@ -191,11 +201,13 @@ def _download(factory, filename, *, media_type="application/zip"):
 
 def install_legacy_adoption_routes(app, *, context, registry_path, source_root_path):
     from app.legacy_adoption_ui import setup_choice_html, wizard_html
+    from app.initial_library_preferences_ui import preferences_html
 
     router = APIRouter(prefix="/api/legacy-adoption", tags=["Bestandsübernahme"])
     running = {}
     review_running = set()
     metadata_running = set()
+    preparing = set()
     running_lock = Lock()
 
     def source_path(root, relative):
@@ -238,6 +250,17 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         if status["running"] or status["pending"] or status.get("state") in {"active", "cancelling"}:
             raise AdoptionError("Schließe den Kopierauftrag zuerst ab.")
 
+    def require_preparation_idle(library, job_id):
+        plan = plan_status(library, job_id)
+        if not plan.get("id") or plan.get("execution"):
+            return
+        progress = preparation_status(library, job_id, plan["id"])
+        if progress is not None:
+            raise AdoptionError(
+                "Die Skriptvorbereitung ist gespeichert. Setze sie zuerst fort "
+                "oder nutze den kontrollierten Rücksetzweg für einen anderen Plan."
+            )
+
     def run_copies(library, job_id, registry):
         def copy_family(family_key):
             with admission(library):
@@ -278,6 +301,21 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 return
             review_running.add(run_key)
         tasks.add_task(run_copies, library, job_id, registry)
+
+    @app.get("/setup/preferences", response_class=HTMLResponse, include_in_schema=False)
+    def setup_preferences(request: Request):
+        library = context()
+        return HTMLResponse(
+            preferences_html(library.display_name),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/api/setup/preferences/continue")
+    def confirm_setup_preferences():
+        library = context()
+        with _errors(), admission(library):
+            complete_initial_preferences(registry_path(), library)
+        return {"next": "/setup/adoption"}
 
     @app.get("/setup/adoption", response_class=HTMLResponse, include_in_schema=False)
     def setup_choice(request: Request):
@@ -641,6 +679,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         with _errors(), adoption_execution_access(registry_path()), admission(library):
             require_adoption(request, library)
             require_review_idle(library, job_id)
+            require_preparation_idle(library, job_id)
             with database_connection(library.database_path) as connection:
                 require_no_partial_publication(connection, job_id)
             create_plan(
@@ -669,6 +708,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def documents(job_id: str):
         library = context()
         with _errors(), admission(library):
+            require_preparation_idle(library, job_id)
             return prepare_documents(library, job_id)
 
     @router.get("/jobs/{job_id}/manual-work")
@@ -719,6 +759,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def script_probe(job_id: str, command: ScriptHost):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
+            require_preparation_idle(library, job_id)
             return prepare_probe(library, job_id, command.plan_id, command.appdata, command.source, command.archive)
 
     @router.get("/jobs/{job_id}/script/manifest")
@@ -746,21 +787,149 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     @router.post("/jobs/{job_id}/script/release")
     def script_release(job_id: str, command: PlanCommand):
         library = context()
-        with _errors(), adoption_execution_access(registry_path()), admission(library),                 locked_script(library, job_id, command.plan_id) as (descriptor, script):
+        with (
+            _errors(), adoption_execution_access(registry_path()), admission(library),
+            locked_script(library, job_id, command.plan_id) as (descriptor, script),
+        ):
             if script["phase"] not in {"script_prepared", "repair"}:
                 raise AdoptionError("Die Skriptausführung ist in dieser Phase gesperrt.")
+            try:
+                assert_unstarted_release_current(library, job_id, command.plan_id, descriptor, script)
+            except (AdoptionError, DatasetError, OSError) as error:
+                if not script_journal_started(descriptor):
+                    permit(descriptor, script, None)
+                raise AdoptionError(
+                    "Skriptnachweis veraltet. Prüfe die Inventur und bereite den Plan erneut vor. " + str(error)
+                ) from error
             change_phase(library, job_id, command.plan_id, "script_prepared",
                          from_phases={"script_prepared", "repair"})
             return {"command": permit(descriptor, script, "apply")}
 
-    @router.post("/jobs/{job_id}/confirm")
-    def confirm(job_id: str, command: Confirm, request: Request):
+    def run_script_preparation(library, job_id, plan_id, probe_digest):
+        """Independent OS-locked worker; progress resides on disk, not a socket."""
+        try:
+            with exclusive_preparation_worker(job_id) as exclusive:
+                if not exclusive:
+                    # Another process is already hashing this exact package.
+                    # Never mark its shared progress record as a failure.
+                    return
+                try:
+                    with adoption_execution_access(registry_path()), admission(library):
+                        record_preparation(
+                            library, job_id, plan_id, probe_digest, "running", phase="hashing",
+                        )
+
+                        def checkpoint(package, processed, total, bytes_processed, bytes_total, *, phase, elapsed_seconds):
+                            record_preparation(
+                                library, job_id, plan_id, probe_digest, "running",
+                                phase=phase, processed=processed, total=total, elapsed_seconds=elapsed_seconds,
+                                bytes_processed=bytes_processed, bytes_total=bytes_total,
+                                descriptor=package,
+                            )
+
+                        confirm_plan(
+                            library, job_id, plan_id, "script", acknowledged=True,
+                            probe_digest=probe_digest, progress=checkpoint,
+                        )
+                        record_preparation(
+                            library, job_id, plan_id, probe_digest, "completed",
+                            phase="manifest_ready",
+                        )
+                except Exception as error:
+                    logging.getLogger(__name__).exception(
+                        "Legacy adoption script preparation failed for %s", job_id,
+                    )
+                    try:
+                        record_preparation(
+                            library, job_id, plan_id, probe_digest, "failed",
+                            phase="attention_required", error=str(error)[:500],
+                        )
+                    except Exception:
+                        logging.getLogger(__name__).exception(
+                            "Cannot persist failed legacy preparation for %s", job_id,
+                        )
+        finally:
+            with running_lock:
+                preparing.discard(key(library, job_id))
+
+    @router.get("/jobs/{job_id}/preparation")
+    def preparation(job_id: str):
+        library = context()
+        with _errors():
+            plan = plan_status(library, job_id)
+            if not plan.get("id"):
+                return {"state": "not_started"}
+            result = preparation_status(library, job_id, plan["id"])
+            if (plan.get("execution") or {}).get("method") == "script":
+                read_manifest(library, job_id, plan["id"])
+                return {**(result or {}), "state": "completed", "phase": "manifest_ready", "worker_active": False}
+            if not result:
+                return {"state": "not_started"}
+            if result["state"] == "completed":
+                result = {**result, "state": "failed", "phase": "attention_required",
+                          "error": "Die gespeicherte Vorbereitung wurde in der Datenbank nicht bestätigt."}
+            with running_lock:
+                local_running = key(library, job_id) in preparing
+            # Distinguish a genuinely active process anywhere on the server
+            # from a stale running record left after a restart.
+            return {**result, "worker_active": (
+                preparation_worker_active(job_id) or local_running
+            )}
+
+    @router.post("/jobs/{job_id}/preparation/abandon")
+    def abandon_preparation(job_id: str, request: Request):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
             require_adoption(request, library)
+            plan = plan_status(library, job_id)
+            if not plan.get("id") or plan.get("execution"):
+                raise AdoptionError("Nur eine nicht bestätigte Skriptvorbereitung darf zurückgesetzt werden.")
+            with running_lock:
+                if key(library, job_id) in preparing:
+                    raise AdoptionError("Die Vorbereitung ist noch aktiv.")
+            return {
+                "abandoned": abandon_failed_preparation(library, job_id, plan["id"]),
+            }
+
+    @router.post("/jobs/{job_id}/confirm")
+    def confirm(job_id: str, command: Confirm, request: Request, tasks: BackgroundTasks):
+        library = context()
+        if command.method != "script":
+            with _errors(), adoption_execution_access(registry_path()), admission(library):
+                require_adoption(request, library)
+                require_review_idle(library, job_id)
+                return confirm_plan(library, job_id, command.plan_id, command.method,
+                                    acknowledged=command.acknowledged, probe_digest=command.probe_sha256)
+        # Script preparation may read hundreds of gigabytes; never keep the
+        # confirmation HTTP request open while checksums are computed.
+        with _errors(), admission(library):
+            require_adoption(request, library)
             require_review_idle(library, job_id)
-            return confirm_plan(library, job_id, command.plan_id, command.method,
-                                acknowledged=command.acknowledged, probe_digest=command.probe_sha256)
+            if not command.acknowledged or not command.probe_sha256:
+                raise AdoptionError("Bestätige die Sicherheitsbedingungen und den Hostnachweis.")
+            plan = plan_status(library, job_id)
+            execution = plan.get("execution")
+            if plan.get("id") == command.plan_id and (execution or {}).get("method") == "script":
+                read_manifest(library, job_id, plan["id"])
+                return plan
+            if (plan.get("id") != command.plan_id or plan.get("filename_method") != "script"
+                    or plan.get("state") != "prepared" or execution):
+                raise AdoptionError("Nur der aktuell vorbereitete Skriptplan darf bestätigt werden.")
+            proof = probe_details(library, job_id, command.plan_id)
+            if not proof.get("verified") or proof.get("sha256") != command.probe_sha256:
+                raise AdoptionError("Der bestätigte Hostpfadnachweis fehlt oder ist veraltet.")
+            with running_lock:
+                current_key = key(library, job_id)
+                if current_key not in preparing:
+                    reserve_preparation(library, job_id, command.plan_id, command.probe_sha256)
+                    preparing.add(current_key)
+                    tasks.add_task(
+                        run_script_preparation, library, job_id, command.plan_id, command.probe_sha256,
+                    )
+            return JSONResponse(
+                {"accepted": True, "preparation": preparation_status(library, job_id, command.plan_id)},
+                status_code=202,
+            )
 
     script_completion_phases = {"script_prepared", "operations_done", "verifying", "repair", "registration_pending"}
 
@@ -859,13 +1028,35 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         library = context()
         with _errors(), admission(library):
             require_review_idle(library, job_id)
+            require_preparation_idle(library, job_id)
             reopen_plan(library, job_id)
+        return {"reopened": True}
+
+    @router.post("/jobs/{job_id}/script/reopen-unstarted")
+    def reopen_unstarted_script(job_id: str, command: PlanCommand, request: Request):
+        library = context()
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
+            require_adoption(request, library)
+            require_review_idle(library, job_id)
+            with locked_script(library, job_id, command.plan_id) as (descriptor, script):
+                with database_connection(library.database_path) as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    plan = connection.execute(
+                        """SELECT id FROM legacy_adoption_plans
+                           WHERE id=? AND job_id=? AND state='prepared'""",
+                        (command.plan_id, job_id),
+                    ).fetchone()
+                    if not plan:
+                        raise AdoptionError("Der bestätigte Verschiebeplan ist eingefroren.")
+                    retire_unstarted_package(descriptor, script)
+                    connection.execute("DELETE FROM legacy_adoption_plans WHERE id=?", (command.plan_id,))
         return {"reopened": True}
 
     @router.delete("/jobs/{job_id}")
     def discard(job_id: str):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
+            require_preparation_idle(library, job_id)
             if copy_status(library, job_id)["running"]:
                 raise AdoptionError("Schließe den Kopierauftrag zuerst ab.")
             with database_connection(library.database_path) as connection:

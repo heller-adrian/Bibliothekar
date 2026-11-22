@@ -193,8 +193,8 @@ def test_upgrades_1_0_0_catalogue_and_registry_without_touching_existing_rows(tm
         library_registry.register_source_backup(
             registry, backup_id="historic", source_kind="import", source_identity="old", backup_path="/synthetic",
         )
-    assert initialize_database(db)["newly_applied_versions"] == list(range(56, 73))
-    assert library_registry.initialize_library_registry(registry)["newly_applied_versions"] == [4, 5, 6, 7, 8]
+    assert initialize_database(db)["newly_applied_versions"] == list(range(56, 74))
+    assert library_registry.initialize_library_registry(registry)["newly_applied_versions"] == [4, 5, 6, 7, 8, 9]
     assert library_registry.read_library_identity(db) == "historic"
     assert library_registry.get_source_backup(registry, "historic")["source_identity"] == "old"
 
@@ -225,7 +225,7 @@ def test_rc12_review_batch_upgrade_preserves_finished_and_pending_copies(tmp_pat
                 "INSERT INTO legacy_adoption_review_batch (job_id, family_key, state) VALUES ('job', ?, ?)",
                 [("ready", "copied"), ("pending", "pending")],
             )
-    assert initialize_database(db)["newly_applied_versions"] == [66, 67, 68, 69, 70, 71, 72]
+    assert initialize_database(db)["newly_applied_versions"] == [66, 67, 68, 69, 70, 71, 72, 73]
     with database.database_connection(db) as connection:
         rows = connection.execute(
             """SELECT family_key, state, bytes_total, bytes_verified FROM legacy_adoption_review_batch
@@ -277,14 +277,14 @@ def test_separate_raw_jpeg_require_unique_identity_and_compatible_capture(librar
     job = create_job(context, source)
     assert scan_inventory(context, job)["files"] == len(originals)
     families = {item["family_key"]: item for item in inventory_families(context, job)}
-    assert len(families) == 13
+    assert len(families) == 14
     assert {member["relative_path"] for member in families["RAW/pair"]["files"]} == {
         "RAW/pair.DNG", "RAW/pair.DNG.xmp", "JPEG/pair.JPG",
     }
     assert "JPEG/pair" not in families
     assert set(item["family_key"] for item in families["RAW/pair"]["files"]) == {"RAW/pair"}
-    assert families["RAW/no-id"]["member_count"] == 2
-    assert "JPEG/no-id" not in families
+    for folder in ("RAW", "JPEG"):
+        assert families[f"{folder}/no-id"]["member_count"] == 1
     assert all(families[f"{directory}/{kind}"]["member_count"] == (2 if kind == "sidecars" else 1)
                for kind in ("camera", "serial", "burst", "ambiguous", "sidecars") for directory in ("RAW", "JPEG"))
     assert families["Other/ambiguous"]["member_count"] == 1

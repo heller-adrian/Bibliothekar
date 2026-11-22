@@ -99,10 +99,10 @@ def bound_file(parent, name, expected=None):
         os.close(descriptor)
 
 
-def bound_sha256(descriptor, cancellation_callback=None):
+def bound_sha256(descriptor, cancellation_callback=None, *, progress_callback=None):
     with os.fdopen(os.dup(descriptor), "rb") as handle:
         handle.seek(0)
-        return sha256_stream(handle, cancellation_callback)
+        return sha256_stream(handle, cancellation_callback, progress_callback)
 
 
 @contextmanager

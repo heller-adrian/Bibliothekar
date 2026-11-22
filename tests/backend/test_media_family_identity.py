@@ -53,16 +53,13 @@ def test_verified_capture_families_share_import_targets(tmp_path, monkeypatch):
 
     monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: exif)
     result = analyze_import_tree(source)
-    assert result["summary"]["family_count"] == 14
+    assert result["summary"]["family_count"] == 16
     families = {family["family_key"]: set(family["members"]) for family in result["families"]}
     complete = {entry["relative_path"] for entry in entries[:5]}
     assert families["day/RAW/DSCF7545"] == complete
     assert families["day/RAW/twin"] == {"day/RAW/twin.NEF", "day/JPEG/twin.JPG"}
-    assert families["day/RAW/coarse"] == {"day/RAW/coarse.RAF", "day/JPEG/coarse.JPG"}
-    assert families["day/RAW/no-serial"] == {"day/RAW/no-serial.RAF", "day/JPEG/no-serial.JPG"}
     assert all(len(family) == 1 for key, family in families.items()
-               if key not in {"day/RAW/twin", "day/RAW/DSCF7545",
-                              "day/RAW/coarse", "day/RAW/no-serial"})
+               if key not in {"day/RAW/twin", "day/RAW/DSCF7545"})
 
     plan, excluded, _ = build_folder_import_plan(entries, result, tmp_path / "workspace")
     assert not excluded
@@ -210,7 +207,7 @@ def test_fujifilm_coarse_context_rejects_ambiguous_or_conflicting_match(
 
 
 def test_separate_raf_sidecar_can_join_only_its_unique_original(tmp_path, monkeypatch):
-    """An XMP without own capture metadata can identify its exact RAF by name."""
+    """A corroborated compound sidecar can bind to its exact RAW."""
     source = tmp_path / "photos"
     paths = [
         "2025/day/RAW/DSCF7545.RAF",
@@ -222,13 +219,13 @@ def test_separate_raf_sidecar_can_join_only_its_unique_original(tmp_path, monkey
         path = source / path_name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(path_name)
-        row = {"SourceFile": str(path)}
-        if path.suffix.lower() != ".xmp":
-            row.update({
-                "EXIF:IFD0:Make": "FUJIFILM",
-                "EXIF:IFD0:Model": "X-H2S",
-                "EXIF:ExifIFD:DateTimeOriginal": "2025:01:28 17:11:52",
-            })
+        row = {
+            "SourceFile": str(path),
+            "EXIF:IFD0:Make": "FUJIFILM",
+            "EXIF:IFD0:Model": "X-H2S",
+            "EXIF:ExifIFD:DateTimeOriginal": "2025:01:28 17:11:52",
+            "EXIF:ExifIFD:ImageUniqueID": "00112233445566778899aabbccddeeff",
+        }
         rows.append(row)
     monkeypatch.setattr("app.metadata.run_exiftool", lambda *_args, **_kwargs: rows)
     result = analyze_import_tree(source)
@@ -246,6 +243,7 @@ def test_separate_raf_sidecar_can_join_only_its_unique_original(tmp_path, monkey
         "EXIF:IFD0:Make": "FUJIFILM",
         "EXIF:IFD0:Model": "X-H2S",
         "EXIF:ExifIFD:DateTimeOriginal": "2025:01:28 17:11:52",
+        "EXIF:ExifIFD:ImageUniqueID": "00112233445566778899aabbccddeeff",
     })
     unsafe = analyze_import_tree(source)
     assert unsafe["summary"]["family_count"] == 4

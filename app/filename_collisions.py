@@ -33,6 +33,11 @@ def numbered_stem(stem: str, index: int) -> str:
     return f"{stem}_{index:03d}" if index else stem
 
 
+def has_capture_fraction(value: str) -> bool:
+    """Distinguish a recorded zero fraction from a whole-second timestamp."""
+    return bool(re.search(r"\.\d+(?=Z|[+-]\d{2}:\d{2}|$)", value))
+
+
 def capture_stem(capture: str, device: str, occupied_stems, *, same_second: bool):
     """Apply the import naming policy to a family with a verified capture time."""
     timestamp = datetime.fromisoformat(capture)
@@ -45,7 +50,7 @@ def capture_stem(capture: str, device: str, occupied_stems, *, same_second: bool
              or any(burst_pattern.fullmatch(stem) for stem in occupied_stems))
     if not burst:
         return base, 0, False
-    if re.search(r"\.\d+(?=Z|[+-]\d{2}:\d{2}|$)", capture):
+    if has_capture_fraction(capture):
         return f"{stamp}{timestamp.microsecond // 1000:03d}_{device}", 0, True
     return f"{base}_Burst", 1, True
 

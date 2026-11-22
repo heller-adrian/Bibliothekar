@@ -332,7 +332,7 @@ if(later) {
   $("choice").href=librarySettings;
 }
 let job = null, draft = {}, draftRevision = 0, year = "", day = null;
-let familyCursor = "", moveCursor = "", timer = 0, scriptTimer = 0, reviewTimer = 0;
+let familyCursor = "", moveCursor = "", timer = 0, scriptTimer = 0, preparationTimer = 0, reviewTimer = 0;
 let reviewSelection = new Set(), reviewOpened = new Set(), reviewBatch = {}, reviewSubmitting = false, reviewCancelling = false;
 let reviewMetadataSaving=false, reviewMetadataFeedback=null;
 let reviewSelectionVersion=0;
@@ -395,9 +395,19 @@ function navigation(){
   const previous={plan:"inventory",review:"plan",execution:"review"}[viewStep];
   if(previous)nav.append(action("Zurück",()=>goStep(previous)));
   if(viewStep==="inventory" && job.state==="inventoried")nav.append(action("Weiter: Ereignisse planen",()=>goStep("plan"),true));
-  if(viewStep==="plan" && previewRevision===draftRevision && !reviewBusy())nav.append(action("Weiter: Plan prüfen",()=>{
+  if(viewStep==="plan" && previewRevision===draftRevision && !reviewBusy())nav.append(action("Weiter: Plan prüfen",async()=>{
     if(!draft.events.length)throw new Error("Lege mindestens ein Ereignis oder einen Sammelordner an.");
-    return mutate("/plan","POST",{revision:draftRevision});
+    try {
+      await mutate("/plan","POST",{revision:draftRevision});
+    } catch (error) {
+      if (error.code==="manual_xmp_rename_conflict" && !nav.querySelector("#plan-with-script")) {
+        const useScript=action("Plan mit TrueNAS-Skript erstellen",()=>
+          mutate("/plan","POST",{revision:draftRevision,filename_method:"script"}));
+        useScript.id="plan-with-script";
+        nav.append(useScript);
+      }
+      throw error;
+    }
   },true));
   if(viewStep==="review" && !job.plan.execution)nav.append(action("Weiter: Methode wählen",async()=>{
     if(!job.plan.documents_at)await mutate("/documents");
@@ -522,7 +532,11 @@ async function api(path, method="GET", body) {
       if(controller?.signal.aborted)throw error;
       throw new Error("Der Server hat keine lesbare Antwort gesendet.");
     });
-    if (!response.ok) throw new Error(detail(value.detail));
+    if (!response.ok) {
+      const error=new Error(detail(value.detail?.message ?? value.detail));
+      error.code=value.detail?.code ?? value.code;
+      throw error;
+    }
     return value;
   }catch(error){
     if(controller?.signal.aborted)throw new Error("Die Anfrage hat zu lange gedauert. Versuche es erneut.");
@@ -650,6 +664,7 @@ async function startInventory(){
 async function refresh() {
   clearTimeout(timer);
   clearTimeout(scriptTimer);
+  clearTimeout(preparationTimer);
   if (!jobId) return;
   const requested=jobId;
   const version=++refreshVersion;
@@ -683,6 +698,9 @@ async function restoreJob(current) {
   draft={events:[],capture_overrides:{},exclude_families:[],target_stems:{},...state.draft};
   render();
   scheduleReviewPoll();
+  if(job.plan.id && !job.plan.execution && job.plan.filename_method==="script"){
+    await pollPreparation();
+  }
   if(job.scan_running || job.metadata_running){
     if(job.metadata_running)report("Metadatenentscheidungen werden angewendet …","busy");
     timer=setTimeout(()=>refresh().catch(()=>{}),2000);
@@ -713,6 +731,90 @@ async function restoreJob(current) {
     (remaining?" · "+t("Noch zu prüfen")+" · "+remaining:""),remaining?"error":"success");
   else report();
 }
+async function pollPreparation(){
+  if(!job?.plan?.id || job.plan.execution)return;
+  const originalJob = jobId;
+  let result;
+  try {
+    result=await api(jobPath("/preparation"));
+  } catch (error) {
+    if(originalJob!==jobId || job.plan.execution)return;
+    if(!$("preparation-progress")) {
+      const status=slot("preparation-progress");
+      status.setAttribute("role","status");
+      $("top-actions").append(status);
+    }
+    if(!$("preparation-connection")) {
+      const note=line("Verbindung unterbrochen. Der letzte Fortschritt bleibt sichtbar.");
+      note.id="preparation-connection";
+      $("preparation-progress").append(note);
+    }
+    preparationTimer=setTimeout(pollPreparation,3000);
+    return;
+  }
+  if(originalJob!==jobId || job.plan.execution)return;
+  const old=document.getElementById("preparation-progress");
+  old?.remove();
+  if(result.state==="not_started")return;
+  const section=node("div",undefined,"adoption-status adoption-progress");
+  section.id="preparation-progress";
+  section.setAttribute("role","status");
+  section.setAttribute("aria-live","polite");
+  section.append(node("strong",result.state==="completed"?"Skriptvorbereitung abgeschlossen":
+    result.state==="failed"?"Vorbereitung unterbrochen":
+    "Skriptmanifest wird serverseitig vorbereitet"));
+  const phase={source:"Quelldateien werden geprüft",archive:"Archivbestand wird geprüft",
+    manifest:"Skriptmanifest wird erstellt"}[result.phase];
+  if(phase)section.append(line(phase));
+  if(!result.worker_active && ["queued","running"].includes(result.state))
+    section.append(line("Die Vorbereitung wurde unterbrochen. Beim Fortsetzen werden die Dateien erneut geprüft."));
+  const total=Number(result.total || 0), done=Number(result.processed || 0);
+  if(total>0){
+    const bar=node("progress");
+    bar.max=total;
+    bar.value=Math.min(total,done);
+    bar.setAttribute("aria-label","Geprüfte Dateien");
+    section.append(bar,line(done+" / "+total+" Dateien geprüft · "+
+      Math.round(Number(result.bytes_processed || 0)/1048576)+" / "+
+      Math.round(Number(result.bytes_total || 0)/1048576)+" MiB"));
+  }else{
+    section.append(line("Der Auftrag ist gespeichert und kann nach einem erneuten Öffnen fortgesetzt werden."));
+  }
+  if(result.error)section.append(line(result.error));
+  if(result.state==="failed" && !result.worker_active){
+    section.append(action("Fehlgeschlagene Vorbereitung zurücksetzen",async()=>{
+      if(!confirm("Nur den fehlgeschlagenen Vorbereitungsversuch zurücksetzen? Der Ereignisentwurf und die Originaldateien bleiben erhalten."))return;
+      await api(jobPath("/preparation/abandon"),"POST");
+      await refresh();
+    }));
+  }
+  if(result.state==="failed" || (!result.worker_active &&
+      ["queued","running"].includes(result.state))){
+    const retry=action("Vorbereitung fortsetzen",async()=>{
+      retry.disabled=true;
+      try {
+        const proof=await api(jobPath("/script/probe"));
+        if(!proof.verified || !proof.sha256)throw Error("Der Hostnachweis muss erneut geprüft werden.");
+        await api(jobPath("/confirm"),"POST",{
+          plan_id:job.plan.id,method:"script",acknowledged:true,probe_sha256:proof.sha256
+        });
+        await refresh();
+      }catch(error){
+        report(error.message,"error");
+        retry.disabled=false;
+      }
+    });
+    section.append(retry);
+  }
+  $("top-actions").append(section);
+  // A terminal preparation record is not equivalent to a verified adoption.
+  // Re-fetch the plan to display its registered execution phase.
+  if(result.state==="completed"){
+    preparationTimer=setTimeout(()=>refresh().catch(()=>{}),500);
+  }else if(["queued","running"].includes(result.state)){
+    preparationTimer=setTimeout(()=>pollPreparation().catch(()=>{}),3000);
+  }
+}
 async function finishAdoption(){
   if(finishing)return;
   finishing=true;
@@ -738,7 +840,7 @@ async function mutate(path, method="POST", body) {
       return result;
     }
     if(checking || path==="/rollback/start")manualSnapshot=null;
-    const target={"/plan":"review","/confirm":"execute","/finalize":"execute","/reopen":"plan","/scan":"inventory","/rollback/start":"execute"}[path];
+    const target={"/plan":"review","/confirm":"execute","/finalize":"execute","/reopen":"plan","/script/reopen-unstarted":"inventory","/scan":"inventory","/rollback/start":"execute"}[path];
     if(target)rememberView(target);
     await refresh();
     report();
@@ -2295,6 +2397,12 @@ async function pollScript() {
     if (!recoveryOnly && !result.running && status?.state!=="completed" &&
         ["script_prepared","repair"].includes(phase) && !result.command) {
       nodes.push(action("Skriptbefehl bereitstellen",()=>run("/script/release"),true));
+    }
+    if (!recoveryOnly && result.can_reopen) {
+      nodes.push(action("Skriptfreigabe aufheben und zur Inventur zurückkehren",()=>{
+        if(confirm("Das ungestartete Skript wird gesperrt. Der Ereignisentwurf bleibt erhalten. Fortfahren?"))
+          return run("/script/reopen-unstarted");
+      }));
     }
     const finalize=$("script-finalize");
     if (finalize) finalize.disabled=finishing || result.running || status?.state!=="completed" || status.mode!=="apply";

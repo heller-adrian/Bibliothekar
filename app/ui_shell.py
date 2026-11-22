@@ -3818,7 +3818,354 @@ BIBLIOTHEKAR_0425_CSS = r"""
 }
 """
 
-BIBLIOTHEKAR_JS = r"""
+SETTINGS_REQUEST_JS = r"""
+  function bkEscape(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  }
+
+  async function bkJson(url, options={}) {
+    const response = await fetch(url, options);
+    const raw = await response.text();
+    let data = {};
+    try { data = raw ? JSON.parse(raw) : {}; }
+    catch (_) { throw new Error("Ungültige Serverantwort."); }
+    if (!response.ok) {
+      const detail = data.detail;
+      if (detail && typeof detail === "object") {
+        throw new Error((detail.errors || []).join("\n") || detail.reason || (detail.issues || detail.storage_health?.issues || []).map(i=>String(i.path||'')+': '+String(i.detail||i.code||'')).join('\n') || "Prüfung fehlgeschlagen.");
+      }
+      throw new Error(String(detail || "Anfrage fehlgeschlagen."));
+    }
+    return data;
+  }
+
+"""
+
+EVENT_PREFERENCES_JS = r"""
+function bkEventPreferences(bkJson, bkEscape) {
+  const folderSettings = document.getElementById("bk-folder-layout-settings");
+  if(!folderSettings)return {load:()=>{}};
+  let folderLayoutState = null;
+
+  const {nodeId:bkNodeId, flatten:bkFlattenLayout} = window.BibliothekarFolderLayout;
+  function bkRenderFolderLayout() {
+    if(!folderSettings || !folderLayoutState) return;
+    const enabled=document.getElementById("bk-folder-layout-enabled");
+    if(enabled) enabled.checked=Boolean(folderLayoutState.structure_enabled);
+    window.BibliothekarFolderLayout.render({
+      state:folderLayoutState,
+      host:document.getElementById("bk-folder-layout-tree"),
+      exportSelect:document.getElementById("bk-folder-export-node"),
+      onChange:bkUpdateSettingsPreview,
+      manageExport:false,
+    });
+    bkUpdateSettingsPreview();
+  }
+
+  document.getElementById("bk-folder-layout-enabled")?.addEventListener("change",event=>{
+    if(folderLayoutState)folderLayoutState.structure_enabled=Boolean(event.target.checked);
+    bkUpdateSettingsPreview();
+  });
+  document.getElementById("bk-folder-export-node")?.addEventListener("change",event=>{
+    if(!folderLayoutState)return;
+    const selected=String(event.target.value||"");
+    for(const item of bkFlattenLayout(folderLayoutState.layout?.nodes||[])){
+      if(String(item.node?.role||"").toLowerCase()==="export")delete item.node.role;
+      if(selected && String(item.node?.id||"")===selected)item.node.role="export";
+    }
+    bkUpdateSettingsPreview();
+  });
+  document.getElementById("bk-folder-add-root")?.addEventListener("click",()=>{
+    if(!folderLayoutState)return;
+    folderLayoutState.layout.nodes.push({id:bkNodeId(),name:"Neuer Ordner",children:[]});
+    bkRenderFolderLayout();
+  });
+  const eventNamingSettings = document.getElementById("bk-event-naming-settings");
+  let savedNaming = null;
+  let savedLayout = null;
+
+  function bkRenderEventNaming(data) {
+    if (!eventNamingSettings || !data) return;
+    const label=document.getElementById("bk-no-event-label");
+    const range=document.getElementById("bk-event-date-range");
+    const year=document.getElementById("bk-event-include-year");
+    const time=document.getElementById("bk-event-include-time");
+    const collectionYear=document.getElementById("bk-no-event-include-year");
+    const subeventRange=document.getElementById("bk-subevent-date-range");
+    const subeventYear=document.getElementById("bk-subevent-include-year");
+    const subeventTime=document.getElementById("bk-subevent-include-time");
+    const subeventEnabled=document.getElementById("bk-subevent-prefix-enabled");
+    if(label)label.value=String(data.no_event_label||(document.documentElement.dataset.bkLocale==="de"?"Ohne Ereignis":"No Event"));
+    if(range)range.checked=String(data.date_mode||"start")==="range";
+    if(year)year.checked=Boolean(data.include_year);
+    if(time)time.checked=Boolean(data.include_time);
+    if(collectionYear)collectionYear.checked=Boolean(data.no_event_include_year);
+    if(subeventRange)subeventRange.checked=String(data.subevent_date_mode||"start")==="range";
+    if(subeventYear)subeventYear.checked=Boolean(data.subevent_include_year);
+    if(subeventTime)subeventTime.checked=Boolean(data.subevent_include_time);
+    if(subeventEnabled)subeventEnabled.checked=data.subevent_prefix_enabled!==false;
+    bkUpdateSettingsPreview();
+  }
+
+  function bkPreviewStructure(parentFolder, childFolder="") {
+    const enabled=Boolean(folderLayoutState?.structure_enabled);
+    const nodes=folderLayoutState?.layout?.nodes||[];
+    const inputPath=String(folderLayoutState?.input_path||"");
+    const lines=["2026"];
+    const parentInput=enabled && !inputPath && !childFolder ? "  [Input]" : "";
+    lines.push("└── "+parentFolder+parentInput);
+    if(childFolder){
+      const childInput=enabled && !inputPath ? "  [Input]" : "";
+      lines.push("    └── "+childFolder+childInput);
+    }
+    if(!enabled || !nodes.length)return lines.join("\n");
+
+    function walk(items,prefix,pathPrefix){
+      (items||[]).forEach((node,index)=>{
+        const last=index===items.length-1;
+        const path=pathPrefix ? pathPrefix+"/"+node.name : node.name;
+        const roles=[];
+        if(path===inputPath)roles.push("Input");
+        if(String(node.role||"").toLowerCase()==="export")roles.push("Export");
+        lines.push(prefix+(last?"└── ":"├── ")+String(node.name||"Ordner")+(roles.length?"  ["+roles.join(", ")+"]":""));
+        walk(node.children||[],prefix+(last?"    ":"│   "),path);
+      });
+    }
+    walk(nodes,childFolder?"        ":"    ","");
+    return lines.join("\n");
+  }
+
+  function bkUpdateSettingsPreview() {
+    const preview=document.getElementById("bk-event-naming-preview");
+    if(!preview)return;
+    const defaultCollectionLabel=document.documentElement.dataset.bkLocale==="de"?"Ohne Ereignis":"No Event";
+    const label=String(document.getElementById("bk-no-event-label")?.value||defaultCollectionLabel).trim()||defaultCollectionLabel;
+    const range=Boolean(document.getElementById("bk-event-date-range")?.checked);
+    const year=Boolean(document.getElementById("bk-event-include-year")?.checked);
+    const time=Boolean(document.getElementById("bk-event-include-time")?.checked);
+    const collectionYear=Boolean(document.getElementById("bk-no-event-include-year")?.checked);
+    const subeventRange=Boolean(document.getElementById("bk-subevent-date-range")?.checked);
+    const subeventYear=Boolean(document.getElementById("bk-subevent-include-year")?.checked);
+    const subeventTime=Boolean(document.getElementById("bk-subevent-include-time")?.checked);
+    const subeventEnabled=Boolean(document.getElementById("bk-subevent-prefix-enabled")?.checked);
+
+    const d1=year?"2026-07-20":"07-20";
+    const d2=year?"2026-07-21":"07-21";
+    let datePart=range ? d1+"–"+d2 : d1;
+    if(time){
+      datePart=range
+        ? d1+" 14-00–"+d2+" 18-30"
+        : d1+" · 14-00–18-30";
+    }
+    const englishExample=document.documentElement.dataset.bkLocale !== "de";
+    const normal=datePart+" - "+(englishExample?"Vacation":"Urlaub");
+
+    const sd1=subeventYear?"2026-07-20":"07-20";
+    const sd2=subeventYear?"2026-07-21":"07-21";
+    let subeventPart=subeventRange ? sd1+"–"+sd2 : sd1;
+    if(subeventTime){
+      subeventPart=subeventRange
+        ? sd1+" 14-00–"+sd2+" 18-30"
+        : sd1+" · 14-00–18-30";
+    }
+    const subevent=(subeventEnabled ? subeventPart+" - " : "")+(englishExample?"City visit":"Stadtbesuch");
+    const collection=(collectionYear?"2026-07":"07")+" - "+label;
+
+    preview.innerHTML=
+      '<div class="bk-settings-preview-grid">'
+      +'<div class="bk-settings-preview-case"><strong>Normales Ereignis</strong><pre>'+bkEscape(bkPreviewStructure(normal,subevent))+'</pre></div>'
+      +'<div class="bk-settings-preview-case"><strong>Sammelordner</strong><pre>'+bkEscape(bkPreviewStructure(collection))+'</pre></div>'
+      +'</div>';
+  }
+  window.addEventListener("bk-language-changed", bkUpdateSettingsPreview);
+  ["bk-no-event-label","bk-event-date-range","bk-event-include-year","bk-event-include-time","bk-no-event-include-year","bk-subevent-date-range","bk-subevent-include-year","bk-subevent-include-time","bk-subevent-prefix-enabled"].forEach(id=>{
+    document.getElementById(id)?.addEventListener("input",bkUpdateSettingsPreview);
+    document.getElementById(id)?.addEventListener("change",bkUpdateSettingsPreview);
+  });
+  function namingValues() {
+    return {
+      no_event_label:document.getElementById("bk-no-event-label")?.value||"",
+      date_mode:Boolean(document.getElementById("bk-event-date-range")?.checked)?"range":"start",
+      include_year:Boolean(document.getElementById("bk-event-include-year")?.checked),
+      include_time:Boolean(document.getElementById("bk-event-include-time")?.checked),
+      no_event_include_year:Boolean(document.getElementById("bk-no-event-include-year")?.checked),
+      subevent_date_mode:Boolean(document.getElementById("bk-subevent-date-range")?.checked)?"range":"start",
+      subevent_include_year:Boolean(document.getElementById("bk-subevent-include-year")?.checked),
+      subevent_include_time:Boolean(document.getElementById("bk-subevent-include-time")?.checked),
+      subevent_prefix_enabled:Boolean(document.getElementById("bk-subevent-prefix-enabled")?.checked),
+    };
+  }
+
+  const namingURL = "/api/settings/event-naming";
+  const layoutURL = "/api/settings/event-folder-layout";
+  const namingStatus = document.getElementById("bk-event-naming-status");
+  const layoutStatus = document.getElementById("bk-folder-layout-status");
+  function layoutNodes(nodes) {
+    return nodes.map(({id, name, role, children})=>({
+      id, name:name.trim(), role:role||"", children:layoutNodes(children||[]),
+    }));
+  }
+  const stateOfLayout = ({structure_enabled, layout, input_path}) =>
+    JSON.stringify({structure_enabled, input_path, nodes:layoutNodes(layout.nodes)});
+  const sameNaming = (expected, actual) =>
+    Object.entries(expected).every(([key, value])=>actual[key]===value);
+  function requireSaved(matches) {
+    if(!matches)throw Error("Die gespeicherten Einstellungen stimmen nicht überein.");
+  }
+
+  function setNaming(data) {
+    bkRenderEventNaming(data);
+    savedNaming = namingValues();
+  }
+
+  function setLayout(data) {
+    folderLayoutState = data;
+    savedLayout = stateOfLayout(data);
+    bkRenderFolderLayout();
+  }
+
+  function read(url) { return bkJson(url, {cache:"no-store"}); }
+  function put(url, data) {
+    return bkJson(url, {
+      method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)
+    });
+  }
+
+  async function saveLayout() {
+    if(!folderLayoutState)return;
+    const expected = stateOfLayout(folderLayoutState);
+    const data = await put(layoutURL, folderLayoutState);
+    requireSaved(stateOfLayout(data)===expected);
+    setLayout(data);
+    document.dispatchEvent(new CustomEvent("bibliothekar:folder-layout-updated",{detail:data}));
+  }
+
+  async function saveNaming() {
+    if(!savedNaming)return;
+    const values = namingValues();
+    const data = await put(namingURL, values);
+    const expected = {...values,no_event_label:values.no_event_label.trim().replace(/\s+/g," ")};
+    requireSaved(sameNaming(expected, data));
+    setNaming(data);
+    document.dispatchEvent(new CustomEvent("bibliothekar:event-naming-updated",{detail:data}));
+  }
+
+  function bindSave(id, status, save, success) {
+    const button = document.getElementById(id);
+    button.addEventListener("click", async()=>{
+      button.disabled=true;
+      status.textContent="Wird gespeichert …";
+      try {
+        await save();
+        status.textContent=success;
+      } catch(error) {
+        status.textContent=error.message;
+      } finally {
+        button.disabled=false;
+      }
+    });
+  }
+  bindSave("bk-folder-layout-save", layoutStatus, saveLayout, "Gespeichert. Bestehende Ereignisse bleiben unverändert.");
+  bindSave("bk-event-naming-save", namingStatus, saveNaming, "Gespeichert. Die Einstellung gilt nur für neue Ereignisse, Unterereignisse und Sammelordner.");
+
+  async function load({strict=false}={}) {
+    await Promise.all([
+      read(layoutURL).then(setLayout).then(()=>layoutStatus.textContent="").catch(error=>{
+        layoutStatus.textContent=error.message;
+        if(strict)throw error;
+      }),
+      read(namingURL).then(setNaming).then(()=>namingStatus.textContent="").catch(error=>{
+        namingStatus.textContent=error.message;
+        if(strict)throw error;
+      }),
+    ]);
+  }
+
+  async function saveAndVerify() {
+    if(JSON.stringify(namingValues())!==JSON.stringify(savedNaming))await saveNaming();
+    if(stateOfLayout(folderLayoutState)!==savedLayout)await saveLayout();
+    const [naming, layout] = await Promise.all([read(namingURL), read(layoutURL)]);
+    requireSaved(sameNaming(savedNaming, naming) && stateOfLayout(layout)===savedLayout);
+  }
+  return {load, saveAndVerify};
+}
+"""
+
+EVENT_PREFERENCES_MARKUP = r"""
+      <div id="bk-event-naming-settings">
+        <details class="bk-settings-card" id="bk-folder-layout-settings">
+          <summary><span>Ordnerstruktur</span><span style="color:var(--bk-muted);font-weight:600">Vorlage für neue Ereignisse</span></summary>
+          <div class="bk-settings-card-body">
+            <label class="bk-folder-layout-toggle"><input id="bk-folder-layout-enabled" type="checkbox"> <span>Unterordner standardmäßig erstellen</span></label>
+            <div id="bk-folder-layout-tree" style="margin-top:12px"></div>
+            <label style="display:grid;gap:6px;margin-top:11px">
+              <span><strong>Exportordner</strong> <span style="color:var(--bk-muted)">· optional</span></span>
+              <select id="bk-folder-export-node">
+                <option value="">Kein Ordner fest als Exportordner klassifiziert</option>
+              </select>
+              <span style="color:var(--bk-muted);font-size:.86rem;line-height:1.35">Dateien in diesem Ordner gelten als Exporte. Die Einstellung wird für neue Ereignisse eingefroren.</span>
+            </label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+              <button id="bk-folder-add-root" type="button">＋ Ordner</button>
+              <button id="bk-folder-layout-save" type="button" class="bk-positive-action">Speichern</button>
+            </div>
+            <div id="bk-folder-layout-status" style="color:var(--bk-muted);margin-top:8px"></div>
+          </div>
+        </details>
+
+        <details class="bk-settings-card">
+          <summary><span>Normale Ereignisse</span><span style="color:var(--bk-muted);font-weight:600">Standardbenennung</span></summary>
+          <div class="bk-settings-card-body">
+            <div style="display:flex;gap:14px;flex-wrap:wrap">
+              <label class="bk-compact-toggle"><input id="bk-event-include-year" type="checkbox"> <span>Jahr einbeziehen</span></label>
+              <label class="bk-compact-toggle"><input id="bk-event-include-time" type="checkbox"> <span>Uhrzeit einbeziehen</span></label>
+              <label class="bk-compact-toggle"><input id="bk-event-date-range" type="checkbox"> <span>Von–bis im Namen</span></label>
+            </div>
+            <div class="bk-language-note">Der eingegebene Ereignisname bleibt Bestandteil des Ordnernamens. Bestehende Ereignisse behalten ihren gespeicherten Benennungsstand.</div>
+          </div>
+        </details>
+
+        <details class="bk-settings-card">
+          <summary><span>Unterereignisse</span><span style="color:var(--bk-muted);font-weight:600">Standardbenennung</span></summary>
+          <div class="bk-settings-card-body">
+            <div style="display:flex;gap:14px;flex-wrap:wrap">
+              <label class="bk-compact-toggle"><input id="bk-subevent-include-year" type="checkbox"> <span>Jahr einbeziehen</span></label>
+              <label class="bk-compact-toggle"><input id="bk-subevent-include-time" type="checkbox"> <span>Uhrzeit einbeziehen</span></label>
+              <label class="bk-compact-toggle"><input id="bk-subevent-date-range" type="checkbox"> <span>Von–bis im Namen</span></label>
+            </div>
+            <label class="bk-compact-toggle" style="margin-top:10px">
+              <input id="bk-subevent-prefix-enabled" type="checkbox">
+              <span>Standardmäßig verwenden</span>
+            </label>
+            <div class="bk-language-note">Der eingegebene Unterereignisname bleibt immer erhalten. Jahr, Uhrzeit und Von–bis lassen sich frei kombinieren. Im Ereignisfenster kann der Standard pro Ereignis mit „Präfix: an/aus“ überschrieben werden.</div>
+          </div>
+        </details>
+
+        <details class="bk-settings-card">
+          <summary><span>Sammelordner</span><span style="color:var(--bk-muted);font-weight:600">bisher „Ohne Ereignis“</span></summary>
+          <div class="bk-settings-card-body">
+            <label style="display:grid;gap:6px"><span>Bezeichnung für Sammelordner</span><input id="bk-no-event-label" value="Ohne Ereignis"></label>
+            <label class="bk-compact-toggle" style="margin-top:10px"><input id="bk-no-event-include-year" type="checkbox"> <span>Jahr einbeziehen</span></label>
+            <div class="bk-language-note">Sammelordner werden monatsweise gebildet. Von–bis und Uhrzeit gehören deshalb nicht in ihre Ordnerbenennung.</div>
+          </div>
+        </details>
+
+        <section class="bk-settings-preview">
+          <strong>Vorschau</strong>
+          <div style="color:var(--bk-muted);font-size:.86rem;margin-top:4px">So sehen Ordnerstruktur und Standardbenennung für neue Inhalte aus.</div>
+          <div id="bk-event-naming-preview"></div>
+          <div class="bk-library-actions" style="margin-top:11px"><button id="bk-event-naming-save" type="button" class="bk-positive-action">Benennung speichern</button></div>
+          <div id="bk-event-naming-status" class="bk-library-status"></div>
+        </section>
+      </div>
+"""
+
+
+BIBLIOTHEKAR_JS = EVENT_PREFERENCES_JS + r"""
 (() => {
   const root = document.documentElement;
   const pageUrl = new URL(window.location.href);
@@ -4327,31 +4674,7 @@ BIBLIOTHEKAR_JS = r"""
     button.addEventListener("click", () => button.closest("dialog")?.close());
   });
 
-  function bkEscape(value) {
-    return String(value ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;");
-  }
-
-  async function bkJson(url, options={}) {
-    const response = await fetch(url, options);
-    const raw = await response.text();
-    let data = {};
-    try { data = raw ? JSON.parse(raw) : {}; }
-    catch (_) { throw new Error("Ungültige Serverantwort."); }
-    if (!response.ok) {
-      const detail = data.detail;
-      if (detail && typeof detail === "object") {
-        throw new Error((detail.errors || []).join("\n") || detail.reason || (detail.issues || detail.storage_health?.issues || []).map(i=>String(i.path||'')+': '+String(i.detail||i.code||'')).join('\n') || "Prüfung fehlgeschlagen.");
-      }
-      throw new Error(String(detail || "Anfrage fehlgeschlagen."));
-    }
-    return data;
-  }
-
-  async function bkRefreshLibrarySwitcher() {
+""" + SETTINGS_REQUEST_JS + r"""  async function bkRefreshLibrarySwitcher() {
     const host = document.getElementById("bk-library-switch-list");
     if (!host) return;
     host.innerHTML = '<div style="color:var(--bk-muted)">Bibliotheken werden geladen …</div>';
@@ -4644,211 +4967,8 @@ BIBLIOTHEKAR_JS = r"""
 
   document.querySelector("[data-bk-open-settings]")?.addEventListener("click", bkLoadStorageSettings);
 
-  const folderSettings = document.getElementById("bk-folder-layout-settings");
-  let folderLayoutState = null;
-
-  const {nodeId:bkNodeId, flatten:bkFlattenLayout} = window.BibliothekarFolderLayout;
-  function bkRenderFolderLayout() {
-    if(!folderSettings || !folderLayoutState) return;
-    const enabled=document.getElementById("bk-folder-layout-enabled");
-    if(enabled) enabled.checked=Boolean(folderLayoutState.structure_enabled);
-    window.BibliothekarFolderLayout.render({
-      state:folderLayoutState,
-      host:document.getElementById("bk-folder-layout-tree"),
-      exportSelect:document.getElementById("bk-folder-export-node"),
-      onChange:bkUpdateSettingsPreview,
-      manageExport:false,
-    });
-  }
-
-  async function bkLoadFolderLayout() {
-    if(!folderSettings)return;
-    const status=document.getElementById("bk-folder-layout-status");
-    try{
-      const response=await fetch("/api/settings/event-folder-layout",{cache:"no-store"});
-      if(!response.ok)throw new Error("Ordnerstruktur konnte nicht geladen werden.");
-      folderLayoutState=await response.json();
-      bkRenderFolderLayout();
-      status.textContent="";
-    }catch(error){status.textContent=error.message;}
-  }
-
-  document.querySelector("[data-bk-open-settings]")?.addEventListener("click", bkLoadFolderLayout);
-  document.getElementById("bk-folder-layout-enabled")?.addEventListener("change",event=>{
-    if(folderLayoutState)folderLayoutState.structure_enabled=Boolean(event.target.checked);
-    bkUpdateSettingsPreview();
-  });
-  document.getElementById("bk-folder-export-node")?.addEventListener("change",event=>{
-    if(!folderLayoutState)return;
-    const selected=String(event.target.value||"");
-    for(const item of bkFlattenLayout(folderLayoutState.layout?.nodes||[])){
-      if(String(item.node?.role||"").toLowerCase()==="export")delete item.node.role;
-      if(selected && String(item.node?.id||"")===selected)item.node.role="export";
-    }
-    bkUpdateSettingsPreview();
-  });
-  document.getElementById("bk-folder-add-root")?.addEventListener("click",()=>{
-    if(!folderLayoutState)return;
-    folderLayoutState.layout.nodes.push({id:bkNodeId(),name:"Neuer Ordner",children:[]});
-    bkRenderFolderLayout();
-  });
-  document.getElementById("bk-folder-layout-save")?.addEventListener("click",async()=>{
-    if(!folderLayoutState)return;
-    const status=document.getElementById("bk-folder-layout-status");
-    status.textContent="Wird gespeichert …";
-    try{
-      const response=await fetch("/api/settings/event-folder-layout",{
-        method:"PUT",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify(folderLayoutState)
-      });
-      const raw=await response.text();
-      let data={};
-      try{data=raw?JSON.parse(raw):{};}
-      catch(_){throw new Error(response.ok?"Ungültige Serverantwort beim Speichern.":`Speichern fehlgeschlagen (HTTP ${response.status}).`);}
-      if(!response.ok)throw new Error(data.detail||"Speichern fehlgeschlagen.");
-      folderLayoutState=data;
-      bkRenderFolderLayout();
-      document.dispatchEvent(new CustomEvent("bibliothekar:folder-layout-updated",{detail:data}));
-      status.textContent="Gespeichert. Bestehende Ereignisse bleiben unverändert.";
-    }catch(error){status.textContent=error.message;}
-  });
-
-  const eventNamingSettings = document.getElementById("bk-event-naming-settings");
-  let eventNamingState = null;
-
-  function bkRenderEventNaming(data) {
-    if (!eventNamingSettings || !data) return;
-    eventNamingState = data;
-    const label=document.getElementById("bk-no-event-label");
-    const range=document.getElementById("bk-event-date-range");
-    const year=document.getElementById("bk-event-include-year");
-    const time=document.getElementById("bk-event-include-time");
-    const collectionYear=document.getElementById("bk-no-event-include-year");
-    const subeventRange=document.getElementById("bk-subevent-date-range");
-    const subeventYear=document.getElementById("bk-subevent-include-year");
-    const subeventTime=document.getElementById("bk-subevent-include-time");
-    const subeventEnabled=document.getElementById("bk-subevent-prefix-enabled");
-    if(label)label.value=String(data.no_event_label||(document.documentElement.dataset.bkLocale==="de"?"Ohne Ereignis":"No Event"));
-    if(range)range.checked=String(data.date_mode||"start")==="range";
-    if(year)year.checked=Boolean(data.include_year);
-    if(time)time.checked=Boolean(data.include_time);
-    if(collectionYear)collectionYear.checked=Boolean(data.no_event_include_year);
-    if(subeventRange)subeventRange.checked=String(data.subevent_date_mode||"start")==="range";
-    if(subeventYear)subeventYear.checked=Boolean(data.subevent_include_year);
-    if(subeventTime)subeventTime.checked=Boolean(data.subevent_include_time);
-    if(subeventEnabled)subeventEnabled.checked=data.subevent_prefix_enabled!==false;
-    bkUpdateSettingsPreview();
-  }
-
-  function bkPreviewStructure(parentFolder, childFolder="") {
-    const enabled=Boolean(folderLayoutState?.structure_enabled);
-    const nodes=folderLayoutState?.layout?.nodes||[];
-    const inputPath=String(folderLayoutState?.input_path||"");
-    const lines=["2026"];
-    const parentInput=enabled && !inputPath && !childFolder ? "  [Input]" : "";
-    lines.push("└── "+parentFolder+parentInput);
-    if(childFolder){
-      const childInput=enabled && !inputPath ? "  [Input]" : "";
-      lines.push("    └── "+childFolder+childInput);
-    }
-    if(!enabled || !nodes.length)return lines.join("\n");
-
-    function walk(items,prefix,pathPrefix){
-      (items||[]).forEach((node,index)=>{
-        const last=index===items.length-1;
-        const path=pathPrefix ? pathPrefix+"/"+node.name : node.name;
-        const roles=[];
-        if(path===inputPath)roles.push("Input");
-        if(String(node.role||"").toLowerCase()==="export")roles.push("Export");
-        lines.push(prefix+(last?"└── ":"├── ")+String(node.name||"Ordner")+(roles.length?"  ["+roles.join(", ")+"]":""));
-        walk(node.children||[],prefix+(last?"    ":"│   "),path);
-      });
-    }
-    walk(nodes,childFolder?"        ":"    ","");
-    return lines.join("\n");
-  }
-
-  function bkUpdateSettingsPreview() {
-    const preview=document.getElementById("bk-event-naming-preview");
-    if(!preview)return;
-    const defaultCollectionLabel=document.documentElement.dataset.bkLocale==="de"?"Ohne Ereignis":"No Event";
-    const label=String(document.getElementById("bk-no-event-label")?.value||defaultCollectionLabel).trim()||defaultCollectionLabel;
-    const range=Boolean(document.getElementById("bk-event-date-range")?.checked);
-    const year=Boolean(document.getElementById("bk-event-include-year")?.checked);
-    const time=Boolean(document.getElementById("bk-event-include-time")?.checked);
-    const collectionYear=Boolean(document.getElementById("bk-no-event-include-year")?.checked);
-    const subeventRange=Boolean(document.getElementById("bk-subevent-date-range")?.checked);
-    const subeventYear=Boolean(document.getElementById("bk-subevent-include-year")?.checked);
-    const subeventTime=Boolean(document.getElementById("bk-subevent-include-time")?.checked);
-    const subeventEnabled=Boolean(document.getElementById("bk-subevent-prefix-enabled")?.checked);
-
-    const d1=year?"2026-07-20":"07-20";
-    const d2=year?"2026-07-21":"07-21";
-    let datePart=range ? d1+"–"+d2 : d1;
-    if(time){
-      datePart=range
-        ? d1+" 14-00–"+d2+" 18-30"
-        : d1+" · 14-00–18-30";
-    }
-    const englishExample=document.documentElement.dataset.bkLocale !== "de";
-    const normal=datePart+" - "+(englishExample?"Vacation":"Urlaub");
-
-    const sd1=subeventYear?"2026-07-20":"07-20";
-    const sd2=subeventYear?"2026-07-21":"07-21";
-    let subeventPart=subeventRange ? sd1+"–"+sd2 : sd1;
-    if(subeventTime){
-      subeventPart=subeventRange
-        ? sd1+" 14-00–"+sd2+" 18-30"
-        : sd1+" · 14-00–18-30";
-    }
-    const subevent=(subeventEnabled ? subeventPart+" - " : "")+(englishExample?"City visit":"Stadtbesuch");
-    const collection=(collectionYear?"2026-07":"07")+" - "+label;
-
-    preview.innerHTML=
-      '<div class="bk-settings-preview-grid">'
-      +'<div class="bk-settings-preview-case"><strong>Normales Ereignis</strong><pre>'+bkEscape(bkPreviewStructure(normal,subevent))+'</pre></div>'
-      +'<div class="bk-settings-preview-case"><strong>Sammelordner</strong><pre>'+bkEscape(bkPreviewStructure(collection))+'</pre></div>'
-      +'</div>';
-  }
-  window.addEventListener("bk-language-changed", bkUpdateSettingsPreview);
-  async function bkLoadEventNaming() {
-    if(!eventNamingSettings)return;
-    const status=document.getElementById("bk-event-naming-status");
-    try{
-      const data=await bkJson("/api/settings/event-naming");
-      bkRenderEventNaming(data);
-      if(status)status.textContent="";
-    }catch(error){if(status)status.textContent=error.message;}
-  }
-
-  ["bk-no-event-label","bk-event-date-range","bk-event-include-year","bk-event-include-time","bk-no-event-include-year","bk-subevent-date-range","bk-subevent-include-year","bk-subevent-include-time","bk-subevent-prefix-enabled"].forEach(id=>{
-    document.getElementById(id)?.addEventListener("input",bkUpdateSettingsPreview);
-    document.getElementById(id)?.addEventListener("change",bkUpdateSettingsPreview);
-  });
-  document.getElementById("bk-event-naming-save")?.addEventListener("click",async()=>{
-    const status=document.getElementById("bk-event-naming-status");
-    if(status)status.textContent="Benennung wird gespeichert …";
-    try{
-      const data=await bkJson("/api/settings/event-naming",{
-        method:"PUT",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          no_event_label:document.getElementById("bk-no-event-label")?.value||"",
-          date_mode:Boolean(document.getElementById("bk-event-date-range")?.checked)?"range":"start",
-          include_year:Boolean(document.getElementById("bk-event-include-year")?.checked),
-          include_time:Boolean(document.getElementById("bk-event-include-time")?.checked),
-          no_event_include_year:Boolean(document.getElementById("bk-no-event-include-year")?.checked),
-          subevent_date_mode:Boolean(document.getElementById("bk-subevent-date-range")?.checked)?"range":"start",
-          subevent_include_year:Boolean(document.getElementById("bk-subevent-include-year")?.checked),
-          subevent_include_time:Boolean(document.getElementById("bk-subevent-include-time")?.checked),
-          subevent_prefix_enabled:Boolean(document.getElementById("bk-subevent-prefix-enabled")?.checked),
-        })
-      });
-      bkRenderEventNaming(data);
-      document.dispatchEvent(new CustomEvent("bibliothekar:event-naming-updated",{detail:data}));
-      if(status)status.textContent="Gespeichert. Die Einstellung gilt nur für neue Ereignisse, Unterereignisse und Sammelordner.";
-    }catch(error){if(status)status.textContent=error.message;}
-  });
-  document.querySelector("[data-bk-open-settings]")?.addEventListener("click", bkLoadEventNaming);
+  const eventPreferences = bkEventPreferences(bkJson, bkEscape);
+  document.querySelector("[data-bk-open-settings]")?.addEventListener("click", eventPreferences.load);
 
   // Quellenwahl 0.22.1: drei gleichwertige Quellkarten im Importbereich.
   const sourcePicker = document.getElementById("bk-source-picker");
@@ -5840,72 +5960,7 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
     </div>
 
     <div class="bk-settings-panel" data-bk-settings-panel="folders" hidden>
-      <div id="bk-event-naming-settings">
-        <details class="bk-settings-card" id="bk-folder-layout-settings">
-          <summary><span>Ordnerstruktur</span><span style="color:var(--bk-muted);font-weight:600">Vorlage für neue Ereignisse</span></summary>
-          <div class="bk-settings-card-body">
-            <label class="bk-folder-layout-toggle"><input id="bk-folder-layout-enabled" type="checkbox"> <span>Unterordner standardmäßig erstellen</span></label>
-            <div id="bk-folder-layout-tree" style="margin-top:12px"></div>
-            <label style="display:grid;gap:6px;margin-top:11px">
-              <span><strong>Exportordner</strong> <span style="color:var(--bk-muted)">· optional</span></span>
-              <select id="bk-folder-export-node">
-                <option value="">Kein Ordner fest als Exportordner klassifiziert</option>
-              </select>
-              <span style="color:var(--bk-muted);font-size:.86rem;line-height:1.35">Dateien in diesem Ordner gelten als Exporte. Die Einstellung wird für neue Ereignisse eingefroren.</span>
-            </label>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-              <button id="bk-folder-add-root" type="button">＋ Ordner</button>
-              <button id="bk-folder-layout-save" type="button" class="bk-positive-action">Speichern</button>
-            </div>
-            <div id="bk-folder-layout-status" style="color:var(--bk-muted);margin-top:8px"></div>
-          </div>
-        </details>
-
-        <details class="bk-settings-card">
-          <summary><span>Normale Ereignisse</span><span style="color:var(--bk-muted);font-weight:600">Standardbenennung</span></summary>
-          <div class="bk-settings-card-body">
-            <div style="display:flex;gap:14px;flex-wrap:wrap">
-              <label class="bk-compact-toggle"><input id="bk-event-include-year" type="checkbox"> <span>Jahr einbeziehen</span></label>
-              <label class="bk-compact-toggle"><input id="bk-event-include-time" type="checkbox"> <span>Uhrzeit einbeziehen</span></label>
-              <label class="bk-compact-toggle"><input id="bk-event-date-range" type="checkbox"> <span>Von–bis im Namen</span></label>
-            </div>
-            <div class="bk-language-note">Der eingegebene Ereignisname bleibt Bestandteil des Ordnernamens. Bestehende Ereignisse behalten ihren gespeicherten Benennungsstand.</div>
-          </div>
-        </details>
-
-        <details class="bk-settings-card">
-          <summary><span>Unterereignisse</span><span style="color:var(--bk-muted);font-weight:600">Standardbenennung</span></summary>
-          <div class="bk-settings-card-body">
-            <div style="display:flex;gap:14px;flex-wrap:wrap">
-              <label class="bk-compact-toggle"><input id="bk-subevent-include-year" type="checkbox"> <span>Jahr einbeziehen</span></label>
-              <label class="bk-compact-toggle"><input id="bk-subevent-include-time" type="checkbox"> <span>Uhrzeit einbeziehen</span></label>
-              <label class="bk-compact-toggle"><input id="bk-subevent-date-range" type="checkbox"> <span>Von–bis im Namen</span></label>
-            </div>
-            <label class="bk-compact-toggle" style="margin-top:10px">
-              <input id="bk-subevent-prefix-enabled" type="checkbox">
-              <span>Standardmäßig verwenden</span>
-            </label>
-            <div class="bk-language-note">Der eingegebene Unterereignisname bleibt immer erhalten. Jahr, Uhrzeit und Von–bis lassen sich frei kombinieren. Im Ereignisfenster kann der Standard pro Ereignis mit „Präfix: an/aus“ überschrieben werden.</div>
-          </div>
-        </details>
-
-        <details class="bk-settings-card">
-          <summary><span>Sammelordner</span><span style="color:var(--bk-muted);font-weight:600">bisher „Ohne Ereignis“</span></summary>
-          <div class="bk-settings-card-body">
-            <label style="display:grid;gap:6px"><span>Bezeichnung für Sammelordner</span><input id="bk-no-event-label" value="Ohne Ereignis"></label>
-            <label class="bk-compact-toggle" style="margin-top:10px"><input id="bk-no-event-include-year" type="checkbox"> <span>Jahr einbeziehen</span></label>
-            <div class="bk-language-note">Sammelordner werden monatsweise gebildet. Von–bis und Uhrzeit gehören deshalb nicht in ihre Ordnerbenennung.</div>
-          </div>
-        </details>
-
-        <section class="bk-settings-preview">
-          <strong>Vorschau</strong>
-          <div style="color:var(--bk-muted);font-size:.86rem;margin-top:4px">So sehen Ordnerstruktur und Standardbenennung für neue Inhalte aus.</div>
-          <div id="bk-event-naming-preview"></div>
-          <div class="bk-library-actions" style="margin-top:11px"><button id="bk-event-naming-save" type="button" class="bk-positive-action">Benennung speichern</button></div>
-          <div id="bk-event-naming-status" class="bk-library-status"></div>
-        </section>
-      </div>
+      {EVENT_PREFERENCES_MARKUP}
     </div>
 
     <div class="bk-settings-panel" data-bk-settings-panel="paths" hidden>
