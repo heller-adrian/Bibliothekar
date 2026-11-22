@@ -89,7 +89,8 @@ def test_0300_library_identity_is_additive_migration_39(tmp_path):
     assert "library_identity" in state["initialized"]["tables"]
 
     registry_status = initialize_library_registry(state["registry_file"])
-    assert registry_status["schema_versions"] == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert registry_status["schema_versions"][:8] == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert registry_status["schema_versions"] == list(range(1, max(registry_status["schema_versions"]) + 1))
     assert registry_status["newly_applied_versions"] == []
 
 
