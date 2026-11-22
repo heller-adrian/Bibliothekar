@@ -70,13 +70,14 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
-            refs/heads/patch/1.0.1-legacy-adoption|refs/heads/patch/1.1.1-media-families|refs/heads/patch/1.1.2-adoption-duplicate-family-targets)
+            refs/heads/patch/1.0.1-legacy-adoption|refs/heads/patch/1.1.1-media-families|refs/heads/patch/1.1.2-adoption-duplicate-family-targets|refs/heads/patch/1.1.2-rc2-xmp-family-adoption)
               test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
               test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
               [[ "$ADOPTION_QA_INPUT" =~ ^[0-9]+$ ]]
               release=v1.1.0
               if [[ "$GITHUB_REF" == 'refs/heads/patch/1.1.1-media-families' ]]; then release=v1.1.1-rc.2; fi
               if [[ "$GITHUB_REF" == 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets' ]]; then release=v1.1.2-rc.1; fi
+              if [[ "$GITHUB_REF" == 'refs/heads/patch/1.1.2-rc2-xmp-family-adoption' ]]; then release=v1.1.2-rc.2; fi
               if git ls-remote --exit-code --tags origin "refs/tags/$release" >/dev/null; then
                 echo 'Release tag already exists.' >&2
                 exit 1
@@ -99,7 +100,7 @@ jobs:
           esac
 
       - name: Verify full backend qualification for the exact release commit
-        if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption' || github.ref == 'refs/heads/patch/1.1.1-media-families' || github.ref == 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets'
+        if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption' || github.ref == 'refs/heads/patch/1.1.1-media-families' || github.ref == 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets' || github.ref == 'refs/heads/patch/1.1.2-rc2-xmp-family-adoption'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -147,11 +148,11 @@ jobs:
         run: docker compose -f compose.example.yaml config -q
 
       - name: Install metadata regression dependency
-        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/patch/1.0.1-legacy-adoption' && github.ref != 'refs/heads/patch/1.1.1-media-families' && github.ref != 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets'
+        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/patch/1.0.1-legacy-adoption' && github.ref != 'refs/heads/patch/1.1.1-media-families' && github.ref != 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets' && github.ref != 'refs/heads/patch/1.1.2-rc2-xmp-family-adoption'
         run: sudo apt-get update -qq && sudo apt-get install -y libimage-exiftool-perl
 
       - name: Complete QA before publishing
-        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/patch/1.0.1-legacy-adoption' && github.ref != 'refs/heads/patch/1.1.1-media-families' && github.ref != 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets'
+        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/patch/1.0.1-legacy-adoption' && github.ref != 'refs/heads/patch/1.1.1-media-families' && github.ref != 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets' && github.ref != 'refs/heads/patch/1.1.2-rc2-xmp-family-adoption'
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
@@ -161,7 +162,7 @@ jobs:
           pytest -q -o addopts='' --junitxml=/tmp/bibliothekar-qa.xml tests/backend
 
       - name: Retain QA evidence
-        if: always() && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/patch/1.0.1-legacy-adoption' && github.ref != 'refs/heads/patch/1.1.1-media-families' && github.ref != 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets'
+        if: always() && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/patch/1.0.1-legacy-adoption' && github.ref != 'refs/heads/patch/1.1.1-media-families' && github.ref != 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets' && github.ref != 'refs/heads/patch/1.1.2-rc2-xmp-family-adoption'
         uses: actions/upload-artifact@v4
         with:
           name: backend-qa
@@ -217,7 +218,7 @@ jobs:
         run: echo '${{ steps.publish.outputs.digest }}' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify the immutable release candidate image with native ZFS
-        if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption' || github.ref == 'refs/heads/patch/1.1.1-media-families' || github.ref == 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets'
+        if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption' || github.ref == 'refs/heads/patch/1.1.1-media-families' || github.ref == 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets' || github.ref == 'refs/heads/patch/1.1.2-rc2-xmp-family-adoption'
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -237,6 +238,10 @@ jobs:
             refs/heads/patch/1.1.2-adoption-duplicate-family-targets)
               test "$VERSION" = '1.1.2'
               release=v1.1.2-rc.1
+              ;;
+            refs/heads/patch/1.1.2-rc2-xmp-family-adoption)
+              test "$VERSION" = '1.1.2'
+              release=v1.1.2-rc.2
               ;;
             *) exit 1 ;;
           esac
@@ -274,9 +279,9 @@ jobs:
       # Workflow-file changes require an authorized maintainer token when
       # tagging this commit. The workflow token builds and verifies the image.
       - uses: actions/upload-artifact@v4
-        if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption' || github.ref == 'refs/heads/patch/1.1.1-media-families' || github.ref == 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets'
+        if: github.ref == 'refs/heads/patch/1.0.1-legacy-adoption' || github.ref == 'refs/heads/patch/1.1.1-media-families' || github.ref == 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets' || github.ref == 'refs/heads/patch/1.1.2-rc2-xmp-family-adoption'
         with:
-          name: ${{ github.ref_name == 'patch/1.1.2-adoption-duplicate-family-targets' && 'rc112-adoption-qualified-image' || (github.ref_name == 'patch/1.1.1-media-families' && 'rc112-qualified-image' || 'stable-1.1.0-qualified-image') }}
+          name: ${{ github.ref_name == 'patch/1.1.2-rc2-xmp-family-adoption' && 'rc112-rc2-qualified-image' || github.ref_name == 'patch/1.1.2-adoption-duplicate-family-targets' && 'rc112-adoption-qualified-image' || (github.ref_name == 'patch/1.1.1-media-families' && 'rc112-qualified-image' || 'stable-1.1.0-qualified-image') }}
           path: |
             ${{ runner.temp }}/adoption-qualification/qualified-image.json
             ${{ runner.temp }}/adoption-qualification/verified.json
@@ -286,7 +291,7 @@ jobs:
           retention-days: 30
 
       - name: Publish qualified 1.1.2 release candidate
-        if: github.ref == 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets'
+        if: github.ref == 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets' || github.ref == 'refs/heads/patch/1.1.2-rc2-xmp-family-adoption'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -295,6 +300,7 @@ jobs:
         run: |
           set -euo pipefail
           release=v1.1.2-rc.1
+          if [[ "$GITHUB_REF" == 'refs/heads/patch/1.1.2-rc2-xmp-family-adoption' ]]; then release=v1.1.2-rc.2; fi
           image="$REGISTRY/$IMAGE_NAME"
           test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
           test "$GITHUB_REPOSITORY" = 'heller-adrian/Bibliothekar'
