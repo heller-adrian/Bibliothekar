@@ -151,7 +151,9 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
     assert "Hast du eine bestehende Fotosammlung?".encode() in choice
     assert b'id="bk-settings-dialog"' not in choice
     assert api("/api/jobs", expected=409)["code"] == "initial_setup_required"
-    assert api("/api/settings/event-folder-layout", expected=409)["code"] == "initial_setup_required"
+    # The initial preferences wizard intentionally permits reading this setting,
+    # while general application operations remain gated until setup is complete.
+    assert isinstance(api("/api/settings/event-folder-layout"), dict)
     if method == "skip":
         assert api("/api/setup/adoption", method="POST", payload={"decision": "skipped"}) == {"next": "/"}
         assert b'id="bk-settings-dialog"' in request("/")
