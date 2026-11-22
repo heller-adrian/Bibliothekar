@@ -43,7 +43,7 @@ jobs:
     outputs:
       request-only: ${{ steps.scope.outputs.request-only }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 24
+    timeout-minutes: ${{ inputs.container_preflight && 40 || 24 }}
     env:
       PYTHONPATH: ${{ github.workspace }}
       PYTEST_ADDOPTS: ''
@@ -130,7 +130,11 @@ jobs:
           bash qa/release/install_runner_packages.sh acl
           image="bibliothekar-qa:$QA_SOURCE"
           docker build --label "org.opencontainers.image.revision=$QA_SOURCE" --tag "$image" .
-          bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh "$image" "$QA_SOURCE"
+          smoke_args=("$image" "$QA_SOURCE")
+          if [[ "$GITHUB_REF_NAME" == patch/1.1.2-rc2-xmp-family-adoption ]]; then
+            smoke_args+=(ghcr.io/heller-adrian/bibliothekar@sha256:c9c2077374643d0598dbadbf976f26da76a9958343e6d39c221efb411b38ac36 rc112)
+          fi
+          bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh "${smoke_args[@]}"
       - name: Verify adoption including the kernel read-only bind mount
         if: steps.scope.outputs.request-only != 'true'
         env:

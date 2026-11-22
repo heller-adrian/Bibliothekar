@@ -7,9 +7,11 @@ from pathlib import PurePosixPath
 import re
 import unicodedata
 
+from app.filename_collisions import has_capture_fraction
+
 
 IDENTITY_TAGS = ("ImageUniqueID", "BodySerialNumber", "OriginalRawFileName")
-IDENTITY_VERSION = 3
+IDENTITY_VERSION = 4
 
 
 def _normalized(value):
@@ -62,6 +64,14 @@ def _same_setting(left, right):
         return _normalized(left) == _normalized(right)
 
 
+def _compatible_time(first, second, left, right):
+    if left is None or right is None or left.replace(microsecond=0) != right.replace(microsecond=0):
+        return False
+    return (left == right or not all(
+        has_capture_fraction(item["selected_capture_time"]) for item in (first, second)
+    ))
+
+
 def _compatible(first, second):
     a, b = first["capture_identity"], second["capture_identity"]
     if a["id"] and b["id"] and a["id"] != b["id"]:
@@ -69,9 +79,7 @@ def _compatible(first, second):
     if a["serial"] and b["serial"] and a["serial"] != b["serial"]:
         return False
     left, right = _time(first), _time(second)
-    if left is None or right is None or left.replace(microsecond=0) != right.replace(microsecond=0):
-        return False
-    if left.microsecond and right.microsecond and left != right:
+    if not _compatible_time(first, second, left, right):
         return False
     a_settings = first.get("capture_settings") or {}
     b_settings = second.get("capture_settings") or {}
@@ -129,17 +137,15 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
             source = item.get("selected_capture_source") or ""
             if (instant and source.endswith(":DateTimeOriginal")
                     and _role(item) in {"raw", "jpeg", "dng"}):
-                # Folder names are not part of capture identity. Use camera,
-                # the original camera filename stem and the EXIF capture instant
-                # to assemble *candidates* anywhere in the scanned collection.
-                # The component validator then requires compatible exposures,
-                # unique media roles and no competing same-role candidates.
-                by_context[(camera, _normalized(PurePosixPath(key).name),
-                            instant.replace(microsecond=0))].add(key)
+                stem = _normalized(PurePosixPath(key).name)
+                settings = item.get("capture_settings") or {}
+                # Keep coarse candidates available for a proven sidecar, but
+                # never connect primaries on a model/stem/whole second alone.
                 has_proof = True
-                if identity["serial"] and instant.microsecond:
-                    by_precision[(camera, identity["serial"],
-                                  _normalized(PurePosixPath(key).name), instant)].add(key)
+                if identity["serial"] and has_capture_fraction(item["selected_capture_time"]):
+                    by_precision[(camera, identity["serial"], stem, instant)].add(key)
+                if all(settings.get(field) not in (None, "") for field in ("exposure", "aperture", "iso")):
+                    by_context[(camera, stem, instant.replace(microsecond=0))].add(key)
         if has_proof:
             candidates[key] = (members, evidence, usable)
 
@@ -201,6 +207,8 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
                     _normalized(PurePosixPath(item["relative_path"]).stem) == original_name)
             ]
             for original in exact:
+                if raw_hint and _role(original) not in {"raw", "dng"}:
+                    continue
                 match = original.get("capture_identity") or {}
                 if any(identity.get(tag) and match.get(tag)
                        and identity[tag] != match[tag] for tag in ("id", "serial")):
@@ -208,10 +216,14 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
                 if any(sidecar_camera) and sidecar_camera != _camera(original):
                     continue
                 original_time = _time(original)
-                if (sidecar_time is not None
-                        and (original_time is None
-                             or sidecar_time.replace(microsecond=0)
-                             != original_time.replace(microsecond=0))):
+                if sidecar_time is not None:
+                    if not _compatible_time(sidecar, original, sidecar_time, original_time):
+                        continue
+                elif not (identity.get("id") and identity["id"] == match.get("id")
+                          or sidecar_camera == _camera(original) and all(sidecar_camera)
+                          and identity.get("serial") and identity["serial"] == match.get("serial")):
+                    continue
+                if not all(sidecar_camera) and not (identity.get("id") and identity["id"] == match.get("id")):
                     continue
                 if not raw_hint:
                     # Without an explicit RAW reference, original capture
@@ -238,10 +250,10 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
             }
             if len(raw_candidates) > 1 or (not raw_candidates and len(unique_owners) != 1):
                 continue
-            # When RAW/JPEG are in separate folders, their proven same-stem
-            # and same-second context may connect them as a single family.
-            if len(unique_owners) > 2:
-                continue
+            # Plain XMP can bind to one RAW, but cannot itself prove a
+            # relationship between that RAW and a separately stored JPEG.
+            if raw_candidates:
+                unique_owners = {owner for owner, _ in raw_candidates}
         candidates[key] = ([sidecar], [], True)
         by_sidecar[key] = {key, *unique_owners}
 
@@ -285,6 +297,11 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
         # A qualified sidecar names a particular primary rather than every
         # file in the family. Require that original, even across folders.
         originals = {_normalized(PurePosixPath(item["relative_path"]).name) for item in primary}
+        masters = {_normalized(PurePosixPath(item["relative_path"]).name) for item in primary
+                   if _role(item) in {"raw", "dng"}}
+        if any(hint not in masters for item in records if _role(item) == "xmp"
+               and (hint := (item.get("capture_identity") or {}).get("sidecar_raw"))):
+            continue
         if any(_role(item) == "xmp" and ending(item["relative_path"]).count(".") > 1
                and _normalized(PurePosixPath(item["relative_path"]).stem) not in originals
                for item in records):

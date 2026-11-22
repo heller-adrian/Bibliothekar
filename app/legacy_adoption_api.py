@@ -29,7 +29,8 @@ from app.legacy_adoption_inventory import (
     inventory_status, qualify_source, scan_inventory,
 )
 from app.legacy_adoption_package import (
-    inspect_runner, locked_script, permit, prepare_probe, probe_details, read_manifest, script_details, script_status,
+    assert_unstarted_release_current, inspect_runner, locked_script, permit, prepare_probe, probe_details,
+    read_manifest, retire_unstarted_package, script_details, script_journal_started, script_status,
 )
 from app.legacy_adoption_preparation import (
     abandon_failed_preparation, exclusive_preparation_worker, preparation_status,
@@ -41,7 +42,9 @@ from app.legacy_adoption_mode import (
     later_adoption_blockers, require_initial_adoption,
     require_later_adoption, reserve_adoption,
 )
-from app.legacy_adoption_plan import MAX_PLAN_ITEMS, create_plan, plan_directories, plan_moves, plan_status
+from app.legacy_adoption_plan import (
+    MAX_PLAN_ITEMS, ManualXmpRenameConflict, create_plan, plan_directories, plan_moves, plan_status,
+)
 from app.legacy_adoption_registration import assert_completed_adoption, finalize_adoption
 from app.legacy_adoption_review import (
     begin_review_batch, check_review_staging, copy_review, fail_pending_review_batch, finish_review_cancellation,
@@ -169,6 +172,8 @@ def _errors():
         raise HTTPException(404, "Der gewählte Pfad ist nicht erreichbar.") from error
     except PermissionError as error:
         raise HTTPException(403, "Für den gewählten Ordner fehlt die Leseberechtigung.") from error
+    except ManualXmpRenameConflict as error:
+        raise HTTPException(409, {"code": "manual_xmp_rename_conflict", "message": str(error)}) from error
     except (AdoptionError, DatasetError, ExecutionError, LibraryRegistryError,
             RootOperationError, OSError, ValueError, TypeError, KeyError) as error:
         raise HTTPException(409, str(error)) from error
@@ -782,9 +787,20 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     @router.post("/jobs/{job_id}/script/release")
     def script_release(job_id: str, command: PlanCommand):
         library = context()
-        with _errors(), adoption_execution_access(registry_path()), admission(library),                 locked_script(library, job_id, command.plan_id) as (descriptor, script):
+        with (
+            _errors(), adoption_execution_access(registry_path()), admission(library),
+            locked_script(library, job_id, command.plan_id) as (descriptor, script),
+        ):
             if script["phase"] not in {"script_prepared", "repair"}:
                 raise AdoptionError("Die Skriptausführung ist in dieser Phase gesperrt.")
+            try:
+                assert_unstarted_release_current(library, job_id, command.plan_id, descriptor, script)
+            except (AdoptionError, DatasetError, OSError) as error:
+                if not script_journal_started(descriptor):
+                    permit(descriptor, script, None)
+                raise AdoptionError(
+                    "Skriptnachweis veraltet. Prüfe die Inventur und bereite den Plan erneut vor. " + str(error)
+                ) from error
             change_phase(library, job_id, command.plan_id, "script_prepared",
                          from_phases={"script_prepared", "repair"})
             return {"command": permit(descriptor, script, "apply")}
@@ -803,10 +819,10 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                             library, job_id, plan_id, probe_digest, "running", phase="hashing",
                         )
 
-                        def checkpoint(package, processed, total, bytes_processed, bytes_total):
+                        def checkpoint(package, processed, total, bytes_processed, bytes_total, *, phase, elapsed_seconds):
                             record_preparation(
                                 library, job_id, plan_id, probe_digest, "running",
-                                phase="hashing", processed=processed, total=total,
+                                phase=phase, processed=processed, total=total, elapsed_seconds=elapsed_seconds,
                                 bytes_processed=bytes_processed, bytes_total=bytes_total,
                                 descriptor=package,
                             )
@@ -844,8 +860,14 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             if not plan.get("id"):
                 return {"state": "not_started"}
             result = preparation_status(library, job_id, plan["id"])
+            if (plan.get("execution") or {}).get("method") == "script":
+                read_manifest(library, job_id, plan["id"])
+                return {**(result or {}), "state": "completed", "phase": "manifest_ready", "worker_active": False}
             if not result:
                 return {"state": "not_started"}
+            if result["state"] == "completed":
+                result = {**result, "state": "failed", "phase": "attention_required",
+                          "error": "Die gespeicherte Vorbereitung wurde in der Datenbank nicht bestätigt."}
             with running_lock:
                 local_running = key(library, job_id) in preparing
             # Distinguish a genuinely active process anywhere on the server
@@ -886,13 +908,12 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             if not command.acknowledged or not command.probe_sha256:
                 raise AdoptionError("Bestätige die Sicherheitsbedingungen und den Hostnachweis.")
             plan = plan_status(library, job_id)
+            execution = plan.get("execution")
+            if plan.get("id") == command.plan_id and (execution or {}).get("method") == "script":
+                read_manifest(library, job_id, plan["id"])
+                return plan
             if (plan.get("id") != command.plan_id or plan.get("filename_method") != "script"
-                    or plan.get("state") != "prepared"):
-                # Repeated acknowledgements after successful preparation are
-                # idempotent and cannot start a second worker.
-                if (plan.get("id") == command.plan_id and
-                        (plan.get("execution") or {}).get("method") == "script"):
-                    return plan
+                    or plan.get("state") != "prepared" or execution):
                 raise AdoptionError("Nur der aktuell vorbereitete Skriptplan darf bestätigt werden.")
             proof = probe_details(library, job_id, command.plan_id)
             if not proof.get("verified") or proof.get("sha256") != command.probe_sha256:
@@ -900,12 +921,11 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             with running_lock:
                 current_key = key(library, job_id)
                 if current_key not in preparing:
-                    record = reserve_preparation(library, job_id, command.plan_id, command.probe_sha256)
-                    if record.get("state") != "completed":
-                        preparing.add(current_key)
-                        tasks.add_task(
-                            run_script_preparation, library, job_id, command.plan_id, command.probe_sha256,
-                        )
+                    reserve_preparation(library, job_id, command.plan_id, command.probe_sha256)
+                    preparing.add(current_key)
+                    tasks.add_task(
+                        run_script_preparation, library, job_id, command.plan_id, command.probe_sha256,
+                    )
             return JSONResponse(
                 {"accepted": True, "preparation": preparation_status(library, job_id, command.plan_id)},
                 status_code=202,
@@ -1010,6 +1030,26 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             require_review_idle(library, job_id)
             require_preparation_idle(library, job_id)
             reopen_plan(library, job_id)
+        return {"reopened": True}
+
+    @router.post("/jobs/{job_id}/script/reopen-unstarted")
+    def reopen_unstarted_script(job_id: str, command: PlanCommand, request: Request):
+        library = context()
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
+            require_adoption(request, library)
+            require_review_idle(library, job_id)
+            with locked_script(library, job_id, command.plan_id) as (descriptor, script):
+                with database_connection(library.database_path) as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    plan = connection.execute(
+                        """SELECT id FROM legacy_adoption_plans
+                           WHERE id=? AND job_id=? AND state='prepared'""",
+                        (command.plan_id, job_id),
+                    ).fetchone()
+                    if not plan:
+                        raise AdoptionError("Der bestätigte Verschiebeplan ist eingefroren.")
+                    retire_unstarted_package(descriptor, script)
+                    connection.execute("DELETE FROM legacy_adoption_plans WHERE id=?", (command.plan_id,))
         return {"reopened": True}
 
     @router.delete("/jobs/{job_id}")

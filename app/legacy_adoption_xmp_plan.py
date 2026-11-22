@@ -20,6 +20,16 @@ class XmpPlanError(ValueError):
     pass
 
 
+def raw_name_pair(family, targets, raw_name):
+    owners = [
+        (PurePosixPath(member["relative_path"]).name, PurePosixPath(target).name)
+        for member, target in zip(family, targets, strict=True)
+        if target and PurePosixPath(member["relative_path"]).suffix.casefold() in RAW_EXTENSIONS
+        and PurePosixPath(member["relative_path"]).name.casefold() == raw_name.casefold()
+    ]
+    return owners[0] if len(owners) == 1 else None
+
+
 def planned_edit(family, targets, payload: bytes):
     """Return old/new digests and names iff the referenced RAW is renamed.
 
@@ -37,15 +47,10 @@ def planned_edit(family, targets, payload: bytes):
     if len(original) != 1:
         raise XmpPlanError("XMP contains ambiguous RAW references.")
     old_name = original[0]
-    owners = []
-    for member, target in zip(family, targets, strict=True):
-        name = PurePosixPath(member["relative_path"]).name
-        if target and (PurePosixPath(name).suffix.casefold() in RAW_EXTENSIONS
-                       and name.casefold() == old_name.casefold()):
-            owners.append(target)
-    if len(owners) != 1:
+    owner = raw_name_pair(family, targets, old_name)
+    if owner is None:
         raise XmpPlanError("XMP RawFileName does not refer to one uniquely matched master.")
-    new_name = PurePosixPath(owners[0]).name
+    _, new_name = owner
     if old_name == new_name:
         return None
     try:

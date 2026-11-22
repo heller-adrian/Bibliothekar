@@ -538,6 +538,14 @@ TRANSLATIONS = {
     "Code für die Dataset-Prüfung ansehen": "View dataset verification code",
     "Hostpfadprüfung vorbereiten": "Prepare host path check",
     "Hostnachweis einlesen": "Read host proof",
+    "Quelldateien werden geprüft": "Checking source files",
+    "Archivbestand wird geprüft": "Checking existing archive files",
+    "Skriptmanifest wird erstellt": "Creating the script manifest",
+    "Verbindung unterbrochen. Der letzte Fortschritt bleibt sichtbar.": "Connection interrupted. The last progress remains visible.",
+    "Die Vorbereitung wurde unterbrochen. Beim Fortsetzen werden die Dateien erneut geprüft.": "Preparation was interrupted. Resuming checks the files again.",
+    "Unbegonnenen Skriptplan zurücksetzen": "Reset unstarted script plan",
+    "Skriptfreigabe widerrufen und mit dem gespeicherten Entwurf weiterplanen?": "Revoke script permission and return to the saved draft?",
+    "Plan mit TrueNAS-Skript erstellen": "Create plan with TrueNAS script",
     "Verbindliche Sicherheitsbestätigung": "Final safety confirmation",
     "Du bist dabei, die geplante Bestandsübernahme verbindlich zu starten.": "You are about to commit to the planned adoption.",
     "Nach dieser Bestätigung kann der Übernahmeauftrag nicht mehr einfach verworfen werden. Die vorgesehenen Verschiebungen müssen abgeschlossen, überprüft oder gegebenenfalls über den vorgesehenen Wiederherstellungsweg rückgängig gemacht werden.":
@@ -639,10 +647,15 @@ TRANSLATIONS = {
     "Die Datei wurde während der Prüfung ausgetauscht.": "The file was replaced during verification.",
     "Die Datei wurde während der Prüfung verändert.": "The file changed during verification.",
     "Der relative Pfad führt über einen Link oder eine Dateisystemgrenze.": "The relative path crosses a link or filesystem boundary.",
+    "Die gespeicherte Vorbereitung wurde in der Datenbank nicht bestätigt.": "The saved preparation was not confirmed in the database.",
     "Inventur pausiert. Bereits gelesene Dateien sind gespeichert.": "Inventory paused. Files already read are recorded.",
 }
 
 _PREFIXES = {
+    "Skriptfreigabe aufheben und zur Inventur zurückkehren": "Revoke script approval and return to inventory",
+    "Das ungestartete Skript wird gesperrt. Der Ereignisentwurf bleibt erhalten. Fortfahren?": "This revokes the unstarted script and keeps the event draft. Continue?",
+    "Skriptnachweis veraltet. Prüfe die Inventur und bereite den Plan erneut vor. ": "Script proof is stale. Check the inventory and prepare the plan again. ",
+    "Die RAW-Umbenennung würde einen gebundenen XMP-Verweis ungültig machen. Plane mit unverändertem RAW-Namen oder wähle das TrueNAS-Skript. ": "Renaming the RAW file would invalidate a linked XMP reference. Keep the RAW name or choose the TrueNAS script. ",
     "Arbeitsordner in General · ": "Working folder in General · ",
     "Ergänzung · ": "Extension · ",
     "Sammelordner · ": "Collection folder · ",

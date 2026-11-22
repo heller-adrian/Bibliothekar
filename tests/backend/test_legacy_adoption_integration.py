@@ -1019,12 +1019,14 @@ def test_exclusive_mode_holds_until_explicit_skip(
     assert _json(restarted, "POST", jobs, status=409, json={"root": "nas"})["code"] == "legacy_adoption_inactive"
 
 
+@pytest.mark.parametrize("change_after_preparation", [False, True], ids=["verify-archive", "reopen-stale-plan"])
 def test_script_host_proof_release_and_independent_archive_verification(
-    fresh_main, tmp_path, monkeypatch, synthetic_dataset,
+    fresh_main, tmp_path, monkeypatch, synthetic_dataset, change_after_preparation,
 ):
     import json
     import shlex
     import subprocess
+    from hashlib import sha256
 
     from pathlib import PurePosixPath
     from app import legacy_adoption_dataset as dataset, legacy_adoption_discover as discovery, legacy_adoption_verify
@@ -1126,12 +1128,67 @@ def test_script_host_proof_release_and_independent_archive_verification(
 
     assert external(probe["command"]) == 0
     assert _json(client, "GET", job + "/script/probe")["verified"]
+    if change_after_preparation:
+        from app import legacy_adoption_preparation as preparation
+
+        preparation.reserve_preparation(library, job_id, plan["id"], probe["sha256"])
+        preparation.record_preparation(library, job_id, plan["id"], probe["sha256"], "completed")
+        assert _json(client, "GET", job + "/preparation")["state"] == "failed"
     assert _json(client, "POST", job + "/confirm", json=confirm, status=202)["accepted"]
     assert _json(client, "GET", job + "/preparation")["state"] == "completed"
     assert _json(client, "GET", job)["plan"]["execution"]["phase"] == "script_prepared"
+    if change_after_preparation:
+        manifest = package_root / "manifest.json"
+        original_manifest = manifest.read_bytes()
+        manifest.write_bytes(original_manifest + b" ")
+        assert "Skriptmanifest" in _json(client, "GET", job + "/preparation", status=409)["detail"]
+        assert "Skriptmanifest" in _json(client, "POST", job + "/confirm", status=409, json=confirm)["detail"]
+        manifest.write_bytes(original_manifest)
+        assert _json(client, "POST", job + "/confirm", json=confirm)["execution"]["phase"] == "script_prepared"
     assert not _json(client, "GET", job + "/script").get("command")
     assert _json(client, "GET", job + "/download/documents", status=409)["detail"]
+    [candidate] = _json(client, "GET", job + "/moves")
+    blocked = Path(candidate["target"])
+    blocked.parent.mkdir(parents=True)
+    blocked.write_bytes(b"target created since preparation")
+    invalid = _json(client, "POST", job + "/script/release", status=409, json=command)
+    assert "Skriptnachweis veraltet" in invalid["detail"]
+    assert not _json(client, "GET", job + "/script").get("command")
+    assert original.exists() and blocked.read_bytes() == b"target created since preparation"
+    blocked.unlink()
+    empty = blocked.parent
+    while empty != library.archive_root:
+        empty.rmdir()
+        empty = empty.parent
     apply = _json(client, "POST", job + "/script/release", json=command)["command"]
+    if change_after_preparation:
+        modified = b"changed script photo!!"
+        assert len(modified) == original.stat().st_size
+        old_stat = original.stat()
+        original.write_bytes(modified)
+        os.utime(original, ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns))
+        response = _json(client, "POST", job + "/script/release", status=409, json=command)
+        assert "Skriptnachweis veraltet" in response["detail"]
+        assert not _json(client, "GET", job + "/script").get("command")
+        assert external(apply) == 1
+        before = _json(client, "GET", job)
+        assert _json(client, "POST", job + "/script/reopen-unstarted", json=command) == {"reopened": True}
+        after = _json(client, "GET", job)
+        assert not after["plan"] and after["state"] == "inventoried"
+        assert (after["draft"], after["draft_revision"]) == (before["draft"], before["draft_revision"])
+        assert original.read_bytes() == modified
+        assert not blocked.exists()
+        _json(client, "POST", job + "/scan", status=202)
+        updated = _json(client, "GET", job)
+        assert updated["state"] == "inventoried"
+        assert updated["draft"]["events"] == before["draft"]["events"]
+        replacement = _json(client, "POST", job + "/plan", json={
+            "revision": updated["draft_revision"], "filename_method": "script",
+        })
+        assert replacement["id"] != command["plan_id"]
+        [new_move] = _json(client, "GET", job + "/moves")
+        assert new_move["sha256"] == sha256(modified).hexdigest()
+        return
     _json(client, "POST", job + "/finalize", json=command, status=409)
     # A reported completion is insufficient while the planned files are still at the source.
     package_root = Path(probe["host"]["package"])
@@ -1143,6 +1200,7 @@ def test_script_host_proof_release_and_independent_archive_verification(
     assert external(apply) == 1
     assert _json(client, "POST", job + "/script/release", json=command)["command"] == apply
     assert external(apply) == 0
+    _json(client, "POST", job + "/script/reopen-unstarted", status=409, json=command)
     assert not original.exists()
     assert _json(client, "GET", job + "/script")["status"]["state"] == "completed"
     [move] = _json(client, "GET", job + "/moves")

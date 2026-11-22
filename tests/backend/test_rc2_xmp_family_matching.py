@@ -109,13 +109,12 @@ def test_xmp_reference_does_not_override_conflicting_identity(tmp_path, monkeypa
     assert len(families) == 2
 
 
-def test_compound_raw_xmp_legacy_matching_still_works(tmp_path, monkeypatch):
-    paths = {"one/DSCF2915.RAF", "two/DSCF2915.RAF.xmp"}
+def test_compound_raw_xmp_without_corroboration_remains_separate(tmp_path, monkeypatch):
     families, _, _ = _analyse(tmp_path, monkeypatch, [
         ("one/DSCF2915.RAF", _camera()),
         ("two/DSCF2915.RAF.xmp", {}),
     ])
-    assert families == [paths]
+    assert families == [{"one/DSCF2915.RAF"}, {"two/DSCF2915.RAF.xmp"}]
 
 
 def test_plain_xmp_without_proof_remains_unassigned(tmp_path, monkeypatch):
@@ -139,10 +138,43 @@ def test_explicit_rawfilename_works_when_xmp_create_date_is_an_edit_timestamp(tm
         "XMP:XMP-tiff:Make": "FUJIFILM",
         "XMP:XMP-tiff:Model": "X-H2S",
         "XMP:XMP-xmp:CreateDate": "2026:11:21 15:03:00+01:00",
+        "XMP:XMP-exifEX:BodySerialNumber": "fixture-serial",
         "XMP:XMP-crs:RawFileName": "DSCF2915.RAF",
     }
     families, _, _ = _analyse(tmp_path, monkeypatch, [
-        ("raw/DSCF2915.RAF", _camera()),
+        ("raw/DSCF2915.RAF", {**_camera(), "EXIF:ExifIFD:BodySerialNumber": "fixture-serial"}),
         ("edit/DSCF2915.xmp", sidecar),
     ])
     assert families == [files]
+
+
+@pytest.mark.parametrize("companion", ["JPEG", "XMP"])
+def test_recorded_zero_fraction_conflicts_with_later_fraction(tmp_path, monkeypatch, companion):
+    raw = {**_camera(), "EXIF:ExifIFD:SubSecTimeOriginal": "000"}
+    if companion == "JPEG":
+        other = {**_camera(), "EXIF:ExifIFD:SubSecTimeOriginal": "900"}
+    else:
+        other = _xmp(day="2025:04:16 17:37:26.900Z")
+    families, result, _ = _analyse(tmp_path, monkeypatch, [
+        ("original/DSCF2915.RAF", raw),
+        (f"other/DSCF2915.{companion.lower()}", other),
+    ])
+    assert len(families) == 2
+    assert next(row for row in result["files"] if row["extension"] == ".raf")[
+        "selected_capture_time"] == "2025-04-16T19:37:26.000000+02:00"
+
+
+def test_recorded_zero_fraction_can_be_inherited_by_a_proven_family(tmp_path, monkeypatch):
+    identifier = "00112233445566778899aabbccddeeff"
+    raw = {**_camera(), "EXIF:ExifIFD:SubSecTimeOriginal": "000", "EXIF:ExifIFD:ImageUniqueID": identifier}
+    jpeg = {**_camera(day="2025:04:16 17:37:26Z"), "EXIF:ExifIFD:ImageUniqueID": identifier}
+    families, result, _ = _analyse(tmp_path, monkeypatch, [
+        ("original/DSCF2915.RAF", raw),
+        ("other/DSCF2915.jpg", jpeg),
+    ])
+    assert len(families) == 1
+    [family] = result["families"]
+    from app.filename_collisions import capture_stem
+    assert capture_stem(family["selected_capture_time"], "Fuji", set(), same_second=True)[0] == (
+        "20250416_193726000_Fuji"
+    )

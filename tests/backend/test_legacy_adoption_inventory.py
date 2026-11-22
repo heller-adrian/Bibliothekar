@@ -277,14 +277,14 @@ def test_separate_raw_jpeg_require_unique_identity_and_compatible_capture(librar
     job = create_job(context, source)
     assert scan_inventory(context, job)["files"] == len(originals)
     families = {item["family_key"]: item for item in inventory_families(context, job)}
-    assert len(families) == 13
+    assert len(families) == 14
     assert {member["relative_path"] for member in families["RAW/pair"]["files"]} == {
         "RAW/pair.DNG", "RAW/pair.DNG.xmp", "JPEG/pair.JPG",
     }
     assert "JPEG/pair" not in families
     assert set(item["family_key"] for item in families["RAW/pair"]["files"]) == {"RAW/pair"}
-    assert families["RAW/no-id"]["member_count"] == 2
-    assert "JPEG/no-id" not in families
+    for folder in ("RAW", "JPEG"):
+        assert families[f"{folder}/no-id"]["member_count"] == 1
     assert all(families[f"{directory}/{kind}"]["member_count"] == (2 if kind == "sidecars" else 1)
                for kind in ("camera", "serial", "burst", "ambiguous", "sidecars") for directory in ("RAW", "JPEG"))
     assert families["Other/ambiguous"]["member_count"] == 1

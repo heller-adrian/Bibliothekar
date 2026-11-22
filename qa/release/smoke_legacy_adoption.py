@@ -35,7 +35,8 @@ def open_request(client, request, *, expected, recovery_status=None):
     # These POSTs acquire the exclusive adoption lock before calling the endpoint.
     path = urllib.parse.urlsplit(request.full_url).path
     retry_busy = request.method == "POST" and (
-        path in {"/api/libraries", "/api/setup/adoption", "/api/legacy-adoption/jobs"}
+        path in {"/api/libraries", "/api/setup/preferences/continue", "/api/setup/adoption",
+                 "/api/legacy-adoption/jobs"}
         or (recovery_status is not None and path.endswith("/finalize"))
     )
     attempts = 121 if recovery_status else (21 if retry_busy else 1)
@@ -85,6 +86,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
     def address():
         return "http://" + subprocess.check_output(["docker", "port", container, "8080/tcp"], text=True).strip()
 
+    current_contract = os.environ.get("ADOPTION_SMOKE_PROTOCOL", "current") == "current"
     base = address()
     cookies = http.cookiejar.CookieJar()
     client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
@@ -120,6 +122,25 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
     wait_ready()
     login()
     assert api("/api/health")["version"] == os.environ["ADOPTION_SMOKE_VERSION"]
+    if method == "resume-112-rc1":
+        recorded = json.loads(Path(os.environ["ADOPTION_SMOKE_HANDOFF"]).read_text())
+        job, command = recorded["job"], recorded["plan"]
+        assert api(job)["plan"]["execution"]["phase"] == "script_prepared"
+        # RC1's on-disk bundle remains bound to the manifest. Release refreshes
+        # the known runner and issues a command with the new bootstrap digest.
+        shell = api(job + "/script/release", method="POST", payload=command)["command"]
+        assert shell != recorded["shell"]
+        subprocess.run(["/bin/bash", "-c", shell], check=True)
+        moves = api(job + "/moves")
+        assert len(moves) == 2
+        for move in moves:
+            target = archive / move["target_path"]
+            assert hashlib.sha256(target.read_bytes()).hexdigest() == move["sha256"]
+            assert not (source / "first" / move["relative_path"]).exists()
+        assert api(job + "/finalize", method="POST", payload=command)["state"] == "completed"
+        assert b'id="bk-settings-dialog"' in request("/workspace")
+        print("Prepared RC1 script resumed and registered after upgrade on native ZFS.")
+        return
     if method == "upgrade":
         assert b'id="bk-settings-dialog"' in request("/workspace")
         assert b'legacy-adoption/history?library=main&amp;job=' in request("/legacy-adoption/history?library=main")
@@ -147,16 +168,14 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
     if method == "prepare-upgrade-100":
         assert b'id="bk-settings-dialog"' in request("/workspace")
         return
-    choice = request("/workspace")
-    assert "Hast du eine bestehende Fotosammlung?".encode() in choice
-    assert b'id="bk-settings-dialog"' not in choice
+    setup = request("/workspace")
+    assert b'id="bk-settings-dialog"' not in setup
     assert api("/api/jobs", expected=409)["code"] == "initial_setup_required"
-    # The first-library preferences wizard was introduced after the 1.0.1
-    # upgrade fixture. Check it only on the current application image;
-    # the older fixture proceeds directly to the adoption choice.
-    if os.environ["ADOPTION_SMOKE_VERSION"] != "1.0.1":
+    if current_contract:
+        assert b'id="first-library-next"' in setup
         assert isinstance(api("/api/settings/event-folder-layout"), dict)
         assert api("/api/setup/preferences/continue", method="POST") == {"next": "/setup/adoption"}
+    assert "Hast du eine bestehende Fotosammlung?".encode() in request("/workspace")
     if method == "skip":
         assert api("/api/setup/adoption", method="POST", payload={"decision": "skipped"}) == {"next": "/"}
         assert b'id="bk-settings-dialog"' in request("/")
@@ -274,7 +293,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
                 "source": str(host_source), "archive": str(archive),
             }
             confirmation["probe_sha256"] = probe["sha256"]
-        if execution == "script":
+        if execution == "script" and current_contract:
             accepted = api(job + "/confirm", method="POST", expected=202, payload=confirmation)
             assert accepted["accepted"], accepted
             for attempt in range(120):
@@ -318,6 +337,11 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             print("Grouped manual SMB work verified the combined ZIP and resumed partial moves after a container restart on native ZFS.")
         else:
             shell = api(job + "/script/release", method="POST", payload=command)["command"]
+            if method == "prepare-upgrade-112-rc1":
+                Path(os.environ["ADOPTION_SMOKE_HANDOFF"]).write_text(json.dumps({
+                    "job": job, "plan": command, "shell": shell,
+                }))
+                return event, moves
             if rollback:
                 subprocess.run(["docker", "restart", container], check=True)
                 base = address()
@@ -328,7 +352,16 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             assert api(job + "/script")["status"]["state"] == "completed"
         for move in moves:
             target = archive / Path(move["target"]).relative_to("/main-library")
-            assert hashlib.sha256(target.read_bytes()).hexdigest() == move["sha256"]
+            assert hashlib.sha256(target.read_bytes()).hexdigest() == (move.get("current_sha256") or move["sha256"])
+        if (current_contract and os.environ.get("ADOPTION_SMOKE_XMP") == "1"
+                and execution == "script" and not existing_event):
+            [raw] = [move for move in moves if Path(move["target"]).suffix.lower() == ".raf"]
+            [sidecar] = [move for move in moves if Path(move["target"]).suffix.lower() == ".xmp"]
+            assert sidecar["current_sha256"] and sidecar["current_sha256"] != sidecar["sha256"]
+            assert sidecar["sha256"] == originals[sidecar["relative_path"]]
+            sidecar_bytes = (archive / sidecar["target_path"]).read_bytes()
+            assert f'RawFileName="{Path(raw["target"]).name}"'.encode() in sidecar_bytes
+            print("Bound XMP reference and original/target SHA-256 verified on native ZFS.")
         if rollback:
             assert api(job + "/rollback/start", method="POST", payload=command)["execution"]["phase"] == "rolling_back"
             shell = api(job + "/script")["command"]
@@ -354,6 +387,9 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
 
     if method == "rollback":
         adopt("script", "first", rollback=True)
+        return
+    if method == "prepare-upgrade-112-rc1":
+        adopt("script", "first")
         return
     event, moves = adopt(method, "first")
     if method == "manual":

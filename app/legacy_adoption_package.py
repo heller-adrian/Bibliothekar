@@ -8,15 +8,16 @@ from pathlib import Path, PurePosixPath
 import re
 import shlex
 from secrets import token_hex
+from time import monotonic
 
 from app import legacy_adoption_discover as discovery, legacy_adoption_host as host
 from app.appdata import root as appdata_root
 from app.database import database_connection
 from app.legacy_adoption_dataset import DatasetError, mount_id, mount_table
 from app.legacy_adoption_inventory import _job
-from app.legacy_adoption_paths import AdoptionError, bound_file, bound_sha256, relative_parent, verify_inventory_identity
+from app.legacy_adoption_paths import AdoptionError, bound_file, bound_sha256, relative_parent, file_identity
 from app.legacy_adoption_plan import _roots
-from app.legacy_adoption_verify import _plan, move_rows
+from app.legacy_adoption_verify import _plan, assert_original_layout, move_rows
 from app.legacy_adoption_xmp_plan import MAX_XMP_BYTES
 from app.xmp_raw_filename import rewrite_raw_filename, XmpReferenceError
 from app.private_storage_security import qualified
@@ -31,6 +32,12 @@ _RC17_RUNNER_DIGESTS = {
     "legacy_adoption_host.py": "cdbb9ad9ea8e9a891ba9f4e686cc593b4789ddf510cccafb7c81bc14ad4e6e04",
     "legacy_adoption_dataset.py": "a96557670afa37aaed905749f3c469f731752a321ead216a50ff04e64459bd65",
     DISCOVERY_FILE: "3e283d3291ef222e7eb111fb23c0f55f89eb9baa9bfca391573e35bc11474cd2",
+}
+
+# The discovery program embeds the runner hashes at packaging time.
+_RC1_RUNNER_DIGESTS = {
+    "legacy_adoption_host.py": "37a523687593d898ebe0366511553e26b8d0c18f4ce9bef3315b49edf27d2aa7",
+    DISCOVERY_FILE: "8f3d9d9fdd31cacd221e353629c306d8e852a3897f9d38023d399ae7ee83211d",
 }
 
 
@@ -254,14 +261,26 @@ def _approved_host(descriptor, library, job, plan_id, probe_digest):
     return {**probe, "host": paths}
 
 
-def _bound_proof(root, path, size, expected, *, inventory_identity=None):
+def _bound_proof(root, path, size, expected, *, inventory_identity=None, xmp=False, on_bytes=None):
+    content = None
     with relative_parent(root, path) as (parent, name):
         with bound_file(parent, name) as (fd, info):
-            if inventory_identity is not None:
-                verify_inventory_identity(fd, info, inventory_identity, expected, hash_required=True)
-            elif info.st_size != size or bound_sha256(fd) != expected:
+            if (info.st_dev != os.fstat(root).st_dev or info.st_size != size
+                    or (inventory_identity is not None
+                        and file_identity(info)[:4] != tuple(inventory_identity[:4]))):
+                raise AdoptionError("Die Dateiidentität weicht von der Inventur ab: " + path)
+            if xmp:
+                if size > MAX_XMP_BYTES:
+                    raise AdoptionError("XMP-Datei erfordert eine separate Prüfung (zu groß): " + path)
+                content = os.pread(fd, size, 0)
+                if on_bytes:
+                    on_bytes(len(content))
+                actual = _sha(content) if len(content) == size else None
+            else:
+                actual = bound_sha256(fd, progress_callback=on_bytes)
+            if actual != expected:
                 raise AdoptionError("Dateiinhalt weicht vom freigegebenen Plan ab: " + path)
-            return {"stamp": host.stamp(info), "sha256": expected}
+            return {"stamp": host.stamp(info), "sha256": expected}, content
 
 
 def prepare_manifest(connection, library, job, plan, probe_digest, *, progress=None):
@@ -270,68 +289,84 @@ def prepare_manifest(connection, library, job, plan, probe_digest, *, progress=N
         descriptor = stack.enter_context(_package(_probe_package(job["id"], plan_id)))
         stack.enter_context(host.package_lock(descriptor))
         probe = _approved_host(descriptor, library, job, plan_id, probe_digest)
-        source, archive = _roots(stack, library, job)
         if probe["dataset"] != json.loads(job["dataset_json"]):
             raise AdoptionError("Die Hostpfadprüfung ist veraltet.")
         directories = [row[0] for row in connection.execute(
             "SELECT relative_path FROM legacy_adoption_directories WHERE plan_id = ? ORDER BY relative_path",
             (plan_id,),
         )]
-        # Hashing the actual source bytes may take many minutes. The durable
-        # confirmation progress file is updated outside SQLite so the browser
-        # can poll even while the prepared-plan transaction is held.
-        totals = connection.execute(
-            """SELECT count(*), coalesce(sum(inventory.size_bytes), 0)
-               FROM legacy_adoption_moves AS move
-               JOIN legacy_adoption_inventory AS inventory
-                 ON inventory.job_id=? AND inventory.relative_path=move.relative_path
-              WHERE move.plan_id=? AND move.target_path IS NOT NULL""",
-            (job["id"], plan_id),
+        source_rows = list(move_rows(connection, job["id"], plan_id, include_duplicates=True))
+        archive_totals = connection.execute(
+            "SELECT count(*), coalesce(sum(size_bytes), 0) FROM legacy_adoption_baseline WHERE plan_id=?",
+            (plan_id,),
         ).fetchone()
-        total_files, total_bytes = int(totals[0]), int(totals[1])
-        done_bytes = 0
-        if progress:
-            progress(descriptor, 0, total_files, 0, total_bytes)
-        moves = []
-        for row in move_rows(connection, job["id"], plan_id):
-            original = row["relative_path"]
-            moves.append({
-                "source": original, "target": row["target_path"],
-                **_bound_proof(source, original, row["size_bytes"], row["sha256"],
-                               inventory_identity=json.loads(row["identity"])),
-            })
-            done_bytes += int(row["size_bytes"])
-            if progress and (len(moves) % 32 == 0 or len(moves) == total_files):
-                progress(descriptor, len(moves), total_files, done_bytes, total_bytes)
-        # The updated sidecar bytes are fully determined by the frozen plan.
-        # Re-verify the original and rederive the approved new SHA before
-        # embedding them in the host-bound manifest. No source is modified.
-        xmp_edits = []
-        for row in move_rows(connection, job["id"], plan_id):
-            if not row["current_sha256"]:
-                continue
-            original_path = row["relative_path"]
-            with relative_parent(source, original_path) as (parent, name):
-                with bound_file(parent, name) as (fd, info):
-                    if info.st_size > MAX_XMP_BYTES or info.st_size != row["size_bytes"]:
-                        raise AdoptionError("XMP-Inhalt ist zu groß oder wurde verändert: " + original_path)
-                    content = os.pread(fd, info.st_size, 0)
-                    if len(content) != info.st_size or _sha(content) != row["sha256"]:
-                        raise AdoptionError("XMP-Original stimmt nicht mehr mit dem Plan überein: " + original_path)
-            try:
-                rewritten = rewrite_raw_filename(
-                    content, row["xmp_old_raw_name"], row["xmp_new_raw_name"],
-                )
-            except XmpReferenceError as error:
-                raise AdoptionError("Die geplante XMP-Umbenennung ist nicht mehr gültig: " + original_path) from error
-            if len(rewritten) != row["current_size_bytes"] or _sha(rewritten) != row["current_sha256"]:
-                raise AdoptionError("Der bestätigte XMP-Zielinhalt weicht von der Planung ab: " + original_path)
-            xmp_edits.append({
-                "source": original_path, "target": row["target_path"],
-                "original_sha256": row["sha256"], "sha256": row["current_sha256"],
-                "size_bytes": row["current_size_bytes"],
-                "content": base64.b64encode(rewritten).decode("ascii"),
-            })
+        phase_started = previous_update = monotonic()
+        phase, total_files, total_bytes = "source", len(source_rows), sum(row["size_bytes"] for row in source_rows)
+        done_files = done_bytes = 0
+
+        def checkpoint(force=False):
+            nonlocal previous_update
+            now = monotonic()
+            if progress and (force or now - previous_update >= 1):
+                progress(descriptor, done_files, total_files, done_bytes, total_bytes,
+                         phase=phase, elapsed_seconds=int(now - phase_started))
+                previous_update = now
+
+        def next_phase(name, files, size):
+            nonlocal phase, total_files, total_bytes, done_files, done_bytes, phase_started
+            checkpoint(True)
+            phase, total_files, total_bytes = name, files, size
+            done_files = done_bytes = 0
+            phase_started = monotonic()
+            checkpoint(True)
+
+        def read_bytes(count):
+            nonlocal done_bytes
+            done_bytes += count
+            checkpoint()
+
+        moves, xmp_edits = [], []
+        archive_proofs, duplicate_proofs = {}, {}
+
+        def source_check(root, row):
+            nonlocal done_files
+            original, target = row["relative_path"], row["target_path"]
+            proof, content = _bound_proof(
+                root, original, row["size_bytes"], row["sha256"],
+                inventory_identity=json.loads(row["identity"]), xmp=bool(row["current_sha256"]),
+                on_bytes=read_bytes if progress else None,
+            )
+            if target is None:
+                duplicate_proofs[original] = proof
+            else:
+                moves.append({"source": original, "target": target, **proof})
+            if content is not None:
+                try:
+                    rewritten = rewrite_raw_filename(content, row["xmp_old_raw_name"], row["xmp_new_raw_name"])
+                except XmpReferenceError as error:
+                    raise AdoptionError("Die geplante XMP-Umbenennung ist nicht mehr gültig: " + original) from error
+                if len(rewritten) != row["current_size_bytes"] or _sha(rewritten) != row["current_sha256"]:
+                    raise AdoptionError("Der bestätigte XMP-Zielinhalt weicht von der Planung ab: " + original)
+                xmp_edits.append({
+                    "source": original, "target": target, "original_sha256": row["sha256"],
+                    "sha256": row["current_sha256"], "size_bytes": row["current_size_bytes"],
+                    "content": base64.b64encode(rewritten).decode("ascii"),
+                })
+            done_files += 1
+            checkpoint(done_files == total_files)
+
+        def archive_check(root, path, size, digest):
+            nonlocal done_files
+            if phase != "archive":
+                next_phase("archive", *archive_totals)
+            archive_proofs[path], _ = _bound_proof(root, path, size, digest,
+                                                   on_bytes=read_bytes if progress else None)
+            done_files += 1
+            checkpoint(done_files == total_files)
+
+        checkpoint(True)
+        assert_original_layout(connection, library, job, plan, source_check=source_check, archive_check=archive_check)
+        next_phase("manifest", 0, 0)
         documents = []
         for row in connection.execute(
             """SELECT new.relative_path, new.content, new.sha256, old.size_bytes, old.sha256
@@ -340,11 +375,12 @@ def prepare_manifest(connection, library, job, plan, probe_digest, *, progress=N
                 WHERE new.plan_id = ? ORDER BY new.relative_path""", (plan_id,),
         ):
             path, content, digest, old_size, old_digest = row
-            original = _bound_proof(archive, path, old_size, old_digest) if old_digest else None
+            original = archive_proofs[path] if old_digest else None
             documents.append({"path": path, "original": original, "sha256": digest,
                               "content": base64.b64encode(content).decode("ascii")})
         manifest = {**probe, "format": 2 if xmp_edits else 1,
                     "directories": directories, "moves": moves, "documents": documents,
+                    "release_proofs": {"archive": archive_proofs, "duplicates": duplicate_proofs},
                     **({"xmp_edits": xmp_edits} if xmp_edits else {})}
         host.validate_plan(manifest)
         if _read_json(descriptor, "permission.json") is not None:
@@ -396,10 +432,82 @@ def _runner_differences(descriptor):
     for name, current in expected.items():
         previous = host.read_bytes(descriptor, name)
         if previous != current:
-            if _sha(previous) != _RC17_RUNNER_DIGESTS[name]:
+            recognized = {_RC17_RUNNER_DIGESTS[name]}
+            if name in _RC1_RUNNER_DIGESTS:
+                recognized.add(_RC1_RUNNER_DIGESTS[name])
+            if _sha(previous) not in recognized:
                 raise AdoptionError("Die Skriptdateien stimmen nicht mit dieser Bibliothekar-Version überein.")
             differences[name] = current
     return differences
+
+
+def script_journal_started(descriptor):
+    with bound_file(descriptor, "journal.jsonl") as (_, info):
+        return bool(info.st_size)
+
+
+def retire_unstarted_package(descriptor, script):
+    if script["phase"] != "script_prepared" or script_journal_started(descriptor):
+        raise AdoptionError("Das Skript wurde bereits ausgeführt. Verwende die kontrollierte Wiederherstellung.")
+    permit(descriptor, script, None)
+    for name in ("manifest.json", "permission.json", "status.json", "preparation.json"):
+        try:
+            os.unlink(name, dir_fd=descriptor)
+        except FileNotFoundError:
+            pass
+    os.fsync(descriptor)
+
+
+def assert_unstarted_release_current(library, job_id, plan_id, descriptor, script):
+    """Recheck the bound manifest under the package lock before first execution."""
+    if script_journal_started(descriptor):
+        # The host will validate the journal against the same digest.
+        return
+    content = host.read_bytes(descriptor, "manifest.json")
+    if _sha(content) != script["manifest_sha256"]:
+        raise AdoptionError("Das Skriptmanifest stimmt nicht mit dem bestätigten Auftrag überein.")
+    manifest = json.loads(content)
+    if (manifest["job_id"], manifest["plan_id"], manifest["library_id"]) != (job_id, plan_id, library.library_id):
+        raise AdoptionError("Der Skriptnachweis gehört zu einem anderen Auftrag.")
+    release_proofs = manifest.get("release_proofs")
+    moves = {row["source"]: row for row in manifest["moves"]}
+
+    def check_proof(root, path, proof, digest):
+        if proof is None or proof["sha256"] != digest:
+            raise AdoptionError("Der gebundene Dateinachweis fehlt: " + path)
+        with relative_parent(root, path) as (parent, name):
+            with bound_file(parent, name) as (_, info):
+                if info.st_dev != os.fstat(root).st_dev or host.stamp(info) != proof["stamp"]:
+                    raise AdoptionError("Die Datei wurde nach der Skriptvorbereitung verändert: " + path)
+
+    def source_check(root, row):
+        path = row["relative_path"]
+        proof = moves.get(path) if row["target_path"] else release_proofs["duplicates"].get(path)
+        if row["target_path"] and (not proof or proof["target"] != row["target_path"]):
+            raise AdoptionError("Der vorbereitete Zielpfad stimmt nicht mit dem Plan überein: " + path)
+        check_proof(root, path, proof, row["sha256"])
+
+    def archive_check(root, path, size, digest):
+        check_proof(root, path, release_proofs["archive"].get(path), digest)
+
+    with database_connection(library.database_path) as connection:
+        connection.execute("BEGIN")
+        job = _job(connection, library.library_id, job_id)
+        plan = _plan(connection, job_id)
+        if plan["id"] != plan_id or json.loads(job["dataset_json"]) != manifest["dataset"]:
+            raise AdoptionError("Der Dataset-Nachweis für das Skript ist veraltet.")
+        assert_original_layout(
+            connection, library, job, plan,
+            source_check=source_check if release_proofs is not None else None,
+            archive_check=archive_check if release_proofs is not None else None,
+        )
+        if release_proofs is None:
+            # A historical package lacks the additional archive proof.
+            # Rehash above and still check its originally approved stamps.
+            with ExitStack() as stack:
+                source, _ = _roots(stack, library, job)
+                for path, proof in moves.items():
+                    check_proof(source, path, proof, proof["sha256"])
 
 
 def permit(descriptor, script, mode):
@@ -428,12 +536,14 @@ def script_details(library, job_id, plan_id):
     with _package(_script_package(script, job_id, plan_id), expected=expected) as descriptor:
         status = script_status(descriptor, script)
         running = False
+        can_reopen = False
         try:
             with host.package_lock(descriptor):
-                pass
+                can_reopen = script["phase"] == "script_prepared" and not script_journal_started(descriptor)
         except host.ExecutionError:
             running = True
-        result = {"status": status, "running": running, "host": json.loads(script["host_json"])}
+        result = {"status": status, "running": running, "host": json.loads(script["host_json"]),
+                  "can_reopen": can_reopen}
         allowed = _read_json(descriptor, "permission.json")
         if (allowed and allowed.get("manifest") == script["manifest_sha256"]
                 and allowed.get("mode") in {"apply", "rollback"} and not _runner_differences(descriptor)):

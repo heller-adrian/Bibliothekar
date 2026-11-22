@@ -395,9 +395,19 @@ function navigation(){
   const previous={plan:"inventory",review:"plan",execution:"review"}[viewStep];
   if(previous)nav.append(action("Zurück",()=>goStep(previous)));
   if(viewStep==="inventory" && job.state==="inventoried")nav.append(action("Weiter: Ereignisse planen",()=>goStep("plan"),true));
-  if(viewStep==="plan" && previewRevision===draftRevision && !reviewBusy())nav.append(action("Weiter: Plan prüfen",()=>{
+  if(viewStep==="plan" && previewRevision===draftRevision && !reviewBusy())nav.append(action("Weiter: Plan prüfen",async()=>{
     if(!draft.events.length)throw new Error("Lege mindestens ein Ereignis oder einen Sammelordner an.");
-    return mutate("/plan","POST",{revision:draftRevision});
+    try {
+      await mutate("/plan","POST",{revision:draftRevision});
+    } catch (error) {
+      if (error.code==="manual_xmp_rename_conflict" && !nav.querySelector("#plan-with-script")) {
+        const useScript=action("Plan mit TrueNAS-Skript erstellen",()=>
+          mutate("/plan","POST",{revision:draftRevision,filename_method:"script"}));
+        useScript.id="plan-with-script";
+        nav.append(useScript);
+      }
+      throw error;
+    }
   },true));
   if(viewStep==="review" && !job.plan.execution)nav.append(action("Weiter: Methode wählen",async()=>{
     if(!job.plan.documents_at)await mutate("/documents");
@@ -522,7 +532,11 @@ async function api(path, method="GET", body) {
       if(controller?.signal.aborted)throw error;
       throw new Error("Der Server hat keine lesbare Antwort gesendet.");
     });
-    if (!response.ok) throw new Error(detail(value.detail));
+    if (!response.ok) {
+      const error=new Error(detail(value.detail?.message ?? value.detail));
+      error.code=value.detail?.code ?? value.code;
+      throw error;
+    }
     return value;
   }catch(error){
     if(controller?.signal.aborted)throw new Error("Die Anfrage hat zu lange gedauert. Versuche es erneut.");
@@ -720,7 +734,24 @@ async function restoreJob(current) {
 async function pollPreparation(){
   if(!job?.plan?.id || job.plan.execution)return;
   const originalJob = jobId;
-  const result = await api(jobPath("/preparation"));
+  let result;
+  try {
+    result=await api(jobPath("/preparation"));
+  } catch (error) {
+    if(originalJob!==jobId || job.plan.execution)return;
+    if(!$("preparation-progress")) {
+      const status=slot("preparation-progress");
+      status.setAttribute("role","status");
+      $("top-actions").append(status);
+    }
+    if(!$("preparation-connection")) {
+      const note=line("Verbindung unterbrochen. Der letzte Fortschritt bleibt sichtbar.");
+      note.id="preparation-connection";
+      $("preparation-progress").append(note);
+    }
+    preparationTimer=setTimeout(pollPreparation,3000);
+    return;
+  }
   if(originalJob!==jobId || job.plan.execution)return;
   const old=document.getElementById("preparation-progress");
   old?.remove();
@@ -732,6 +763,11 @@ async function pollPreparation(){
   section.append(node("strong",result.state==="completed"?"Skriptvorbereitung abgeschlossen":
     result.state==="failed"?"Vorbereitung unterbrochen":
     "Skriptmanifest wird serverseitig vorbereitet"));
+  const phase={source:"Quelldateien werden geprüft",archive:"Archivbestand wird geprüft",
+    manifest:"Skriptmanifest wird erstellt"}[result.phase];
+  if(phase)section.append(line(phase));
+  if(!result.worker_active && ["queued","running"].includes(result.state))
+    section.append(line("Die Vorbereitung wurde unterbrochen. Beim Fortsetzen werden die Dateien erneut geprüft."));
   const total=Number(result.total || 0), done=Number(result.processed || 0);
   if(total>0){
     const bar=node("progress");
@@ -804,7 +840,7 @@ async function mutate(path, method="POST", body) {
       return result;
     }
     if(checking || path==="/rollback/start")manualSnapshot=null;
-    const target={"/plan":"review","/confirm":"execute","/finalize":"execute","/reopen":"plan","/scan":"inventory","/rollback/start":"execute"}[path];
+    const target={"/plan":"review","/confirm":"execute","/finalize":"execute","/reopen":"plan","/script/reopen-unstarted":"inventory","/scan":"inventory","/rollback/start":"execute"}[path];
     if(target)rememberView(target);
     await refresh();
     report();
@@ -2361,6 +2397,12 @@ async function pollScript() {
     if (!recoveryOnly && !result.running && status?.state!=="completed" &&
         ["script_prepared","repair"].includes(phase) && !result.command) {
       nodes.push(action("Skriptbefehl bereitstellen",()=>run("/script/release"),true));
+    }
+    if (!recoveryOnly && result.can_reopen) {
+      nodes.push(action("Skriptfreigabe aufheben und zur Inventur zurückkehren",()=>{
+        if(confirm("Das ungestartete Skript wird gesperrt. Der Ereignisentwurf bleibt erhalten. Fortfahren?"))
+          return run("/script/reopen-unstarted");
+      }));
     }
     const finalize=$("script-finalize");
     if (finalize) finalize.disabled=finishing || result.running || status?.state!=="completed" || status.mode!=="apply";

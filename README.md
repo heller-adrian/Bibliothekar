@@ -99,13 +99,13 @@ The repository provides a [Compose example](compose.example.yaml) for a TrueNAS 
 4. Deploy the Custom App and finish the web-based setup. Back up app data and your database before upgrading.
 
 ```text
-Image: ghcr.io/heller-adrian/bibliothekar:1.1.0
+Image: ghcr.io/heller-adrian/bibliothekar:1.1.1
 Web UI: http://<your-truenas-host>:30044
 ```
 
 **Release candidate version:** 1.1.2 (development source only; not yet published or qualified).
 
-**Stable version:** 1.1.0. Verify that the [GitHub Release](https://github.com/heller-adrian/Bibliothekar/releases) and the corresponding GHCR image have actually been published before installing it. For reproducible deployments, pin a numbered image tag or digest. The floating image tag is `ghcr.io/heller-adrian/bibliothekar:latest`.
+**Stable version:** 1.1.1. Verify that the [GitHub Release](https://github.com/heller-adrian/Bibliothekar/releases) and the corresponding GHCR image have actually been published before installing it. For reproducible deployments, pin a numbered image tag or digest. The floating image tag is `ghcr.io/heller-adrian/bibliothekar:latest`.
 
 | Container path | Use | Mount |
 | --- | --- | --- |

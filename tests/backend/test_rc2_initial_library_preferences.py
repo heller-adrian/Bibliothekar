@@ -23,7 +23,8 @@ def test_new_library_must_set_preferences_before_adoption_choice(fresh_main):
     response = client.get("/setup/preferences")
     assert response.status_code == 200
     assert "Synthetic Main" in response.text
-    assert "folder-tree" in response.text
+    assert 'id="bk-folder-layout-tree"' in response.text
+    assert 'id="bk-event-naming-preview"' in response.text
     assert 'id="first-library-next"' in response.text
     assert _json(client, "POST", "/api/setup/adoption", status=409,
                  json={"decision": "adopting"})["code"] == "initial_setup_required"

@@ -657,6 +657,73 @@ def test_verification_detects_archived_media_changes(inventory):
     assert any(row["relative_path"].endswith("old.jpg") for row in plan_issues(context, job))
 
 
+def test_script_release_rechecks_bound_archived_media_without_rehashing(inventory, monkeypatch):
+    import json
+    import os
+    from sys import platform
+
+    from app import legacy_adoption_host as host, legacy_adoption_package as package
+    from app.legacy_adoption_catalogue import prepare_documents
+    from app.legacy_adoption_inventory import _job
+    from app.legacy_adoption_verify import _plan
+
+    context, source, registry = inventory
+    (source / "extra.jpg").write_bytes(b"extra")
+    job_id = _scan(context, source)
+    _, previous = _frozen_rc1_extension(context, registry, job_id, existing_media=True)
+    [document] = prepare_documents(context, job_id)
+    existing_document = context.archive_root / document["relative_path"]
+    prepared = source.parent / "test-script-appdata"
+    prepared.mkdir()
+    monkeypatch.setattr(package, "appdata_root", lambda: prepared)
+    if platform == "darwin":
+        monkeypatch.setattr(host, "mount_id", lambda fd: 1)
+    with package._package(job_id, create=True) as descriptor:
+        package._initialize_files(descriptor)
+    monkeypatch.setattr(
+        package, "_approved_host", lambda _package, library, job, plan, _digest: {
+            "job_id": job["id"], "plan_id": plan, "library_id": library.library_id,
+            "dataset": json.loads(job["dataset_json"]),
+            "host": {"package": str(prepared / package.PACKAGE_ROOT / job_id)},
+        },
+    )
+    checked_files = []
+    original_hash = package.bound_sha256
+
+    def count_hash(fd, **kwargs):
+        checked_files.append(os.fstat(fd).st_ino)
+        return original_hash(fd, **kwargs)
+
+    monkeypatch.setattr(package, "bound_sha256", count_hash)
+    checkpoints = []
+
+    def progress(_descriptor, processed, total, read, size, *, phase, elapsed_seconds):
+        checkpoints.append((phase, processed, total, read, size, elapsed_seconds))
+
+    with database_connection(context.database_path) as connection:
+        job = _job(connection, context.library_id, job_id)
+        plan = _plan(connection, job_id)
+        connection.execute(
+            "INSERT INTO legacy_adoption_execution (plan_id, method, phase) VALUES (?, 'script', 'script_prepared')",
+            (plan["id"],),
+        )
+        package.prepare_manifest(connection, context, job, plan, "synthetic-proof", progress=progress)
+    assert checked_files.count(existing_document.stat().st_ino) == 1
+    assert checked_files.count(previous.stat().st_ino) == 1
+    assert {entry[0] for entry in checkpoints} == {"source", "archive", "manifest"}
+    assert any(phase == "archive" and files == total == 2 and read == size > 0
+               for phase, files, total, read, size, _ in checkpoints)
+    count = len(checked_files)
+    with package.locked_script(context, job_id, plan["id"]) as (descriptor, script):
+        package.assert_unstarted_release_current(context, job_id, plan["id"], descriptor, script)
+        stat = previous.stat()
+        previous.write_bytes(b"modified")
+        os.utime(previous, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        with pytest.raises(AdoptionError, match="nach der Skriptvorbereitung verändert: .*old.jpg"):
+            package.assert_unstarted_release_current(context, job_id, plan["id"], descriptor, script)
+    assert len(checked_files) == count
+
+
 def test_manual_manifest_and_empty_scaffold(inventory):
     import json
     from zipfile import ZipFile
@@ -1051,11 +1118,13 @@ def test_rc2_true_raf_jpeg_xmp_sidecar_shared_script_target_stem(inventory, monk
 
     monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", bound_metadata)
     job = _scan(context, source)
-    plan = create_plan(
-        context, registry, job,
-        {"events": [{"name": "Vögel", "start_date": "2025-04-16", "end_date": "2025-04-16"}]},
-        filename_method="script",
-    )
+    draft = {"events": [{"name": "Vögel", "start_date": "2025-04-16", "end_date": "2025-04-16"}]}
+    from app.legacy_adoption_inventory import inventory_families
+    [family] = inventory_families(context, job)
+    with pytest.raises(AdoptionError, match="gebundenen XMP-Verweis"):
+        create_plan(context, registry, job, {**draft, "target_stems": {family["family_key"]: "Renamed"}})
+    assert (source / items[2]).read_bytes() == original_xmp
+    plan = create_plan(context, registry, job, draft, filename_method="script")
     assert plan["move_files"] == 3
     moves = plan_moves(context, job)
     assert {row["relative_path"] for row in moves} == set(items)

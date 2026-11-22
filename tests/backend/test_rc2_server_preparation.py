@@ -1,6 +1,7 @@
 """RC2 durable preparation checkpoints without real media or TrueNAS mutations."""
 from contextlib import contextmanager
 import os
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +26,8 @@ def private_package(tmp_path, monkeypatch):
         finally:
             os.close(fd)
 
+    if sys.platform == "darwin":
+        monkeypatch.setattr(preparation.host, "mount_id", lambda fd: 1)
     monkeypatch.setattr(preparation, "_package", package)
     monkeypatch.setattr(preparation, "appdata_root", lambda: tmp_path)
     return SimpleNamespace(library_id="main"), job_id, plan_id, place
@@ -54,7 +57,13 @@ def test_durable_preparation_state_and_progress_survive_reload(private_package):
     preparation.record_preparation(library, job, plan, digest, "completed",
                                    phase="manifest_ready", processed=10346)
     assert preparation.preparation_status(library, job, plan)["state"] == "completed"
-    assert preparation.reserve_preparation(library, job, plan, digest)["state"] == "completed"
+    # Reservation is only used without an execution row. An orphan progress
+    # record cannot override the catalogue and may be regenerated.
+    (place / "permission.json").write_text('{"mode":"apply","manifest":"old"}')
+    with pytest.raises(AdoptionError, match="Hostbefehl"):
+        preparation.reserve_preparation(library, job, plan, digest)
+    (place / "permission.json").unlink()
+    assert preparation.reserve_preparation(library, job, plan, digest)["state"] == "queued"
 
 
 def test_restart_retry_and_failure_have_durable_identity(private_package):

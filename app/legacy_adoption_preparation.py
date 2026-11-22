@@ -136,6 +136,17 @@ def preparation_worker_active(job_id):
         return _active_worker(descriptor)
 
 
+def _require_unreleased(descriptor):
+    if _read_json(descriptor, "permission.json") is not None:
+        raise AdoptionError("Ein bestätigter Hostbefehl kann nicht als Entwurf verworfen werden.")
+    try:
+        with host.file_at(descriptor, "journal.jsonl") as (_, info):
+            if info.st_size:
+                raise AdoptionError("Das Hostjournal ist nicht leer; verwende die kontrollierte Wiederherstellung.")
+    except FileNotFoundError:
+        pass
+
+
 def reserve_preparation(library, job_id, plan_id, probe_digest):
     """Durably record an accepted attempt; lock the immutable host package."""
     with _package(job_id) as descriptor, host.package_lock(descriptor):
@@ -144,8 +155,9 @@ def reserve_preparation(library, job_id, plan_id, probe_digest):
             _assert_identity(record, library, job_id, plan_id)
             if record.get("probe_sha256") != probe_digest:
                 raise AdoptionError("Der Hostnachweis passt nicht zum bereits begonnenen Auftrag.")
-            if record.get("state") == "completed" or _active_worker(descriptor):
+            if _active_worker(descriptor):
                 return {key: value for key, value in record.items() if key != "probe_sha256"}
+        _require_unreleased(descriptor)
         initial = _base(library, job_id, plan_id, probe_digest)
         _write(descriptor, initial)
         return {key: value for key, value in initial.items() if key != "probe_sha256"}
@@ -163,19 +175,11 @@ def abandon_failed_preparation(library, job_id, plan_id):
         if not record:
             return False
         _assert_identity(record, library, job_id, plan_id)
-        if record.get("state") not in {"failed", "queued", "running"}:
-            raise AdoptionError("Eine abgeschlossene Vorbereitung kann nicht zurückgesetzt werden.")
+        if record.get("state") not in {"failed", "queued", "running", "completed"}:
+            raise AdoptionError("Der gespeicherte Vorbereitungsstatus ist ungültig.")
         if _active_worker(descriptor):
             raise AdoptionError("Der serverseitige Vorbereitungsauftrag ist noch aktiv.")
-        permission = _read_json(descriptor, "permission.json")
-        if permission is not None:
-            raise AdoptionError("Ein bestätigter Hostbefehl kann nicht als Entwurf verworfen werden.")
-        try:
-            journal = host.read_bytes(descriptor, "journal.jsonl")
-        except FileNotFoundError:
-            journal = b""
-        if journal:
-            raise AdoptionError("Das Hostjournal ist nicht leer; verwende die kontrollierte Wiederherstellung.")
+        _require_unreleased(descriptor)
         os.unlink(_PROGRESS_FILE, dir_fd=descriptor)
         os.fsync(descriptor)
         return True
@@ -183,7 +187,7 @@ def abandon_failed_preparation(library, job_id, plan_id):
 
 def record_preparation(library, job_id, plan_id, probe_digest, state, *,
                        phase=None, processed=None, total=None,
-                       bytes_processed=None, bytes_total=None, error=None,
+                       bytes_processed=None, bytes_total=None, elapsed_seconds=None, error=None,
                        descriptor=None):
     """Checkpoint one state; use the already held package lock when supplied."""
     def update(package):
@@ -200,6 +204,7 @@ def record_preparation(library, job_id, plan_id, probe_digest, state, *,
         for name, value in (
             ("processed", processed), ("total", total),
             ("bytes_processed", bytes_processed), ("bytes_total", bytes_total),
+            ("elapsed_seconds", elapsed_seconds),
         ):
             if value is not None:
                 new[name] = int(value)

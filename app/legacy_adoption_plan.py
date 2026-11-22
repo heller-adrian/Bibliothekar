@@ -22,13 +22,13 @@ from app.event_naming import (
     render_event_folder_name, render_no_event_folder_name,
 )
 from app.event_structure import continuous_event_bounds
-from app.filename_collisions import capture_stem, numbered_stem
+from app.filename_collisions import capture_stem, has_capture_fraction, numbered_stem
 from app.folder_import import normalize_device_name
 from app.free_time import free_ranges_for_day
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps, normalize_no_event_segments, normal_event_ranges
 from app.legacy_adoption_inventory import _job, _legacy_family_key, registered_content
 from app.legacy_adoption_mode import require_no_managed_data
-from app.legacy_adoption_xmp_plan import MAX_XMP_BYTES, XmpPlanError, planned_edit
+from app.legacy_adoption_xmp_plan import MAX_XMP_BYTES, XmpPlanError, planned_edit, raw_name_pair
 from app.legacy_adoption_paths import (
     AdoptionError, bound_directory, bound_file, bound_sha256, file_identity, relative_parent,
     target_key, validate_target, verify_inventory_identity, walk_bound_files,
@@ -43,6 +43,10 @@ MAX_PLAN_ITEMS = 2000
 MAX_DRAFT_CONFLICTS = 50
 
 
+class ManualXmpRenameConflict(AdoptionError):
+    pass
+
+
 def _event_id():
     return "EVENT_" + uuid4().hex.upper()
 
@@ -53,7 +57,7 @@ def _local_capture(value):
         raise AdoptionError("Die bestätigte Aufnahmezeit benötigt Datum und Uhrzeit.")
     if result.tzinfo is None:
         result = result.replace(tzinfo=LOCAL_TIMEZONE)
-    return result.isoformat()
+    return result.isoformat(timespec="microseconds" if has_capture_fraction(value) else "auto")
 
 
 def _layout(definition, defaults, inherited=None):
@@ -905,7 +909,7 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
         elif filename_method == "script" and key not in target_stems:
             camera, burst_group = cameras[key]
             same_second = (distinct[burst_group] > 1 or
-                           (bursts[burst_group] > 1 and capture[19:20] == "."))
+                           (bursts[burst_group] > 1 and has_capture_fraction(capture)))
             generated_stem, generated_index, _ = capture_stem(
                 capture, camera, set(), same_second=same_second,
             )
@@ -936,22 +940,29 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                     verify_inventory_identity(fd, info, json.loads(member["identity"]), member["sha256"])
                     metadata = json.loads(member["metadata_json"] or "{}")
                     raw_hint = (metadata.get("capture_identity") or {}).get("sidecar_raw")
-                    if (filename_method == "script" and target is not None
-                            and metadata.get("media_type") == "xmp" and raw_hint):
-                        if info.st_size > MAX_XMP_BYTES:
-                            raise AdoptionError("XMP-Datei erfordert eine separate Prüfung (zu groß): " + source)
-                        payload = os.pread(fd, info.st_size, 0)
-                        if len(payload) != info.st_size:
-                            raise AdoptionError("XMP-Datei wurde während der Planung verändert: " + source)
-                        try:
-                            xmp_edit = planned_edit(family, targets, payload)
-                            if (xmp_edit and xmp_edit["xmp_old_raw_name"].casefold() != raw_hint):
-                                raise XmpPlanError("Der RAW-Verweis weicht von den inventarisierten XMP-Metadaten ab.")
-                        except XmpPlanError as error:
-                            raise AdoptionError(
-                                "Die XMP-Referenz kann nicht sicher mitbenannt werden: " + source +
-                                " (" + str(error) + ")"
-                            ) from error
+                    if target is not None and metadata.get("media_type") == "xmp" and raw_hint:
+                        if filename_method == "manual":
+                            owner = raw_name_pair(family, targets, raw_hint)
+                            if owner and owner[0] != owner[1]:
+                                raise ManualXmpRenameConflict(
+                                    "Die RAW-Umbenennung würde einen gebundenen XMP-Verweis ungültig machen. "
+                                    "Plane mit unverändertem RAW-Namen oder wähle das TrueNAS-Skript. " + source
+                                )
+                        else:
+                            if info.st_size > MAX_XMP_BYTES:
+                                raise AdoptionError("XMP-Datei erfordert eine separate Prüfung (zu groß): " + source)
+                            payload = os.pread(fd, info.st_size, 0)
+                            if len(payload) != info.st_size:
+                                raise AdoptionError("XMP-Datei wurde während der Planung verändert: " + source)
+                            try:
+                                xmp_edit = planned_edit(family, targets, payload)
+                                if (xmp_edit and xmp_edit["xmp_old_raw_name"].casefold() != raw_hint):
+                                    raise XmpPlanError("Der RAW-Verweis weicht von den inventarisierten XMP-Metadaten ab.")
+                            except XmpPlanError as error:
+                                raise AdoptionError(
+                                    "Die XMP-Referenz kann nicht sicher mitbenannt werden: " + source +
+                                    " (" + str(error) + ")"
+                                ) from error
             if target is not None:
                 source_dir = PurePosixPath(source).parent
                 target_dir = str(PurePosixPath(target).parent)

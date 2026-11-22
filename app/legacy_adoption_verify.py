@@ -226,14 +226,8 @@ def assert_verification_stamps(connection, library, job, plan):
                 raise AdoptionError("Quelldatei ist seit der Prüfung wieder vorhanden: " + path)
 
 
-def assert_original_layout(connection, library, job, plan, *, defer_source_hash=False):
-    """Verify the original layout; optionally defer script source hashing.
-
-    Only manifest preparation may defer the original media checksum:
-    _bound_proof() immediately rechecks every inventory identity and SHA-256
-    before the script is confirmed. Archive baselines and target vacancies
-    must still be checked here.
-    """
+def assert_original_layout(connection, library, job, plan, *, source_check=None, archive_check=None):
+    """Verify every planned input and the original archive layout."""
     plan_id = plan["id"]
     with ExitStack() as stack:
         source, archive = _roots(stack, library, job)
@@ -241,20 +235,8 @@ def assert_original_layout(connection, library, job, plan, *, defer_source_hash=
         for row in move_rows(connection, job["id"], plan_id, include_duplicates=True):
             if row["target_path"] and lookup(row["target_path"]) is not None:
                 raise AdoptionError("Das Verschiebeziel ist noch belegt: " + row["target_path"])
-            if defer_source_hash and row["target_path"] is not None:
-                try:
-                    with relative_parent(source, row["relative_path"]) as (folder, name):
-                        with bound_file(folder, name) as (_descriptor, info):
-                            expected = json.loads(row["identity"])
-                            if file_identity(info)[:4] != tuple(expected[:4]):
-                                raise AdoptionError("Die Quelldateiidentität wurde verändert.")
-                except (FileNotFoundError, OSError, AdoptionError) as error:
-                    raise AdoptionError(
-                        "Die Quelldatei fehlt oder stimmt nicht mit dem Plan überein: " +
-                        row["relative_path"]
-                    ) from error
-                # _bound_proof() provides the final SHA-256, ctime and inode
-                # fence for this source before the immutable script is issued.
+            if source_check is not None:
+                source_check(source, row)
             elif not _matches(source, row["relative_path"], row["size_bytes"], row["sha256"],
                               expected_inode=tuple(json.loads(row["identity"])[:2])):
                 raise AdoptionError("Die Quelldatei fehlt oder stimmt nicht mit dem Plan überein: " +
@@ -267,7 +249,9 @@ def assert_original_layout(connection, library, job, plan, *, defer_source_hash=
             )
         }
         for path, proof in baseline.items():
-            if not _matches(archive, path, *proof):
+            if archive_check is not None:
+                archive_check(archive, path, *proof)
+            elif not _matches(archive, path, *proof):
                 raise AdoptionError("Vorhandene Archivdatei fehlt oder wurde verändert: " + path)
         for event in json.loads(plan["events_json"]):
             prefix = event_root_relative(event)

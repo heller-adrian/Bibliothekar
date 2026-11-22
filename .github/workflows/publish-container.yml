@@ -78,11 +78,13 @@ jobs:
               if [[ "$GITHUB_REF" == 'refs/heads/patch/1.1.1-media-families' ]]; then release=v1.1.1-rc.2; fi
               if [[ "$GITHUB_REF" == 'refs/heads/patch/1.1.2-adoption-duplicate-family-targets' ]]; then release=v1.1.2-rc.1; fi
               if [[ "$GITHUB_REF" == 'refs/heads/patch/1.1.2-rc2-xmp-family-adoption' ]]; then release=v1.1.2-rc.2; fi
-              if git ls-remote --exit-code --tags origin "refs/tags/$release" >/dev/null; then
-                echo 'Release tag already exists.' >&2
-                exit 1
-              else
-                test "$?" = 2
+              refs="$(git ls-remote --tags origin "refs/tags/$release" "refs/tags/$release^{}")"
+              if [[ -n "$refs" ]]; then
+                existing="$(awk 'END {print $1}' <<< "$refs")"
+                test "$release" = v1.1.2-rc.2 && test "$existing" = "$GITHUB_SHA" || {
+                  echo 'Release tag already exists on an unauthorized ref.' >&2
+                  exit 1
+                }
               fi
               ;;
             refs/heads/patch/*)
@@ -253,13 +255,21 @@ jobs:
             bash qa/release/install_runner_packages.sh acl
           fi
           previous="$image@sha256:c9c2077374643d0598dbadbf976f26da76a9958343e6d39c221efb411b38ac36"
-          bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh "$image@$IMAGE_DIGEST" "$GITHUB_SHA" "$previous" |
+          smoke_args=("$image@$IMAGE_DIGEST" "$GITHUB_SHA" "$previous")
+          if [[ "$release" == v1.1.2-rc.2 ]]; then smoke_args+=(rc112); fi
+          bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh "${smoke_args[@]}" |
             tee "$evidence/container-smoke.log"
           grep -Fxq "Grouped manual SMB work verified the combined ZIP and resumed partial moves after a container restart on native ZFS." "$evidence/container-smoke.log"
           grep -Fxq "Review batch preserved a complete RAW/JPEG/XMP family and read-only originals on native ZFS." "$evidence/container-smoke.log"
           grep -Fxq "Native ZFS POSIX ACL inheritance preserved private review staging." "$evidence/container-smoke.log"
           grep -Fxq "Upgrade from RC22 retained the registered archive, receipt and SHA-256 on native ZFS." "$evidence/container-smoke.log"
           grep -Fxq "Upgrade from 1.0.0 retained the existing library and normal Workspace access on native ZFS." "$evidence/container-smoke.log"
+          if [[ "$release" == v1.1.2-rc.2 ]]; then
+            grep -Fxq "Upgrade from 1.1.1 retained the registered archive, receipt and SHA-256 on native ZFS." "$evidence/container-smoke.log"
+            grep -Fxq "Upgrade from 1.1.2-RC1 retained the registered archive, receipt and SHA-256 on native ZFS." "$evidence/container-smoke.log"
+            grep -Fxq "Prepared RC1 script resumed and registered after upgrade on native ZFS." "$evidence/container-smoke.log"
+            test "$(grep -Fxc 'Bound XMP reference and original/target SHA-256 verified on native ZFS.' "$evidence/container-smoke.log")" = 2
+          fi
           jq -n --arg source "$GITHUB_SHA" --arg image "$image" --arg digest "$IMAGE_DIGEST" \
             --arg qa_run "$ADOPTION_QA_RUN" --arg image_run "$GITHUB_RUN_ID" --arg tag "$release" \
             '{tag:$tag, source:$source, image:$image, digest:$digest, qa_run:$qa_run, image_run:$image_run}' \
@@ -308,33 +318,67 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | cut -f1)" = "$GITHUB_SHA"
           [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          test -z "$(git ls-remote --tags origin "refs/tags/$release")"
-          if gh release view "$release" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "The prerelease already exists: $release" >&2
-            exit 1
+          refs="$(git ls-remote --tags origin "refs/tags/$release" "refs/tags/$release^{}")"
+          tag_options=(--target "$GITHUB_SHA")
+          if [[ -n "$refs" ]]; then
+            test "$(awk 'END {print $1}' <<< "$refs")" = "$GITHUB_SHA"
+            tag_options+=(--verify-tag)
           fi
           evidence="$RUNNER_TEMP/adoption-qualification"
           jq -e --arg sha "$GITHUB_SHA" --arg digest "$IMAGE_DIGEST" \
             --arg run "$ADOPTION_QA_RUN" --arg tag "$release" \
             'select(.source == $sha and .digest == $digest and .qa_run == $run and .tag == $tag)' \
             "$evidence/qualified-image.json" >/dev/null
-          # Reuse the exact built and ZFS-qualified manifest; do not rebuild
-          # or overwrite a stable version tag.
-          docker buildx imagetools create \
-            --tag "$image:$release" "$image@$IMAGE_DIGEST"
-          docker buildx imagetools inspect "$image:$release" \
-            | grep -F "$IMAGE_DIGEST"
-          cat >> "$evidence/release-notes.md" <<EOF
+          # Inspect the top-level manifest by tag, using the registry's authenticated response.
+          token="$(curl --fail --silent --show-error --get "https://$REGISTRY/token" \
+            --data-urlencode "service=$REGISTRY" --data-urlencode "scope=repository:$IMAGE_NAME:pull" \
+            | jq -er '.token | select(type == "string" and length > 0)')"
+          manifest="$evidence/rc-manifest.json"
+          manifest_status() {
+            curl --silent --show-error --output "$manifest" --write-out '%{http_code}' \
+              -H "Authorization: Bearer $token" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json' \
+              "https://$REGISTRY/v2/$IMAGE_NAME/manifests/$release"
+          }
+          status="$(manifest_status)"
+          case "$status" in
+            200) test "sha256:$(sha256sum "$manifest" | cut -d' ' -f1)" = "$IMAGE_DIGEST" ;;
+            404) jq -e '.errors | any(.code == "MANIFEST_UNKNOWN")' "$manifest" >/dev/null ;;
+            *) echo "Could not check the RC image (HTTP $status)." >&2; exit 1 ;;
+          esac
+
+          release_response="$evidence/rc-release.http"
+          if gh api --include "repos/$GITHUB_REPOSITORY/releases/tags/$release" > "$release_response"; then
+            test -n "$refs"
+            awk 'body {print} /^[[:space:]]*$/ {body=1}' "$release_response" |
+              jq -e --arg digest "$IMAGE_DIGEST" --arg tag "$release" '
+                .tag_name == $tag and .prerelease and (.draft | not)
+                and (.body | contains("Verified image digest: `" + $digest + "`"))
+                and ([.assets[].name] | index("qualified-image.json") != null and index("verified.json") != null)
+              ' >/dev/null
+            test "$status" = 200
+          else
+            # A rate limit, authentication problem or server error is not an absent release.
+            grep -Eq '^HTTP/[^ ]+ 404([[:space:]]|$)' "$release_response"
+            if [[ "$status" == 404 ]]; then
+              docker buildx imagetools create \
+                --tag "$image:$release" "$image@$IMAGE_DIGEST"
+            fi
+            status="$(manifest_status)"
+            test "$status" = 200
+            test "sha256:$(sha256sum "$manifest" | cut -d' ' -f1)" = "$IMAGE_DIGEST"
+            cat >> "$evidence/release-notes.md" <<EOF
 
           Release candidate container: \`$image:$release\`
           Verified image digest: \`$IMAGE_DIGEST\`
           Stable v1.1.1 is unchanged.
           EOF
-          gh release create "$release" \
-            "$evidence/qualified-image.json" "$evidence/verified.json" \
-            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "Bibliothekar $release" --prerelease \
-            --notes-file "$evidence/release-notes.md"
-          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$release" \
-            | jq -e --arg sha "$GITHUB_SHA" '.object.sha == $sha and .object.type == "commit"'
+            gh release create "$release" \
+              "$evidence/qualified-image.json" "$evidence/verified.json" \
+              --repo "$GITHUB_REPOSITORY" "${tag_options[@]}" \
+              --title "Bibliothekar $release" --prerelease --latest=false \
+              --notes-file "$evidence/release-notes.md"
+          fi
+          refs="$(git ls-remote --tags origin "refs/tags/$release" "refs/tags/$release^{}")"
+          test "$(awk 'END {print $1}' <<< "$refs")" = "$GITHUB_SHA"
           echo "$image:$release at $IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"

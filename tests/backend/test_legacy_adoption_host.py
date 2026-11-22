@@ -457,3 +457,35 @@ def test_rc2_host_rejects_modified_xmp_payload_before_moving_files(package):
     with pytest.raises(host.ExecutionError, match="checksum"):
         host.validate_plan(plan)
     assert (source / "photo.raf.xmp").read_bytes() == original
+
+
+def test_manifest_xmp_proof_hashes_the_same_bytes_used_for_the_rewrite(tmp_path, monkeypatch):
+    from app import legacy_adoption_package as package
+    from app.legacy_adoption_paths import AdoptionError, file_identity
+
+    sidecar = tmp_path / "photo.xmp"
+    original = b"synthetic sidecar bytes"
+    sidecar.write_bytes(original)
+    identity = file_identity(sidecar.stat())
+    reads = []
+    pread = os.pread
+
+    def count_read(fd, size, offset):
+        reads.append((size, offset))
+        return pread(fd, size, offset)
+
+    monkeypatch.setattr(os, "pread", count_read)
+    def reject_second_pass(*args, **kwargs):
+        pytest.fail("An edited XMP must not be reopened or streamed again.")
+    monkeypatch.setattr(package, "bound_sha256", reject_second_pass)
+    root = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        proof, content = package._bound_proof(root, sidecar.name, len(original), _sha(original),
+                                               inventory_identity=identity, xmp=True)
+        assert reads == [(len(original), 0)]
+        assert content == original and proof["sha256"] == _sha(original)
+        with pytest.raises(AdoptionError, match="Dateiinhalt"):
+            package._bound_proof(root, sidecar.name, len(original), "0" * 64,
+                                 inventory_identity=identity, xmp=True)
+    finally:
+        os.close(root)
