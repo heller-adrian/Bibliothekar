@@ -272,7 +272,19 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
                 "source": str(host_source), "archive": str(archive),
             }
             confirmation["probe_sha256"] = probe["sha256"]
-        api(job + "/confirm", method="POST", payload=confirmation)
+        if execution == "script":
+            accepted = api(job + "/confirm", method="POST", expected=202, payload=confirmation)
+            assert accepted["accepted"], accepted
+            for attempt in range(120):
+                preparation = api(job + "/preparation")
+                if preparation["state"] == "completed":
+                    break
+                if preparation["state"] in {"failed", "error", "cancelled"} or attempt == 119:
+                    raise AssertionError(f"Script preparation did not complete: {preparation}")
+                time.sleep(1)
+            assert api(job)["plan"]["execution"]["phase"] == "script_prepared"
+        else:
+            api(job + "/confirm", method="POST", payload=confirmation)
         assert api("/api/setup/adoption", method="POST", expected=409, payload={"decision": "skipped"})[
             "code"
         ] == "legacy_adoption_active"
