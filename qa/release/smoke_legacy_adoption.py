@@ -151,10 +151,12 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
     assert "Hast du eine bestehende Fotosammlung?".encode() in choice
     assert b'id="bk-settings-dialog"' not in choice
     assert api("/api/jobs", expected=409)["code"] == "initial_setup_required"
-    # The initial preferences wizard intentionally permits reading this setting,
-    # while general application operations remain gated until setup is complete.
-    assert isinstance(api("/api/settings/event-folder-layout"), dict)
-    assert api("/api/setup/preferences/continue", method="POST") == {"next": "/setup/adoption"}
+    # The first-library preferences wizard was introduced after the 1.0.1
+    # upgrade fixture. Check it only on the current application image;
+    # the older fixture proceeds directly to the adoption choice.
+    if os.environ["ADOPTION_SMOKE_VERSION"] != "1.0.1":
+        assert isinstance(api("/api/settings/event-folder-layout"), dict)
+        assert api("/api/setup/preferences/continue", method="POST") == {"next": "/setup/adoption"}
     if method == "skip":
         assert api("/api/setup/adoption", method="POST", payload={"decision": "skipped"}) == {"next": "/"}
         assert b'id="bk-settings-dialog"' in request("/")
