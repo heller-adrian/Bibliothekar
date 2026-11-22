@@ -1,4 +1,6 @@
 """RC2 first-library configuration: no duplicate storage, durable settings, isolation."""
+import time
+
 from fastapi.testclient import TestClient
 
 from app import main
@@ -73,9 +75,16 @@ def test_library_specific_preferences_survive_restart_skip_and_second_library(fr
     assert restarted.get("/").status_code == 200
     assert _json(restarted, "GET", "/api/settings/event-naming")["include_year"] is True
     assert _json(restarted, "GET", "/api/settings/event-folder-layout") == layout
-    assert _json(restarted, "POST", "/api/setup/preferences/continue", status=409)[
-        "code"
-    ] == "legacy_adoption_inactive"
+    # The adoption admission lock may still be held briefly by startup recovery.
+    # Only retry the documented transient busy response; all other errors fail.
+    for attempt in range(40):
+        response = _json(restarted, "POST", "/api/setup/preferences/continue", status=409)
+        if response["code"] != "legacy_adoption_busy":
+            break
+        if attempt == 39:
+            raise AssertionError(f"Adoption lock did not clear: {response}")
+        time.sleep(0.25)
+    assert response["code"] == "legacy_adoption_inactive", response
 
     other_archive = archive.with_name("another-library-archive")
     other_archive.mkdir()
