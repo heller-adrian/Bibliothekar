@@ -203,6 +203,7 @@ jobs:
               "test_rc5_large_xmp_streams_to_archive_and_registers[native-zfs]",
               "test_rc5_streaming_xmp_patch_is_byte_exact_after_recovery[native-zfs]",
               "test_rc5_resumes_committed_plan_request_during_server_startup",
+              "test_rc5_native_smoke_pair_keeps_colocated_raw_without_shutter_metadata",
               "test_background_plan_reports_and_reverses_individual_xmp_exclusions[native-zfs]",
               "test_two_archived_occurrences_are_both_named_and_registered[manual-full-copies-native-when-available]",
               "test_two_archived_occurrences_are_both_named_and_registered[manual-shared-jpeg-native-when-available]",

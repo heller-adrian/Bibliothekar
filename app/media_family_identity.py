@@ -174,7 +174,7 @@ def split_family_groups(groups, *, ending, cancel=lambda: None, preserve_xmp_ver
                     by_precision[(camera, identity["serial"], stem, instant)].add(key)
                 if all(settings.get(field) not in (None, "") for field in ("exposure", "aperture", "iso")):
                     by_context[(camera, stem, instant.replace(microsecond=0))].add(key)
-        if has_proof or preserve_xmp_versions and primaries and any(_time(item) is not None for item in primaries):
+        if has_proof or preserve_xmp_versions and primaries:
             candidates[key] = (members, evidence, usable)
 
     by_sidecar = {}

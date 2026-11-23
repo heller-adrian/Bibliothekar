@@ -108,6 +108,14 @@ def _inventory_groups(rows, source):
         members = [dict(row) for row in group]
         candidates = [row for row in members if row["disposition"] == "candidate"]
         files = [json.loads(row["metadata_json"]) for row in candidates if row["metadata_json"]]
+        primary_has_time = any(
+            file["media_type"] != "xmp" and not file["review_required"] and file["selected_capture_time"]
+            for file in files
+        )
+        primary_paths = {
+            Path(file["relative_path"]).parent / Path(file["relative_path"]).name.casefold()
+            for file in files if file["media_type"] == "raw"
+        }
         for index, file in enumerate(files):
             file["family_key"] = key
             if file.get("adoption_xmp_bound"):
@@ -115,10 +123,13 @@ def _inventory_groups(rows, source):
                 if not qualified.get("review_required") and str(qualified.get("selected_capture_source")).endswith(":DateTimeOriginal"):
                     qualified["capture_time_confidence"] = "high"
                 else:
-                    # A verified bound sidecar without its own shutter time
-                    # inherits the master's time. Keep all raw tags for review.
-                    qualified.update(selected_capture_time=None, selected_capture_source=None,
-                                     capture_time_confidence="missing", metadata_conflict=False)
+                    # Preserve the existing date fallback for a verified
+                    # co-located pair whose RAW has no usable capture time.
+                    raw_name = file["capture_identity"]["sidecar_raw"]
+                    near_raw = (Path(file["relative_path"]).parent / raw_name) in primary_paths
+                    if primary_has_time or not near_raw:
+                        qualified.update(selected_capture_time=None, selected_capture_source=None,
+                                         capture_time_confidence="missing", metadata_conflict=False)
                 files[index] = qualified
         family = {"family_key": key, "status": "review_required"}
         if files:

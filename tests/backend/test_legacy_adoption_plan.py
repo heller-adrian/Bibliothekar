@@ -1412,3 +1412,27 @@ def test_rc5_keeps_proven_sidecar_when_other_same_second_raw_is_ambiguous(invent
     assert xmp["family_key"] == anchored["family_key"] != unrelated["family_key"]
     assert xmp["xmp_new_raw_name"] == Path(anchored["target_path"]).name
     assert all((source / path).read_bytes() == content for path, content in originals.items())
+
+
+def test_rc5_native_smoke_pair_keeps_colocated_raw_without_shutter_metadata(inventory, monkeypatch):
+    import shutil
+    from app.metadata import read_bound_metadata
+
+    if shutil.which("exiftool") is None:
+        pytest.skip("ExifTool is required for the real smoke fixture")
+    context, source, registry = inventory
+    (source / "sample.raf").write_bytes(b"synthetic raw for script\n")
+    (source / "sample.xmp").write_text(
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+        '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        '<rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/" '
+        'xmp:CreateDate="2026-07-22T12:34:56+02:00" '
+        'xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:RawFileName="sample.raf"/>'
+        '</rdf:RDF></x:xmpmeta>'
+    )
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", read_bound_metadata)
+    job = _scan(context, source)
+    assert inventory_chronology(context, job) == [{"period": "2026", "families": 1, "review": 0}]
+    plan = create_plan(context, registry, job, _draft(), filename_method="script")
+    assert (plan["move_families"], plan["move_files"]) == (1, 2)
+    assert all((source / name).is_file() for name in ("sample.raf", "sample.xmp"))
