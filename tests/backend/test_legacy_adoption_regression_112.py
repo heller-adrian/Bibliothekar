@@ -147,7 +147,7 @@ def test_occurrence_detection_uses_sha_and_actual_target_path_not_source_folders
         item("any/where/DSCF1000", ".RAF", "same-sha"),
         item("other/DSCF1000", ".JPG", "jpeg-sha"),
     ]
-    duplicates, collisions = _adoption_occurrence_sequences(selected, {})
+    duplicates, collisions, _ = _adoption_occurrence_sequences(selected, {})
     assert duplicates["some/DSCF1000"] == 2
     assert duplicates["any/where/DSCF1000"] == 1
     assert "other/DSCF1000" not in duplicates

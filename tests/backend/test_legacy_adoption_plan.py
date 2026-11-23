@@ -229,23 +229,27 @@ def test_identical_media_across_undated_arbitrary_directories_are_detected(inven
     assert "DSCF2922_Duplicate_002.JPG" in targets
 
 
-def test_shared_jpeg_with_different_raws_remains_ambiguous(inventory):
+@pytest.mark.parametrize("method", ["manual", "script"])
+def test_shared_jpeg_with_different_raws_keeps_each_capture_in_the_plan(inventory, method):
     context, source, registry = inventory
-    for folder, raw in (("A", b"raw photo A"), ("B", b"raw photo B")):
-        directory = source / folder
-        directory.mkdir()
-        (directory / "DSCF2222.JPG").write_bytes(b"shared JPEG")
-        (directory / "DSCF2222.RAF").write_bytes(raw)
+    folder = source / "2025/06/BWB Wuppertal/RAW"
+    folder.mkdir(parents=True)
+    for stem, raw in (("DSCF8391", b"raw photo A"), ("DSCF8391_1", b"raw photo B")):
+        (folder / (stem + ".JPG")).write_bytes(b"shared JPEG")
+        (folder / (stem + ".RAF")).write_bytes(raw)
     job = _scan(context, source)
-    with database_connection(context.database_path) as connection:
-        rows = list(connection.execute(
-            "SELECT disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
-        ))
-    assert all(row[0] == "candidate" for row in rows)
-    # A shared JPEG checksum is not proof that different RAWs are the same
-    # capture. Do not create an executable move plan for such ambiguity.
-    with pytest.raises(AdoptionError, match="Widersprüchliche RAW-Aufnahmen in Duplikatfamilien"):
-        create_plan(context, registry, job, _draft())
+    plan = create_plan(context, registry, job, _draft(), filename_method=method)
+    assert (plan["move_files"], plan["move_families"], plan["inventory_duplicates"]) == (4, 2, 0)
+    moves = plan_moves(context, job)
+    assert len({move["sha256"] for move in moves}) == 3
+    for number, key in enumerate(sorted({move["family_key"] for move in moves}), 1):
+        family = [move for move in moves if move["family_key"] == key]
+        assert len(family) == 2
+        [target_stem] = {Path(move["target"]).stem for move in family}
+        assert target_stem.endswith(f"_Duplicate_{number:03d}")
+        if method == "script":
+            assert target_stem.endswith(f"_Burst_{number:03d}_Duplicate_{number:03d}")
+        assert len({Path(move["target"]).suffix for move in family}) == 2
 
 
 def test_historical_duplicate_raw_preserves_distinct_xmp_as_detached(inventory):
@@ -411,6 +415,33 @@ def test_later_extension_rejects_collision_with_archived_original(inventory):
     assert (source / "same.raf").read_bytes() == b"different capture with the same name"
     with database_connection(context.database_path) as connection:
         assert connection.execute("SELECT count(*) FROM legacy_adoption_plans").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize(("method", "stem"), [
+    ("manual", "DSCF8391"), ("script", "20260721_120000_Unbekanntes-Gerät"),
+])
+def test_existing_case_variant_of_numbered_duplicate_keeps_its_path(inventory, method, stem):
+    context, source, registry = inventory
+    event_id = _existing(context)
+    archive = context.archive_root / "2026" / "Urlaub" / "Alle"
+    archive.mkdir()
+    occupied = archive / f"{stem}_Duplicate_001.jpg"
+    occupied.write_bytes(b"already archived")
+    copies = []
+    for directory in ("card", "backup"):
+        original = source / directory / "DSCF8391.JPG"
+        original.parent.mkdir()
+        original.write_bytes(b"identical source copies")
+        copies.append(original)
+    job = _scan(context, source)
+    draft = {"events": [{"existing_id": event_id}]}
+    plan = create_plan(context, registry, job, draft, allow_existing=True, filename_method=method)
+    assert plan["move_files"] == 2
+    assert {Path(row["target"]).name for row in plan_moves(context, job)} == {
+        f"{stem}_Duplicate_002.JPG", f"{stem}_Duplicate_003.JPG",
+    }
+    assert occupied.read_bytes() == b"already archived"
+    assert all(file.read_bytes() == b"identical source copies" for file in copies)
 
 
 @pytest.mark.parametrize(
@@ -1167,14 +1198,14 @@ def test_rc2_duplicate_numbers_are_separate_from_filename_collisions():
         candidate("C", "C/c.jpg", "sha-2", "S2"),
         candidate("D", "D/d.jpg", "sha-2", "S3"),
     ]
-    duplicate, collision = _adoption_occurrence_sequences(
+    duplicate, collision, _ = _adoption_occurrence_sequences(
         selected, {"A": "S1", "B": "S2", "C": "S2", "D": "S3"},
     )
     assert duplicate == {"A": 1, "B": 2, "C": 1, "D": 2}
     assert collision == {"B": 1, "C": 2}
 
 
-def test_rc2_conflicting_duplicate_membership_requires_review():
+def test_overlapping_copies_get_unique_suffixes_without_merging_captures():
     from app.legacy_adoption_plan import _adoption_occurrence_sequences
 
     def member(name, sha):
@@ -1187,8 +1218,10 @@ def test_rc2_conflicting_duplicate_membership_requires_review():
         ("B", [member("b.A", "hash-a")], "2025-04-16", None, folder),
         ("C", [member("c.B", "hash-b")], "2025-04-16", None, folder),
     ]
-    with pytest.raises(AdoptionError, match="Duplikatfamilien"):
-        _adoption_occurrence_sequences(selections, {})
+    duplicate, _, cohorts = _adoption_occurrence_sequences(selections, {})
+    assert duplicate == {"A": 1, "B": 2, "C": 3}
+    assert cohorts == {key: frozenset({key}) for key in duplicate}
+    assert _adoption_occurrence_sequences(list(reversed(selections)), {})[0] == duplicate
 
 
 def test_rc2_same_second_distinct_captures_with_two_copies_each_use_contiguous_suffixes(
@@ -1240,7 +1273,7 @@ def test_rc2_same_second_distinct_captures_with_two_copies_each_use_contiguous_s
 
 
 
-def test_rc2_identical_jpeg_with_different_raw_masters_is_not_a_duplicate_capture():
+def test_identical_companions_do_not_share_a_capture_ordinal_with_different_raw_masters():
     """Shared JPEG content cannot override conflicting actual RAW capture bytes."""
     from app.legacy_adoption_plan import _adoption_occurrence_sequences
 
@@ -1260,5 +1293,6 @@ def test_rc2_identical_jpeg_with_different_raw_masters_is_not_a_duplicate_captur
         ("B", [item("B.RAF", "raw-2", "raw"), item("B.JPG", "same-jpeg", "jpeg")],
          "2025-04-16T19:37:26", None, folder),
     ]
-    with pytest.raises(AdoptionError, match="Widersprüchliche RAW"):
-        _adoption_occurrence_sequences(selections, {})
+    duplicate, _, cohorts = _adoption_occurrence_sequences(selections, {})
+    assert duplicate == {"A": 1, "B": 2}
+    assert cohorts == {"A": frozenset({"A"}), "B": frozenset({"B"})}

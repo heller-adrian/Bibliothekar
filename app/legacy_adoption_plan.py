@@ -578,7 +578,7 @@ def _registered_archive_paths(connection, plan_id, event_id):
 
 
 def _family_targets(folder, key, family, override, archive_entry, registered, used, sequences,
-                    *, duplicate_index=None, collision_index=None, occupied_paths=None):
+                    *, duplicate_index=None, collision_index=None, occupied_paths=None, sibling_names=()):
     """Retain original names unless a *real target path* is already reserved.
 
     A byte-identical source occurrence always gets a _Duplicate_NNN label,
@@ -615,8 +615,9 @@ def _family_targets(folder, key, family, override, archive_entry, registered, us
         targets = [str(folder / (safe_stem + ending)) for ending in endings]
         for path in targets:
             validate_target(path)
-        if all(target_key(path) not in reserved and archive_entry(path) is None
-               for path in targets):
+        if all(target_key(path) not in reserved
+               and target_key(PurePosixPath(path).name) not in sibling_names
+               and archive_entry(path) is None for path in targets):
             for path in targets:
                 reserved.add(target_key(path))
             used.add(target_key(str(folder / safe_stem)))
@@ -627,90 +628,78 @@ def _family_targets(folder, key, family, override, archive_entry, registered, us
         number += 1
 
 
-def _adoption_occurrence_sequences(selections, target_stems):
-    """Keep true SHA-256 copy sequences separate from path collision sequences.
-
-    A collision between two *different* originals must not consume a number
-    in a separate SHA-identical duplicate group. Resolve each hash bucket
-    independently; overlapping but nonidentical duplicate buckets cannot
-    safely receive a single family suffix and therefore require review.
-    """
-    by_hash, by_target = defaultdict(set), defaultdict(set)
-    raw_hashes_by_key = {}
-    keys = set()
-    for key, members, _capture, _event, (_assigned, leaf, _leaf_key, layout) in selections:
-        keys.add(key)
-        raw_hashes_by_key[key] = frozenset(
-            item["sha256"] for item in members
-            if json.loads(item["metadata_json"] or "{}").get("media_type") == "raw"
-        )
-        folder = _destination_folder(leaf, layout)
-        stem = target_stems.get(key, PurePosixPath(key).name)
-        for member in members:
-            ending = family_member_ending(member["relative_path"])
-            by_target[target_key(str(folder / (stem + ending)))].add(key)
-            media_type = json.loads(member["metadata_json"] or "{}").get("media_type")
-            if media_type != "xmp":
-                by_hash[member["sha256"]].add(key)
-
-    # Do NOT apply graph connectivity to real duplicates. A family may contain
-    # two media hashes shared with distinct sets of other families; arbitrarily
-    # merging their transitive closure makes duplicate indices skip values.
-    duplicate_indices = {}
-    membership = {}
-    seen_groups = set()
-    for bucket in by_hash.values():
-        if len(bucket) < 2:
-            continue
-        members = frozenset(bucket)
-        # A copied JPEG must not falsely collapse two distinct RAW captures
-        # merely because the JPEGs happen to have identical bytes.
-        raw_signatures = {
-            raw_hashes_by_key[key] for key in members if raw_hashes_by_key[key]
-        }
-        if len(raw_signatures) > 1:
-            raise AdoptionError(
-                "Widersprüchliche RAW-Aufnahmen in Duplikatfamilien (gemeinsame Begleitmedien): " +
-                ", ".join(sorted(members))
-            )
-        if members in seen_groups:
-            continue
-        seen_groups.add(members)
-        for index, key in enumerate(sorted(members), 1):
-            previous = membership.get(key)
-            if previous is not None and previous != members:
-                raise AdoptionError(
-                    "Überlappende, uneinheitliche Duplikatfamilien erfordern eine manuelle Prüfung: " + key
-                )
-            membership[key] = members
-            duplicate_indices[key] = index
-
-    # Collision numbering is separate: several different file extensions in
-    # one family can still clash with other families' complete target names.
-    parent = {key: key for key in keys}
+def _occurrence_components(buckets):
+    """Return connected sets for numbering, without changing any family identity."""
+    parent = {}
 
     def root(key):
+        parent.setdefault(key, key)
         while key != parent[key]:
             parent[key] = parent[parent[key]]
             key = parent[key]
         return key
 
-    for bucket in by_target.values():
-        if len(bucket) < 2:
-            continue
-        ordered = sorted(bucket)
-        first = root(ordered[0])
-        for key in ordered[1:]:
-            parent[root(key)] = first
+    for bucket in buckets:
+        if len(bucket) > 1:
+            ordered = sorted(bucket)
+            first = root(ordered[0])
+            for key in ordered[1:]:
+                parent[root(key)] = first
     components = defaultdict(list)
-    for key in sorted(keys):
+    for key in sorted(parent):
         components[root(key)].append(key)
-    collision_indices = {
-        key: index
-        for members in components.values() if len(members) > 1
-        for index, key in enumerate(sorted(members), 1)
+    return components.values()
+
+
+def _adoption_occurrence_sequences(selections, target_stems):
+    """Number physical file copies and name conflicts independently."""
+    by_hash, by_target = defaultdict(set), defaultdict(set)
+    media_hashes, raw_hashes = {}, {}
+    for key, members, _capture, _event, (_assigned, leaf, _leaf_key, layout) in selections:
+        folder = _destination_folder(leaf, layout)
+        stem = target_stems.get(key, PurePosixPath(key).name)
+        media_hashes[key], raw_hashes[key] = set(), set()
+        for member in members:
+            ending = family_member_ending(member["relative_path"])
+            by_target[target_key(str(folder / (stem + ending)))].add(key)
+            media_type = json.loads(member["metadata_json"] or "{}").get("media_type")
+            checksum = member["sha256"]
+            if media_type != "xmp":
+                by_hash[checksum].add(key)
+                media_hashes[key].add(checksum)
+            if media_type == "raw":
+                raw_hashes[key].add(checksum)
+
+    duplicates, cohorts = {}, {}
+    for component in _occurrence_components(by_hash.values()):
+        masters = {frozenset(raw_hashes[key]) for key in component if raw_hashes[key]}
+        unambiguous = len(masters) <= 1 and all(
+            len(by_hash[checksum]) in {1, len(component)}
+            for key in component for checksum in media_hashes[key]
+        )
+        # A shared companion proves copies of that file. Burst numbering may
+        # group captures only when their masters or complete media agree.
+        capture_groups = defaultdict(list)
+        for number, key in enumerate(component, 1):
+            duplicates[key] = number
+            if unambiguous:
+                signature = None
+            elif raw_hashes[key]:
+                signature = ("raw", frozenset(raw_hashes[key]))
+            else:
+                signature = ("media", frozenset(media_hashes[key]))
+            capture_groups[signature].append(key)
+        for group in capture_groups.values():
+            cohort = frozenset(group)
+            cohorts.update(dict.fromkeys(group, cohort))
+
+    collisions = {
+        key: number
+        for component in _occurrence_components(by_target.values())
+        for number, key in enumerate(component, 1)
     }
-    return duplicate_indices, collision_indices
+    return duplicates, collisions, cohorts
+
 
 def _exact_script_collisions(selections, camera_tokens, burst_counts):
     """Only same generated millisecond name needs _001 from the first family."""
@@ -758,29 +747,8 @@ def _camera_tokens(families):
     return tokens, groups
 
 
-def _script_capture_ordinals(selections, cameras):
-    """Assign a stable burst position to each *distinct* capture, not each copy.
-
-    SHA-identical occurrences are the same capture for burst numbering, but
-    still receive their own _Duplicate_NNN occurrence suffix. Different
-    exposures at the same second never borrow each other's duplicate index.
-    """
-    by_hash = defaultdict(set)
-    for key, members, *_ in selections:
-        for item in members:
-            if json.loads(item["metadata_json"] or "{}").get("media_type") != "xmp":
-                by_hash[item["sha256"]].add(key)
-    cohorts = {}
-    for bucket in by_hash.values():
-        if len(bucket) < 2:
-            continue
-        identity = frozenset(bucket)
-        for key in bucket:
-            previous = cohorts.get(key)
-            if previous is not None and previous != identity:
-                raise AdoptionError("Mehrdeutige, überlappende Aufnahme-Duplikatgruppen: " + key)
-            cohorts[key] = identity
-
+def _script_capture_ordinals(selections, cameras, cohorts):
+    """Assign burst positions to distinct captures, sharing an ordinal only for proven copies."""
     unique_by_group = defaultdict(set)
     no_subsec_by_group = defaultdict(set)
     for key, _members, capture, *_ in selections:
@@ -800,6 +768,41 @@ def _script_capture_ordinals(selections, cameras):
             for key in cohort:
                 burst_ordinals[key] = index
     return distinct, burst_ordinals
+
+
+def _has_bound_raw_reference(family):
+    originals = [member["relative_path"] for member in family]
+    for member in family:
+        metadata = json.loads(member["metadata_json"] or "{}")
+        hint = (metadata.get("capture_identity") or {}).get("sidecar_raw")
+        if metadata.get("media_type") == "xmp" and hint and raw_name_pair(family, originals, hint):
+            return True
+    return False
+
+
+def _manual_copy_targets(folder, key, family, number, archive_entry, reserved, layout_paths):
+    """Give a copy its own directory when renaming would break its XMP link."""
+    stem = PurePosixPath(key).name
+    siblings = archive_entry.names(str(folder))
+    layout_keys = {target_key(path) for path in layout_paths}
+    names = [PurePosixPath(member["relative_path"]).name for member in family]
+    if len({target_key(name) for name in names}) != len(names):
+        raise AdoptionError("Mehrere Aufnahmen beanspruchen denselben Dateinamen: " + key)
+    while number <= 999999:
+        suffix = f"_Duplicate_{number:03d}"
+        prefix = stem.encode("utf-8")[:255 - len(suffix)].decode("utf-8", errors="ignore")
+        name = prefix + suffix
+        directory = folder / name
+        normalized = target_key(str(directory))
+        if normalized not in reserved and normalized not in layout_keys and target_key(name) not in siblings:
+            targets = [str(directory / filename) for filename in names]
+            for target in targets:
+                validate_target(target)
+            reserved.add(normalized)
+            reserved.update(target_key(target) for target in targets)
+            return directory, targets
+        number += 1
+    raise AdoptionError("Zu viele gleichnamige Dateien im Zielordner: " + stem)
 
 
 def _automatic_family_targets(folder, key, family, capture, camera, same_second, names, stems, used,
@@ -877,11 +880,11 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
         if not all(registered_content(connection, registry, member["sha256"])
                    for member in selected[1])
     ]
-    duplicate_indices, collision_indices = _adoption_occurrence_sequences(new_selections, target_stems)
+    duplicate_indices, collision_indices, cohorts = _adoption_occurrence_sequences(new_selections, target_stems)
     occupied_targets = set()
     if filename_method == "script":
         cameras, bursts = _camera_tokens(selections)
-        distinct, burst_ordinals = _script_capture_ordinals(new_selections, cameras)
+        distinct, burst_ordinals = _script_capture_ordinals(new_selections, cameras, cohorts)
         exact_collisions = _exact_script_collisions(new_selections, cameras, bursts)
     @lru_cache(maxsize=128)
     def existing_names(folder):
@@ -922,6 +925,13 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                 duplicate_index=duplicate_indices.get(key), number_all=number_all,
                 burst_ordinal=burst_ordinals.get(key),
             )
+        elif (filename_method == "manual" and key not in target_stems
+              and key in duplicate_indices and _has_bound_raw_reference(family)):
+            directory, targets = _manual_copy_targets(
+                folder, key, family, duplicate_indices[key], archive_entry, occupied_targets,
+                _leaf_directories(leaf, layout),
+            )
+            _plan_directories(connection, plan_id, directory, {"structure_enabled": False}, archive_entry)
         else:
             targets = _family_targets(
                 folder, key, family, target_stems.get(key), archive_entry, registered_keys,
@@ -929,6 +939,7 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                 duplicate_index=duplicate_indices.get(key),
                 collision_index=collision_indices.get(key),
                 occupied_paths=occupied_targets,
+                sibling_names=archive_entry.names(str(folder)) if key in duplicate_indices else (),
             )
         for member, target in zip(family, targets, strict=True):
             source = member["relative_path"]

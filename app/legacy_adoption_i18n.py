@@ -254,6 +254,11 @@ TRANSLATIONS = {
         "The source and target must be on the same ZFS dataset. Leave the rest of the archive unchanged during the transfer.",
     "Führe zuerst die Host- und Dataset-Prüfung durch.": "Complete the host and dataset check first.",
 
+    "Ordnerstruktur und Benennung": "Folder layout and naming",
+    "Weiter · Übernahme auswählen": "Continue to collection adoption",
+    "Einstellungen werden geladen …": "Loading settings …",
+    "Einstellungen werden gespeichert …": "Saving settings …",
+    "Einstellungen geladen. Ohne Änderung direkt mit Weiter fortfahren.": "Settings loaded. Continue to keep these defaults.",
     "Ersteinrichtung · Bibliothekar": "Initial setup · Bibliothekar",
     "Hauptbibliothek einrichten": "Set up your main library",
     "Hast du eine bestehende Fotosammlung?": "Do you have an existing photo collection?",

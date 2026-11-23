@@ -4,13 +4,14 @@ from html import escape
 from app.legacy_adoption_i18n import PATTERNS, TRANSLATIONS
 from app.ui_i18n import i18n_ui_js
 from app.ui_shell import (
-    EVENT_PREFERENCES_JS, EVENT_PREFERENCES_MARKUP, SETTINGS_REQUEST_JS, apply_setup_shell,
+    EVENT_PREFERENCES_CSS, EVENT_PREFERENCES_JS, EVENT_PREFERENCES_MARKUP, SETTINGS_REQUEST_JS, apply_setup_shell,
 )
 
 
 def preferences_html(library_name: str) -> str:
     return apply_setup_shell(
         _PAGE.replace("{{EDITOR}}", EVENT_PREFERENCES_MARKUP)
+        .replace("{{EDITOR_CSS}}", EVENT_PREFERENCES_CSS)
         .replace("{{SCRIPT}}", SETTINGS_REQUEST_JS + EVENT_PREFERENCES_JS)
         .replace("{{LIBRARY}}", escape(library_name, quote=True)),
         localization_js=i18n_ui_js(TRANSLATIONS, PATTERNS),
@@ -22,6 +23,7 @@ _PAGE = r"""<!doctype html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Bibliothekseinstellungen · Bibliothekar</title>
 <style>
+{{EDITOR_CSS}}
 #first-library-preferences{max-width:950px;margin:26px auto;padding:16px}
 #first-library-editor{margin:0;padding:0;border:0;min-inline-size:0}
 #first-library-preferences h1{font-size:clamp(1.5rem,4vw,2.3rem);margin:4px 0}
@@ -37,7 +39,6 @@ _PAGE = r"""<!doctype html>
 </head>
 <body>
 <main id="first-library-preferences">
-<p>Ersteinrichtung · Schritt 2 von 3</p>
 <h1>Ordnerstruktur und Benennung</h1>
 <p>Diese Einstellungen gelten für <strong>{{LIBRARY}}</strong> und bleiben nach der Übernahme
 für spätere Ereignisse und Importe erhalten. Du kannst die Standardwerte unverändert übernehmen.</p>

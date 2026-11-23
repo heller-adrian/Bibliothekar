@@ -3,7 +3,7 @@ import time
 
 from fastapi.testclient import TestClient
 
-from app import main
+from app import main, ui_shell
 from app.database import database_connection
 from app.event_layout import get_global_default
 from app.legacy_adoption_mode import initial_preferences_required
@@ -26,6 +26,10 @@ def test_new_library_must_set_preferences_before_adoption_choice(fresh_main):
     assert 'id="bk-folder-layout-tree"' in response.text
     assert 'id="bk-event-naming-preview"' in response.text
     assert 'id="first-library-next"' in response.text
+    assert ui_shell.EVENT_PREFERENCES_CSS in response.text
+    assert ui_shell.EVENT_PREFERENCES_CSS in ui_shell.BIBLIOTHEKAR_0311_CSS
+    assert response.text.count('<details class="bk-settings-card"') == 4
+    assert "Schritt 2 von 3" not in response.text
     assert _json(client, "POST", "/api/setup/adoption", status=409,
                  json={"decision": "adopting"})["code"] == "initial_setup_required"
     assert _json(client, "GET", "/api/jobs", status=409)["code"] == "initial_setup_required"
