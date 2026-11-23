@@ -378,7 +378,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 return copy_review(library, job_id, family_key)
 
         try:
-            with adoption_execution_access(registry):
+            with adoption_execution_access(registry, wait_seconds=2):
                 with admission(library):
                     try:
                         if copy_status(library, job_id).get("state") != "cancelling":
@@ -701,7 +701,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             require_review_idle(library, job_id)
             require_inventory_idle(library, job_id)
             batch_id = begin_review_batch(library, job_id, payload.family_keys)
-            schedule_copies(library, job_id, tasks, registry)
+        schedule_copies(library, job_id, tasks, registry)
         return {"accepted": True, "batch_id": batch_id}
 
     @router.post("/jobs/{job_id}/review/batch/cancel", status_code=202)
@@ -723,8 +723,9 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         with _errors(), adoption_execution_access(registry), admission(library):
             require_inventory_idle(library, job_id)
             status = copy_status(library, job_id)
-            if (status["pending"] or status.get("state") == "active") and not status["running"]:
-                schedule_copies(library, job_id, tasks, registry)
+            pending = (status["pending"] or status.get("state") == "active") and not status["running"]
+        if pending:
+            schedule_copies(library, job_id, tasks, registry)
         return {"accepted": True}
 
     @router.get("/jobs/{job_id}/events")
@@ -1006,7 +1007,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                     # Never mark its shared progress record as a failure.
                     return
                 try:
-                    with adoption_execution_access(registry_path()), admission(library):
+                    with adoption_execution_access(registry_path(), wait_seconds=2), admission(library):
                         record_preparation(
                             library, job_id, plan_id, probe_digest, "running", phase="hashing",
                         )
@@ -1192,7 +1193,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def run_finalize(library, job_id, plan_id):
         registry = registry_path()
         try:
-            with adoption_execution_access(registry):
+            with adoption_execution_access(registry, wait_seconds=2):
                 finalize_adoption(library, registry, job_id, plan_id)
         except Exception:
             logging.getLogger(__name__).exception("Legacy adoption finalization stopped for %s", job_id)

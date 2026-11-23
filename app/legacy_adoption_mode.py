@@ -230,6 +230,7 @@ def require_later_adoption(library):
         raise AdoptionError("\n".join(blockers))
 
 
-def adoption_execution_access(registry_path):
+def adoption_execution_access(registry_path, *, wait_seconds=0):
     path = Path(registry_path)
-    return _lock(path.with_name(path.name + ".adoption-execution.lock"), exclusive=True)
+    return _lock(path.with_name(path.name + ".adoption-execution.lock"),
+                 exclusive=True, wait_seconds=wait_seconds)
