@@ -13,7 +13,7 @@ from uuid import uuid4
 from app import legacy_adoption_dataset as dataset
 from app.database import catalogue_contains_sha256, database_connection
 from app.legacy_adoption_families import join_split_families
-from app.media_family_identity import IDENTITY_VERSION
+from app.media_family_identity import IDENTITY_VERSION, _xmp_original_capture
 from app.legacy_adoption_paths import (
     AdoptionError, absolute_root, bound_child_directory, bound_directory,
     bound_file, bound_sha256, directory_identity, file_identity,
@@ -108,8 +108,18 @@ def _inventory_groups(rows, source):
         members = [dict(row) for row in group]
         candidates = [row for row in members if row["disposition"] == "candidate"]
         files = [json.loads(row["metadata_json"]) for row in candidates if row["metadata_json"]]
-        for file in files:
+        for index, file in enumerate(files):
             file["family_key"] = key
+            if file.get("adoption_xmp_bound"):
+                qualified = _xmp_original_capture(file)
+                if not qualified.get("review_required") and str(qualified.get("selected_capture_source")).endswith(":DateTimeOriginal"):
+                    qualified["capture_time_confidence"] = "high"
+                else:
+                    # A verified bound sidecar without its own shutter time
+                    # inherits the master's time. Keep all raw tags for review.
+                    qualified.update(selected_capture_time=None, selected_capture_source=None,
+                                     capture_time_confidence="missing", metadata_conflict=False)
+                files[index] = qualified
         family = {"family_key": key, "status": "review_required"}
         if files:
             family = summarize_file_metadata(source, files)["families"][0]
@@ -341,6 +351,7 @@ def _read_batch(directory, source, rows, cached, cancel):
                         with bound:
                             pass
                         record["family_key"] = row["family_key"]
+                        record.pop("adoption_xmp_bound", None)
                         row.update(sha256=old["sha256"], metadata_json=json.dumps(record, ensure_ascii=False))
                         continue
                 descriptor, _ = files.enter_context(bound)
@@ -502,8 +513,9 @@ def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path 
                 kept = connection.execute(
                     """SELECT e.key FROM json_each(?) AS e JOIN legacy_adoption_inventory inventory
                        ON inventory.job_id=? AND inventory.relative_path=e.key
-                        AND inventory.sha256=json_extract(e.value, '$.sha256')""",
-                    (json.dumps(excluded), job_id),
+                        AND inventory.sha256=json_extract(e.value, '$.sha256')
+                        AND json_extract(e.value, '$.identity_version')=?""",
+                    (json.dumps(excluded), job_id, IDENTITY_VERSION),
                 )
                 draft["file_exclusions"] = {row[0]: excluded[row[0]] for row in kept}
             join_split_families(connection, job_id, draft, cancel)

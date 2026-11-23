@@ -13,6 +13,8 @@ import stat
 from uuid import uuid4
 
 from app import legacy_adoption_dataset as dataset
+from app.large_xmp import large_xmp_proof, MAX_STREAM_BYTES
+from app.xmp_raw_filename import XmpReferenceError
 from app.database import database_connection
 from app.event_inventory import event_root_relative
 from app.event_layout import ensure_event_layout_snapshot, get_global_default, layout_paths, resolve_layout_choice
@@ -28,11 +30,12 @@ from app.free_time import free_ranges_for_day
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps, normalize_no_event_segments, normal_event_ranges
 from app.legacy_adoption_inventory import _job, _legacy_family_key, registered_content
 from app.legacy_adoption_mode import require_no_managed_data
-from app.legacy_adoption_xmp_plan import MAX_XMP_BYTES, XmpPlanError, planned_edit, raw_name_pair
+from app.legacy_adoption_xmp_plan import MAX_XMP_BYTES, RAW_EXTENSIONS, XmpPlanError, planned_edit, raw_name_pair
 from app.legacy_adoption_paths import (
     AdoptionError, bound_directory, bound_file, bound_sha256, file_identity, relative_parent,
     target_key, validate_target, verify_inventory_identity, walk_bound_files,
 )
+from app.media_family_identity import IDENTITY_VERSION
 from app.metadata import LOCAL_TIMEZONE, family_member_ending
 from app.operation_health import read_session
 from app.released_ranges import merge_intervals
@@ -905,6 +908,64 @@ def _automatic_family_targets(folder, key, family, capture, camera, same_second,
         index += 1
 
 
+def _retain_xmp_companions(connection, plan_id, job_id, issues, anchors, selections, exclusions):
+    """Refuse to move a source master away from a retained companion."""
+    paths = {item["path"] for item in issues}
+    anchors = {path: (raw, key) for path, raw, key in anchors}
+    source_sidecars = connection.execute(
+        """SELECT inventory.relative_path, inventory.family_key, inventory.sha256,
+                  json_extract(inventory.metadata_json, '$.capture_identity.sidecar_raw') AS raw_name
+             FROM legacy_adoption_inventory AS inventory
+             LEFT JOIN legacy_adoption_moves AS move
+               ON move.plan_id = ? AND move.relative_path = inventory.relative_path AND move.target_path IS NOT NULL
+            WHERE inventory.job_id = ? AND inventory.disposition = 'candidate' AND move.relative_path IS NULL
+              AND json_extract(inventory.metadata_json, '$.media_type') = 'xmp'
+              AND json_extract(inventory.metadata_json, '$.capture_identity.sidecar_raw') <> ''""",
+        (plan_id, job_id),
+    )
+    documents = {row["relative_path"]: row for row in source_sidecars}
+    anchors.update((path, (row["raw_name"], row["family_key"])) for path, row in documents.items())
+    if not anchors:
+        return
+    groups = {key: members for key, members, *_ in selections}
+    folders, adjacent = defaultdict(set), defaultdict(set)
+    names = {target_key(raw) for raw, _ in anchors.values()}
+    for key, members in groups.items():
+        for member in members:
+            path = PurePosixPath(member["relative_path"])
+            name = target_key(path.name)
+            if path.suffix.casefold() in RAW_EXTENSIONS and name in names:
+                folders[path.parent, name].add(key)
+                adjacent[path.parent.parent, name].add(key)
+    protected = set()
+    for sidecar, (raw, key) in anchors.items():
+        directory = PurePosixPath(sidecar).parent
+        name = target_key(raw)
+        companions = set(folders.get((directory, name), ()))
+        if directory.parent != PurePosixPath("."):
+            companions.update(adjacent.get((directory.parent, name), ()))
+        if key in groups and any(member["relative_path"] != sidecar for member in groups[key]):
+            companions.add(key)
+        if companions and sidecar not in paths and sidecar not in exclusions:
+            paths.add(sidecar)
+            issues.append({
+                "path": sidecar, "sha256": documents[sidecar]["sha256"],
+                "reason": "Für ein an der Quelle verbleibendes XMP ist ein möglicher RAW-Partner eingeplant.",
+                "identity_version": IDENTITY_VERSION,
+            })
+        protected.update(companions)
+    for key in sorted(protected):
+        for member in groups.get(key, ()):
+            if member["relative_path"] not in paths:
+                paths.add(member["relative_path"])
+                issues.append({
+                    "path": member["relative_path"], "sha256": member["sha256"],
+                    "reason": "Datei bleibt mit einem nicht sicher übernehmbaren XMP an der Quelle.",
+                    "identity_version": IDENTITY_VERSION,
+                })
+
+
+
 def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, source_fd, archive_fd,
                 filename_method):
     registered = set()
@@ -925,6 +986,7 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
     target_counts = Counter()
     planned_directories = set()
     file_issues = []
+    xmp_anchors = []
     used_stems = {target_key(_legacy_family_key(Path(), path)) for path in registered}
     registered_keys = {target_key(path) for path in registered}
     filename_sequences = Counter()
@@ -1026,15 +1088,21 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                             reason = "XMP-Metadaten konnten nicht gelesen werden."
                         elif not owner:
                             reason = "Der referenzierte RAW-Master ist nicht eindeutig zugeordnet."
-                        elif info.st_size > MAX_XMP_BYTES:
+                        elif info.st_size > MAX_STREAM_BYTES:
                             reason = "Die XMP-Datei überschreitet die sichere Prüfgröße."
                         else:
-                            payload = os.pread(fd, info.st_size, 0)
-                            if len(payload) != info.st_size:
-                                raise AdoptionError("XMP-Datei wurde während der Planung verändert: " + source)
                             try:
-                                xmp_edit = planned_edit(family, targets, payload, inventory_hint=raw_hint)
-                            except XmpPlanError:
+                                if info.st_size > MAX_XMP_BYTES:
+                                    proof = large_xmp_proof(fd, info.st_size, raw_hint, owner[1])
+                                    if proof.pop("original_sha256") != member["sha256"]:
+                                        raise AdoptionError("XMP-Datei wurde während der Planung verändert: " + source)
+                                    xmp_edit = proof or None
+                                else:
+                                    payload = os.pread(fd, info.st_size, 0)
+                                    if len(payload) != info.st_size:
+                                        raise AdoptionError("XMP-Datei wurde während der Planung verändert: " + source)
+                                    xmp_edit = planned_edit(family, targets, payload, inventory_hint=raw_hint)
+                            except (XmpPlanError, XmpReferenceError):
                                 reason = "Der eingebettete RAW-Verweis konnte nicht sicher geprüft oder angepasst werden."
                             if filename_method == "manual" and xmp_edit is not None:
                                 raise ManualXmpRenameConflict(
@@ -1042,7 +1110,12 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                                     "Plane mit unverändertem RAW-Namen oder wähle das TrueNAS-Skript. " + source
                                 )
                         if reason:
-                            file_issues.append({"path": source, "reason": reason, "sha256": member["sha256"]})
+                            file_issues.append({
+                                "path": source, "reason": reason, "sha256": member["sha256"],
+                                "identity_version": IDENTITY_VERSION,
+                            })
+                            if raw_hint:
+                                xmp_anchors.append((source, raw_hint, key))
                             continue
             if target is not None:
                 source_dir = PurePosixPath(source).parent
@@ -1084,6 +1157,8 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
         for key, path, layout in _unpopulated_child_leaves(event, event["leaf_layouts"]):
             _store_leaf(event, key, path, layout)
             _plan_directories(connection, plan_id, path, layout, archive_entry)
+    _retain_xmp_companions(connection, plan_id, job["id"], file_issues, xmp_anchors, new_selections,
+                           draft.get("file_exclusions", {}))
     if file_issues:
         raise PlanFileIssues(file_issues)
     _check_planned_collisions(connection, plan_id)

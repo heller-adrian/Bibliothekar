@@ -25,14 +25,14 @@ _PAGE = r"""<!doctype html>
 <style>
 {{EDITOR_CSS}}
 #first-library-preferences{max-width:950px;margin:26px auto;padding:16px}
-#first-library-editor{margin:0;padding:0;border:0;min-inline-size:0}
+#first-library-editor{margin:0 0 16px;padding:0;border:0;min-inline-size:0}
 #first-library-preferences h1{font-size:clamp(1.5rem,4vw,2.3rem);margin:4px 0}
 #first-library-preferences p{color:var(--bk-muted);line-height:1.5}
 #first-library-preferences input:not([type=checkbox]):not([type=radio]),#first-library-preferences select{box-sizing:border-box;max-width:100%;padding:8px;background:var(--bk-paper);color:var(--bk-ink);border:1px solid var(--bk-line);border-radius:9px}
 #first-library-preferences button{background:var(--bk-surface-2);color:var(--bk-ink);border:1px solid var(--bk-line);border-radius:10px;padding:9px 15px;cursor:pointer}
 #first-library-preferences #first-library-next{background:var(--bk-blue);color:white}
 #first-library-preferences button:disabled{opacity:.55}
-#first-library-preferences .actions{position:sticky;bottom:0;border-top:1px solid var(--bk-line);background:var(--bk-paper);padding:15px 0}
+#first-library-preferences .actions{border-top:1px solid var(--bk-line);background:var(--bk-paper);padding:15px 0}
 #first-library-status{white-space:pre-wrap;margin-top:10px}
 #first-library-status[data-error=true]{color:var(--bk-danger)}
 </style>

@@ -1368,3 +1368,47 @@ def test_identical_companions_do_not_share_a_capture_ordinal_with_different_raw_
     duplicate, _, cohorts = _adoption_occurrence_sequences(selections, {})
     assert duplicate == {"A": 1, "B": 2}
     assert cohorts == {"A": frozenset({"A"}), "B": frozenset({"B"})}
+
+
+def test_rc5_keeps_proven_sidecar_when_other_same_second_raw_is_ambiguous(inventory, monkeypatch):
+    import os
+
+    context, source, registry = inventory
+    originals = {
+        "capture/RAW/DSCF0382.RAF": b"first master",
+        "other/RAW/DSCF0382.RAF": b"unrelated master",
+        "capture/Edits/DSCF0382_1.xmp": (
+            b'<r xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:RawFileName="DSCF0382.RAF"/>'
+        ),
+    }
+    for path, data in originals.items():
+        path = source / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    def metadata(descriptors, _cancel):
+        result = {}
+        first = "0123456789abcdef0123456789abcdef"
+        for fd in descriptors:
+            payload = os.pread(fd, 1024, 0)
+            tags = {"EXIF:IFD0:Make": "FUJIFILM", "EXIF:IFD0:Model": "X-H2S",
+                    "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00+02:00",
+                    "EXIF:ExifIFD:FNumber": "5.6", "EXIF:ExifIFD:ExposureTime": "1/125", "EXIF:ExifIFD:ISO": "320"}
+            if payload.startswith(b"<r"):
+                tags = {"XMP:XMP-crs:RawFileName": "DSCF0382.RAF", "XMP:XMP-exifEX:ImageUniqueID": first}
+            else:
+                tags["EXIF:ExifIFD:ImageUniqueID"] = first if payload.startswith(b"first") else first[::-1]
+            result[fd] = tags
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    job = _scan(context, source)
+    result = create_plan(context, registry, job, _draft(), filename_method="script")
+    assert (result["move_families"], result["move_files"]) == (2, 3)
+    by_path = {row["relative_path"]: row for row in plan_moves(context, job)}
+    anchored = by_path["capture/RAW/DSCF0382.RAF"]
+    unrelated = by_path["other/RAW/DSCF0382.RAF"]
+    xmp = by_path["capture/Edits/DSCF0382_1.xmp"]
+    assert xmp["family_key"] == anchored["family_key"] != unrelated["family_key"]
+    assert xmp["xmp_new_raw_name"] == Path(anchored["target_path"]).name
+    assert all((source / path).read_bytes() == content for path, content in originals.items())

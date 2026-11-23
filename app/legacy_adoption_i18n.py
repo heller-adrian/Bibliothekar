@@ -254,6 +254,10 @@ TRANSLATIONS = {
         "The source and target must be on the same ZFS dataset. Leave the rest of the archive unchanged during the transfer.",
     "Führe zuerst die Host- und Dataset-Prüfung durch.": "Complete the host and dataset check first.",
 
+    "Bibliothekar prüft und registriert den Archivbestand …": "Bibliothekar is verifying and registering the archive …",
+    "Für ein an der Quelle verbleibendes XMP ist ein möglicher RAW-Partner eingeplant.": "The plan includes a possible RAW match for an XMP sidecar that will stay at the source.",
+    "Datei bleibt mit einem nicht sicher übernehmbaren XMP an der Quelle.": "This file stays at the source with an XMP sidecar that cannot be adopted safely.",
+    "Es fehlen bestätigbare Ergebnisse der aktuellen Planprüfung.": "The current plan check has no results that can be confirmed.",
     "Betroffene Dateien": "Affected files",
     "Nur die ersten zehn Pfade werden angezeigt.": "Only the first ten paths are shown.",
     "TrueNAS-Skriptplan wird geprüft …": "Checking the TrueNAS script plan \u2026",

@@ -375,7 +375,7 @@ async function goStep(step){
   rememberView(step,true);await refresh();
   window.scrollTo({top:0});
 }
-function planningBusy(){return planningRequest || job?.planning?.state==="running";}
+function planningBusy(){return planningRequest || ["queued","running"].includes(job?.planning?.state);}
 function navigation(){
   const allowed=allowedSteps();
   if(!allowed.includes(viewStep))rememberView(allowed.at(-1));
@@ -389,7 +389,9 @@ function navigation(){
   if(!job)return;
   const phase=job.plan.execution?.phase;
   if(viewStep==="execute" && (phase==="registering" || (!recoveryOnly && phase==="registration_pending"))){
-    nav.append(action("Übernahme prüfen und registrieren",finishAdoption,true));
+    const register=action("Übernahme prüfen und registrieren",finishAdoption,true);
+    register.disabled=Boolean(job.registration_running);
+    nav.append(register);
     return;
   }
   if(recoveryOnly && !(viewStep==="execute" && manualPhase(job.plan)))return;
@@ -504,13 +506,19 @@ function node(tag, content, className) {
 }
 function describeFiles(host, summary){
   const details=node("details",undefined,"adoption-file-issues");
-  details.append(node("summary",t("Betroffene Dateien")+ " ("+summary.total+")"));
+  const title=node("summary");
+  title.append(node("span","Betroffene Dateien")," ("+summary.total+")");
+  details.append(title);
   const reasons=node("ul");
-  for(const [reason,count] of Object.entries(summary.reasons || {}))reasons.append(node("li",count+" · "+t(reason)));
+  for(const [reason,count] of Object.entries(summary.reasons || {})){
+    const row=node("li");
+    row.append(count+" · ",node("span",reason));
+    reasons.append(row);
+  }
   details.append(reasons);
   const examples=node("ul");
   for(const item of summary.examples || []){
-    const row=node("li");row.append(node("code",item.path),document.createTextNode(" · "+t(item.reason)));
+    const row=node("li");row.append(node("code",item.path)," · ",node("span",item.reason));
     examples.append(row);
   }
   details.append(examples);
@@ -525,7 +533,7 @@ function renderPlanningResult(){
   }else if(attempt.state==="interrupted"){
     report("Die Planprüfung wurde unterbrochen. Starte sie erneut.","error");
   }else if(attempt.state==="failed"){
-    report(detail(attempt.message),"error");
+    report(attempt.message,"error");
     if(attempt.files?.total){
       describeFiles($("message"),attempt.files);
       $("message").append(action("Problematische Dateien ausschließen",()=>updateExclusions(false)));
@@ -732,6 +740,12 @@ async function refresh() {
     await restoreJob(current);
   }catch(error){
     if(!current())return;
+    if(error.code==="legacy_adoption_inactive" && jobId){
+      // The wizard route resolves the completed job to its receipt and
+      // stale or discarded jobs to the app, using the server reservation.
+      location.replace("/legacy-adoption?"+new URLSearchParams({library,job:jobId}));
+      return;
+    }
     $("retry-adoption").hidden=false;
     report(error.message,"error");
     throw error;
@@ -751,6 +765,10 @@ async function restoreJob(current) {
     freeSegments=[];archiveSegments=[];draftStats=[];draftCoverage=null;previewRevision=-1;
     selectedEvent=null;selectedArchive=null;selectionAnchor="";day=null;
   }
+  if (job.plan?.state==="completed"){
+    location.replace("/legacy-adoption/history?"+new URLSearchParams({library,job:jobId}));
+    return;
+  }
   draftRevision=state.draft_revision;
   draft={events:[],capture_overrides:{},exclude_families:[],target_stems:{},...state.draft};
   render();
@@ -758,8 +776,9 @@ async function restoreJob(current) {
   if(job.plan.id && !job.plan.execution && job.plan.filename_method==="script"){
     await pollPreparation();
   }
-  if(planningBusy() || job.scan_running || job.metadata_running){
-    if(planningBusy())renderPlanningResult();
+  if(planningBusy() || job.scan_running || job.metadata_running || job.registration_running){
+    if(job.registration_running)report("Bibliothekar prüft und registriert den Archivbestand …","busy");
+    else if(planningBusy())renderPlanningResult();
     else if(job.metadata_running)report("Metadatenentscheidungen werden angewendet …","busy");
     timer=setTimeout(()=>refresh().catch(()=>{}),2000);
     return;
@@ -878,7 +897,7 @@ async function finishAdoption(){
   if(finishing)return;
   finishing=true;
   try{
-    return await mutate("/finalize","POST",{plan_id:job.plan.id});
+    return await mutate("/finalize","POST",{plan_id:job.plan.id,background:true});
   } finally {
     finishing=false;
   }
@@ -902,7 +921,7 @@ async function mutate(path, method="POST", body) {
     const target={"/plan":"review","/confirm":"execute","/finalize":"execute","/reopen":"plan","/script/reopen-unstarted":"inventory","/scan":"inventory","/rollback/start":"execute"}[path];
     if(target)rememberView(target);
     await refresh();
-    report();
+    if(!checking || !job?.registration_running)report();
     return result;
   } catch (error) {
     if (checking) await refresh().catch(()=>{});
@@ -1720,6 +1739,7 @@ async function setDraft(value, editor) {
   draft=value;
   draftRevision=result.revision;
   savedEditor(editor);
+  navigation();
   selectedEvent=null;
   selectedArchive=null;
   day=null;

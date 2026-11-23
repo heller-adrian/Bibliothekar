@@ -1874,7 +1874,14 @@ BIBLIOTHEKAR_0311_CSS = r"""
   scrollbar-gutter: stable;
 }
 #bk-settings-dialog {
+  box-sizing: border-box;
   width: min(880px, calc(100vw - 28px));
+  padding: 0;
+}
+#bk-settings-dialog .bk-dialog-head > div > h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  line-height: 1.25;
 }
 #bk-settings-dialog .bk-settings-tabs {
   display: flex;

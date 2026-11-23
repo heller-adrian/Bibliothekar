@@ -481,11 +481,66 @@ def test_manifest_xmp_proof_hashes_the_same_bytes_used_for_the_rewrite(tmp_path,
     root = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
     try:
         proof, content = package._bound_proof(root, sidecar.name, len(original), _sha(original),
-                                               inventory_identity=identity, xmp=True)
+                                               inventory_identity=identity, xmp_names=("photo.raf", "new.raf"))
         assert reads == [(len(original), 0)]
         assert content == original and proof["sha256"] == _sha(original)
         with pytest.raises(AdoptionError, match="Dateiinhalt"):
             package._bound_proof(root, sidecar.name, len(original), "0" * 64,
-                                 inventory_identity=identity, xmp=True)
+                                 inventory_identity=identity, xmp_names=("photo.raf", "new.raf"))
     finally:
         os.close(root)
+
+
+@pytest.mark.parametrize("package", [True], indirect=True, ids=["native-zfs"])
+def test_rc5_streaming_xmp_patch_is_byte_exact_after_recovery(package, monkeypatch):
+    from app.large_xmp import large_xmp_proof
+
+    edited, original, updated = _rc2_edit_fixture(package)
+    private, source, archive, plan, _binding = edited
+    edit = plan["xmp_edits"][0]
+    with (source / edit["source"]).open("rb") as stream:
+        proof = large_xmp_proof(stream.fileno(), len(original), "photo.raf", "20260721_120000_Fuji.raf")
+    assert proof["original_sha256"] == edit["original_sha256"]
+    assert proof["current_sha256"] == edit["sha256"]
+    assert proof["current_size_bytes"] == edit["size_bytes"]
+    edit.pop("content")
+    edit["patch"] = proof["patch"]
+    encoded = host.json_bytes(plan)
+    edited = private, source, archive, plan, _sha(encoded)
+    (private / "manifest.json").write_bytes(encoded)
+    _permit(edited, "apply")
+    rename = host.rename_noreplace
+
+    def abort_after_install(left, name, right, target):
+        rename(left, name, right, target)
+        if name == "new-xmp-0.xmp":
+            raise KeyboardInterrupt
+
+    with monkeypatch.context() as interrupted:
+        interrupted.setattr(host, "rename_noreplace", abort_after_install)
+        with pytest.raises(KeyboardInterrupt):
+            host.main(_command(edited, "apply"))
+    assert host.main(_command(edited, "apply")) == 0
+    assert (archive / edit["target"]).read_bytes() == updated
+    assert host.main(_command(edited, "apply")) == 0
+    _permit(edited, "rollback")
+    assert host.main(_command(edited, "rollback")) == 0
+    assert host.main(_command(edited, "rollback")) == 0
+    assert (source / edit["source"]).read_bytes() == original
+    assert not (archive / edit["target"]).exists()
+
+
+def test_rc5_streaming_xmp_rejects_xml_entities_and_ambiguous_references(tmp_path):
+    from app.large_xmp import large_xmp_proof
+    from app.xmp_raw_filename import XmpReferenceError
+
+    path = tmp_path / "unqualified.xmp"
+    xml = (b'<r xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:RawFileName="photo.raf" />')
+    for content in (
+        b'<!DOCTYPE r [<!ENTITY unsupported "text">]>' + xml,
+        xml.replace(b'/>', b'><crs:RawFileName>photo.raf</crs:RawFileName></r>'),
+        xml.replace(b'/>', b'><!-- crs:RawFileName="photo.raf" --></r>'),
+    ):
+        path.write_bytes(content)
+        with path.open("rb") as stream, pytest.raises(XmpReferenceError):
+            large_xmp_proof(stream.fileno(), len(content), "photo.raf", "new.raf")

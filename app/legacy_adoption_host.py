@@ -316,6 +316,26 @@ def move(journal, operation, source, source_path, target, target_path, expected,
         journal.append(operation, done)
 
 
+def stream_xmp_patch(fd, size, patch):
+    """Copy byte ranges with one verified substitution, using bounded reads."""
+    offset = patch["offset"]
+    old, new = bytes.fromhex(patch["old"]), bytes.fromhex(patch["new"])
+    if os.pread(fd, len(old), offset) != old:
+        raise ExecutionError("The original XMP token differs from the approved patch.")
+
+    def read(start, end):
+        while start < end:
+            block = os.pread(fd, min(1024 * 1024, end - start), start)
+            if not block:
+                raise ExecutionError("The original XMP ended during staging.")
+            yield block
+            start += len(block)
+
+    yield from read(0, offset)
+    yield new
+    yield from read(offset + len(old), size)
+
+
 def write_document(holding, name, data):
     if info_at(holding, name) is not None:
         return  # A crash may have followed creation but preceded the journal record.
@@ -323,7 +343,11 @@ def write_document(holding, name, data):
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666, dir_fd=holding)
     try:
         with os.fdopen(fd, "wb") as stream:
-            stream.write(data)
+            if isinstance(data, bytes):
+                stream.write(data)
+            else:
+                for block in data:
+                    stream.write(block)
             stream.flush()
             os.fsync(stream.fileno())
         rename_noreplace(holding, temporary, holding, name)
@@ -413,11 +437,18 @@ def apply_xmp_edit(journal, item, original_move, archive, holding, prefix, index
         return
 
     if staged is None:
-        content = base64.b64decode(item["content"], validate=True)
-        if len(content) != item["size_bytes"] or hashlib.sha256(content).hexdigest() != item["sha256"]:
-            raise ExecutionError("Approved XMP content proof differs from manifest: " + target)
         check_roots()
-        write_document(holding, ready_name, content)
+        if "patch" in item:
+            with relative_parent(archive, target) as (directory, name, check), file_at(directory, name) as (fd, info):
+                if stamp(info)[:4] != original["stamp"][:4]:
+                    raise ExecutionError("Original XMP identity differs from the manifest: " + target)
+                write_document(holding, ready_name, stream_xmp_patch(fd, info.st_size, item["patch"]))
+                check()
+        else:
+            content = base64.b64decode(item["content"], validate=True)
+            if len(content) != item["size_bytes"] or hashlib.sha256(content).hexdigest() != item["sha256"]:
+                raise ExecutionError("Approved XMP content proof differs from manifest: " + target)
+            write_document(holding, ready_name, content)
         with file_at(holding, ready_name) as (fd, info):
             if info.st_size != item["size_bytes"] or hash_fd(fd) != item["sha256"]:
                 raise ExecutionError("Staged XMP content has changed: " + target)
@@ -475,12 +506,30 @@ def validate_plan(plan):
             raise ExecutionError("XMP rewrite does not match one approved source move.")
         seen_edits.add(source)
         expected_size = edit["size_bytes"]
-        if not isinstance(expected_size, int) or not 0 <= expected_size <= 16 * 1024 * 1024:
-            raise ExecutionError("XMP rewrite exceeds the supported size limit.")
-        data = base64.b64decode(edit["content"], validate=True)
-        if (len(data) != expected_size or
-                hashlib.sha256(data).hexdigest() != edit["sha256"]):
-            raise ExecutionError("Approved XMP rewrite checksum is inconsistent.")
+        if not isinstance(expected_size, int):
+            raise ExecutionError("Invalid XMP output size.")
+        if "patch" in edit:
+            patch = edit["patch"]
+            size = original["stamp"][2]
+            if ("content" in edit or not isinstance(patch, dict)
+                    or set(patch) != {"offset", "old", "new"}
+                    or type(patch["offset"]) is not int
+                    or not all(isinstance(patch[key], str) and re.fullmatch(r"(?:[0-9a-f]{2}){1,2048}", patch[key])
+                               for key in ("old", "new"))
+                    or not 0 < size <= 128 * 1024 * 1024):
+                raise ExecutionError("Invalid streaming XMP patch.")
+            old_size, new_size = len(patch["old"]) // 2, len(patch["new"]) // 2
+            if (not 0 <= patch["offset"] <= size - old_size
+                    or expected_size != size - old_size + new_size
+                    or not re.fullmatch(r"[0-9a-f]{64}", edit["sha256"])):
+                raise ExecutionError("Invalid streaming XMP patch proof.")
+        else:
+            if not 0 <= expected_size <= 16 * 1024 * 1024:
+                raise ExecutionError("XMP rewrite exceeds the supported size limit.")
+            data = base64.b64decode(edit["content"], validate=True)
+            if (len(data) != expected_size or
+                    hashlib.sha256(data).hexdigest() != edit["sha256"]):
+                raise ExecutionError("Approved XMP rewrite checksum is inconsistent.")
     if plan["format"] == 2 and not edits:
         raise ExecutionError("The extended manifest has no bound XMP edits.")
     reserved = ".bibliothekar-adoption-" + plan["plan_id"]

@@ -89,8 +89,7 @@ def _write(descriptor, record):
     }))
 
 
-def preparation_status(library, job_id, plan_id):
-    """Read an already existing private record without creating directories."""
+def _record(library, job_id, plan_id):
     appdata = appdata_root()
     if appdata is None or not (appdata / PACKAGE_ROOT / job_id).is_dir():
         return None
@@ -98,8 +97,21 @@ def preparation_status(library, job_id, plan_id):
         record = _read_json(descriptor, _PROGRESS_FILE)
     if record is not None:
         _assert_identity(record, library, job_id, plan_id)
-        # Do not leak the probe digest to a caller that only polls progress.
+    return record
+
+
+def preparation_status(library, job_id, plan_id):
+    """Read an existing progress record without exposing the host proof."""
+    record = _record(library, job_id, plan_id)
+    if record:
         return {key: value for key, value in record.items() if key != "probe_sha256"}
+    return None
+
+
+def saved_preparation_proof(library, job_id, plan_id):
+    record = _record(library, job_id, plan_id)
+    if record and record["state"] in {"queued", "running"}:
+        return record["probe_sha256"]
     return None
 
 

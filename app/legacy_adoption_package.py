@@ -12,6 +12,7 @@ from time import monotonic
 
 from app import legacy_adoption_discover as discovery, legacy_adoption_host as host
 from app.appdata import root as appdata_root
+from app.large_xmp import large_xmp_proof
 from app.database import database_connection
 from app.legacy_adoption_dataset import DatasetError, mount_id, mount_table
 from app.legacy_adoption_inventory import _job
@@ -38,6 +39,13 @@ _RC17_RUNNER_DIGESTS = {
 _RC1_RUNNER_DIGESTS = {
     "legacy_adoption_host.py": "37a523687593d898ebe0366511553e26b8d0c18f4ce9bef3315b49edf27d2aa7",
     DISCOVERY_FILE: "8f3d9d9fdd31cacd221e353629c306d8e852a3897f9d38023d399ae7ee83211d",
+}
+
+
+# Script and generated bootstrap published in RC2 through RC4.
+_RC4_RUNNER_DIGESTS = {
+    "legacy_adoption_host.py": "a8fec3095e5b7fb2170e7bb0f7124828de6119283572ae61d2a03d0f2eb3192e",
+    DISCOVERY_FILE: "a72348c1cf0aeec9ccfd45b4f29b58571d9edaba6536d348a050c0c77fd4e3d5",
 }
 
 
@@ -261,7 +269,7 @@ def _approved_host(descriptor, library, job, plan_id, probe_digest):
     return {**probe, "host": paths}
 
 
-def _bound_proof(root, path, size, expected, *, inventory_identity=None, xmp=False, on_bytes=None):
+def _bound_proof(root, path, size, expected, *, inventory_identity=None, xmp_names=None, on_bytes=None):
     content = None
     with relative_parent(root, path) as (parent, name):
         with bound_file(parent, name) as (fd, info):
@@ -269,9 +277,15 @@ def _bound_proof(root, path, size, expected, *, inventory_identity=None, xmp=Fal
                     or (inventory_identity is not None
                         and file_identity(info)[:4] != tuple(inventory_identity[:4]))):
                 raise AdoptionError("Die Dateiidentität weicht von der Inventur ab: " + path)
-            if xmp:
-                if size > MAX_XMP_BYTES:
-                    raise AdoptionError("XMP-Datei erfordert eine separate Prüfung (zu groß): " + path)
+            if xmp_names and size > MAX_XMP_BYTES:
+                try:
+                    content = large_xmp_proof(fd, size, *xmp_names)
+                except XmpReferenceError as error:
+                    raise AdoptionError("Die geplante XMP-Umbenennung ist nicht mehr gültig: " + path) from error
+                actual = content["original_sha256"]
+                if on_bytes:
+                    on_bytes(size)
+            elif xmp_names:
                 content = os.pread(fd, size, 0)
                 if on_bytes:
                     on_bytes(len(content))
@@ -333,7 +347,8 @@ def prepare_manifest(connection, library, job, plan, probe_digest, *, progress=N
             original, target = row["relative_path"], row["target_path"]
             proof, content = _bound_proof(
                 root, original, row["size_bytes"], row["sha256"],
-                inventory_identity=json.loads(row["identity"]), xmp=bool(row["current_sha256"]),
+                inventory_identity=json.loads(row["identity"]),
+                xmp_names=(row["xmp_old_raw_name"], row["xmp_new_raw_name"]) if row["current_sha256"] else None,
                 on_bytes=read_bytes if progress else None,
             )
             if target is None:
@@ -341,16 +356,21 @@ def prepare_manifest(connection, library, job, plan, probe_digest, *, progress=N
             else:
                 moves.append({"source": original, "target": target, **proof})
             if content is not None:
-                try:
-                    rewritten = rewrite_raw_filename(content, row["xmp_old_raw_name"], row["xmp_new_raw_name"])
-                except XmpReferenceError as error:
-                    raise AdoptionError("Die geplante XMP-Umbenennung ist nicht mehr gültig: " + original) from error
-                if len(rewritten) != row["current_size_bytes"] or _sha(rewritten) != row["current_sha256"]:
+                if isinstance(content, dict):
+                    size, digest = content.get("current_size_bytes"), content.get("current_sha256")
+                    replacement = {"patch": content["patch"]} if "patch" in content else {}
+                else:
+                    try:
+                        rewritten = rewrite_raw_filename(content, row["xmp_old_raw_name"], row["xmp_new_raw_name"])
+                    except XmpReferenceError as error:
+                        raise AdoptionError("Die geplante XMP-Umbenennung ist nicht mehr gültig: " + original) from error
+                    size, digest = len(rewritten), _sha(rewritten)
+                    replacement = {"content": base64.b64encode(rewritten).decode("ascii")}
+                if size != row["current_size_bytes"] or digest != row["current_sha256"]:
                     raise AdoptionError("Der bestätigte XMP-Zielinhalt weicht von der Planung ab: " + original)
                 xmp_edits.append({
                     "source": original, "target": target, "original_sha256": row["sha256"],
-                    "sha256": row["current_sha256"], "size_bytes": row["current_size_bytes"],
-                    "content": base64.b64encode(rewritten).decode("ascii"),
+                    "sha256": digest, "size_bytes": size, **replacement,
                 })
             done_files += 1
             checkpoint(done_files == total_files)
@@ -436,8 +456,9 @@ def _runner_differences(descriptor):
         previous = host.read_bytes(descriptor, name)
         if previous != current:
             recognized = {_RC17_RUNNER_DIGESTS[name]}
-            if name in _RC1_RUNNER_DIGESTS:
-                recognized.add(_RC1_RUNNER_DIGESTS[name])
+            for historical in (_RC1_RUNNER_DIGESTS, _RC4_RUNNER_DIGESTS):
+                if name in historical:
+                    recognized.add(historical[name])
             if _sha(previous) not in recognized:
                 raise AdoptionError("Die Skriptdateien stimmen nicht mit dieser Bibliothekar-Version überein.")
             differences[name] = current

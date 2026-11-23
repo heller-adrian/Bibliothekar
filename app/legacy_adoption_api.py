@@ -5,6 +5,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import sqlite3
 from threading import Event, Lock
 from typing import Any, Literal
 
@@ -34,15 +35,17 @@ from app.legacy_adoption_package import (
 )
 from app.legacy_adoption_preparation import (
     abandon_failed_preparation, exclusive_preparation_worker, preparation_status,
-    preparation_worker_active, record_preparation, reserve_preparation,
+    preparation_worker_active, record_preparation, reserve_preparation, saved_preparation_proof,
 )
 from app.legacy_adoption_paths import AdoptionError, bound_directory
 from app.legacy_adoption_mode import (
-    adoption_execution_access, choose_initial_setup, complete_initial_preferences,
+    active_adoption, adoption_execution_access, choose_initial_setup, complete_initial_preferences,
     later_adoption_blockers, require_initial_adoption,
     require_later_adoption, reserve_adoption,
 )
 from app.media_family_identity import IDENTITY_VERSION
+from app.legacy_adoption_worker import dispatch
+from app.library_context import resolve_library_context
 from app.legacy_adoption_plan import (
     MAX_PLAN_ITEMS, ManualXmpRenameConflict, PlanFileIssues, create_plan, file_issue_summary,
     plan_directories, plan_moves, plan_status,
@@ -58,7 +61,7 @@ from app.legacy_adoption_review_progress import batch_details
 from app.legacy_adoption_verify import plan_issues, reopen_plan
 from app.library_registry import LibraryRegistryError, list_libraries
 from app.operation_health import read_session
-from app.root_operations import RootOperationError, admission
+from app.root_operations import _lock, RootOperationBusy, RootOperationError, admission
 
 
 class SetupDecision(BaseModel):
@@ -145,6 +148,10 @@ class PlanCommand(BaseModel):
     plan_id: str = Field(pattern=r"^[a-f0-9]{32}$")
 
 
+class FinishPlan(PlanCommand):
+    background: StrictBool = False
+
+
 class Confirm(PlanCommand):
     method: Literal["manual", "script"]
     acknowledged: StrictBool
@@ -221,6 +228,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     preparing = set()
     planning = set()
     releasing = set()
+    registering = set()
     running_lock = Lock()
 
     def source_path(root, relative):
@@ -248,8 +256,19 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             if row["draft_revision"] != command.revision:
                 raise AdoptionError("Der Entwurf wurde in einer anderen Sitzung geändert. Lade ihn erneut.")
             draft = json.loads(row["draft_json"])
-            draft["planning_attempt"] = {"state": state, "method": command.filename_method,
-                                         "revision": command.revision}
+            previous = draft.get("planning_attempt", {})
+            if state == "queued":
+                if connection.execute(
+                    "SELECT 1 FROM legacy_adoption_plans WHERE job_id=?", (job_id,),
+                ).fetchone():
+                    raise AdoptionError("Ein Verschiebeplan ist bereits gespeichert.")
+                if previous.get("state") in {"queued", "running"} and (
+                    previous["method"], previous["revision"]
+                ) != (command.filename_method, command.revision):
+                    raise AdoptionError("Eine andere Planprüfung läuft bereits.")
+            draft["planning_attempt"] = {
+                "state": state, "method": command.filename_method, "revision": command.revision,
+            }
             if message:
                 draft["planning_attempt"]["message"] = message
             if issues:
@@ -258,18 +277,39 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                                (json.dumps(draft), job_id))
 
     def run_planning(library, job_id, command, later):
+        registry = registry_path()
+        lock = registry.with_name(registry.name + ".adoption-planning.lock")
         try:
-            with admission(library):
-                result = create_plan(library, registry_path(), job_id, draft_revision=command.revision,
-                                     allow_existing=later, filename_method=command.filename_method)
-            planning_attempt(library, job_id, command, state="completed")
-            return result
-        except Exception as error:
-            planning_attempt(library, job_id, command, state="failed", message=str(error),
-                             issues=error.items if isinstance(error, PlanFileIssues) else None)
+            with _lock(lock, exclusive=True):
+                try:
+                    if saved := plan_status(library, job_id):
+                        return saved
+                    with admission(library):
+                        reservation = active_adoption(registry)
+                        if not reservation or (reservation["library_id"], reservation["job_id"]) != (library.library_id, job_id):
+                            raise AdoptionError("Der Übernahmeauftrag ist nicht mehr aktiv.")
+                        if later:
+                            require_later_adoption(library)
+                        else:
+                            require_initial_adoption(registry, library)
+                        with database_connection(library.database_path) as connection:
+                            require_no_partial_publication(connection, job_id)
+                            if matching_update_required(connection, job_id):
+                                raise AdoptionError("Aktualisiere die Inventur für die neue RAW- und XMP-Zuordnung.")
+                        planning_attempt(library, job_id, command, state="running")
+                        result = create_plan(library, registry, job_id, draft_revision=command.revision,
+                                             allow_existing=later, filename_method=command.filename_method)
+                        planning_attempt(library, job_id, command, state="completed")
+                        return result
+                except Exception as error:
+                    planning_attempt(library, job_id, command, state="failed", message=str(error),
+                                     issues=error.items if isinstance(error, PlanFileIssues) else None)
+                    if not command.background:
+                        raise
+                    logging.getLogger(__name__).info("Legacy adoption planning %s: %s", job_id, error)
+        except RootOperationBusy:
             if not command.background:
                 raise
-            logging.getLogger(__name__).info("Legacy adoption planning %s: %s", job_id, error)
         finally:
             with running_lock:
                 planning.discard(key(library, job_id))
@@ -278,6 +318,13 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         with running_lock:
             if key(library, job_id) in planning:
                 raise AdoptionError("Die Planprüfung läuft bereits.")
+        with database_connection(library.database_path) as connection:
+            row = _job(connection, library.library_id, job_id)
+            attempt = json.loads(row["draft_json"]).get("planning_attempt", {})
+            if attempt.get("state") in {"queued", "running"} and not connection.execute(
+                "SELECT 1 FROM legacy_adoption_plans WHERE job_id=?", (job_id,),
+            ).fetchone():
+                raise AdoptionError("Die Planprüfung läuft bereits.")
 
     def run_scan(library, job_id, pause):
         def check_pause():
@@ -285,7 +332,11 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 raise InterruptedError("Inventur pausiert. Bereits gelesene Dateien sind gespeichert.")
 
         try:
-            scan_inventory(library, job_id, registry_path=registry_path(), cancellation_callback=check_pause)
+            registry = registry_path()
+            with _lock(registry.with_name(registry.name + ".adoption-scan.lock"), exclusive=True):
+                scan_inventory(library, job_id, registry_path=registry, cancellation_callback=check_pause)
+        except RootOperationBusy:
+            pass
         except Exception as error:
             # Most failures are already persisted by scan_inventory. A job
             # rejected before claiming a generation remains visible as ready.
@@ -360,7 +411,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             if run_key in review_running:
                 return
             review_running.add(run_key)
-        tasks.add_task(run_copies, library, job_id, registry)
+        dispatch("review", run_copies, library, job_id, registry, tasks=tasks)
 
     @app.get("/setup/preferences", response_class=HTMLResponse, include_in_schema=False)
     def setup_preferences(request: Request):
@@ -521,11 +572,14 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 result["layout_default"] = get_global_default(connection)
                 result["subevent_prefix_enabled"] = naming_from_library_settings(library.settings)["subevent_prefix_enabled"]
                 result["review_count"] = review_count(connection, job_id, result["plan"].get("id"))
+            if attempt.get("state") == "completed" and not result["plan"]:
+                result["plan"] = plan_status(library, job_id)
             with running_lock:
                 result["scan_running"] = key(library, job_id) in running
+                result["registration_running"] = operation in registering
                 result["metadata_running"] = metadata_was_running or operation in metadata_running
-                if attempt.get("state") == "running" and operation not in planning:
-                    attempt["state"] = "completed" if result["plan"] else "interrupted"
+                if attempt.get("state") in {"queued", "running"} and result["plan"]:
+                    attempt["state"] = "completed"
         return result
 
     @router.post("/jobs/{job_id}/scan", status_code=202)
@@ -541,9 +595,14 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 require_no_partial_publication(connection, job_id)
             with running_lock:
                 if key(library, job_id) not in running:
+                    with database_connection(library.database_path) as connection:
+                        connection.execute(
+                            "UPDATE legacy_adoption_jobs SET state='scanning', scan_error=NULL WHERE id=?",
+                            (job_id,),
+                        )
                     pause = Event()
                     running[key(library, job_id)] = pause
-                    tasks.add_task(run_scan, library, job_id, pause)
+                    dispatch("scan", run_scan, library, job_id, pause, tasks=tasks)
         return {"accepted": True}
 
     @router.post("/jobs/{job_id}/pause")
@@ -754,8 +813,9 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 excluded.clear()
             else:
                 issues = attempt.get("issues", ())
-                if not issues or attempt.get("revision") != command.revision:
-                    raise AdoptionError("Es fehlen bestätigbare Ergebnisse der Planprüfung.")
+                if (not issues or attempt.get("revision") != command.revision
+                        or any(item.get("identity_version") != IDENTITY_VERSION for item in issues)):
+                    raise AdoptionError("Es fehlen bestätigbare Ergebnisse der aktuellen Planprüfung.")
                 excluded.update((item["path"], item) for item in issues)
             revision = command.revision + 1
             connection.execute(
@@ -769,6 +829,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         library = context()
         with _errors(), admission(library):
             require_adoption(request, library)
+            require_inventory_idle(library, job_id)
             require_review_idle(library, job_id)
             with database_connection(library.database_path) as connection:
                 require_no_partial_publication(connection, job_id)
@@ -780,10 +841,10 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                     raise AdoptionError("Die Planprüfung läuft bereits.")
                 planning.add(operation)
             try:
-                planning_attempt(library, job_id, draft, state="running")
+                planning_attempt(library, job_id, draft, state="queued")
                 later = is_later(request)
                 if draft.background:
-                    tasks.add_task(run_planning, library, job_id, draft, later)
+                    dispatch("planning", run_planning, library, job_id, draft, later, tasks=tasks)
                     return JSONResponse({"accepted": True}, status_code=202)
             except Exception:
                 with running_lock:
@@ -1054,9 +1115,8 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 if current_key not in preparing:
                     reserve_preparation(library, job_id, command.plan_id, command.probe_sha256)
                     preparing.add(current_key)
-                    tasks.add_task(
-                        run_script_preparation, library, job_id, command.plan_id, command.probe_sha256,
-                    )
+                    dispatch("preparation", run_script_preparation, library, job_id,
+                             command.plan_id, command.probe_sha256, tasks=tasks)
             return JSONResponse(
                 {"accepted": True, "preparation": preparation_status(library, job_id, command.plan_id)},
                 status_code=202,
@@ -1129,8 +1189,26 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                     )
             return complete_rollback(library, job_id, command.plan_id)
 
+    def run_finalize(library, job_id, plan_id):
+        registry = registry_path()
+        try:
+            with adoption_execution_access(registry):
+                finalize_adoption(library, registry, job_id, plan_id)
+        except Exception:
+            logging.getLogger(__name__).exception("Legacy adoption finalization stopped for %s", job_id)
+        finally:
+            with running_lock:
+                registering.discard(key(library, job_id))
+
+    def schedule_finalization(library, job_id, plan_id, tasks=None):
+        operation = key(library, job_id)
+        with running_lock:
+            if operation not in registering:
+                registering.add(operation)
+                dispatch("registration", run_finalize, library, job_id, plan_id, tasks=tasks)
+
     @router.post("/jobs/{job_id}/finalize")
-    def finalize(job_id: str, command: PlanCommand, request: Request):
+    def finalize(job_id: str, command: FinishPlan, request: Request, tasks: BackgroundTasks):
         library = context()
         with _errors(), adoption_execution_access(registry_path()):
             with read_session():
@@ -1152,7 +1230,10 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                     else:
                         change_phase(library, job_id, command.plan_id, "registering",
                                      from_phases={"manual", "verifying", "repair", "registration_pending"})
-            return finalize_adoption(library, registry_path(), job_id, command.plan_id)
+            if not command.background:
+                return finalize_adoption(library, registry_path(), job_id, command.plan_id)
+        schedule_finalization(library, job_id, command.plan_id, tasks)
+        return JSONResponse({"accepted": True}, status_code=202)
 
     @router.post("/jobs/{job_id}/reopen")
     def reopen(job_id: str):
@@ -1195,5 +1276,54 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 require_no_partial_publication(connection, job_id)
             discard_job(library, job_id)
         return {"discarded": True}
+
+    @app.on_event("startup")
+    def resume_pending_adoption():
+        registry = registry_path()
+        try:
+            reservation = active_adoption(registry)
+            if not reservation:
+                return
+            job_id = reservation["job_id"]
+            library = resolve_library_context(registry, reservation["library_id"])
+            operation = key(library, job_id)
+            plan_id = reservation["plan_id"]
+            if reservation["phase"] == "registering":
+                schedule_finalization(library, job_id, plan_id)
+                return
+            if plan_id:
+                if not reservation["phase"] and (digest := saved_preparation_proof(library, job_id, plan_id)):
+                    with running_lock:
+                        if operation not in preparing:
+                            preparing.add(operation)
+                            dispatch("recovered-preparation", run_script_preparation, library, job_id, plan_id, digest)
+                return
+            if copy_status(library, job_id).get("state") in {"active", "cancelling"}:
+                schedule_copies(library, job_id, None, registry)
+                return
+            with database_connection(library.database_path) as connection:
+                row = _job(connection, library.library_id, job_id)
+                attempt = json.loads(row["draft_json"]).get("planning_attempt", {})
+                interrupted_scan = row["state"] == "scanning" and row["scan_error"] is None
+                if not interrupted_scan and (
+                    attempt.get("state") not in {"queued", "running"} or attempt.get("revision") != row["draft_revision"]
+                ):
+                    return
+            if interrupted_scan:
+                with running_lock:
+                    if operation not in running:
+                        pause = Event()
+                        running[operation] = pause
+                        dispatch("recovered-scan", run_scan, library, job_id, pause)
+                return
+            command = FreezePlan(revision=attempt["revision"], filename_method=attempt["method"], background=True)
+            operation = key(library, job_id)
+            with running_lock:
+                if operation not in planning:
+                    planning.add(operation)
+                    dispatch("recovered-planning", run_planning, library, job_id, command,
+                             reservation["access_kind"] == "library")
+        except (AdoptionError, RootOperationError, LibraryRegistryError, OSError, sqlite3.DatabaseError, ValueError):
+            logging.getLogger(__name__).exception("Could not resume pending adoption work")
 
     app.include_router(router)
