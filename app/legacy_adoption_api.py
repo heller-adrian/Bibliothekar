@@ -42,8 +42,10 @@ from app.legacy_adoption_mode import (
     later_adoption_blockers, require_initial_adoption,
     require_later_adoption, reserve_adoption,
 )
+from app.media_family_identity import IDENTITY_VERSION
 from app.legacy_adoption_plan import (
-    MAX_PLAN_ITEMS, ManualXmpRenameConflict, create_plan, plan_directories, plan_moves, plan_status,
+    MAX_PLAN_ITEMS, ManualXmpRenameConflict, PlanFileIssues, create_plan, file_issue_summary,
+    plan_directories, plan_moves, plan_status,
 )
 from app.legacy_adoption_registration import assert_completed_adoption, finalize_adoption
 from app.legacy_adoption_review import (
@@ -117,6 +119,12 @@ class Freeze(BaseModel):
 
 class FreezePlan(Freeze):
     filename_method: Literal["manual", "script"] = "manual"
+    background: StrictBool = False
+
+
+class PlanningExclusions(Freeze):
+    acknowledged: StrictBool
+    restore: StrictBool = False
 
 
 class SelectExecution(BaseModel):
@@ -174,6 +182,9 @@ def _errors():
         raise HTTPException(403, "Für den gewählten Ordner fehlt die Leseberechtigung.") from error
     except ManualXmpRenameConflict as error:
         raise HTTPException(409, {"code": "manual_xmp_rename_conflict", "message": str(error)}) from error
+    except PlanFileIssues as error:
+        raise HTTPException(409, {"code": "plan_file_issues", "message": str(error),
+                                  **file_issue_summary(error.items)}) from error
     except (AdoptionError, DatasetError, ExecutionError, LibraryRegistryError,
             RootOperationError, OSError, ValueError, TypeError, KeyError) as error:
         raise HTTPException(409, str(error)) from error
@@ -208,6 +219,8 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     review_running = set()
     metadata_running = set()
     preparing = set()
+    planning = set()
+    releasing = set()
     running_lock = Lock()
 
     def source_path(root, relative):
@@ -218,6 +231,53 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
 
     def key(library, job_id):
         return str(library.database_path), job_id
+
+    def matching_update_required(connection, job_id):
+        return connection.execute(
+            """SELECT 1 FROM legacy_adoption_inventory
+                WHERE job_id=? AND disposition='candidate'
+                  AND json_extract(metadata_json, '$.media_type')='xmp'
+                  AND coalesce(json_extract(metadata_json, '$.capture_identity_version'), 0) < ?
+                LIMIT 1""", (job_id, IDENTITY_VERSION),
+        ).fetchone() is not None
+
+    def planning_attempt(library, job_id, command, *, state, message=None, issues=None):
+        with database_connection(library.database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = _job(connection, library.library_id, job_id)
+            if row["draft_revision"] != command.revision:
+                raise AdoptionError("Der Entwurf wurde in einer anderen Sitzung geändert. Lade ihn erneut.")
+            draft = json.loads(row["draft_json"])
+            draft["planning_attempt"] = {"state": state, "method": command.filename_method,
+                                         "revision": command.revision}
+            if message:
+                draft["planning_attempt"]["message"] = message
+            if issues:
+                draft["planning_attempt"]["issues"] = issues
+            connection.execute("UPDATE legacy_adoption_jobs SET draft_json=? WHERE id=?",
+                               (json.dumps(draft), job_id))
+
+    def run_planning(library, job_id, command, later):
+        try:
+            with admission(library):
+                result = create_plan(library, registry_path(), job_id, draft_revision=command.revision,
+                                     allow_existing=later, filename_method=command.filename_method)
+            planning_attempt(library, job_id, command, state="completed")
+            return result
+        except Exception as error:
+            planning_attempt(library, job_id, command, state="failed", message=str(error),
+                             issues=error.items if isinstance(error, PlanFileIssues) else None)
+            if not command.background:
+                raise
+            logging.getLogger(__name__).info("Legacy adoption planning %s: %s", job_id, error)
+        finally:
+            with running_lock:
+                planning.discard(key(library, job_id))
+
+    def require_planning_idle(library, job_id):
+        with running_lock:
+            if key(library, job_id) in planning:
+                raise AdoptionError("Die Planprüfung läuft bereits.")
 
     def run_scan(library, job_id, pause):
         def check_pause():
@@ -449,6 +509,14 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             with database_connection(library.database_path) as connection:
                 item = _job(connection, library.library_id, job_id)
                 result["draft"] = json.loads(item["draft_json"])
+                attempt = result["draft"].pop("planning_attempt", {})
+                issues = attempt.pop("issues", ())
+                if issues:
+                    attempt["files"] = file_issue_summary(issues)
+                result["planning"] = attempt
+                result["matching_update_required"] = (item["state"] == "inventoried" and not result["plan"]
+                                                      and matching_update_required(connection, job_id))
+                result["excluded_files"] = file_issue_summary(result["draft"].pop("file_exclusions", {}).values())
                 result["draft_revision"] = item["draft_revision"]
                 result["layout_default"] = get_global_default(connection)
                 result["subevent_prefix_enabled"] = naming_from_library_settings(library.settings)["subevent_prefix_enabled"]
@@ -456,12 +524,15 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             with running_lock:
                 result["scan_running"] = key(library, job_id) in running
                 result["metadata_running"] = metadata_was_running or operation in metadata_running
+                if attempt.get("state") == "running" and operation not in planning:
+                    attempt["state"] = "completed" if result["plan"] else "interrupted"
         return result
 
     @router.post("/jobs/{job_id}/scan", status_code=202)
     def scan(job_id: str, tasks: BackgroundTasks):
         library = context()
         with _errors(), admission(library):
+            require_planning_idle(library, job_id)
             status = inventory_status(library, job_id)
             if status["state"] not in {"ready", "scanning", "inventoried"} or plan_status(library, job_id):
                 raise AdoptionError("Der Auftrag ist nicht zur Inventur verfügbar.")
@@ -635,6 +706,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         library = context()
         with _errors(), admission(library), database_connection(library.database_path) as connection:
             require_adoption(request, library)
+            require_planning_idle(library, job_id)
             if not is_later(request) and any(event.existing_id for event in draft.events):
                 raise AdoptionError("Vorhandene Archivereignisse können bei der Ersteinrichtung nicht ergänzt werden.")
             connection.execute("BEGIN IMMEDIATE")
@@ -648,6 +720,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             revision = draft.revision + 1
             previous = json.loads(item["draft_json"])
             saved = draft.model_dump(exclude_none=True, exclude={"revision"})
+            saved["file_exclusions"] = previous.get("file_exclusions", {})
             saved["metadata_review_pending"] = {
                 key: choice for key, choice in previous.get("metadata_review_pending", {}).items()
                 if key not in saved["capture_overrides"]
@@ -662,16 +735,62 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             )
         return {"saved": True, "revision": revision}
 
+    @router.post("/jobs/{job_id}/planning-exclusions")
+    def update_planning_exclusions(job_id: str, command: PlanningExclusions, request: Request):
+        library = context()
+        with _errors(), admission(library), database_connection(library.database_path) as connection:
+            require_adoption(request, library)
+            require_planning_idle(library, job_id)
+            connection.execute("BEGIN IMMEDIATE")
+            row = _job(connection, library.library_id, job_id)
+            if (command.acknowledged is not True or row["draft_revision"] != command.revision
+                    or row["state"] != "inventoried" or connection.execute(
+                    "SELECT 1 FROM legacy_adoption_plans WHERE job_id=?", (job_id,)).fetchone()):
+                raise AdoptionError("Der Entwurf ist nicht mehr aktuell oder die Bestätigung fehlt.")
+            draft = json.loads(row["draft_json"])
+            attempt = draft.pop("planning_attempt", {})
+            excluded = draft.setdefault("file_exclusions", {})
+            if command.restore:
+                excluded.clear()
+            else:
+                issues = attempt.get("issues", ())
+                if not issues or attempt.get("revision") != command.revision:
+                    raise AdoptionError("Es fehlen bestätigbare Ergebnisse der Planprüfung.")
+                excluded.update((item["path"], item) for item in issues)
+            revision = command.revision + 1
+            connection.execute(
+                "UPDATE legacy_adoption_jobs SET draft_json=?, draft_revision=? WHERE id=?",
+                (json.dumps(draft), revision, job_id),
+            )
+        return {"revision": revision, "excluded_files": file_issue_summary(excluded.values())}
+
     @router.post("/jobs/{job_id}/plan")
-    def freeze(job_id: str, draft: FreezePlan, request: Request):
+    def freeze(job_id: str, draft: FreezePlan, request: Request, tasks: BackgroundTasks):
         library = context()
         with _errors(), admission(library):
             require_adoption(request, library)
             require_review_idle(library, job_id)
             with database_connection(library.database_path) as connection:
                 require_no_partial_publication(connection, job_id)
-            return create_plan(library, registry_path(), job_id, draft_revision=draft.revision,
-                               allow_existing=is_later(request), filename_method=draft.filename_method)
+                if matching_update_required(connection, job_id):
+                    raise AdoptionError("Aktualisiere die Inventur für die neue RAW- und XMP-Zuordnung.")
+            operation = key(library, job_id)
+            with running_lock:
+                if operation in planning:
+                    raise AdoptionError("Die Planprüfung läuft bereits.")
+                planning.add(operation)
+            try:
+                planning_attempt(library, job_id, draft, state="running")
+                later = is_later(request)
+                if draft.background:
+                    tasks.add_task(run_planning, library, job_id, draft, later)
+                    return JSONResponse({"accepted": True}, status_code=202)
+            except Exception:
+                with running_lock:
+                    planning.discard(operation)
+                raise
+        with _errors():
+            return run_planning(library, job_id, draft, later)
 
     @router.post("/jobs/{job_id}/execution-method")
     def select_execution(job_id: str, command: SelectExecution, request: Request):
@@ -780,6 +899,8 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             if not plan.get("execution") or plan["execution"]["method"] != "script":
                 raise AdoptionError("Für diesen Auftrag ist kein Skript freigegeben.")
             result = script_details(library, job_id, plan["id"])
+            with running_lock:
+                result["release_running"] = key(library, job_id) in releasing
             if getattr(request.state, "legacy_adoption_recovery", False) and plan["execution"]["phase"] != "rolling_back":
                 result.pop("command", None)
             return result
@@ -787,23 +908,33 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     @router.post("/jobs/{job_id}/script/release")
     def script_release(job_id: str, command: PlanCommand):
         library = context()
-        with (
-            _errors(), adoption_execution_access(registry_path()), admission(library),
-            locked_script(library, job_id, command.plan_id) as (descriptor, script),
-        ):
-            if script["phase"] not in {"script_prepared", "repair"}:
-                raise AdoptionError("Die Skriptausführung ist in dieser Phase gesperrt.")
+        operation = key(library, job_id)
+        with _errors():
+            with running_lock:
+                if operation in releasing:
+                    raise AdoptionError("Der Nachweis für den Skriptbefehl wird bereits geprüft.")
+                releasing.add(operation)
             try:
-                assert_unstarted_release_current(library, job_id, command.plan_id, descriptor, script)
-            except (AdoptionError, DatasetError, OSError) as error:
-                if not script_journal_started(descriptor):
-                    permit(descriptor, script, None)
-                raise AdoptionError(
-                    "Skriptnachweis veraltet. Prüfe die Inventur und bereite den Plan erneut vor. " + str(error)
-                ) from error
-            change_phase(library, job_id, command.plan_id, "script_prepared",
-                         from_phases={"script_prepared", "repair"})
-            return {"command": permit(descriptor, script, "apply")}
+                with (
+                    adoption_execution_access(registry_path()), admission(library),
+                    locked_script(library, job_id, command.plan_id) as (descriptor, script),
+                ):
+                    if script["phase"] not in {"script_prepared", "repair"}:
+                        raise AdoptionError("Die Skriptausführung ist in dieser Phase gesperrt.")
+                    try:
+                        assert_unstarted_release_current(library, job_id, command.plan_id, descriptor, script)
+                    except (AdoptionError, DatasetError, OSError) as error:
+                        if not script_journal_started(descriptor):
+                            permit(descriptor, script, None)
+                        raise AdoptionError(
+                            "Skriptnachweis veraltet. Prüfe die Inventur und bereite den Plan erneut vor. " + str(error)
+                        ) from error
+                    change_phase(library, job_id, command.plan_id, "script_prepared",
+                                 from_phases={"script_prepared", "repair"})
+                    return {"command": permit(descriptor, script, "apply")}
+            finally:
+                with running_lock:
+                    releasing.discard(operation)
 
     def run_script_preparation(library, job_id, plan_id, probe_digest):
         """Independent OS-locked worker; progress resides on disk, not a socket."""
@@ -1056,6 +1187,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def discard(job_id: str):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
+            require_planning_idle(library, job_id)
             require_preparation_idle(library, job_id)
             if copy_status(library, job_id)["running"]:
                 raise AdoptionError("Schließe den Kopierauftrag zuerst ab.")

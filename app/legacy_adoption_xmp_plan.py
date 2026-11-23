@@ -30,7 +30,7 @@ def raw_name_pair(family, targets, raw_name):
     return owners[0] if len(owners) == 1 else None
 
 
-def planned_edit(family, targets, payload: bytes):
+def planned_edit(family, targets, payload: bytes, *, inventory_hint=None):
     """Return old/new digests and names iff the referenced RAW is renamed.
 
     Only original members of the *already proven* family are eligible. A
@@ -42,6 +42,8 @@ def planned_edit(family, targets, payload: bytes):
         original = _raw_values(payload)
     except XmpReferenceError as exc:
         raise XmpPlanError(str(exc)) from exc
+    if inventory_hint and (not original or original[0].casefold() != inventory_hint):
+        raise XmpPlanError("Der RAW-Verweis weicht von den inventarisierten XMP-Metadaten ab.")
     if not original:
         return None
     if len(original) != 1:

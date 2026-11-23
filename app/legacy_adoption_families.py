@@ -31,7 +31,7 @@ def join_split_families(connection, job_id, draft, cancel):
     evidence_fields = (
         "media_type", "extension", "relative_path", "capture_identity", "camera_make", "camera_model",
         "selected_capture_time", "selected_capture_source", "review_required", "metadata_error",
-        "capture_settings",
+        "metadata_conflict", "capture_settings",
     )
 
     def groups():
@@ -43,7 +43,9 @@ def join_split_families(connection, job_id, draft, cancel):
                          and not item.get("metadata_error") for row, item in zip(entries, members, strict=True))
             yield key, members, usable
 
-    for anchor, _, members in split_family_groups(groups(), ending=family_member_ending, cancel=cancel):
+    for anchor, _, members in split_family_groups(
+        groups(), ending=family_member_ending, cancel=cancel, preserve_xmp_versions=True,
+    ):
         connection.executemany(
             """UPDATE legacy_adoption_inventory
                   SET family_key = ?1, metadata_json = json_set(metadata_json, '$.family_key', ?1, '$.adoption_family', ?1)

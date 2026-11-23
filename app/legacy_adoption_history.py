@@ -18,7 +18,7 @@ def completed_adoptions(library, registry_path, *, job_id=None, page=1):
     parameters = (library.library_id, job_id) if job_id else (library.library_id,)
     with closing(read_connection(library.database_path)) as catalogue, closing(read_connection(registry_path)) as registry:
         catalogue.execute("BEGIN")
-        rows = catalogue.execute(f"""SELECT plan.id, plan.job_id, plan.events_json, run.method, run.updated_at
+        rows = catalogue.execute(f"""SELECT plan.id, plan.job_id, plan.events_json, plan.draft_json, run.method, run.updated_at
                  FROM legacy_adoption_plans plan JOIN legacy_adoption_jobs job ON job.id = plan.job_id
                  JOIN legacy_adoption_execution run ON run.plan_id = plan.id
                  WHERE job.library_id = ? AND plan.state = 'completed' AND run.phase = 'completed' {selection}
@@ -36,6 +36,7 @@ def completed_adoptions(library, registry_path, *, job_id=None, page=1):
             entry = {"job_id": row["job_id"], "method": row["method"], "updated_at": row["updated_at"]}
             if job_id:
                 entry["fingerprint"] = receipt["plan_fingerprint"]
+                entry["excluded_files"] = list((json.loads(row["draft_json"]).get("file_exclusions") or {}).values())
                 entry["files"], entry["families"] = catalogue.execute("""SELECT count(*), count(DISTINCT inventory.family_key)
                     FROM legacy_adoption_moves move JOIN legacy_adoption_inventory inventory
                       ON inventory.job_id = ? AND inventory.relative_path = move.relative_path
@@ -81,11 +82,20 @@ def history_html(library, entries, *, job_id, page, more):
                 events.append(f'<li><a href="{link}">{name}</a></li>')
             else:
                 events.append(f'<li>{name} <span class="muted">Nicht mehr im Archiv</span></li>')
+        excluded = ""
+        if entry["excluded_files"]:
+            items = "".join(
+                f'<li><code>{escape(item["path"])}</code> · <span>{escape(item["reason"])}</span></li>'
+                for item in entry["excluded_files"]
+            )
+            excluded = (f'<details><summary><span>Bestätigte Dateiausschlüsse</span> ({len(entry["excluded_files"])})</summary>'
+                        f'<ul>{items}</ul></details>')
         body = f'''<section class="card adoption-history-card">
           <dl class="adoption-history-facts"><div><dt>Übernommene Dateien</dt><dd>{entry['files']}</dd></div>
             <div><dt>Übernommene Dateifamilien</dt><dd>{entry['families']}</dd></div>
             <div><dt>Abgeschlossen am</dt><dd>{date(entry)}</dd></div><div><dt>Methode</dt><dd>{method(entry)}</dd></div></dl>
           <h2>Archivierte Ereignisse</h2><ul>{''.join(events)}</ul>
+          {excluded}
           <details><summary>Prüfnachweis anzeigen</summary>
             <p>Die Dateien und Ereignisdokumente wurden vor der Registrierung unabhängig mit SHA-256 geprüft.</p>
             <p>SHA-256 des bestätigten Plans</p><code>{escape(entry['fingerprint'])}</code></details>

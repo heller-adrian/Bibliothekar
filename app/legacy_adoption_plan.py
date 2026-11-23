@@ -47,6 +47,19 @@ class ManualXmpRenameConflict(AdoptionError):
     pass
 
 
+def file_issue_summary(items):
+    files = list(items)
+    return {"total": len(files),
+            "reasons": dict(Counter(item["reason"] for item in files)),
+            "examples": [{key: item[key] for key in ("path", "reason")} for item in files[:10]]}
+
+
+class PlanFileIssues(AdoptionError):
+    def __init__(self, items):
+        self.items = items
+        super().__init__("Einige Dateien können nicht sicher in diesen Plan aufgenommen werden.")
+
+
 def _event_id():
     return "EVENT_" + uuid4().hex.upper()
 
@@ -577,6 +590,46 @@ def _registered_archive_paths(connection, plan_id, event_id):
     )}
 
 
+def _versioned_members(family, member_name):
+    """Reserve distinct names for sidecars without replacing an edit version."""
+    names = [member_name(member["relative_path"]) for member in family]
+    bases = defaultdict(list)
+    for index, name in enumerate(names):
+        bases[target_key(name)].append(index)
+    reserved = set(bases)
+    for indexes in bases.values():
+        if len(indexes) < 2:
+            continue
+        if any(not names[index].casefold().endswith(".xmp") for index in indexes):
+            raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + family[indexes[0]]["relative_path"])
+        # Keep the sidecar beside the matching master as the default version.
+        def order(index):
+            member = family[index]
+            path = PurePosixPath(member["relative_path"])
+            metadata = json.loads(member["metadata_json"] or "{}")
+            hint = (metadata.get("capture_identity") or {}).get("sidecar_raw")
+            colocated = any(
+                PurePosixPath(item["relative_path"]).parent == path.parent
+                and PurePosixPath(item["relative_path"]).name.casefold() == hint
+                for item in family
+            )
+            return not colocated, path.as_posix()
+
+        for index in sorted(indexes, key=order)[1:]:
+            name = names[index]
+            number = 2
+            while True:
+                tail = f".XMP_{number:03d}" + name[-4:]
+                stem = name[:-4].encode("utf-8")[:255 - len(tail.encode("utf-8"))].decode("utf-8", errors="ignore")
+                alternate = stem + tail
+                if target_key(alternate) not in reserved:
+                    names[index] = alternate
+                    reserved.add(target_key(alternate))
+                    break
+                number += 1
+    return names
+
+
 def _family_targets(folder, key, family, override, archive_entry, registered, used, sequences,
                     *, duplicate_index=None, collision_index=None, occupied_paths=None, sibling_names=()):
     """Retain original names unless a *real target path* is already reserved.
@@ -595,9 +648,7 @@ def _family_targets(folder, key, family, override, archive_entry, registered, us
     if override is not None and (duplicate_index is not None or collision_index is not None):
         raise AdoptionError("Expliziter Zielname kollidiert mit einer weiteren Aufnahme: " + stem)
 
-    endings = [family_member_ending(member["relative_path"]) for member in family]
-    if len({target_key(ending) for ending in endings}) != len(endings):
-        raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + str(folder / stem))
+    endings = _versioned_members(family, family_member_ending)
 
     reserved = used if occupied_paths is None else occupied_paths
     number = duplicate_index if duplicate_index is not None else (collision_index or 0)
@@ -718,8 +769,17 @@ def _assigned_families(rows, draft, events, intervals, seen):
     starts = [item[0] for item in intervals]
     overrides = {key: _local_capture(value) for key, value in (draft.get("capture_overrides") or {}).items()}
     exclusions = set(draft.get("exclude_families") or [])
+    file_exclusions = draft.get("file_exclusions") or {}
     for key, group in groupby(rows, key=lambda row: row["family_key"]):
-        members = [member for member in group if member["disposition"] == "candidate"]
+        members = []
+        for member in group:
+            proof = file_exclusions.get(member["relative_path"])
+            if proof:
+                if proof["sha256"] != member["sha256"]:
+                    raise AdoptionError("Eine ausgeschlossene Datei hat sich geändert. Prüfe die Inventur erneut.")
+                continue
+            if member["disposition"] == "candidate":
+                members.append(member)
         seen.add(key)
         if not members or key in exclusions or members[0]["review_copy"]:
             continue
@@ -780,16 +840,24 @@ def _has_bound_raw_reference(family):
     return False
 
 
-def _manual_copy_targets(folder, key, family, number, archive_entry, reserved, layout_paths):
-    """Give a copy its own directory when renaming would break its XMP link."""
+def _manual_linked_targets(folder, key, family, duplicate_index, archive_entry, reserved, layout_paths):
+    """Preserve the RAW basename required by a bound sidecar."""
     stem = PurePosixPath(key).name
     siblings = archive_entry.names(str(folder))
     layout_keys = {target_key(path) for path in layout_paths}
-    names = [PurePosixPath(member["relative_path"]).name for member in family]
-    if len({target_key(name) for name in names}) != len(names):
-        raise AdoptionError("Mehrere Aufnahmen beanspruchen denselben Dateinamen: " + key)
+    names = _versioned_members(family, lambda path: PurePosixPath(path).name)
+    targets = [str(folder / name) for name in names]
+    if duplicate_index is None and all(
+        target_key(path) not in reserved and target_key(path) not in layout_keys
+        and target_key(PurePosixPath(path).name) not in siblings for path in targets
+    ):
+        for path in targets:
+            validate_target(path)
+        reserved.update(target_key(path) for path in targets)
+        return folder, targets
+    number = duplicate_index or 1
     while number <= 999999:
-        suffix = f"_Duplicate_{number:03d}"
+        suffix = f"_Duplicate_{number:03d}" if duplicate_index is not None else f"_{number:03d}"
         prefix = stem.encode("utf-8")[:255 - len(suffix)].decode("utf-8", errors="ignore")
         name = prefix + suffix
         directory = folder / name
@@ -807,9 +875,7 @@ def _manual_copy_targets(folder, key, family, number, archive_entry, reserved, l
 
 def _automatic_family_targets(folder, key, family, capture, camera, same_second, names, stems, used,
                               *, duplicate_index=None, number_all=False, burst_ordinal=None):
-    endings = [family_member_ending(member["relative_path"]) for member in family]
-    if len({target_key(ending) for ending in endings}) != len(endings):
-        raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + key)
+    endings = _versioned_members(family, family_member_ending)
     # Reuse exactly the same real-EXIF-millisecond Burst implementation as the
     # normal folder import. Neither invented subseconds nor directory patterns.
     base, index, _ = capture_stem(capture, camera, stems, same_second=same_second)
@@ -858,6 +924,7 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
     candidates = {}
     target_counts = Counter()
     planned_directories = set()
+    file_issues = []
     used_stems = {target_key(_legacy_family_key(Path(), path)) for path in registered}
     registered_keys = {target_key(path) for path in registered}
     filename_sequences = Counter()
@@ -925,10 +992,9 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                 duplicate_index=duplicate_indices.get(key), number_all=number_all,
                 burst_ordinal=burst_ordinals.get(key),
             )
-        elif (filename_method == "manual" and key not in target_stems
-              and key in duplicate_indices and _has_bound_raw_reference(family)):
-            directory, targets = _manual_copy_targets(
-                folder, key, family, duplicate_indices[key], archive_entry, occupied_targets,
+        elif filename_method == "manual" and key not in target_stems and _has_bound_raw_reference(family):
+            directory, targets = _manual_linked_targets(
+                folder, key, family, duplicate_indices.get(key), archive_entry, occupied_targets,
                 _leaf_directories(leaf, layout),
             )
             _plan_directories(connection, plan_id, directory, {"structure_enabled": False}, archive_entry)
@@ -951,29 +1017,33 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                     verify_inventory_identity(fd, info, json.loads(member["identity"]), member["sha256"])
                     metadata = json.loads(member["metadata_json"] or "{}")
                     raw_hint = (metadata.get("capture_identity") or {}).get("sidecar_raw")
-                    if target is not None and metadata.get("media_type") == "xmp" and raw_hint:
-                        if filename_method == "manual":
-                            owner = raw_name_pair(family, targets, raw_hint)
-                            if owner and owner[0] != owner[1]:
-                                raise ManualXmpRenameConflict(
-                                    "Die RAW-Umbenennung würde einen gebundenen XMP-Verweis ungültig machen. "
-                                    "Plane mit unverändertem RAW-Namen oder wähle das TrueNAS-Skript. " + source
-                                )
+                    if target is not None and metadata.get("media_type") == "xmp" and (
+                        raw_hint or metadata.get("metadata_error")
+                    ):
+                        owner = raw_name_pair(family, targets, raw_hint) if raw_hint else None
+                        reason = None
+                        if metadata.get("metadata_error"):
+                            reason = "XMP-Metadaten konnten nicht gelesen werden."
+                        elif not owner:
+                            reason = "Der referenzierte RAW-Master ist nicht eindeutig zugeordnet."
+                        elif info.st_size > MAX_XMP_BYTES:
+                            reason = "Die XMP-Datei überschreitet die sichere Prüfgröße."
                         else:
-                            if info.st_size > MAX_XMP_BYTES:
-                                raise AdoptionError("XMP-Datei erfordert eine separate Prüfung (zu groß): " + source)
                             payload = os.pread(fd, info.st_size, 0)
                             if len(payload) != info.st_size:
                                 raise AdoptionError("XMP-Datei wurde während der Planung verändert: " + source)
                             try:
-                                xmp_edit = planned_edit(family, targets, payload)
-                                if (xmp_edit and xmp_edit["xmp_old_raw_name"].casefold() != raw_hint):
-                                    raise XmpPlanError("Der RAW-Verweis weicht von den inventarisierten XMP-Metadaten ab.")
-                            except XmpPlanError as error:
-                                raise AdoptionError(
-                                    "Die XMP-Referenz kann nicht sicher mitbenannt werden: " + source +
-                                    " (" + str(error) + ")"
-                                ) from error
+                                xmp_edit = planned_edit(family, targets, payload, inventory_hint=raw_hint)
+                            except XmpPlanError:
+                                reason = "Der eingebettete RAW-Verweis konnte nicht sicher geprüft oder angepasst werden."
+                            if filename_method == "manual" and xmp_edit is not None:
+                                raise ManualXmpRenameConflict(
+                                    "Die RAW-Umbenennung würde einen gebundenen XMP-Verweis ungültig machen. "
+                                    "Plane mit unverändertem RAW-Namen oder wähle das TrueNAS-Skript. " + source
+                                )
+                        if reason:
+                            file_issues.append({"path": source, "reason": reason, "sha256": member["sha256"]})
+                            continue
             if target is not None:
                 source_dir = PurePosixPath(source).parent
                 target_dir = str(PurePosixPath(target).parent)
@@ -1014,6 +1084,8 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
         for key, path, layout in _unpopulated_child_leaves(event, event["leaf_layouts"]):
             _store_leaf(event, key, path, layout)
             _plan_directories(connection, plan_id, path, layout, archive_entry)
+    if file_issues:
+        raise PlanFileIssues(file_issues)
     _check_planned_collisions(connection, plan_id)
     if (set(draft.get("capture_overrides") or {}) | set(draft.get("exclude_families") or [])
             | target_stems.keys()) - seen_draft_keys:
@@ -1068,7 +1140,8 @@ def create_plan(library, registry_path: Path, job_id: str, draft=None, *, draft_
             if job["draft_revision"] != draft_revision:
                 raise AdoptionError("Der Entwurf wurde in einer anderen Sitzung geändert. Lade ihn erneut.")
             draft = json.loads(job["draft_json"])
-        definitions = (draft or {}).get("events")
+        draft = {key: value for key, value in (draft or {}).items() if key != "planning_attempt"}
+        definitions = draft.get("events")
         if not isinstance(definitions, list) or not definitions:
             raise AdoptionError("Lege mindestens ein Ereignis oder einen Sammelordner an.")
         if len(definitions) > MAX_PLAN_ITEMS:
@@ -1133,6 +1206,7 @@ def plan_status(library, job_id: str) -> dict:
         ).fetchone()
         return {
             "rename_files": renamed[0], "rename_families": renamed[1],
+            "excluded_files": file_issue_summary((json.loads(plan["draft_json"]).get("file_exclusions") or {}).values()),
             "id": plan["id"], "state": plan["state"], "counts": counts, "filename_method": plan["filename_method"],
             "execution": dict(execution) if execution else None,
             "inventory_duplicates": connection.execute(

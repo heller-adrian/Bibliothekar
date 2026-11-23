@@ -2892,3 +2892,106 @@ def test_large_adoption_restores_review_and_plans_from_saved_inventory(fresh_mai
             "RAW/split.DNG": sha256(str(total - 2).encode()).hexdigest(),
             "JPEG/split.JPG": sha256(str(total - 1).encode()).hexdigest(),
         }
+
+
+@pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["native-zfs"])
+def test_background_plan_reports_and_reverses_individual_xmp_exclusions(
+    fresh_main, tmp_path, monkeypatch, synthetic_dataset,
+):
+    import json
+    from io import BytesIO
+    from zipfile import ZipFile
+
+    from app import legacy_adoption_package as package
+
+    _, database, _, archive = fresh_main
+    source = archive.parent / "rc4-xmp-source"
+    if os.environ.get("ADOPTION_ZFS_ROOT"):
+        monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
+    source.mkdir()
+    originals = {
+        "photo.RAF": b"current camera RAW",
+        "photo.xmp": b"<invalid XML",
+        "missing.xmp": b'<x:xmpmeta xmlns:x="adobe:ns:meta/"/>',
+        "other.JPG": b"other JPEG",
+    }
+    for name, data in originals.items():
+        (source / name).write_bytes(data)
+    package_root = tmp_path / "rc4-xmp-appdata"
+    package_root.mkdir()
+    monkeypatch.setattr(package, "appdata_root", lambda: package_root)
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+
+    def metadata(descriptors, _cancel):
+        rows = {}
+        for fd in descriptors:
+            payload = os.pread(fd, 16, 0)
+            tags = {"EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00"}
+            if payload.startswith(b"<"):
+                tags.update({
+                    "XMP:XMP-crs:RawFileName": "photo.RAF" if payload.startswith(b"<invalid") else "missing.RAF",
+                    "XMP:XMP-tiff:Make": "FUJIFILM", "XMP:XMP-tiff:Model": "X-E5",
+                })
+            rows[fd] = tags
+        return rows
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    client = _onboard(fresh_main)
+    _adopt(client)
+    endpoint = "/api/legacy-adoption/jobs"
+    job_id = _json(client, "POST", endpoint, status=201, json={"root": "nas"})["id"]
+    job = endpoint + "/" + job_id
+    _json(client, "POST", job + "/scan", status=202)
+    draft = {"events": [{"event_kind": "no_event", "segments": [{"day_key": "2026-07-21"}]}]}
+    revision = _json(client, "PUT", job + "/draft", json={**draft, "revision": 0})["revision"]
+
+    def diagnose(revision):
+        _json(client, "POST", job + "/plan", status=202, json={"revision": revision, "background": True})
+        state = _json(client, "GET", job)
+        assert not state["plan"]
+        assert state["planning"]["state"] == "failed"
+        assert state["planning"]["files"]["total"] == 2
+        assert set(state["planning"]["files"]["reasons"].values()) == {1}
+        assert {row["path"] for row in state["planning"]["files"]["examples"]} == {"photo.xmp", "missing.xmp"}
+        assert not list(archive.iterdir())
+
+    diagnose(revision)
+    operation = job + "/planning-exclusions"
+    _json(client, "POST", operation, status=409, json={"revision": revision, "acknowledged": False})
+    _json(client, "POST", operation, status=409, json={"revision": 0, "acknowledged": True})
+    def exclude(revision, restore=False):
+        return _json(client, "POST", operation,
+                     json={"revision": revision, "acknowledged": True, "restore": restore})["revision"]
+    revision = exclude(revision)
+    assert _json(client, "GET", job)["excluded_files"]["total"] == 2
+    revision = exclude(revision, restore=True)
+    assert _json(client, "GET", job)["excluded_files"]["total"] == 0
+    diagnose(revision)
+    revision = exclude(revision)
+    # A normal draft save must retain the server-approved file-level decisions.
+    revision = _json(client, "PUT", job + "/draft", json={**draft, "revision": revision})["revision"]
+    plan = _json(client, "POST", job + "/plan", json={"revision": revision})
+    assert plan["excluded_files"]["total"] == 2
+    moves = _json(client, "GET", job + "/moves")
+    assert {row["relative_path"] for row in moves} == {"photo.RAF", "other.JPG"}
+    with database_connection(database) as connection:
+        saved = json.loads(connection.execute(
+            "SELECT draft_json FROM legacy_adoption_plans WHERE id=?", (plan["id"],),
+        ).fetchone()[0])
+        assert set(saved["file_exclusions"]) == {"photo.xmp", "missing.xmp"}
+    command = {"plan_id": plan["id"]}
+    _json(client, "POST", job + "/documents")
+    _json(client, "POST", job + "/confirm", json={**command, "method": "manual", "acknowledged": True})
+    bundle = client.get(job + "/download/manual-setup")
+    assert bundle.status_code == 200
+    with ZipFile(BytesIO(bundle.content)) as document:
+        document.extractall(archive)
+    for move in moves:
+        Path(move["source"]).rename(Path(move["target"]))
+    assert _json(client, "POST", job + "/finalize", json=command)["state"] == "completed"
+    assert {item.name: item.read_bytes() for item in source.iterdir()} == {
+        name: originals[name] for name in ("photo.xmp", "missing.xmp")
+    }
+    receipt = client.get(f"/legacy-adoption/history?library=main&job={job_id}")
+    assert receipt.status_code == 200
+    assert "<span>Bestätigte Dateiausschlüsse</span> (2)" in receipt.text

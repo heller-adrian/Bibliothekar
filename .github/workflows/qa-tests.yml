@@ -131,7 +131,7 @@ jobs:
           image="bibliothekar-qa:$QA_SOURCE"
           docker build --label "org.opencontainers.image.revision=$QA_SOURCE" --tag "$image" .
           smoke_args=("$image" "$QA_SOURCE")
-          if [[ "$GITHUB_REF_NAME" == patch/1.1.2-rc2-xmp-family-adoption || "$GITHUB_REF_NAME" == patch/1.1.2-rc3-adoption-copies ]]; then
+          if [[ "$GITHUB_REF_NAME" == patch/1.1.2-rc2-xmp-family-adoption || "$GITHUB_REF_NAME" == patch/1.1.2-rc3-adoption-copies || "$GITHUB_REF_NAME" == patch/1.1.2-rc4-adoption-xmp ]]; then
             smoke_args+=(ghcr.io/heller-adrian/bibliothekar@sha256:c9c2077374643d0598dbadbf976f26da76a9958343e6d39c221efb411b38ac36 rc112)
           fi
           bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh "${smoke_args[@]}"
@@ -198,6 +198,9 @@ jobs:
               "test_verified_capture_families_share_import_targets",
               "test_regular_import_recognizes_adopted_file_family_before_any_regular_import[native-zfs]",
               "test_script_and_manual_plans_use_correct_family_names",
+              "test_rc4_preserves_lineage_and_distinct_xmp_versions[manual]",
+              "test_rc4_preserves_lineage_and_distinct_xmp_versions[script]",
+              "test_background_plan_reports_and_reverses_individual_xmp_exclusions[native-zfs]",
               "test_two_archived_occurrences_are_both_named_and_registered[manual-full-copies-native-when-available]",
               "test_two_archived_occurrences_are_both_named_and_registered[manual-shared-jpeg-native-when-available]",
               "test_two_archived_occurrences_are_both_named_and_registered[manual-bound-sidecar-native-when-available]",

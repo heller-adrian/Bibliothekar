@@ -338,7 +338,7 @@ let reviewMetadataSaving=false, reviewMetadataFeedback=null;
 let reviewSelectionVersion=0;
 let selectedSource = null, browsedSource = null, browseVersion = 0;
 let draftPage = 40;
-let inventoryStarting = false;
+let inventoryStarting = false, planningRequest = false, scriptReleasing = false;
 let refreshVersion=0;
 let viewStep=currentUrl.searchParams.get("step") || "";
 let manualSnapshot=null, finishing=false;
@@ -375,6 +375,7 @@ async function goStep(step){
   rememberView(step,true);await refresh();
   window.scrollTo({top:0});
 }
+function planningBusy(){return planningRequest || job?.planning?.state==="running";}
 function navigation(){
   const allowed=allowedSteps();
   if(!allowed.includes(viewStep))rememberView(allowed.at(-1));
@@ -393,22 +394,20 @@ function navigation(){
   }
   if(recoveryOnly && !(viewStep==="execute" && manualPhase(job.plan)))return;
   const previous={plan:"inventory",review:"plan",execution:"review"}[viewStep];
-  if(previous)nav.append(action("Zurück",()=>goStep(previous)));
+  if(previous){
+    const back=action("Zurück",()=>goStep(previous));
+    back.disabled=planningBusy();
+    nav.append(back);
+  }
   if(viewStep==="inventory" && job.state==="inventoried")nav.append(action("Weiter: Ereignisse planen",()=>goStep("plan"),true));
-  if(viewStep==="plan" && previewRevision===draftRevision && !reviewBusy())nav.append(action("Weiter: Plan prüfen",async()=>{
-    if(!draft.events.length)throw new Error("Lege mindestens ein Ereignis oder einen Sammelordner an.");
-    try {
-      await mutate("/plan","POST",{revision:draftRevision});
-    } catch (error) {
-      if (error.code==="manual_xmp_rename_conflict" && !nav.querySelector("#plan-with-script")) {
-        const useScript=action("Plan mit TrueNAS-Skript erstellen",()=>
-          mutate("/plan","POST",{revision:draftRevision,filename_method:"script"}));
-        useScript.id="plan-with-script";
-        nav.append(useScript);
-      }
-      throw error;
-    }
-  },true));
+  if(viewStep==="plan"){
+    const disabled=planningBusy() || previewRevision!==draftRevision || job.matching_update_required || reviewBusy() || !draft.events.length;
+    const manual=action("Weiter: Plan prüfen",()=>startPlan("manual"),true);
+    const script=action("Plan mit TrueNAS-Skript erstellen",()=>startPlan("script"));
+    manual.disabled=script.disabled=disabled;
+    manual.id="plan-manual";script.id="plan-with-script";
+    nav.append(manual,script);
+  }
   if(viewStep==="review" && !job.plan.execution)nav.append(action("Weiter: Methode wählen",async()=>{
     if(!job.plan.documents_at)await mutate("/documents");
     await goStep("execution");
@@ -483,7 +482,8 @@ window.addEventListener("beforeunload", event => {
 const labels = {
  ready:"Bereit", scanning:"Inventur", inventoried:"Inventur abgeschlossen", prepared:"Plan vorbereitet",
  manual:"Manuelle Verschiebung", verifying:"Archivprüfung läuft", repair:"Fehlerbehebung erforderlich",
- script_prepared:"Skript bereitgestellt", script_running:"Skript wird extern ausgeführt",
+ script_prepared:"Skript bereitgestellt", script_releasing:"Nachweis für den Skriptbefehl wird geprüft …",
+ script_running:"Skript wird extern ausgeführt",
  script_interrupted:"Skriptausführung unterbrochen", operations_done:"Dateioperationen abgeschlossen",
  attention_required:"Fehlerbehebung erforderlich",
  registration_pending:"Registrierung ausstehend", registering:"Registrierung läuft",
@@ -502,6 +502,63 @@ function node(tag, content, className) {
   if (className) el.className = className;
   return el;
 }
+function describeFiles(host, summary){
+  const details=node("details",undefined,"adoption-file-issues");
+  details.append(node("summary",t("Betroffene Dateien")+ " ("+summary.total+")"));
+  const reasons=node("ul");
+  for(const [reason,count] of Object.entries(summary.reasons || {}))reasons.append(node("li",count+" · "+t(reason)));
+  details.append(reasons);
+  const examples=node("ul");
+  for(const item of summary.examples || []){
+    const row=node("li");row.append(node("code",item.path),document.createTextNode(" · "+t(item.reason)));
+    examples.append(row);
+  }
+  details.append(examples);
+  if(summary.total>(summary.examples || []).length)details.append(line("Nur die ersten zehn Pfade werden angezeigt."));
+  host.append(details);
+}
+function renderPlanningResult(){
+  const attempt=job.planning || {};
+  if(planningBusy()){
+    const method=attempt.method || (planningRequest===true ? "manual" : planningRequest);
+    report(method==="script"?"TrueNAS-Skriptplan wird geprüft …":"Manueller Verschiebeplan wird geprüft …","busy");
+  }else if(attempt.state==="interrupted"){
+    report("Die Planprüfung wurde unterbrochen. Starte sie erneut.","error");
+  }else if(attempt.state==="failed"){
+    report(detail(attempt.message),"error");
+    if(attempt.files?.total){
+      describeFiles($("message"),attempt.files);
+      $("message").append(action("Problematische Dateien ausschließen",()=>updateExclusions(false)));
+    }
+  }
+}
+async function updateExclusions(restore){
+  const question=restore?"Alle bestätigten Dateiausschlüsse dieses Entwurfs aufheben?":
+    "Diese Dateien bleiben unverändert an der Quelle. Möchtest du sie für diesen Übernahmeauftrag ausschließen?";
+  if(!await window.BibliothekarI18n.confirmAsync(question)){
+    if(!restore)renderPlanningResult();
+    return;
+  }
+  await mutate("/planning-exclusions","POST",{revision:draftRevision,acknowledged:true,restore});
+}
+async function startPlan(method){
+  if(planningBusy())return;
+  requireSaved();
+  planningRequest=method;
+  navigation();
+  $("work").inert=true;
+  renderPlanningResult();
+  try{
+    await api(jobPath("/plan"),"POST",{revision:draftRevision,filename_method:method,background:true});
+    job.planning={state:"running",method};
+  }finally{
+    planningRequest=false;
+    $("work").inert=planningBusy();
+    navigation();
+  }
+  await refresh();
+}
+
 function report(message="", result="") {
   const editorMessage=document.querySelector("#event-editor[open] #editor-message, dialog[open] #review-metadata-message");
   const status=editorMessage || $("message");
@@ -701,8 +758,9 @@ async function restoreJob(current) {
   if(job.plan.id && !job.plan.execution && job.plan.filename_method==="script"){
     await pollPreparation();
   }
-  if(job.scan_running || job.metadata_running){
-    if(job.metadata_running)report("Metadatenentscheidungen werden angewendet …","busy");
+  if(planningBusy() || job.scan_running || job.metadata_running){
+    if(planningBusy())renderPlanningResult();
+    else if(job.metadata_running)report("Metadatenentscheidungen werden angewendet …","busy");
     timer=setTimeout(()=>refresh().catch(()=>{}),2000);
     return;
   }
@@ -727,7 +785,8 @@ async function restoreJob(current) {
   }
   if(!current())return;
   const {applied,remaining}=draft.metadata_review_result || {};
-  if(applied)report(t("Aufnahmezeiten übernommen")+" · "+applied+
+  if(viewStep==="plan" && ["failed","interrupted"].includes(job.planning?.state))renderPlanningResult();
+  else if(applied)report(t("Aufnahmezeiten übernommen")+" · "+applied+
     (remaining?" · "+t("Noch zu prüfen")+" · "+remaining:""),remaining?"error":"success");
   else report();
 }
@@ -872,6 +931,7 @@ const planningToolsObserver=new ResizeObserver(entries=>{
 function render() {
   const phase=job.plan.execution?.phase;
   const terminal=job.state==="discarded" || job.plan.state==="completed";
+  $("work").inert=planningBusy();
   navigation();
   $("introduction").hidden=false;
   $("setup").hidden=viewStep!=="setup";
@@ -937,7 +997,7 @@ function render() {
       await startInventory();
     },true));
   }
-  if (!terminal && !job.plan.execution && !job.scan_running && !inventoryStarting && !reviewBusy()) { const discard=action("Änderungen verwerfen",async()=>{
+  if (!terminal && !job.plan.execution && !planningBusy() && !job.scan_running && !inventoryStarting && !reviewBusy()) { const discard=action("Änderungen verwerfen",async()=>{
     if(reviewBusy())return;
     if (!confirm(t("Auftrag und Entwurf verwerfen? Originale und fertige Arbeitskopien in General bleiben erhalten."))) return;
     await api(jobPath(),"DELETE");
@@ -972,6 +1032,19 @@ function applyDraftPreview(checked){
 }
 function renderDraft(host) {
   const panel=section("Ereignisse planen");
+  if(job.matching_update_required){
+    const refreshNotice=node("div",undefined,"adoption-card");
+    refreshNotice.append(line("Aktualisiere die Inventur für die neue RAW- und XMP-Zuordnung."),
+      action("Inventur aktualisieren",()=>mutate("/scan"),true));
+    panel.append(refreshNotice);
+  }
+  if(job.excluded_files?.total){
+    const notice=node("div",undefined,"adoption-card");
+    notice.append(line("Bestätigte Ausschlüsse bleiben unverändert an der Quelle."));
+    describeFiles(notice,job.excluded_files);
+    notice.append(action("Dateiausschlüsse aufheben",()=>updateExclusions(true)));
+    panel.append(notice);
+  }
   if(previewRevision!==draftRevision){
     host.append(panel);
     return;
@@ -1642,6 +1715,7 @@ async function setDraft(value, editor) {
   const checked=await api(jobPath("/draft/check"),"POST",value);
   if(!checked.valid){showConflicts(checked,value,editor);throw new Error("Zeitkonflikt: Korrigiere die markierte Planung. Gespeicherte Entwürfe bleiben erhalten.");}
   const result=await api(jobPath("/draft"),"PUT",{...value,revision:draftRevision});
+  if(job)job.planning={};
   applyDraftPreview(checked);previewRevision=result.revision;
   draft=value;
   draftRevision=result.revision;
@@ -2006,6 +2080,10 @@ function renderPlan(host) {
     const fact=node("div");fact.append(node("dt",title),node("dd",value));facts.append(fact);
   }
   panel.append(facts);
+  if(plan.excluded_files?.total){
+    panel.append(line("Bestätigte Ausschlüsse bleiben unverändert an der Quelle."));
+    describeFiles(panel,plan.excluded_files);
+  }
   if (duplicateFiles) panel.append(line("Duplikate sind bereits registriert oder in diesem Plan mit identischem Inhalt enthalten."));
   if (job.review_count) panel.append(line("Dateifamilien ohne Zuordnung und ausgenommene Prüffälle bleiben an der Quelle. Prüfe sie in der Liste der Prüffälle."),reviewControls());
   const diagnostics=node("details",undefined,"adoption-proof");
@@ -2367,11 +2445,12 @@ async function pollScript() {
     const result=await api(jobPath("/script"));
     if (target!==$("script-state")) return;
     const status=result.status;
-    const state=result.running ? "script_running" :
+    const releasing=scriptReleasing || result.release_running;
+    const state=releasing ? "script_releasing" : result.running ? "script_running" :
       status?.state==="running" ? "script_interrupted" :
       status?.state==="completed" ? "operations_done" : status?.state || phase;
     const nodes=[];
-    if(status || result.running){
+    if(status || result.running || releasing){
       const progress=node("div",undefined,"adoption-status adoption-progress");
       progress.append(node("strong",label(state)));
       if(status){
@@ -2394,11 +2473,18 @@ async function pollScript() {
       delete target.dataset.command;
       target.replaceChildren();
     }
-    if (!recoveryOnly && !result.running && status?.state!=="completed" &&
-        ["script_prepared","repair"].includes(phase) && !result.command) {
-      nodes.push(action("Skriptbefehl bereitstellen",()=>run("/script/release"),true));
+    if (!recoveryOnly && (releasing || !result.running) && status?.state!=="completed" &&
+        ["script_prepared","repair"].includes(phase) && !readyCommand) {
+      const release=action("Skriptbefehl bereitstellen",async()=>{
+        scriptReleasing=true;
+        release.disabled=true;
+        try{await run("/script/release");}
+        finally{scriptReleasing=false;}
+      },true);
+      release.disabled=releasing;
+      nodes.push(release);
     }
-    if (!recoveryOnly && result.can_reopen) {
+    if (!recoveryOnly && !releasing && result.can_reopen) {
       nodes.push(action("Skriptfreigabe aufheben und zur Inventur zurückkehren",()=>{
         if(confirm("Das ungestartete Skript wird gesperrt. Der Ereignisentwurf bleibt erhalten. Fortfahren?"))
           return run("/script/reopen-unstarted");

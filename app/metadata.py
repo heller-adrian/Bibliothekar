@@ -245,6 +245,8 @@ def run_exiftool(
         "-SubSecTimeOriginal",
         "-SubSecTimeDigitized",
         "-XMP-crs:RawFileName",
+        "-XMP-xmpMM:DocumentID",
+        "-XMP-xmpMM:OriginalDocumentID",
         "-OffsetTimeOriginal",
         "-ExposureTime",
         "-FNumber",

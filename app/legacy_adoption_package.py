@@ -382,6 +382,9 @@ def prepare_manifest(connection, library, job, plan, probe_digest, *, progress=N
                     "directories": directories, "moves": moves, "documents": documents,
                     "release_proofs": {"archive": archive_proofs, "duplicates": duplicate_proofs},
                     **({"xmp_edits": xmp_edits} if xmp_edits else {})}
+        excluded = json.loads(plan["draft_json"]).get("file_exclusions")
+        if excluded:
+            manifest["excluded_sources"] = list(excluded.values())
         host.validate_plan(manifest)
         if _read_json(descriptor, "permission.json") is not None:
             raise AdoptionError("Das Paket wurde bereits zur Ausführung freigegeben.")

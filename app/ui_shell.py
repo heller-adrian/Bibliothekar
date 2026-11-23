@@ -1842,6 +1842,12 @@ EVENT_PREFERENCES_CSS = r"""
   overflow-wrap:anywhere;
   font: .86rem/1.45 ui-monospace, Menlo, Consolas, monospace;
 }
+#bk-event-naming-settings #bk-event-naming-save {
+  background:var(--bk-blue) !important;
+  color:var(--bk-on-blue) !important;
+  border-color:transparent !important;
+}
+#bk-event-naming-status:not(:empty) { margin-top:10px; }
 #bk-settings-dialog .bk-settings-preview-case {
   background:var(--bk-surface-2) !important;
   color:var(--bk-ink) !important;
@@ -4015,7 +4021,8 @@ function bkEventPreferences(bkJson, bkEscape) {
   const namingURL = "/api/settings/event-naming";
   const layoutURL = "/api/settings/event-folder-layout";
   const namingStatus = document.getElementById("bk-event-naming-status");
-  const layoutStatus = document.getElementById("bk-folder-layout-status");
+  const saveButton = document.getElementById("bk-event-naming-save");
+  let pendingSave = null;
   function layoutNodes(nodes) {
     return nodes.map(({id, name, role, children})=>({
       id, name:name.trim(), role:role||"", children:layoutNodes(children||[]),
@@ -4066,43 +4073,48 @@ function bkEventPreferences(bkJson, bkEscape) {
     document.dispatchEvent(new CustomEvent("bibliothekar:event-naming-updated",{detail:data}));
   }
 
-  function bindSave(id, status, save, success) {
-    const button = document.getElementById(id);
-    button.addEventListener("click", async()=>{
-      button.disabled=true;
-      status.textContent="Wird gespeichert …";
-      try {
-        await save();
-        status.textContent=success;
-      } catch(error) {
-        status.textContent=error.message;
-      } finally {
-        button.disabled=false;
-      }
-    });
-  }
-  bindSave("bk-folder-layout-save", layoutStatus, saveLayout, "Gespeichert. Bestehende Ereignisse bleiben unverändert.");
-  bindSave("bk-event-naming-save", namingStatus, saveNaming, "Gespeichert. Die Einstellung gilt nur für neue Ereignisse, Unterereignisse und Sammelordner.");
-
   async function load({strict=false}={}) {
-    await Promise.all([
-      read(layoutURL).then(setLayout).then(()=>layoutStatus.textContent="").catch(error=>{
-        layoutStatus.textContent=error.message;
-        if(strict)throw error;
-      }),
-      read(namingURL).then(setNaming).then(()=>namingStatus.textContent="").catch(error=>{
-        namingStatus.textContent=error.message;
-        if(strict)throw error;
-      }),
-    ]);
+    saveButton.disabled=true;
+    namingStatus.textContent="";
+    try {
+      const [naming, layout] = await Promise.all([read(namingURL), read(layoutURL)]);
+      setNaming(naming);
+      setLayout(layout);
+      saveButton.disabled=false;
+    } catch(error) {
+      namingStatus.textContent=error.message;
+      if(strict)throw error;
+    }
   }
 
-  async function saveAndVerify() {
-    if(JSON.stringify(namingValues())!==JSON.stringify(savedNaming))await saveNaming();
+  async function saveSettings() {
+    if(!savedNaming || !folderLayoutState)throw Error("Die Einstellungen sind noch nicht geladen.");
+    if(!sameNaming(savedNaming, namingValues()))await saveNaming();
     if(stateOfLayout(folderLayoutState)!==savedLayout)await saveLayout();
     const [naming, layout] = await Promise.all([read(namingURL), read(layoutURL)]);
     requireSaved(sameNaming(savedNaming, naming) && stateOfLayout(layout)===savedLayout);
   }
+
+  function saveAndVerify() {
+    if(!pendingSave){
+      saveButton.disabled=true;
+      pendingSave=saveSettings().finally(()=>{
+        pendingSave=null;
+        saveButton.disabled=false;
+      });
+    }
+    return pendingSave;
+  }
+
+  saveButton.addEventListener("click",async()=>{
+    namingStatus.textContent="Wird gespeichert …";
+    try {
+      await saveAndVerify();
+      namingStatus.textContent="Gespeichert. Die Einstellung gilt nur für neue Ereignisse, Unterereignisse und Sammelordner.";
+    } catch(error) {
+      namingStatus.textContent=error.message;
+    }
+  });
   return {load, saveAndVerify};
 }
 """
@@ -4123,9 +4135,7 @@ EVENT_PREFERENCES_MARKUP = r"""
             </label>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
               <button id="bk-folder-add-root" type="button">＋ Ordner</button>
-              <button id="bk-folder-layout-save" type="button" class="bk-positive-action">Speichern</button>
             </div>
-            <div id="bk-folder-layout-status" style="color:var(--bk-muted);margin-top:8px"></div>
           </div>
         </details>
 
@@ -4158,7 +4168,7 @@ EVENT_PREFERENCES_MARKUP = r"""
         </details>
 
         <details class="bk-settings-card">
-          <summary><span>Sammelordner</span><span style="color:var(--bk-muted);font-weight:600">bisher „Ohne Ereignis“</span></summary>
+          <summary><span>Sammelordner</span><span style="color:var(--bk-muted);font-weight:600">bisher „No Event“</span></summary>
           <div class="bk-settings-card-body">
             <label style="display:grid;gap:6px"><span>Bezeichnung für Sammelordner</span><input id="bk-no-event-label" value="Ohne Ereignis"></label>
             <label class="bk-compact-toggle" style="margin-top:10px"><input id="bk-no-event-include-year" type="checkbox"> <span>Jahr einbeziehen</span></label>
@@ -4170,8 +4180,8 @@ EVENT_PREFERENCES_MARKUP = r"""
           <strong>Vorschau</strong>
           <div style="color:var(--bk-muted);font-size:.86rem;margin-top:4px">So sehen Ordnerstruktur und Standardbenennung für neue Inhalte aus.</div>
           <div id="bk-event-naming-preview"></div>
-          <div class="bk-library-actions" style="margin-top:11px"><button id="bk-event-naming-save" type="button" class="bk-positive-action">Benennung speichern</button></div>
-          <div id="bk-event-naming-status" class="bk-library-status"></div>
+          <div class="bk-library-actions" style="margin-top:11px"><button id="bk-event-naming-save" type="button" disabled>Benennung speichern</button></div>
+          <div id="bk-event-naming-status" class="bk-library-status" role="status"></div>
         </section>
       </div>
 """

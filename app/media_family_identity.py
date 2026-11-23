@@ -11,7 +11,7 @@ from app.filename_collisions import has_capture_fraction
 
 
 IDENTITY_TAGS = ("ImageUniqueID", "BodySerialNumber", "OriginalRawFileName")
-IDENTITY_VERSION = 4
+IDENTITY_VERSION = 5
 
 
 def _normalized(value):
@@ -34,6 +34,8 @@ def capture_identity(metadata):
         "original_raw": _normalized(metadata.get("DNG:IFD0:OriginalRawFileName")
                                     or metadata.get("EXIF:IFD0:OriginalRawFileName")),
         "sidecar_raw": _normalized(metadata.get("XMP:XMP-crs:RawFileName")),
+        "document": _normalized(metadata.get("XMP:XMP-xmpMM:DocumentID")),
+        "original_document": _normalized(metadata.get("XMP:XMP-xmpMM:OriginalDocumentID")),
         "conflict": len(ids) > 1 or len(serials) > 1,
     }
 
@@ -94,7 +96,7 @@ def _compatible(first, second):
     return True
 
 
-def split_family_groups(groups, *, ending, cancel=lambda: None):
+def split_family_groups(groups, *, ending, cancel=lambda: None, preserve_xmp_versions=False):
     """Yield only sets backed by unambiguous, mutually compatible evidence.
 
     Each input supplies its local family key, its member records and eligibility.
@@ -105,6 +107,7 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
     primary_by_name = defaultdict(set)
     primary_by_stem = defaultdict(set)
     standalone_sidecars = {}
+    dng_by_document = defaultdict(list)
     for key, members, eligible in groups:
         cancel()
         primaries = [item for item in members if _role(item) in {"raw", "jpeg", "dng"}]
@@ -119,6 +122,9 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
             name = _normalized(PurePosixPath(primary["relative_path"]).name)
             primary_by_name[name].add(key)
             primary_by_stem[_normalized(PurePosixPath(primary["relative_path"]).stem)].add(key)
+            lineage = (primary.get("capture_identity") or {}).get("original_document")
+            if preserve_xmp_versions and _role(primary) == "dng" and lineage:
+                dng_by_document[lineage].append((key, primary))
         if not evidence:
             continue
         # A local family with multiple media files is a single unit. Every
@@ -150,6 +156,7 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
             candidates[key] = (members, evidence, usable)
 
     by_sidecar = {}
+    by_lineage = []
     for key, sidecar in standalone_sidecars.items():
         cancel()
         path = PurePosixPath(sidecar["relative_path"])
@@ -256,9 +263,22 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
                 unique_owners = {owner for owner, _ in raw_candidates}
         candidates[key] = ([sidecar], [], True)
         by_sidecar[key] = {key, *unique_owners}
+        if preserve_xmp_versions and raw_hint:
+            ((owner, _), original), = qualified.items()
+            lineage = identity.get("original_document") or identity.get("document")
+            derived = [
+                (dng_key, dng) for dng_key, dng in dng_by_document.get(lineage, ())
+                if _camera(dng) == _camera(original) and dng.get("capture_identity")
+                and not dng["capture_identity"].get("conflict")
+                and _compatible(dng, original)
+            ]
+            # A document lineage supplements an already proven RAW binding.
+            # An ambiguous lineage must not choose between multiple DNGs.
+            if _role(original) == "raw" and len(derived) == 1 and derived[0][0] in candidates:
+                by_lineage.append({owner, derived[0][0]})
 
     groups_by_key = defaultdict(list)
-    for bucket in chain(by_id.values(), by_precision.values(), by_context.values(), by_sidecar.values()):
+    for bucket in chain(by_id.values(), by_precision.values(), by_context.values(), by_sidecar.values(), by_lineage):
         if len(bucket) > 1:
             for key in bucket:
                 groups_by_key[key].append(bucket)
@@ -278,15 +298,23 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
                 component.update(others)
                 pending.extend(others)
         visited.update(component)
-        if len(component) > 7 or not all(candidates[item][2] for item in component):
+        if (not preserve_xmp_versions and len(component) > 7) or not all(candidates[item][2] for item in component):
             continue
         records = [item for key in sorted(component) for item in candidates[key][0]]
         evidence = [item for key in component for item in candidates[key][1]]
         primary = [item for item in records if _role(item) != "xmp"]
         roles = [_role(item) for item in primary]
-        if not roles or len(set(roles)) != len(roles) or len(records) > 7:
+        if not roles or len(set(roles)) != len(roles) or (not preserve_xmp_versions and len(records) > 7):
             continue
-        if len({_normalized(ending(item["relative_path"])) for item in records}) != len(records):
+        ending_buckets = defaultdict(list)
+        for item in records:
+            ending_buckets[_normalized(ending(item["relative_path"]))].append(item)
+        if any(len(items) > 1 and not (
+            preserve_xmp_versions and all(
+                _role(item) == "xmp" and (item.get("capture_identity") or {}).get("sidecar_raw")
+                for item in items
+            )
+        ) for items in ending_buckets.values()):
             continue
         if any(not item.get("capture_identity") or item["capture_identity"]["conflict"] for item in evidence):
             continue
@@ -297,9 +325,9 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
         # A qualified sidecar names a particular primary rather than every
         # file in the family. Require that original, even across folders.
         originals = {_normalized(PurePosixPath(item["relative_path"]).name) for item in primary}
-        masters = {_normalized(PurePosixPath(item["relative_path"]).name) for item in primary
-                   if _role(item) in {"raw", "dng"}}
-        if any(hint not in masters for item in records if _role(item) == "xmp"
+        masters = [_normalized(PurePosixPath(item["relative_path"]).name) for item in primary
+                   if _role(item) in {"raw", "dng"}]
+        if any(masters.count(hint) != 1 for item in records if _role(item) == "xmp"
                and (hint := (item.get("capture_identity") or {}).get("sidecar_raw"))):
             continue
         if any(_role(item) == "xmp" and ending(item["relative_path"]).count(".") > 1

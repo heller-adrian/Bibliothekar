@@ -495,6 +495,17 @@ def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path 
                 (job_id, generation),
             )
             draft = json.loads(_job(connection, library.library_id, job_id)["draft_json"])
+            draft.pop("planning_attempt", None)
+            excluded = draft.get("file_exclusions", {})
+            previous_exclusions = len(excluded)
+            if excluded:
+                kept = connection.execute(
+                    """SELECT e.key FROM json_each(?) AS e JOIN legacy_adoption_inventory inventory
+                       ON inventory.job_id=? AND inventory.relative_path=e.key
+                        AND inventory.sha256=json_extract(e.value, '$.sha256')""",
+                    (json.dumps(excluded), job_id),
+                )
+                draft["file_exclusions"] = {row[0]: excluded[row[0]] for row in kept}
             join_split_families(connection, job_id, draft, cancel)
             # Do not discard source occurrences merely because their bytes match.
             # The move planner labels every member of a duplicate group.
@@ -535,7 +546,8 @@ def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path 
                 draft["capture_overrides"].pop(key, None)
             connection.execute(
                 "UPDATE legacy_adoption_jobs SET state = 'inventoried', draft_json = ?, draft_revision = draft_revision + ? WHERE id = ?",
-                (json.dumps(draft), int(len(pending) + len(applied) != decisions), job_id),
+                (json.dumps(draft), int(len(pending) + len(applied) != decisions
+                                          or len(draft.get("file_exclusions", {})) != previous_exclusions), job_id),
             )
     except Exception as error:
         with database_connection(library.database_path) as connection:

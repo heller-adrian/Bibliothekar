@@ -103,7 +103,7 @@ UI_TRANSLATIONS = {
   "Unterereignisse": "Subevents",
   "Standardmäßig verwenden": "Use by default",
   "Sammelordner": "Collection folders",
-  "bisher „Ohne Ereignis“": "previously “No Event”",
+  "bisher „No Event“": "previously “No Event”",
   "Ohne Ereignis": "No Event",
   "Ohne Datum": "Undated",
   "Ohne_Datum": "Undated",

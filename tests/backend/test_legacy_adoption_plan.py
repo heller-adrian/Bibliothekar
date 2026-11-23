@@ -1103,6 +1103,78 @@ def test_script_adoption_precise_burst_vs_real_duplicates(
     assert {Path(item["target"]).name for item in plan_moves(context, job)} == expected
 
 
+@pytest.mark.parametrize("method", ["manual", "script"])
+def test_rc4_preserves_lineage_and_distinct_xmp_versions(inventory, monkeypatch, method):
+    import os
+    from hashlib import sha256
+
+    context, source, registry = inventory
+    first, second = "2025/06/16.06.2025", "2025/07/10.07.2025"
+    first_stem, second_stem = "DSCF9850", "DSCF2371"
+    fixtures = {
+        f"{first}/RAW/{first_stem}.RAF": b"R9850 original",
+        f"{first}/DNG/{first_stem}.dng": b"D9850 derivative",
+        f"{second}/RAW/{second_stem}.RAF": b"R2371 original",
+    }
+    for directory, stem, inst in ((first+"/Sonstiges", first_stem, "9850-edit"),
+                                  (second+"/RAW", second_stem, "2371-original"),
+                                  (second+"/Sonstiges", second_stem, "2371-alternate")):
+        fixtures[f"{directory}/{stem}.xmp"] = (
+            '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+            '<rdf:Description xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" '
+            'xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/" '
+            f'crs:RawFileName="{stem}.RAF" xmpMM:InstanceID="{inst}"/></rdf:RDF></x:xmpmeta>'
+        ).encode()
+    for path, payload in fixtures.items():
+        full = source / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_bytes(payload)
+
+    def read(descriptors, _cancel):
+        result = {}
+        for fd in descriptors:
+            payload = os.pread(fd, 1024, 0)
+            first_day = b'9850' in payload
+            wall_time = "2025:06:16 18:39:58" if first_day else "2025:07:10 17:04:40"
+            tags = {"EXIF:ExifIFD:DateTimeOriginal": wall_time,
+                    "EXIF:IFD0:Make": "FUJIFILM", "EXIF:IFD0:Model": "X-H2S"}
+            if payload.startswith(b'<x:xmpmeta'):
+                tags = {"XMP:XMP-exif:DateTimeOriginal": wall_time+"+02:00",
+                        "XMP:XMP-tiff:Make": "FUJIFILM", "XMP:XMP-tiff:Model": "X-H2S",
+                        "XMP:XMP-crs:RawFileName": (first_stem if first_day else second_stem)+".RAF",
+                        "XMP:XMP-xmpMM:OriginalDocumentID": "origin-9850" if first_day else "origin-2371"}
+            elif payload.startswith(b'D'):
+                tags["XMP:XMP-xmpMM:OriginalDocumentID"] = "origin-9850"
+            result[fd] = tags
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", read)
+    job = _scan(context, source)
+    draft = {"events": [
+        {"event_kind": "no_event", "segments": [{"day_key": day}]}
+        for day in ("2025-06-16", "2025-07-10")
+    ]}
+    plan = create_plan(context, registry, job, draft, filename_method=method)
+    assert (plan["move_files"], plan["move_families"]) == (6, 2)
+    moves = {row["relative_path"]: row for row in plan_moves(context, job)}
+    assert set(moves) == fixtures.keys()
+    assert len({row["target"] for row in moves.values()}) == 6
+    for day, stem in ((first, first_stem), (second, second_stem)):
+        master = Path(moves[f"{day}/RAW/{stem}.RAF"]["target"]).name
+        group = [row for path, row in moves.items() if path.startswith(day+"/")]
+        assert len({row["family_key"] for row in group}) == 1
+        for row in group:
+            original = fixtures[row["relative_path"]]
+            assert row["sha256"] == sha256(original).hexdigest()
+            if row["relative_path"].endswith(".xmp"):
+                if method == "script":
+                    assert row["current_sha256"] == sha256(original.replace((stem+".RAF").encode(), master.encode())).hexdigest()
+                else:
+                    assert master == stem+".RAF" and row["current_sha256"] is None
+    assert any(".XMP_002.xmp" in row["target"] for row in moves.values())
+    assert all((source / path).read_bytes() == content for path, content in fixtures.items())
+
+
 def test_rc2_true_raf_jpeg_xmp_sidecar_shared_script_target_stem(inventory, monkeypatch):
     """Real DSCF2915 regression: a sidecar in Sonstiges must keep the RAW stem."""
     import os
