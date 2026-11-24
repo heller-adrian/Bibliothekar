@@ -25,7 +25,8 @@ async function finishManualAdoption(page){
   await page.locator('.adoption-target-preview ul ul code').filter({hasText:'Reopened Test'}).first().waitFor();
   await page.getByRole('button',{name:/Next: Choose execution|Weiter: Methode wählen/}).click();
   const panel=page.locator('#work section');
-  await panel.getByRole('heading',{name:/Final safety confirmation|Verbindliche Sicherheitsbestätigung/}).waitFor();
+  const chooseMethod=page.locator('#execution-method-choice');
+  await chooseMethod.waitFor();
   const order=await panel.evaluate(panel=>{
     const selectors=['h2','h2 + p','.adoption-plan-facts','details.adoption-proof',
       'details.adoption-proof + p','.adoption-target-preview','.adoption-card h3'];
@@ -36,7 +37,7 @@ async function finishManualAdoption(page){
       facts:elements[2].children.length,
     };
   });
-  assert.deepEqual(order,{inOrder:true,facts:8});
+  assert.deepEqual(order,{inOrder:true,facts:10});
   const methods=page.getByRole('radiogroup');
   const scriptMethod=methods.locator('[value=script]');
   const ack=page.getByLabel(/I confirm the safety conditions|Ich bestätige die Sicherheitsbedingungen/);
@@ -62,6 +63,7 @@ async function finishManualAdoption(page){
   const emptyProof=page.waitForResponse(response=>response.url().endsWith('/script/probe'));
   await scriptMethod.focus();
   await page.keyboard.press('Space');
+  await chooseMethod.click();
   await emptyProof;
   await prepare.waitFor({state:'visible'});
   assert.equal(await scriptMethod.isChecked(),true);
@@ -116,6 +118,8 @@ async function finishManualAdoption(page){
   await page.unroute(confirmRoute);
   await page.unroute(probeRoute);
   await methods.locator('[value=manual]').check();
+  await chooseMethod.click();
+  await ack.waitFor();
   assert.equal(await ack.isChecked(),false);
   assert.equal(await ack.isDisabled(),false);
   assert.equal(await ack.isVisible(),true);

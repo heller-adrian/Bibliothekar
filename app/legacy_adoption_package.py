@@ -560,14 +560,15 @@ def script_details(library, job_id, plan_id):
     with _package(_script_package(script, job_id, plan_id), expected=expected) as descriptor:
         status = script_status(descriptor, script)
         running = False
-        can_reopen = False
+        journal_started = None
         try:
             with host.package_lock(descriptor):
-                can_reopen = script["phase"] == "script_prepared" and not script_journal_started(descriptor)
+                journal_started = script_journal_started(descriptor)
         except host.ExecutionError:
             running = True
         result = {"status": status, "running": running, "host": json.loads(script["host_json"]),
-                  "can_reopen": can_reopen}
+                  "journal_started": journal_started,
+                  "can_reopen": script["phase"] == "script_prepared" and journal_started is False}
         allowed = _read_json(descriptor, "permission.json")
         if (allowed and allowed.get("manifest") == script["manifest_sha256"]
                 and allowed.get("mode") in {"apply", "rollback"} and not _runner_differences(descriptor)):

@@ -1145,7 +1145,9 @@ def test_script_host_proof_release_and_independent_archive_verification(
         assert "Skriptmanifest" in _json(client, "POST", job + "/confirm", status=409, json=confirm)["detail"]
         manifest.write_bytes(original_manifest)
         assert _json(client, "POST", job + "/confirm", json=confirm)["execution"]["phase"] == "script_prepared"
-    assert not _json(client, "GET", job + "/script").get("command")
+    script_state = _json(client, "GET", job + "/script")
+    assert script_state["can_reopen"] and script_state["journal_started"] is False
+    assert not script_state.get("command")
     assert _json(client, "GET", job + "/download/documents", status=409)["detail"]
     [candidate] = _json(client, "GET", job + "/moves")
     blocked = Path(candidate["target"])
@@ -1202,7 +1204,9 @@ def test_script_host_proof_release_and_independent_archive_verification(
     assert external(apply) == 0
     _json(client, "POST", job + "/script/reopen-unstarted", status=409, json=command)
     assert not original.exists()
-    assert _json(client, "GET", job + "/script")["status"]["state"] == "completed"
+    script_state = _json(client, "GET", job + "/script")
+    assert script_state["status"]["state"] == "completed"
+    assert script_state["journal_started"] is True and not script_state["can_reopen"]
     [move] = _json(client, "GET", job + "/moves")
     observed_hashes = []
     checksum = legacy_adoption_verify.bound_sha256
@@ -2995,6 +2999,63 @@ def test_background_plan_reports_and_reverses_individual_xmp_exclusions(
     receipt = client.get(f"/legacy-adoption/history?library=main&job={job_id}")
     assert receipt.status_code == 200
     assert "<span>Bestätigte Dateiausschlüsse</span> (3)" in receipt.text
+
+
+@pytest.mark.parametrize("reference", ["photo.raf", "photo.RAF"])
+def test_rc6_manual_availability_uses_bound_xmp_name(fresh_main, monkeypatch, synthetic_dataset, reference):
+    _, _, _, archive = fresh_main
+    source = archive.parent / "rc6-collection"
+    source.mkdir()
+    (source / "photo.RAF").write_bytes(b"synthetic raw")
+    (source / "photo.xmp").write_text(
+        f'<r xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:RawFileName="{reference}"/>'
+    )
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+
+    def metadata(descriptors, _cancel):
+        tags = {}
+        for fd in descriptors:
+            if os.pread(fd, 2, 0) == b"<r":
+                tags[fd] = {"XMP:XMP-exif:DateTimeOriginal": "2025:06:18 20:15:01+02:00",
+                            "XMP:XMP-crs:RawFileName": reference}
+            else:
+                tags[fd] = {"EXIF:ExifIFD:DateTimeOriginal": "2025:06:18 20:15:01+02:00"}
+        return tags
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    client = _onboard(fresh_main)
+    _adopt(client)
+    endpoint = "/api/legacy-adoption/jobs"
+    job = endpoint + "/" + _json(client, "POST", endpoint, status=201, json={"root": "nas"})["id"]
+    _json(client, "POST", job + "/scan", status=202)
+    saved = _json(client, "PUT", job + "/draft", json={"revision": 0, "events": [
+        {"event_kind": "no_event", "segments": [{"day_key": "2025-06-18"}]},
+    ]})
+    plan = _json(client, "POST", job + "/plan", json={
+        "revision": saved["revision"], "filename_method": "script",
+    })
+    assert plan["move_files"] == 2
+    command = {"plan_id": plan["id"], "method": "manual"}
+    if reference == "photo.RAF":
+        assert plan["manual_blocker"] is None
+        replacement = _json(client, "POST", job + "/execution-method", json=command)
+        assert replacement["id"] != plan["id"]
+        assert replacement["filename_method"] == "manual"
+        assert replacement["documents_at"]
+        return
+
+    assert plan["manual_blocker"] == {
+        "path": "photo.xmp", "raw_reference": "photo.raf", "raw_name": "photo.RAF",
+    }
+
+    def no_file_recheck(*args):
+        pytest.fail("A known manual conflict must be rejected before rehashing the collection")
+
+    monkeypatch.setattr("app.legacy_adoption_verify.assert_original_layout", no_file_recheck)
+    conflict = _json(client, "POST", job + "/execution-method", status=409, json=command)
+    assert conflict["detail"]["code"] == "manual_xmp_rename_conflict"
+    assert _json(client, "GET", job)["plan"]["id"] == plan["id"]
+    assert not list(archive.iterdir())
 
 
 @pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["native-zfs"])

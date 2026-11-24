@@ -1186,6 +1186,43 @@ def _roots(stack, library, job):
     return source, archive
 
 
+def _manual_method_blocker(connection, job_id, plan, draft):
+    """Identify known bound RAW names that a manual plan could not preserve."""
+    if plan["filename_method"] != "script":
+        return None
+    rows = connection.execute(
+        """SELECT inventory.family_key, move.relative_path, move.target_path, move.xmp_old_raw_name
+             FROM legacy_adoption_moves move
+             JOIN legacy_adoption_inventory inventory
+               ON inventory.job_id = ? AND inventory.relative_path = move.relative_path
+            WHERE move.plan_id = ? AND move.target_path IS NOT NULL
+            ORDER BY move.relative_path""",
+        (job_id, plan["id"]),
+    )
+    raw_names, references = {}, []
+    for row in rows:
+        name = PurePosixPath(row["relative_path"]).name
+        if row["xmp_old_raw_name"]:
+            references.append(row)
+        elif PurePosixPath(name).suffix.casefold() in RAW_EXTENSIONS:
+            raw_names.setdefault((row["family_key"], name.casefold()), []).append(row)
+    target_stems = draft.get("target_stems") or {}
+    for sidecar in references:
+        family, old_name = sidecar["family_key"], sidecar["xmp_old_raw_name"]
+        owners = raw_names.get((family, old_name.casefold()), ())
+        if len(owners) != 1:
+            continue
+        raw = owners[0]
+        # Only make an early decision when manual collision handling keeps
+        # the physical RAW name. Overrides still need normal plan validation.
+        if family in target_stems:
+            continue
+        manual_name = PurePosixPath(raw["relative_path"]).name
+        if manual_name != old_name:
+            return {"path": sidecar["relative_path"], "raw_reference": old_name, "raw_name": manual_name}
+    return None
+
+
 def create_plan(library, registry_path: Path, job_id: str, draft=None, *, draft_revision=None,
                 allow_existing=False, filename_method="manual", replace_plan_id=None) -> dict:
     if filename_method not in {"manual", "script"}:
@@ -1208,8 +1245,12 @@ def create_plan(library, registry_path: Path, job_id: str, draft=None, *, draft_
                         "SELECT 1 FROM legacy_adoption_execution WHERE plan_id = ?", (replace_plan_id,),
                     ).fetchone()):
                 raise AdoptionError("Der bestätigte Verschiebeplan ist eingefroren.")
-            assert_original_layout(connection, library, job, previous)
             draft = json.loads(previous["draft_json"])
+            if filename_method == "manual" and (blocker := _manual_method_blocker(connection, job_id, previous, draft)):
+                raise ManualXmpRenameConflict(
+                    "Die manuelle Methode kann den gebundenen XMP-Verweis nicht anpassen. " + blocker["path"]
+                )
+            assert_original_layout(connection, library, job, previous)
             connection.execute("DELETE FROM legacy_adoption_plans WHERE id = ?", (replace_plan_id,))
         if draft_revision is not None:
             if job["draft_revision"] != draft_revision:
@@ -1279,9 +1320,11 @@ def plan_status(library, job_id: str) -> dict:
                       != '/' || json_extract(inventory.metadata_json, '$.filename')""",
             (job_id, plan["id"]),
         ).fetchone()
+        draft = json.loads(plan["draft_json"])
         return {
             "rename_files": renamed[0], "rename_families": renamed[1],
-            "excluded_files": file_issue_summary((json.loads(plan["draft_json"]).get("file_exclusions") or {}).values()),
+            "excluded_files": file_issue_summary((draft.get("file_exclusions") or {}).values()),
+            "manual_blocker": _manual_method_blocker(connection, job_id, plan, draft) if execution is None else None,
             "id": plan["id"], "state": plan["state"], "counts": counts, "filename_method": plan["filename_method"],
             "execution": dict(execution) if execution else None,
             "inventory_duplicates": connection.execute(
@@ -1296,7 +1339,7 @@ def plan_status(library, job_id: str) -> dict:
                     WHERE plan_id = ? ORDER BY source_path LIMIT 100""", (plan["id"],),
             )],
             "source_root": job["source_root"], "archive_root": job["archive_root"],
-            "draft": json.loads(plan["draft_json"]), "events": json.loads(plan["events_json"]),
+            "draft": draft, "events": json.loads(plan["events_json"]),
             "issues": connection.execute("SELECT count(*) FROM legacy_adoption_issues WHERE plan_id = ?",
                                          (plan["id"],)).fetchone()[0],
             "dataset": json.loads(job["dataset_json"] or "null"),
