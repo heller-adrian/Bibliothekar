@@ -31,7 +31,7 @@ from app.legacy_adoption_inventory import (
 )
 from app.legacy_adoption_package import (
     assert_unstarted_release_current, inspect_runner, locked_script, permit, prepare_probe, probe_details,
-    read_manifest, retire_unstarted_package, script_details, script_journal_started, script_status,
+    read_manifest, retire_unstarted_package, rollback_directory_scope, script_details, script_documents_stale, script_journal_started, script_status,
 )
 from app.legacy_adoption_preparation import (
     abandon_failed_preparation, exclusive_preparation_worker, preparation_status,
@@ -58,7 +58,7 @@ from app.legacy_adoption_review import (
 from app.legacy_adoption_review_cancel import request as request_review_cancel
 from app.legacy_adoption_review_metadata import apply_metadata, metadata_sources, stage_metadata
 from app.legacy_adoption_review_progress import batch_details
-from app.legacy_adoption_verify import plan_issues, reopen_plan
+from app.legacy_adoption_verify import STALE_XMP_DOCUMENTS, plan_issues, reopen_plan
 from app.library_registry import LibraryRegistryError, list_libraries
 from app.operation_health import read_session
 from app.root_operations import _lock, RootOperationBusy, RootOperationError, admission
@@ -983,6 +983,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 ):
                     if script["phase"] not in {"script_prepared", "repair"}:
                         raise AdoptionError("Die Skriptausführung ist in dieser Phase gesperrt.")
+                    reject_stale_script(library, descriptor, script, command.plan_id)
                     try:
                         assert_unstarted_release_current(library, job_id, command.plan_id, descriptor, script)
                     except (AdoptionError, DatasetError, OSError) as error:
@@ -1001,7 +1002,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     def run_script_preparation(library, job_id, plan_id, probe_digest):
         """Independent OS-locked worker; progress resides on disk, not a socket."""
         try:
-            with exclusive_preparation_worker(job_id) as exclusive:
+            with exclusive_preparation_worker(job_id, plan_id) as exclusive:
                 if not exclusive:
                     # Another process is already hashing this exact package.
                     # Never mark its shared progress record as a failure.
@@ -1066,7 +1067,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             # Distinguish a genuinely active process anywhere on the server
             # from a stale running record left after a restart.
             return {**result, "worker_active": (
-                preparation_worker_active(job_id) or local_running
+                preparation_worker_active(job_id, plan["id"]) or local_running
             )}
 
     @router.post("/jobs/{job_id}/preparation/abandon")
@@ -1125,7 +1126,13 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
 
     script_completion_phases = {"script_prepared", "operations_done", "verifying", "repair", "registration_pending"}
 
-    def retire_completed_script(descriptor, script):
+    def reject_stale_script(library, descriptor, script, plan_id):
+        if script_documents_stale(library, plan_id):
+            permit(descriptor, script, None)
+            raise AdoptionError(STALE_XMP_DOCUMENTS)
+
+    def retire_completed_script(library, descriptor, script, plan_id):
+        reject_stale_script(library, descriptor, script, plan_id)
         if script["phase"] not in script_completion_phases:
             raise AdoptionError("Der Übernahmeauftrag ist für diesen Schritt nicht verfügbar.")
         status = script_status(descriptor, script)
@@ -1142,7 +1149,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             execution = planned.get("execution")
             if execution and execution["method"] == "script":
                 with locked_script(library, job_id, command.plan_id) as (descriptor, script):
-                    retire_completed_script(descriptor, script)
+                    retire_completed_script(library, descriptor, script, command.plan_id)
                     change_phase(library, job_id, command.plan_id, "operations_done",
                                  from_phases=script_completion_phases)
                     return verify_execution(library, job_id, command.plan_id)
@@ -1163,7 +1170,8 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
             phases = {"manual", "verifying", "repair", "registration_pending", "rolling_back"}
-            execution = plan_status(library, job_id).get("execution")
+            plan = plan_status(library, job_id)
+            execution = plan.get("execution")
             if execution and execution["method"] == "script":
                 phases.update(("script_prepared", "operations_done"))
                 with locked_script(library, job_id, command.plan_id) as (descriptor, script):
@@ -1171,7 +1179,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                         raise AdoptionError("Eine Skriptrücknahme ist in dieser Phase gesperrt.")
                     permit(descriptor, script, None)
                     change_phase(library, job_id, command.plan_id, "rolling_back", from_phases=phases)
-                    permit(descriptor, script, "rollback")
+                    permit(descriptor, script, "rollback", rollback_directories=rollback_directory_scope(library, plan))
             else:
                 change_phase(library, job_id, command.plan_id, "rolling_back", from_phases=phases)
             return plan_status(library, job_id)
@@ -1185,8 +1193,14 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 with locked_script(library, job_id, command.plan_id) as (descriptor, script):
                     if script["phase"] != "rolling_back":
                         raise AdoptionError("Starte zuerst den vorgesehenen Wiederherstellungsweg.")
+                    keep_draft = script_documents_stale(library, command.plan_id)
+                    if keep_draft and script_journal_started(descriptor):
+                        status = script_status(descriptor, script)
+                        if not status or (status.get("state"), status.get("mode")) != ("rolled_back", "rollback"):
+                            raise AdoptionError("Schließe zuerst die kontrollierte Skriptrücknahme ab.")
                     return complete_rollback(
                         library, job_id, command.plan_id, before_commit=lambda: permit(descriptor, script, None),
+                        keep_draft=keep_draft,
                     )
             return complete_rollback(library, job_id, command.plan_id)
 
@@ -1225,7 +1239,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                     require_adoption(request, library)
                     if execution and execution["method"] == "script":
                         with locked_script(library, job_id, command.plan_id) as (descriptor, script):
-                            retire_completed_script(descriptor, script)
+                            retire_completed_script(library, descriptor, script, command.plan_id)
                             change_phase(library, job_id, command.plan_id, "registering",
                                          from_phases=script_completion_phases)
                     else:
@@ -1289,6 +1303,14 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             library = resolve_library_context(registry, reservation["library_id"])
             operation = key(library, job_id)
             plan_id = reservation["plan_id"]
+            if reservation["phase"] in {"script_prepared", "operations_done", "verifying", "repair",
+                                        "registration_pending", "registering"}:
+                plan = plan_status(library, job_id)
+                if (plan.get("execution") or {}).get("method") == "script" and script_documents_stale(library, plan_id):
+                    # The runner and its original journal must remain available
+                    # for rollback. Revoke any previous apply permission.
+                    with locked_script(library, job_id, plan_id) as (descriptor, script):
+                        permit(descriptor, script, None)
             if reservation["phase"] == "registering":
                 schedule_finalization(library, job_id, plan_id)
                 return
@@ -1324,7 +1346,8 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                     planning.add(operation)
                     dispatch("recovered-planning", run_planning, library, job_id, command,
                              reservation["access_kind"] == "library")
-        except (AdoptionError, RootOperationError, LibraryRegistryError, OSError, sqlite3.DatabaseError, ValueError):
+        except (AdoptionError, ExecutionError, RootOperationError, LibraryRegistryError, OSError,
+                sqlite3.DatabaseError, ValueError):
             logging.getLogger(__name__).exception("Could not resume pending adoption work")
 
     app.include_router(router)

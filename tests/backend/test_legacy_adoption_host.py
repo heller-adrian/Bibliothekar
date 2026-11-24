@@ -516,6 +516,15 @@ def test_rc5_streaming_xmp_patch_is_byte_exact_after_recovery(package, monkeypat
         if name == "new-xmp-0.xmp":
             raise KeyboardInterrupt
 
+    def abort_after_stage(left, name, right, target):
+        rename(left, name, right, target)
+        if target == "new-xmp-0.xmp":
+            raise KeyboardInterrupt
+
+    with monkeypatch.context() as interrupted:
+        interrupted.setattr(host, "rename_noreplace", abort_after_stage)
+        with pytest.raises(KeyboardInterrupt):
+            host.main(_command(edited, "apply"))
     with monkeypatch.context() as interrupted:
         interrupted.setattr(host, "rename_noreplace", abort_after_install)
         with pytest.raises(KeyboardInterrupt):

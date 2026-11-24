@@ -218,7 +218,7 @@ def split_family_groups(groups, *, ending, cancel=lambda: None, preserve_xmp_ver
         sidecar_time = (_time(sidecar) if sidecar_source.endswith(":DateTimeOriginal")
                         else None)
         if not raw_hint and not exact_named:
-            if sidecar_time is None or not all(sidecar_camera):
+            if not all(sidecar_camera) or not (sidecar_time is not None or preserve_xmp_versions and identity.get("id")):
                 continue
         if sidecar.get("review_required") and sidecar.get("selected_capture_time"):
             continue
@@ -254,6 +254,8 @@ def split_family_groups(groups, *, ending, cancel=lambda: None, preserve_xmp_ver
                         continue
                 elif any(sidecar_camera) and not same_camera:
                     continue
+                if preserve_xmp_versions and match.get("conflict"):
+                    continue
                 original_time = _time(original)
                 if sidecar_time is not None and not _compatible_time(sidecar, original, sidecar_time, original_time):
                     continue
@@ -278,12 +280,23 @@ def split_family_groups(groups, *, ending, cancel=lambda: None, preserve_xmp_ver
                 if not has_evidence:
                     continue
                 if not raw_hint:
-                    # Without an explicit RAW reference, original capture
-                    # settings provide an additional conservative fence.
+                    # Adoption can use a shared capture ID, or exact recorded
+                    # subseconds from the same camera serial. Otherwise keep
+                    # the original shutter-settings corroboration.
+                    exact_identity = preserve_xmp_versions and same_camera and (
+                        shared_id or bool(serial and serial == match.get("serial") and sidecar_time is not None
+                                          and sidecar_time == original_time
+                                          and has_capture_fraction(sidecar.get("selected_capture_time"))
+                                          and has_capture_fraction(original.get("selected_capture_time")))
+                    )
                     settings = sidecar.get("capture_settings") or {}
                     original_settings = original.get("capture_settings") or {}
-                    if any(not _same_setting(settings.get(field), original_settings.get(field))
-                           for field in ("exposure", "aperture", "iso")):
+                    fields = ("exposure", "aperture", "iso")
+                    if preserve_xmp_versions and not exact_named and not exact_identity and any(
+                        values.get(field) in (None, "") for values in (settings, original_settings) for field in fields
+                    ):
+                        continue
+                    if any(not _same_setting(settings.get(field), original_settings.get(field)) for field in fields):
                         continue
                 qualified[(owner, original["relative_path"])] = original
 

@@ -1436,3 +1436,50 @@ def test_rc5_native_smoke_pair_keeps_colocated_raw_without_shutter_metadata(inve
     plan = create_plan(context, registry, job, _draft(), filename_method="script")
     assert (plan["move_families"], plan["move_files"]) == (1, 2)
     assert all((source / name).is_file() for name in ("sample.raf", "sample.xmp"))
+
+
+@pytest.mark.parametrize("evidence", ["absent", "shared-id", "conflicting-id"])
+def test_rc7_split_sidecar_requires_evidence_for_matching_target(inventory, monkeypatch, evidence):
+    import os
+
+    from app.legacy_adoption_plan import PlanFileIssues
+
+    context, source, registry = inventory
+    raw, xmp = (source / name for name in ("day/RAW/DSCF0030.RAF", "day/Edits/DSCF0030.xmp"))
+    for path, content in ((raw, b"raw"), (xmp, b"<edit/>")):
+        path.parent.mkdir(parents=True)
+        path.write_bytes(content)
+    (source / "independent.JPG").write_bytes(b"unrelated")
+    capture_id = "a1" * 16
+
+    def metadata(descriptors, _cancel):
+        result = {}
+        for fd in descriptors:
+            xmp_file = os.pread(fd, 1, 0) == b"<"
+            prefix = "XMP:XMP-exif" if xmp_file else "EXIF:ExifIFD"
+            camera = "XMP:XMP-tiff" if xmp_file else "EXIF:IFD0"
+            result[fd] = {f"{prefix}:DateTimeOriginal": "2026:07:21 12:00:00",
+                          f"{camera}:Make": "FUJIFILM", f"{camera}:Model": "X-H2S"}
+            if evidence != "absent":
+                result[fd][f"{prefix}:ImageUniqueID"] = "b2" * 16 if xmp_file and evidence == "conflicting-id" else capture_id
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    job = _scan(context, source)
+    draft = _draft()
+    if evidence == "absent":
+        with pytest.raises(PlanFileIssues) as error:
+            create_plan(context, registry, job, draft, filename_method="script")
+        assert {item["path"] for item in error.value.items} == {
+            raw.relative_to(source).as_posix(), xmp.relative_to(source).as_posix(),
+        }
+        draft["file_exclusions"] = {item["path"]: item for item in error.value.items}
+        plan = create_plan(context, registry, job, draft, filename_method="script")
+        assert plan["move_files"] == 1
+    else:
+        plan = create_plan(context, registry, job, draft, filename_method="script")
+        assert plan["move_files"] == 3
+        moves = {Path(row["relative_path"]).suffix: row for row in plan_moves(context, job)}
+        assert (moves[".RAF"]["family_key"] == moves[".xmp"]["family_key"]) == (evidence == "shared-id")
+        assert (Path(moves[".RAF"]["target"]).stem == Path(moves[".xmp"]["target"]).stem) == (evidence == "shared-id")
+    assert raw.read_bytes() == b"raw" and xmp.read_bytes() == b"<edit/>"

@@ -3061,9 +3061,11 @@ def test_rc6_manual_availability_uses_bound_xmp_name(fresh_main, monkeypatch, sy
 @pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["native-zfs"])
 def test_rc5_large_xmp_streams_to_archive_and_registers(fresh_main, monkeypatch, synthetic_dataset):
     from hashlib import file_digest
+    import base64
     import json
 
     from app import legacy_adoption_host as host, legacy_adoption_package as package
+    from app.archive_transfer import verify_event_archive
     from tests.backend.test_legacy_adoption_host import _macos_rename
 
     _, database, _, archive = fresh_main
@@ -3166,6 +3168,16 @@ def test_rc5_large_xmp_streams_to_archive_and_registers(fresh_main, monkeypatch,
     edits = {edit["source"]: edit for edit in manifest["xmp_edits"]}
     assert set(paths).issubset(edits)
     assert len(edits) == 4
+    projections = {}
+    for document in manifest["documents"]:
+        frozen = json.loads(base64.b64decode(document["content"]))
+        for family in frozen["families"]:
+            assert family["total_size_bytes"] == sum(
+                member["size_bytes"] for member in frozen["files"] if member["family_id"] == family["family_id"]
+            )
+        projections.update((member["relative_path"], (member["sha256"], member["size_bytes"]))
+                           for member in frozen["files"])
+    assert all(projections[edit["target"]] == (edit["sha256"], edit["size_bytes"]) for edit in edits.values())
 
     def sha(path):
         with path.open("rb") as stream:
@@ -3190,7 +3202,170 @@ def test_rc5_large_xmp_streams_to_archive_and_registers(fresh_main, monkeypatch,
         count, families = connection.execute(
             "SELECT count(*), count(DISTINCT family_id) FROM files WHERE job_id=?", (catalogue_job_id(plan),),
         ).fetchone()
+        for edit in edits.values():
+            file = connection.execute(
+                """SELECT * FROM files WHERE job_id=? AND current_relative_path=?""",
+                (catalogue_job_id(plan), edit["target"]),
+            ).fetchone()
+            assert file["sha256_original"] == edit["original_sha256"]
+            assert file["source_size_bytes"] == next(m["stamp"][2] for m in manifest["moves"] if m["target"] == edit["target"])
+            assert (file["sha256_current"], file["size_bytes"]) == projections[edit["target"]]
+            inventory = connection.execute(
+                "SELECT sha256, size_bytes FROM event_inventory_files WHERE known_file_id=?", (file["id"],),
+            ).fetchone()
+            proof = connection.execute(
+                """SELECT expected_sha256, expected_size_bytes, actual_sha256, actual_size_bytes
+                   FROM event_archive_verification_files WHERE file_id=?""", (file["id"],),
+            ).fetchone()
+            assert tuple(inventory) == projections[edit["target"]]
+            assert tuple(proof) == projections[edit["target"]] * 2
+            assert (sha(archive / edit["target"]), (archive / edit["target"]).stat().st_size) == projections[edit["target"]]
     assert (count, families) == (8, 3)
+    for document in manifest["documents"]:
+        assert sha(archive / document["path"]) == document["sha256"]
+    verified = verify_event_archive(database, archive, catalogue_job_id(plan), result["events"][0]["id"])
+    assert verified["status"] == "verified" and verified["verified_file_count"] == 8
+
+
+@pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["native-zfs"])
+@pytest.mark.parametrize("started", [False, True], ids=["unstarted", "journaled"])
+def test_rc7_replans_stale_xmp_package_with_35_saved_events(fresh_main, monkeypatch, synthetic_dataset, started):
+    from datetime import date, timedelta
+    from hashlib import sha256
+    import json
+
+    from app import legacy_adoption_catalogue as catalogue
+    from app import legacy_adoption_host as host, legacy_adoption_package as package
+    from tests.backend.test_legacy_adoption_host import _macos_rename
+
+    _, database, registry, archive = fresh_main
+    source = archive.parent / "rc7-source"
+    source.mkdir()
+    sidecar = source / "photo.RAF.xmp"
+    original_xmp = b'<r xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:RawFileName="photo.RAF" flavor="original"/>'
+    sidecar.write_bytes(original_xmp)
+    (source / "photo.RAF").write_bytes(b"camera-original")
+    first = date(2025, 6, 18)
+    days = [(first + timedelta(days=index)).isoformat() for index in range(35)]
+    for index, day in enumerate(days[1:], 1):
+        (source / f"extra-{index}.JPG").write_bytes(day.encode())
+    originals = {path.name: sha256(path.read_bytes()).hexdigest() for path in source.iterdir()}
+    appdata = database.parent / "rc7-appdata"
+    appdata.mkdir()
+    monkeypatch.setattr(package, "appdata_root", lambda: appdata)
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+    if os.environ.get("ADOPTION_ZFS_ROOT"):
+        monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
+    if sys.platform == "darwin":
+        monkeypatch.setattr(host, "mount_id", lambda _fd: 1)
+        monkeypatch.setattr(host, "rename_noreplace", _macos_rename)
+
+    def metadata(descriptors, _cancel):
+        tags = {}
+        for fd in descriptors:
+            content = os.pread(fd, 120, 0)
+            xml = content.startswith(b"<r ")
+            day = days[0] if xml or content == b"camera-original" else content.decode()
+            field = "XMP:XMP-exif:DateTimeOriginal" if xml else "EXIF:ExifIFD:DateTimeOriginal"
+            tags[fd] = {field: day.replace("-", ":") + " 12:00:00"}
+            if xml:
+                tags[fd]["XMP:XMP-crs:RawFileName"] = "photo.RAF"
+        return tags
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    client = _onboard(fresh_main)
+    _adopt(client)
+    endpoint = "/api/legacy-adoption/jobs"
+    job_id = _json(client, "POST", endpoint, status=201, json={"root": "nas"})["id"]
+    job = endpoint + "/" + job_id
+    _json(client, "POST", job + "/scan", status=202)
+    events = [{"name": f"Event {index}", "start_date": day, "end_date": day} for index, day in enumerate(days)]
+    events[0].update(folder_layout={"input_path": "Originals", "layout": {"version": 2, "nodes": [
+        {"id": "originals", "name": "Originals"}, {"id": "extra", "name": "Extra"},
+    ]}}, children=[{"name": "Afternoon", "start_datetime": days[0] + "T12:00",
+                    "end_datetime": days[0] + "T14:00"}])
+    revision = _json(client, "PUT", job + "/draft", json={"revision": 0, "events": events})["revision"]
+    freeze = {"revision": revision, "filename_method": "script"}
+    plan = _json(client, "POST", job + "/plan", json=freeze)
+
+    def host_package(candidate):
+        plan_id = {"plan_id": candidate["id"]}
+        probe = _json(client, "POST", job + "/script/probe", json={
+            **plan_id, "appdata": str(appdata), "source": str(source), "archive": str(archive),
+        })
+        folder = Path(probe["host"]["package"])
+        dev, ino = host.inode(folder.stat())
+        args = ["--package", str(folder), "--source", str(source), "--archive", str(archive),
+                "--package-device", str(dev), "--package-inode", str(ino)]
+        assert host.main(["probe", *args, "--sha256", probe["sha256"]]) == 0
+        _json(client, "POST", job + "/confirm", status=202, json={
+            **plan_id, "method": "script", "acknowledged": True, "probe_sha256": probe["sha256"],
+        })
+        _json(client, "GET", job + "/preparation")
+        return folder, args
+
+    inventory_file = catalogue._inventory_file
+
+    def old_inventory_file(connection, event_id, anchor, path, relative, proof, attributes, now):
+        if path.endswith(".xmp"):
+            proof = {"sha256": originals[sidecar.name], "size_bytes": len(original_xmp)}
+        return inventory_file(connection, event_id, anchor, path, relative, proof, attributes, now)
+
+    with monkeypatch.context() as rc6:
+        rc6.setattr(catalogue, "_inventory_file", old_inventory_file)
+        rc6.setattr(package, "stale_xmp_documents", lambda *_: False)
+        _json(client, "POST", job + "/documents")
+        folder, args = host_package(plan)
+        library = resolve_library_context(registry, "main")
+        with package.locked_script(library, job_id, plan["id"]) as (descriptor, script):
+            package.permit(descriptor, script, "apply")
+    command = {"plan_id": plan["id"]}
+    sha = sha256((folder / "manifest.json").read_bytes()).hexdigest()
+    if started:
+        assert host.main(["apply", *args, "--sha256", sha]) == 0
+    before = _json(client, "GET", job)
+    startup = next(handler for handler in main.app.router.on_startup if handler.__name__ == "resume_pending_adoption")
+    startup()
+    assert json.loads((folder / "permission.json").read_bytes()) == {"manifest": sha, "mode": None}
+    current = _json(client, "GET", job + "/script")
+    assert current["stale_documents"] and "command" not in current
+    _json(client, "POST", job + "/script/release", status=409, json=command)
+    _json(client, "POST", job + "/finalize", status=409, json=command)
+    if started:
+        assert not current["can_reopen"]
+        _json(client, "POST", job + "/rollback/start", json=command)
+        _json(client, "POST", job + "/rollback/check", status=409, json=command)
+        protected = next((archive / "2025").iterdir()) / "external.txt"
+        protected.write_bytes(b"external to the plan")
+        assert host.main(["rollback", *args, "--sha256", sha]) == 1
+        assert protected.read_bytes() == b"external to the plan"
+        protected.unlink()
+        assert host.main(["rollback", *args, "--sha256", sha]) == 0
+        assert host.main(["rollback", *args, "--sha256", sha]) == 0
+        assert _json(client, "POST", job + "/rollback/check", json=command) == {"reopened": True}
+    else:
+        assert current["can_reopen"]
+        assert _json(client, "POST", job + "/script/reopen-unstarted", json=command) == {"reopened": True}
+    assert not [path for path in archive.rglob("*") if path != archive / "2025"]
+    assert {path.name: sha256(path.read_bytes()).hexdigest() for path in source.iterdir()} == originals
+    after = _json(client, "GET", job)
+    assert after["state"] == "inventoried" and not after["plan"]
+    assert (after["draft_revision"], after["draft"]) == (before["draft_revision"], before["draft"])
+    assert len(after["draft"]["events"]) == 35
+    replacement = _json(client, "POST", job + "/plan", json=freeze)
+    assert replacement["id"] != plan["id"]
+    _json(client, "POST", job + "/documents")
+    new_folder, _ = host_package(replacement)
+    if started:
+        assert new_folder != folder and (folder / "journal.jsonl").stat().st_size > 0
+        assert json.loads((folder / "permission.json").read_bytes())["mode"] is None
+    assert not _json(client, "GET", job + "/script")["stale_documents"]
+    new_manifest = json.loads((new_folder / "manifest.json").read_bytes())
+    assert len(new_manifest["documents"]) == 35
+    [edit] = new_manifest["xmp_edits"]
+    [raw] = [row for row in new_manifest["moves"] if row["source"] == "photo.RAF"]
+    assert Path(edit["target"]).with_suffix("") == Path(raw["target"]).with_suffix("")
+    _json(client, "POST", job + "/script/release", json={"plan_id": replacement["id"]})
 
 
 def test_rc5_resumes_committed_plan_request_during_server_startup(fresh_main, monkeypatch, synthetic_dataset):

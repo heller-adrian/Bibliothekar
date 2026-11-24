@@ -920,7 +920,7 @@ async function mutate(path, method="POST", body) {
       return result;
     }
     if(checking || path==="/rollback/start")manualSnapshot=null;
-    const target={"/plan":"review","/confirm":"execute","/finalize":"execute","/reopen":"plan","/script/reopen-unstarted":"inventory","/scan":"inventory","/rollback/start":"execute"}[path];
+    const target=result.reopened && path==="/rollback/check" ? "inventory" : {"/plan":"review","/confirm":"execute","/finalize":"execute","/reopen":"plan","/script/reopen-unstarted":"inventory","/scan":"inventory","/rollback/start":"execute"}[path];
     if(target)rememberView(target);
     await refresh();
     if(!checking || !job?.registration_running)report();
@@ -1021,7 +1021,7 @@ function render() {
   else if (!recoveryOnly && !terminal && !job.plan.id && !inventoryStarting && !reviewBusy()) {
     const labels={ready:"Inventur starten",scanning:"Inventur fortsetzen",inventoried:"Inventur erneut starten"};
     buttons.append(action(labels[job.state],async()=>{
-      if(job.state==="inventoried" && !confirm(t("Inventur neu starten? Der bisherige Entwurf wird verworfen. Originaldateien bleiben unverändert.")))return;
+      if(job.state==="inventoried" && !confirm(t("Inventur neu starten? Die gespeicherte Ereignisplanung bleibt erhalten.")))return;
       await startInventory();
     },true));
   }
@@ -2188,8 +2188,9 @@ function renderPlan(host) {
   }
   if (!recoveryOnly && phase==="repair" && !scripted) controls.append(action("Manuelle Schritte fortsetzen",()=>run("/resume")));
   if (phase==="rolling_back" && scripted) {
-    controls.append(action("Befehl für die Skriptrücknahme bereitstellen",()=>run("/rollback/start")),
-      action("Wiederherstellung prüfen und Auftrag beenden",()=>run("/rollback/check"),true));
+    const confirmRollback=action("Wiederherstellung prüfen und Auftrag beenden",()=>run("/rollback/check"),true);
+    confirmRollback.id="script-rollback-check";
+    controls.append(action("Befehl für die Skriptrücknahme bereitstellen",()=>run("/rollback/start")),confirmRollback);
   }
   if (plan.issues) controls.append(action("Prüfprobleme anzeigen",async()=>{
     const issues=await api(jobPath("/issues"));
@@ -2524,6 +2525,9 @@ async function pollScript() {
     const result=await api(jobPath("/script"));
     if (target!==$("script-state")) return;
     const status=result.status;
+    if(result.stale_documents && $("script-rollback-check")){
+      $("script-rollback-check").textContent=t("Wiederherstellung prüfen und zur Inventur zurückkehren");
+    }
     const releasing=scriptReleasing || result.release_running;
     if(!recoveryOnly && recoveryPhases.includes(phase) && result.journal_started!==null)
       showRecovery(result.journal_started);
@@ -2544,6 +2548,10 @@ async function pollScript() {
       }
       nodes.push(progress);
     }
+    if(result.stale_documents && phase!=="rolling_back")nodes.push(line(result.can_reopen
+      ? "Die Ereignisdokumente enthalten veraltete XMP-Nachweise. Hebe die Skriptfreigabe auf und erstelle einen neuen Plan."
+      : "Die Ereignisdokumente enthalten veraltete XMP-Nachweise. Schließe die kontrollierte Wiederherstellung ab, bevor du neu planst."
+    ));
     if (status?.error) nodes.push(line(status.error));
     const readyCommand=(["script_prepared","repair","rolling_back"].includes(phase) &&
       !(status?.state==="completed" && phase!=="repair"))?result.command:null;
@@ -2554,7 +2562,7 @@ async function pollScript() {
       delete target.dataset.command;
       target.replaceChildren();
     }
-    if (!recoveryOnly && (releasing || !result.running) && status?.state!=="completed" &&
+    if (!recoveryOnly && !result.stale_documents && (releasing || !result.running) && status?.state!=="completed" &&
         ["script_prepared","repair"].includes(phase) && !readyCommand) {
       const release=action("Skriptbefehl bereitstellen",async()=>{
         scriptReleasing=true;
@@ -2575,7 +2583,7 @@ async function pollScript() {
       }));
     }
     const finalize=$("script-finalize");
-    if (finalize) finalize.disabled=finishing || result.running || status?.state!=="completed" || status.mode!=="apply";
+    if (finalize) finalize.disabled=Boolean(result.stale_documents) || finishing || result.running || status?.state!=="completed" || status.mode!=="apply";
     if (!$("script-progress")) target.append(slot("script-progress"));
     $("script-progress").classList.add("adoption-stage");
     $("script-progress").replaceChildren(...nodes);

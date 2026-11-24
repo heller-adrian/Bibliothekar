@@ -29,7 +29,8 @@ def private_package(tmp_path, monkeypatch):
     if sys.platform == "darwin":
         monkeypatch.setattr(preparation.host, "mount_id", lambda fd: 1)
     monkeypatch.setattr(preparation, "_package", package)
-    monkeypatch.setattr(preparation, "appdata_root", lambda: tmp_path)
+    monkeypatch.setattr(preparation.package, "_package", package)
+    monkeypatch.setattr(preparation.package, "appdata_root", lambda: tmp_path)
     return SimpleNamespace(library_id="main"), job_id, plan_id, place
 
 

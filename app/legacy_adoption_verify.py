@@ -19,6 +19,44 @@ def _plan(connection, job_id):
     return plan
 
 
+STALE_XMP_DOCUMENTS = ("Die Ereignisdokumente enthalten veraltete XMP-Nachweise. "
+                       "Erzeuge den Plan aus dem gespeicherten Entwurf erneut.")
+
+
+def stale_xmp_documents(connection, plan_id):
+    """Check target proofs against the actual frozen document payloads."""
+    expected = {path: (digest, size) for path, digest, size in connection.execute(
+        """SELECT target_path, current_sha256, current_size_bytes FROM legacy_adoption_moves
+            WHERE plan_id = ? AND current_sha256 IS NOT NULL""", (plan_id,),
+    )}
+    if not expected:
+        return False
+    seen = set()
+    for content, in connection.execute(
+        "SELECT content FROM legacy_adoption_documents WHERE plan_id = ?", (plan_id,),
+    ):
+        try:
+            payload = json.loads(content)
+            sizes = {}
+            affected = set()
+            for entry in payload["files"]:
+                path = entry["relative_path"]
+                family = entry["family_id"]
+                if entry["known_file_id"] is not None:
+                    sizes[family] = sizes.get(family, 0) + entry["size_bytes"]
+                if path in expected:
+                    if path in seen or (entry["sha256"], entry["size_bytes"]) != expected[path]:
+                        return True
+                    seen.add(path)
+                    affected.add(family)
+            totals = {entry["family_id"]: entry["total_size_bytes"] for entry in payload["families"]}
+            if any(family not in totals or totals[family] != sizes[family] for family in affected):
+                return True
+        except (ValueError, TypeError, KeyError):
+            return True
+    return seen != expected.keys()
+
+
 def _entry(root, relative):
     try:
         with relative_parent(root, relative) as (directory, name):
@@ -44,8 +82,9 @@ def _verify_move(source, archive, row, stamp):
             with bound_file(directory, name) as (descriptor, info):
                 if info.st_dev != os.fstat(archive).st_dev:
                     return "unsafe"
-                expected_size = row["current_size_bytes"] or row["size_bytes"]
-                expected_sha256 = row["current_sha256"] or row["sha256"]
+                transformed = row["current_sha256"] is not None
+                expected_size = row["current_size_bytes"] if transformed else row["size_bytes"]
+                expected_sha256 = row["current_sha256"] if transformed else row["sha256"]
                 if info.st_size != expected_size:
                     return "size_mismatch"
                 if bound_sha256(descriptor) != expected_sha256:
@@ -116,6 +155,9 @@ def verify_locked(connection, library, job, plan, *, keep_stamps=False):
         str(event_root_relative(event) / EVENT_DOCUMENT_FILENAME) for event in events
     }:
         issue("", "Die vorbereiteten Ereignisdokumente sind unvollständig.")
+
+    if plan["documents_at"] is not None and stale_xmp_documents(connection, plan_id):
+        issue("", STALE_XMP_DOCUMENTS)
 
     try:
         _catalogue_unchanged(connection, job_id, events)

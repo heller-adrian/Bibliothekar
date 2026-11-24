@@ -32,20 +32,20 @@ def appdata_root():
 
 
 @contextmanager
-def exclusive_preparation_worker(job_id):
+def exclusive_preparation_worker(job_id, plan_id=None):
     """Only one OS process can execute a long hash-bound preparation at once.
 
     Keep this separate from the short package metadata lock, which progress
     checkpoint writers need to acquire while the job is hashing files.
     """
-    with _package(job_id) as package:
+    with _package(package._probe_package(job_id, plan_id) if plan_id else job_id) as descriptor:
         fd = os.open(
             "preparation-worker.lock",
             os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
-            0o600, dir_fd=package,
+            0o600, dir_fd=descriptor,
         )
         try:
-            host.check_child(package, "preparation-worker.lock", fd)
+            host.check_child(descriptor, "preparation-worker.lock", fd)
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise AdoptionError("Der Sperrnachweis zur Vorbereitung ist keine reguläre Datei.")
             try:
@@ -91,9 +91,10 @@ def _write(descriptor, record):
 
 def _record(library, job_id, plan_id):
     appdata = appdata_root()
-    if appdata is None or not (appdata / PACKAGE_ROOT / job_id).is_dir():
+    identifier = package._probe_package(job_id, plan_id)
+    if appdata is None or not (appdata / PACKAGE_ROOT / identifier).is_dir():
         return None
-    with _package(job_id) as descriptor:
+    with _package(identifier) as descriptor:
         record = _read_json(descriptor, _PROGRESS_FILE)
     if record is not None:
         _assert_identity(record, library, job_id, plan_id)
@@ -139,12 +140,13 @@ def _active_worker(package):
         os.close(fd)
 
 
-def preparation_worker_active(job_id):
+def preparation_worker_active(job_id, plan_id=None):
     """Inspect the OS worker lock without creating files or trusting local RAM."""
     appdata = appdata_root()
-    if appdata is None or not (appdata / PACKAGE_ROOT / job_id).is_dir():
+    identifier = package._probe_package(job_id, plan_id) if plan_id else job_id
+    if appdata is None or not (appdata / PACKAGE_ROOT / identifier).is_dir():
         return False
-    with _package(job_id) as descriptor:
+    with _package(identifier) as descriptor:
         return _active_worker(descriptor)
 
 
@@ -161,7 +163,7 @@ def _require_unreleased(descriptor):
 
 def reserve_preparation(library, job_id, plan_id, probe_digest):
     """Durably record an accepted attempt; lock the immutable host package."""
-    with _package(job_id) as descriptor, host.package_lock(descriptor):
+    with _package(package._probe_package(job_id, plan_id)) as descriptor, host.package_lock(descriptor):
         record = _read_json(descriptor, _PROGRESS_FILE)
         if record is not None:
             _assert_identity(record, library, job_id, plan_id)
@@ -182,7 +184,7 @@ def abandon_failed_preparation(library, job_id, plan_id):
     journal and no DB execution (checked by the caller). The immutable draft
     and event definitions are retained.
     """
-    with _package(job_id) as descriptor, host.package_lock(descriptor):
+    with _package(package._probe_package(job_id, plan_id)) as descriptor, host.package_lock(descriptor):
         record = _read_json(descriptor, _PROGRESS_FILE)
         if not record:
             return False
@@ -226,5 +228,5 @@ def record_preparation(library, job_id, plan_id, probe_digest, state, *,
     if descriptor is not None:
         update(descriptor)
     else:
-        with _package(job_id) as package, host.package_lock(package):
-            update(package)
+        with _package(package._probe_package(job_id, plan_id)) as descriptor, host.package_lock(descriptor):
+            update(descriptor)

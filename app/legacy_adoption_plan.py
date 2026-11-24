@@ -593,9 +593,21 @@ def _registered_archive_paths(connection, plan_id, event_id):
     )}
 
 
-def _versioned_members(family, member_name):
+def _versioned_members(family, member_name, *, canonical_script_sidecars=False):
     """Reserve distinct names for sidecars without replacing an edit version."""
     names = [member_name(member["relative_path"]) for member in family]
+    owners = {PurePosixPath(member["relative_path"]).name.casefold(): PurePosixPath(member["relative_path"])
+              for member in family if PurePosixPath(member["relative_path"]).suffix.casefold() in RAW_EXTENSIONS}
+    sidecar_owners = {}
+    for index, member in enumerate(family):
+        if not names[index].casefold().endswith(".xmp"):
+            continue
+        metadata = json.loads(member["metadata_json"] or "{}")
+        hint = (metadata.get("capture_identity") or {}).get("sidecar_raw")
+        if hint in owners:
+            sidecar_owners[index] = owners[hint]
+            if canonical_script_sidecars:
+                names[index] = ".xmp"
     bases = defaultdict(list)
     for index, name in enumerate(names):
         bases[target_key(name)].append(index)
@@ -607,16 +619,10 @@ def _versioned_members(family, member_name):
             raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + family[indexes[0]]["relative_path"])
         # Keep the sidecar beside the matching master as the default version.
         def order(index):
-            member = family[index]
-            path = PurePosixPath(member["relative_path"])
-            metadata = json.loads(member["metadata_json"] or "{}")
-            hint = (metadata.get("capture_identity") or {}).get("sidecar_raw")
-            colocated = any(
-                PurePosixPath(item["relative_path"]).parent == path.parent
-                and PurePosixPath(item["relative_path"]).name.casefold() == hint
-                for item in family
-            )
-            return not colocated, path.as_posix()
+            path = PurePosixPath(family[index]["relative_path"])
+            owner = sidecar_owners.get(index)
+            return (owner is None, owner is not None and owner.suffix.casefold() == ".dng",
+                    owner is None or owner.parent != path.parent, path.as_posix())
 
         for index in sorted(indexes, key=order)[1:]:
             name = names[index]
@@ -878,7 +884,7 @@ def _manual_linked_targets(folder, key, family, duplicate_index, archive_entry, 
 
 def _automatic_family_targets(folder, key, family, capture, camera, same_second, names, stems, used,
                               *, duplicate_index=None, number_all=False, burst_ordinal=None):
-    endings = _versioned_members(family, family_member_ending)
+    endings = _versioned_members(family, family_member_ending, canonical_script_sidecars=True)
     # Reuse exactly the same real-EXIF-millisecond Burst implementation as the
     # normal folder import. Neither invented subseconds nor directory patterns.
     base, index, _ = capture_stem(capture, camera, stems, same_second=same_second)
@@ -906,6 +912,72 @@ def _automatic_family_targets(folder, key, family, capture, camera, same_second,
                 validate_target(path)
             return targets
         index += 1
+
+
+def _unbound_sidecar_issues(connection, plan_id, job_id, selections, exclusions):
+    """Route nearby same-stem candidates to review without guessing family identity."""
+    rows = connection.execute(
+        """SELECT i.relative_path, i.family_key, i.sha256, i.metadata_json, m.target_path
+             FROM legacy_adoption_inventory i
+             LEFT JOIN legacy_adoption_moves m ON m.plan_id = ? AND m.relative_path = i.relative_path
+            WHERE i.job_id = ? AND i.disposition = 'candidate' AND i.sha256 IS NOT NULL
+              AND json_extract(i.metadata_json, '$.media_type') IN ('raw', 'xmp')""",
+        (plan_id, job_id),
+    )
+    nearby, adjacent, sidecars = defaultdict(list), defaultdict(list), []
+    for row in rows:
+        source = PurePosixPath(row["relative_path"])
+        identity = json.loads(row["metadata_json"]).get("capture_identity") or {}
+        if source.suffix.casefold() in RAW_EXTENSIONS:
+            stem = target_key(source.stem)
+            candidate = (source, identity, row)
+            nearby[source.parent, stem].append(candidate)
+            adjacent[source.parent.parent, stem].append(candidate)
+        elif source.suffix.casefold() == ".xmp" and not identity.get("sidecar_raw"):
+            sidecars.append((source, identity, row))
+
+    issues, protected = {}, set()
+    for source, identity, row in sidecars:
+        if str(source) in exclusions:
+            continue
+        base = source.with_suffix("")
+        ending = family_member_ending(source).casefold()
+        if ending != ".xmp" and base.suffix.casefold() not in RAW_EXTENSIONS:
+            continue  # The sidecar explicitly names a different media type.
+        stem = target_key(base.stem if ending != ".xmp" else base.name)
+        candidates = {candidate[0]: candidate for candidate in nearby[source.parent, stem]}
+        if source.parent.parent != PurePosixPath("."):
+            candidates.update((candidate[0], candidate) for candidate in adjacent[source.parent.parent, stem])
+        unresolved = []
+        for master, other, partner in candidates.values():
+            if partner["family_key"] == row["family_key"] or str(master) in exclusions:
+                continue
+            if ending != ".xmp" and master.name.casefold() != base.name.casefold():
+                continue
+            if not row["target_path"] and not partner["target_path"]:
+                continue
+            if any(identity.get(tag) and other.get(tag) and identity[tag] != other[tag] for tag in ("id", "serial")):
+                continue
+            unresolved.append(master.as_posix())
+            protected.add(partner["family_key"])
+        if unresolved:
+            issues[str(source)] = {
+                "path": str(source), "sha256": row["sha256"], "identity_version": IDENTITY_VERSION,
+                "reason": "Möglicher RAW-Partner, aber keine eindeutig belegte Aufnahmezuordnung: "
+                          + ", ".join(sorted(set(unresolved))),
+            }
+            protected.add(row["family_key"])
+
+    for key, members, *_ in selections:
+        if key not in protected:
+            continue
+        for member in members:
+            path = member["relative_path"]
+            issues.setdefault(path, {
+                "path": path, "sha256": member["sha256"], "identity_version": IDENTITY_VERSION,
+                "reason": "Datei bleibt mit einem nicht sicher übernehmbaren XMP an der Quelle.",
+            })
+    return issues.values()
 
 
 def _retain_xmp_companions(connection, plan_id, job_id, issues, anchors, selections, exclusions):
@@ -1159,6 +1231,11 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             _plan_directories(connection, plan_id, path, layout, archive_entry)
     _retain_xmp_companions(connection, plan_id, job["id"], file_issues, xmp_anchors, new_selections,
                            draft.get("file_exclusions", {}))
+    if filename_method == "script":
+        reported = {item["path"] for item in file_issues}
+        file_issues.extend(item for item in _unbound_sidecar_issues(
+            connection, plan_id, job["id"], new_selections, draft.get("file_exclusions") or {},
+        ) if item["path"] not in reported)
     if file_issues:
         raise PlanFileIssues(file_issues)
     _check_planned_collisions(connection, plan_id)

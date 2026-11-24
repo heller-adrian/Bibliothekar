@@ -83,7 +83,7 @@ def verify_execution(library, job_id, plan_id):
     return plan_status(library, job_id)
 
 
-def complete_rollback(library, job_id, plan_id, *, before_commit=None):
+def complete_rollback(library, job_id, plan_id, *, before_commit=None, keep_draft=False):
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         job = _job(connection, library.library_id, job_id)
@@ -97,6 +97,9 @@ def complete_rollback(library, job_id, plan_id, *, before_commit=None):
             assert_directories_restored(connection, library, job, plan)
         if before_commit:
             before_commit()
+        if keep_draft:
+            connection.execute("DELETE FROM legacy_adoption_plans WHERE id = ?", (plan_id,))
+            return {"reopened": True}
         set_phase(connection, plan_id, "rolled_back")
         connection.execute("UPDATE legacy_adoption_jobs SET state = 'discarded' WHERE id = ?", (job_id,))
     return plan_status(library, job_id)

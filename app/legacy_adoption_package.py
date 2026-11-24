@@ -14,11 +14,12 @@ from app import legacy_adoption_discover as discovery, legacy_adoption_host as h
 from app.appdata import root as appdata_root
 from app.large_xmp import large_xmp_proof
 from app.database import database_connection
+from app.event_inventory import event_root_relative
 from app.legacy_adoption_dataset import DatasetError, mount_id, mount_table
 from app.legacy_adoption_inventory import _job
 from app.legacy_adoption_paths import AdoptionError, bound_file, bound_sha256, relative_parent, file_identity
 from app.legacy_adoption_plan import _roots
-from app.legacy_adoption_verify import _plan, assert_original_layout, move_rows
+from app.legacy_adoption_verify import STALE_XMP_DOCUMENTS, _plan, assert_original_layout, move_rows, stale_xmp_documents
 from app.legacy_adoption_xmp_plan import MAX_XMP_BYTES
 from app.xmp_raw_filename import rewrite_raw_filename, XmpReferenceError
 from app.private_storage_security import qualified
@@ -46,6 +47,13 @@ _RC1_RUNNER_DIGESTS = {
 _RC4_RUNNER_DIGESTS = {
     "legacy_adoption_host.py": "a8fec3095e5b7fb2170e7bb0f7124828de6119283572ae61d2a03d0f2eb3192e",
     DISCOVERY_FILE: "a72348c1cf0aeec9ccfd45b4f29b58571d9edaba6536d348a050c0c77fd4e3d5",
+}
+
+
+# RC5 and RC6 shipped identical host and bootstrap bytes.
+_RC6_RUNNER_DIGESTS = {
+    "legacy_adoption_host.py": "dbe6dc44ae9586f1648605d0c6992397c0849489a8835aefd299912e84117821",
+    DISCOVERY_FILE: "f7ff1972d33449f9e4a68f45516329f887ea0b5c77f1623307f6552942247516",
 }
 
 
@@ -134,7 +142,13 @@ def _command(mode, descriptor, paths, digest):
 
 def _probe_package(job_id, plan_id):
     base = appdata_root()
-    if base is not None and (base / PACKAGE_ROOT / job_id).exists():
+    if base is None or (base / PACKAGE_ROOT / plan_id).exists():
+        return plan_id
+    if (base / PACKAGE_ROOT / job_id).exists():
+        with _package(job_id) as descriptor:
+            probe = _read_json(descriptor, "probe.json")
+            if probe and probe["plan_id"] != plan_id and script_journal_started(descriptor):
+                return plan_id
         return job_id
     return plan_id  # Packages prepared before the job-based layout.
 
@@ -200,7 +214,6 @@ def _probe_result(descriptor, probe, digest):
 
 def prepare_probe(library, job_id, plan_id, host_appdata=None, host_source=None, host_archive=None):
     supplied = (host_appdata, host_source, host_archive)
-    paths = _host_paths(job_id, *supplied) if any(value is not None for value in supplied) else None
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN")
         job = _job(connection, library.library_id, job_id)
@@ -215,9 +228,18 @@ def prepare_probe(library, job_id, plan_id, host_appdata=None, host_source=None,
             descriptor = stack.enter_context(_package(job_id, create=True))
             _initialize_files(descriptor)
             stack.enter_context(host.package_lock(descriptor))
+            identifier = job_id
+            if script_journal_started(descriptor):
+                # Keep the revoked package and its history. A fresh plan
+                # must never reuse journal entries from a rolled-back plan.
+                identifier = plan_id
+                descriptor = stack.enter_context(_package(identifier, create=True))
+                _initialize_files(descriptor)
+                stack.enter_context(host.package_lock(descriptor))
+            paths = _host_paths(identifier, *supplied) if any(value is not None for value in supplied) else None
             for name in RUNNER_FILES:
                 host.write_atomic(descriptor, name, Path(__file__).with_name(name).read_bytes())
-            package_path = appdata_root() / PACKAGE_ROOT / job_id
+            package_path = appdata_root() / PACKAGE_ROOT / identifier
             host.write_atomic(descriptor, DISCOVERY_FILE, _discovery_script())
             probe = {
                 "job_id": job_id, "plan_id": plan_id, "library_id": library.library_id, "host": paths,
@@ -298,6 +320,8 @@ def _bound_proof(root, path, size, expected, *, inventory_identity=None, xmp_nam
 
 
 def prepare_manifest(connection, library, job, plan, probe_digest, *, progress=None):
+    if stale_xmp_documents(connection, plan["id"]):
+        raise AdoptionError(STALE_XMP_DOCUMENTS)
     plan_id = plan["id"]
     with ExitStack() as stack:
         descriptor = stack.enter_context(_package(_probe_package(job["id"], plan_id)))
@@ -456,7 +480,7 @@ def _runner_differences(descriptor):
         previous = host.read_bytes(descriptor, name)
         if previous != current:
             recognized = {_RC17_RUNNER_DIGESTS[name]}
-            for historical in (_RC1_RUNNER_DIGESTS, _RC4_RUNNER_DIGESTS):
+            for historical in (_RC1_RUNNER_DIGESTS, _RC4_RUNNER_DIGESTS, _RC6_RUNNER_DIGESTS):
                 if name in historical:
                     recognized.add(historical[name])
             if _sha(previous) not in recognized:
@@ -534,7 +558,21 @@ def assert_unstarted_release_current(library, job_id, plan_id, descriptor, scrip
                     check_proof(source, path, proof, proof["sha256"])
 
 
-def permit(descriptor, script, mode):
+def rollback_directory_scope(library, plan):
+    # New event roots were required to be absent when the plan was frozen.
+    # Shared year folders and pre-existing event trees are never candidates.
+    roots = {event_root_relative(event) for event in plan["events"] if not event["existing"]}
+    with database_connection(library.database_path) as connection:
+        paths = connection.execute(
+            "SELECT relative_path FROM legacy_adoption_directories WHERE plan_id = ? ORDER BY relative_path",
+            (plan["id"],),
+        )
+        return [path for path, in paths if not roots.isdisjoint(
+            (PurePosixPath(path), *PurePosixPath(path).parents)
+        )]
+
+
+def permit(descriptor, script, mode, *, rollback_directories=None):
     digest = script["manifest_sha256"]
     if mode is not None:
         if _sha(host.read_bytes(descriptor, "manifest.json")) != digest:
@@ -543,7 +581,10 @@ def permit(descriptor, script, mode):
         # commands both reject an interrupted refresh until it is completed.
         for name, data in _runner_differences(descriptor).items():
             host.write_atomic(descriptor, name, data)
-    _put_json(descriptor, "permission.json", {"manifest": digest, "mode": mode})
+    permission = {"manifest": digest, "mode": mode}
+    if mode == "rollback" and rollback_directories is not None:
+        permission["rollback_directories"] = rollback_directories
+    _put_json(descriptor, "permission.json", permission)
     return _command(mode, descriptor, json.loads(script["host_json"]), digest) if mode else None
 
 
@@ -552,6 +593,12 @@ def script_status(descriptor, script):
     if status and status.get("manifest") != script["manifest_sha256"]:
         raise AdoptionError("Das externe Skript meldet einen anderen Verschiebeplan.")
     return status
+
+
+def script_documents_stale(library, plan_id):
+    with database_connection(library.database_path) as connection:
+        connection.execute("BEGIN")
+        return stale_xmp_documents(connection, plan_id)
 
 
 def script_details(library, job_id, plan_id):
@@ -568,10 +615,13 @@ def script_details(library, job_id, plan_id):
             running = True
         result = {"status": status, "running": running, "host": json.loads(script["host_json"]),
                   "journal_started": journal_started,
+                  "stale_documents": script_documents_stale(library, plan_id),
                   "can_reopen": script["phase"] == "script_prepared" and journal_started is False}
         allowed = _read_json(descriptor, "permission.json")
         if (allowed and allowed.get("manifest") == script["manifest_sha256"]
-                and allowed.get("mode") in {"apply", "rollback"} and not _runner_differences(descriptor)):
+                and (allowed.get("mode") == "rollback"
+                     or allowed.get("mode") == "apply" and not result["stale_documents"])
+                and not _runner_differences(descriptor)):
             result["command"] = _command(allowed["mode"], descriptor, result["host"], script["manifest_sha256"])
         return result
 
