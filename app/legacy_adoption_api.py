@@ -7,9 +7,10 @@ import os
 from pathlib import Path
 import sqlite3
 from threading import Event, Lock
+from uuid import uuid4
 from typing import Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
@@ -59,7 +60,7 @@ from app.legacy_adoption_review import (
 from app.legacy_adoption_review_cancel import request as request_review_cancel
 from app.legacy_adoption_review_metadata import apply_metadata, metadata_sources, stage_metadata
 from app.legacy_adoption_review_progress import batch_details
-from app.legacy_adoption_verify import STALE_XMP_DOCUMENTS, plan_issues, reopen_plan
+from app.legacy_adoption_verify import editable_plan, STALE_XMP_DOCUMENTS, plan_issues, reopen_plan
 from app.library_registry import LibraryRegistryError, list_libraries
 from app.operation_health import read_session
 from app.root_operations import _lock, RootOperationBusy, RootOperationError, admission
@@ -160,6 +161,12 @@ class PlanCommand(BaseModel):
 
 class RollbackCheck(PlanCommand):
     keep_draft: StrictBool = False
+    background: StrictBool = False
+
+
+class ReopenPlan(BaseModel):
+    plan_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    background: StrictBool = False
 
 
 class FinishPlan(PlanCommand):
@@ -235,13 +242,27 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     from app.legacy_adoption_ui import setup_choice_html, wizard_html
     from app.initial_library_preferences_ui import preferences_html
 
-    router = APIRouter(prefix="/api/legacy-adoption", tags=["Bestandsübernahme"])
+    def require_reopen_idle(request: Request):
+        job_id = request.path_params.get("job_id")
+        if (not job_id or request.method in {"GET", "HEAD", "OPTIONS"}
+                or request.url.path.endswith(("/reopen", "/rollback/check", "/draft/check", "/draft/structure"))):
+            return
+        library = context()
+        with _errors(), database_connection(library.database_path) as connection:
+            job = _job(connection, library.library_id, job_id)
+            state = json.loads(job["draft_json"]).get("reopen_attempt", {}).get("state")
+            if state in {"queued", "running"}:
+                raise AdoptionError("Der Verschiebeplan wird bereits zurückgenommen.")
+
+    router = APIRouter(prefix="/api/legacy-adoption", tags=["Bestandsübernahme"],
+                       dependencies=[Depends(require_reopen_idle)])
     running = {}
     review_running = set()
     metadata_running = set()
     preparing = set()
     planning = set()
     releasing = set()
+    reopening = set()
     registering = set()
     running_lock = Lock()
 
@@ -577,6 +598,9 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             with database_connection(library.database_path) as connection:
                 item = _job(connection, library.library_id, job_id)
                 result["draft"] = json.loads(item["draft_json"])
+                result["reopen"] = result["draft"].pop("reopen_attempt", {})
+                result["inventory_changes"] = result["draft"].pop("inventory_changes", {})
+                result["draft"].pop("scan_family_proofs", None)
                 attempt = result["draft"].pop("planning_attempt", {})
                 issues = attempt.pop("issues", ())
                 if issues:
@@ -595,10 +619,13 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                                                       and matching_update_required(connection, job_id))
                 result["excluded_files"] = file_issue_summary(result["draft"].pop("file_exclusions", {}).values())
                 result["draft_revision"] = item["draft_revision"]
+                result["scan_generation"] = item["scan_generation"]
                 result["layout_default"] = get_global_default(connection)
                 result["subevent_prefix_enabled"] = naming_from_library_settings(library.settings)["subevent_prefix_enabled"]
                 result["review_count"] = review_count(connection, job_id, result["plan"].get("id"))
-            if attempt.get("state") == "completed" and not result["plan"]:
+            reopen = result["reopen"]
+            if ((attempt.get("state") == "completed" and not result["plan"])
+                    or (reopen.get("state") == "completed" and result["plan"].get("id") == reopen["plan_id"])):
                 result["plan"] = plan_status(library, job_id)
             with running_lock:
                 result["scan_running"] = key(library, job_id) in running
@@ -952,7 +979,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
     @router.post("/jobs/{job_id}/documents")
     def documents(job_id: str):
         library = context()
-        with _errors(), admission(library):
+        with _errors(), adoption_execution_access(registry_path()), admission(library):
             require_preparation_idle(library, job_id)
             return prepare_documents(library, job_id)
 
@@ -1248,25 +1275,25 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 change_phase(library, job_id, command.plan_id, "rolling_back", from_phases=phases)
             return plan_status(library, job_id)
 
+    def check_rollback(library, job_id, plan_id, *, keep_draft=False, finish=None):
+        execution = plan_status(library, job_id).get("execution")
+        if execution and execution["method"] == "script":
+            with locked_script(library, job_id, plan_id) as (descriptor, script):
+                if script["phase"] != "rolling_back":
+                    raise AdoptionError("Starte zuerst den vorgesehenen Wiederherstellungsweg.")
+                keep_draft = keep_draft or script_documents_stale(library, plan_id)
+                if keep_draft and script_journal_started(descriptor):
+                    status = script_status(descriptor, script)
+                    if not status or (status.get("state"), status.get("mode")) != ("rolled_back", "rollback"):
+                        raise AdoptionError("Schließe zuerst die kontrollierte Skriptrücknahme ab.")
+                return complete_rollback(library, job_id, plan_id, keep_draft=keep_draft, finish=finish,
+                                         before_commit=lambda: permit(descriptor, script, None))
+        return complete_rollback(library, job_id, plan_id, finish=finish)
+
     @router.post("/jobs/{job_id}/rollback/check")
-    def rollback_check(job_id: str, command: RollbackCheck):
-        library = context()
-        with _errors(), adoption_execution_access(registry_path()), admission(library):
-            execution = plan_status(library, job_id).get("execution")
-            if execution and execution["method"] == "script":
-                with locked_script(library, job_id, command.plan_id) as (descriptor, script):
-                    if script["phase"] != "rolling_back":
-                        raise AdoptionError("Starte zuerst den vorgesehenen Wiederherstellungsweg.")
-                    keep_draft = command.keep_draft or script_documents_stale(library, command.plan_id)
-                    if keep_draft and script_journal_started(descriptor):
-                        status = script_status(descriptor, script)
-                        if not status or (status.get("state"), status.get("mode")) != ("rolled_back", "rollback"):
-                            raise AdoptionError("Schließe zuerst die kontrollierte Skriptrücknahme ab.")
-                    return complete_rollback(
-                        library, job_id, command.plan_id, before_commit=lambda: permit(descriptor, script, None),
-                        keep_draft=keep_draft,
-                    )
-            return complete_rollback(library, job_id, command.plan_id)
+    def rollback_check(job_id: str, command: RollbackCheck, tasks: BackgroundTasks):
+        with _errors():
+            return start_reopen(context(), job_id, command, tasks, kind="rollback")
 
     def run_finalize(library, job_id, plan_id):
         registry = registry_path()
@@ -1314,14 +1341,120 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
         schedule_finalization(library, job_id, command.plan_id, tasks)
         return JSONResponse({"accepted": True}, status_code=202)
 
+    def store_reopen(connection, job, attempt):
+        draft = json.loads(job["draft_json"])
+        draft["reopen_attempt"] = attempt
+        connection.execute("UPDATE legacy_adoption_jobs SET draft_json=? WHERE id=?",
+                           (json.dumps(draft), job["id"]))
+
+    def run_reopen(library, job_id, attempt, background):
+        operation = key(library, job_id)
+        registry = registry_path()
+        lock = registry.with_name(registry.name + ".adoption-return.lock")
+        try:
+            with _lock(lock, exclusive=True):
+                try:
+                    with adoption_execution_access(registry, wait_seconds=2), admission(library):
+                        with database_connection(library.database_path) as connection:
+                            connection.execute("BEGIN IMMEDIATE")
+                            job = _job(connection, library.library_id, job_id)
+                            saved = json.loads(job["draft_json"]).get("reopen_attempt", {})
+                            if saved.get("id") != attempt["id"] or saved.get("state") not in {"queued", "running"}:
+                                return
+                            store_reopen(connection, job, {**attempt, "state": "running"})
+                        plan_id = attempt["plan_id"]
+                        if attempt.get("kind") == "rollback":
+                            def rolled_back(connection, job, keep_draft):
+                                store_reopen(connection, job, {**attempt, "state": "completed",
+                                                               "step": "inventory" if keep_draft else "setup"})
+
+                            return check_rollback(library, job_id, plan_id, keep_draft=attempt["keep_draft"],
+                                                  finish=rolled_back)
+                        require_review_idle(library, job_id)
+                        require_preparation_idle(library, job_id)
+
+                        def completed(connection, job, changed):
+                            store_reopen(connection, job, {**attempt, "state": "completed",
+                                                           "changed_sources": changed,
+                                                           "step": "inventory" if changed else "plan"})
+
+                        reopen_plan(library, job_id, expected_id=plan_id, finish=completed)
+                        return {"reopened": True}
+                except Exception as error:
+                    with database_connection(library.database_path) as connection:
+                        connection.execute("BEGIN IMMEDIATE")
+                        job = _job(connection, library.library_id, job_id)
+                        saved = json.loads(job["draft_json"]).get("reopen_attempt", {})
+                        if saved.get("id") == attempt["id"]:
+                            store_reopen(connection, job, {**attempt, "state": "failed", "message": str(error)})
+                    if not background:
+                        raise
+                    logging.getLogger(__name__).info("Legacy adoption return %s: %s", job_id, error)
+        except RootOperationBusy:
+            if not background:
+                raise
+        finally:
+            with running_lock:
+                reopening.discard(operation)
+
+    def schedule_reopen(library, job_id, attempt, tasks=None):
+        with running_lock:
+            operation = key(library, job_id)
+            if operation in reopening:
+                return
+            reopening.add(operation)
+        dispatch("reopen", run_reopen, library, job_id, attempt, True, tasks=tasks)
+
+    def start_reopen(library, job_id, command, tasks, *, kind="draft"):
+        keep_draft = getattr(command, "keep_draft", False)
+        with database_connection(library.database_path) as connection:
+            job = _job(connection, library.library_id, job_id)
+            previous = json.loads(job["draft_json"]).get("reopen_attempt", {})
+        previous_state = previous.get("state")
+        same_request = (command.plan_id, kind, keep_draft) == (
+            previous.get("plan_id"), previous.get("kind", "draft"), previous.get("keep_draft", False),
+        )
+        if previous_state in {"queued", "running"}:
+            if not same_request:
+                raise AdoptionError("Der Verschiebeplan wird bereits zurückgenommen.")
+            schedule_reopen(library, job_id, previous, tasks)
+            return JSONResponse({"accepted": True}, status_code=202)
+        if previous_state == "completed" and same_request and previous["step"] != "setup":
+            return {"reopened": True}
+        with adoption_execution_access(registry_path()), admission(library):
+            if kind == "draft":
+                require_review_idle(library, job_id)
+                require_preparation_idle(library, job_id)
+            with database_connection(library.database_path) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                job = _job(connection, library.library_id, job_id)
+                if json.loads(job["draft_json"]).get("reopen_attempt", {}) != previous:
+                    raise AdoptionError("Der Verschiebeplan wird bereits zurückgenommen.")
+                if kind == "draft":
+                    plan_id = editable_plan(connection, job_id)["id"]
+                else:
+                    plan = connection.execute(
+                        """SELECT plan.id FROM legacy_adoption_plans plan
+                             JOIN legacy_adoption_execution execution ON execution.plan_id=plan.id
+                            WHERE plan.job_id=? AND execution.phase='rolling_back'""", (job_id,),
+                    ).fetchone()
+                    if plan is None:
+                        raise AdoptionError("Starte zuerst den vorgesehenen Wiederherstellungsweg.")
+                    plan_id = plan["id"]
+                if command.plan_id is not None and command.plan_id != plan_id:
+                    raise AdoptionError("Der geprüfte Verschiebeplan wurde ersetzt.")
+                attempt = {"id": uuid4().hex, "plan_id": plan_id, "state": "queued",
+                           "kind": kind, "keep_draft": keep_draft}
+                store_reopen(connection, job, attempt)
+        if command.background:
+            schedule_reopen(library, job_id, attempt, tasks)
+            return JSONResponse({"accepted": True}, status_code=202)
+        return run_reopen(library, job_id, attempt, False)
+
     @router.post("/jobs/{job_id}/reopen")
-    def reopen(job_id: str):
-        library = context()
-        with _errors(), admission(library):
-            require_review_idle(library, job_id)
-            require_preparation_idle(library, job_id)
-            reopen_plan(library, job_id)
-        return {"reopened": True}
+    def reopen(job_id: str, tasks: BackgroundTasks, command: ReopenPlan | None = None):
+        with _errors():
+            return start_reopen(context(), job_id, command or ReopenPlan(), tasks)
 
     @router.post("/jobs/{job_id}/script/reopen-unstarted")
     def reopen_unstarted_script(job_id: str, command: PlanCommand, request: Request):
@@ -1379,6 +1512,12 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 schedule_finalization(library, job_id, plan_id)
                 return
             if plan_id:
+                with database_connection(library.database_path) as connection:
+                    job = _job(connection, library.library_id, job_id)
+                    reopen = json.loads(job["draft_json"]).get("reopen_attempt", {})
+                if reopen.get("state") in {"queued", "running"} and reopen.get("plan_id") == plan_id:
+                    schedule_reopen(library, job_id, reopen)
+                    return
                 if not reservation["phase"] and (digest := saved_preparation_proof(library, job_id, plan_id)):
                     with running_lock:
                         if operation not in preparing:

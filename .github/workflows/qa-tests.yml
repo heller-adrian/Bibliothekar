@@ -131,7 +131,7 @@ jobs:
           image="bibliothekar-qa:$QA_SOURCE"
           docker build --label "org.opencontainers.image.revision=$QA_SOURCE" --tag "$image" .
           smoke_args=("$image" "$QA_SOURCE")
-          if [[ "$GITHUB_REF_NAME" == patch/1.1.2-rc2-xmp-family-adoption || "$GITHUB_REF_NAME" == patch/1.1.2-rc3-adoption-copies || "$GITHUB_REF_NAME" == patch/1.1.2-rc4-adoption-xmp || "$GITHUB_REF_NAME" == patch/1.1.2-rc5-adoption-recovery || "$GITHUB_REF_NAME" == patch/1.1.2-rc6-adoption-confirmation || "$GITHUB_REF_NAME" == patch/1.1.2-rc7-adoption-archive || "$GITHUB_REF_NAME" == patch/1.1.2-rc8-adoption-partners ]]; then
+          if [[ "$GITHUB_REF_NAME" == patch/1.1.2-rc2-xmp-family-adoption || "$GITHUB_REF_NAME" == patch/1.1.2-rc3-adoption-copies || "$GITHUB_REF_NAME" == patch/1.1.2-rc4-adoption-xmp || "$GITHUB_REF_NAME" == patch/1.1.2-rc5-adoption-recovery || "$GITHUB_REF_NAME" == patch/1.1.2-rc6-adoption-confirmation || "$GITHUB_REF_NAME" == patch/1.1.2-rc7-adoption-archive || "$GITHUB_REF_NAME" == patch/1.1.2-rc8-adoption-partners || "$GITHUB_REF_NAME" == patch/1.1.2-rc9-adoption-navigation ]]; then
             smoke_args+=(ghcr.io/heller-adrian/bibliothekar@sha256:c9c2077374643d0598dbadbf976f26da76a9958343e6d39c221efb411b38ac36 rc112)
           fi
           bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh "${smoke_args[@]}"
@@ -211,6 +211,9 @@ jobs:
               "test_rc7_replans_stale_xmp_package_with_35_saved_events[unstarted-native-zfs]",
               "test_rc7_replans_stale_xmp_package_with_35_saved_events[journaled-native-zfs]",
               "test_rc8_upgrade_preserves_rc7_draft_and_xmp_move_proofs",
+              "test_rc9_reopen_is_durable_and_does_not_hold_sqlite_writer[native-zfs]",
+              "test_rc9_reopen_invalidates_changed_input_but_keeps_draft",
+              "test_script_release_rechecks_bound_archived_media_without_rehashing",
               "test_rc8_confirmed_partnerships_with_saved_events[rollback-native-zfs]",
               "test_rc8_confirmed_partnerships_with_saved_events[register-native-zfs]",
               "test_rc7_split_sidecar_requires_evidence_for_matching_target[absent]",

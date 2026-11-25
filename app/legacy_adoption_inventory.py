@@ -14,6 +14,7 @@ from app import legacy_adoption_dataset as dataset
 from app.database import catalogue_contains_sha256, database_connection
 from app.legacy_adoption_families import join_split_families
 from app.media_family_identity import IDENTITY_VERSION, _xmp_original_capture
+from app.legacy_adoption_partners import reconcile_after_scan
 from app.legacy_adoption_paths import (
     AdoptionError, absolute_root, bound_child_directory, bound_directory,
     bound_file, bound_sha256, directory_identity, file_identity,
@@ -432,6 +433,18 @@ def _classify_inventory(connection, registry, job_id, cancel):
         )
 
 
+def _draft_family_proofs(connection, job_id, draft):
+    keys = set(draft.get("capture_overrides", {})) | set(draft.get("exclude_families", ())) | set(draft.get("target_stems", {}))
+    if not keys:
+        return {}
+    rows = connection.execute(
+        """SELECT family_key, relative_path, identity, sha256, disposition FROM legacy_adoption_inventory
+            WHERE job_id=? AND family_key IN (SELECT value FROM json_each(?))
+            ORDER BY family_key, relative_path""", (job_id, json.dumps(sorted(keys))),
+    )
+    return {key: inventory_fingerprint(group) for key, group in groupby(rows, key=lambda row: row["family_key"])}
+
+
 def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path | None = None,
                    cancellation_callback=None) -> dict:
     def cancel():
@@ -448,11 +461,14 @@ def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path 
         if Path(job["archive_root"]) != library.archive_root:
             raise AdoptionError("Die Archivwurzel der Zielbibliothek hat sich geändert.")
         generation = job["scan_generation"] + 1
+        draft = json.loads(job["draft_json"])
+        if "scan_family_proofs" not in draft:
+            draft["scan_family_proofs"] = _draft_family_proofs(connection, job_id, draft)
         connection.execute(
             """UPDATE legacy_adoption_jobs
-                  SET scan_generation = ?, scan_error = NULL, state = 'scanning'
+                  SET scan_generation = ?, scan_error = NULL, state = 'scanning', draft_json=?
                 WHERE id = ?""",
-            (generation, job_id),
+            (generation, json.dumps(draft), job_id),
         )
 
     def check_current(connection):
@@ -567,10 +583,27 @@ def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path 
             for key in applied.keys() - unchanged:
                 del applied[key]
                 draft["capture_overrides"].pop(key, None)
+            former = draft.pop("scan_family_proofs", {})
+            current = _draft_family_proofs(connection, job_id, draft)
+            invalid = {key for key in former.keys() | current.keys() if former.get(key) != current.get(key)}
+            for field in ("capture_overrides", "target_stems"):
+                for key in invalid:
+                    draft.get(field, {}).pop(key, None)
+            if invalid:
+                draft["exclude_families"] = [key for key in draft.get("exclude_families", ()) if key not in invalid]
+                for key in invalid:
+                    pending.pop(key, None)
+                    applied.pop(key, None)
+            lost_partners, relocated = reconcile_after_scan(connection, job_id, draft)
+            lost_exclusions = previous_exclusions - len(draft.get("file_exclusions", {}))
+            lost_metadata = decisions - len(pending) - len(applied)
+            changes = {"partners": lost_partners, "relocated_partners": relocated,
+                       "family_decisions": len(invalid), "metadata_decisions": lost_metadata,
+                       "file_exclusions": lost_exclusions}
+            draft["inventory_changes"] = changes
             connection.execute(
                 "UPDATE legacy_adoption_jobs SET state = 'inventoried', draft_json = ?, draft_revision = draft_revision + ? WHERE id = ?",
-                (json.dumps(draft), int(len(pending) + len(applied) != decisions
-                                          or len(draft.get("file_exclusions", {})) != previous_exclusions), job_id),
+                (json.dumps(draft), int(any(changes.values())), job_id),
             )
     except Exception as error:
         with database_connection(library.database_path) as connection:

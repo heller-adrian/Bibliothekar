@@ -376,11 +376,16 @@ function rememberView(step,push=false){
 async function goStep(step){
   requireSaved();
   if(reviewMetadataSaving)return;
-  if(step==="plan" && job?.plan.id && !job.plan.execution)await mutate("/reopen");
+  if(step==="plan" && job?.plan.id && !job.plan.execution){
+    await api(jobPath("/reopen"),"POST",{plan_id:job.plan.id,background:true});
+    await refresh();
+    return;
+  }
   if(!allowedSteps().includes(step))return;
   rememberView(step,true);await refresh();
   window.scrollTo({top:0});
 }
+function reopenBusy(){return ["queued","running"].includes(job?.reopen?.state);}
 function planningBusy(){return planningRequest || ["queued","running"].includes(job?.planning?.state);}
 function navigation(){
   const allowed=allowedSteps();
@@ -815,10 +820,16 @@ async function refresh() {
   }
 }
 async function restoreJob(current) {
-  const [state, batch]=await Promise.all([api(jobPath()),api(jobPath("/review/batch?details=true"))]);
+  const batchRequest=job?.plan.id ? null : api(jobPath("/review/batch?details=true"));
+  const [state, batch]=await Promise.all([api(jobPath()),batchRequest]);
   if(!current())return;
+  const currentBatch=batch || (!state.plan.id ? await api(jobPath("/review/batch?details=true")) : {});
+  if(!current())return;
+  if(state.scan_generation!==job?.scan_generation)previewRevision=-1;
   requireSaved();
-  job=state;reviewBatch=batch;
+  job=state;reviewBatch=currentBatch;
+  if(!job.plan.id && job.reopen?.state==="completed" && ["review","execution","execute"].includes(viewStep))
+    rememberView(job.reopen.step);
   if(manualSnapshot && (manualSnapshot.plan_id!==job.plan.id ||
       manualSnapshot.reverse!==(job.plan.execution?.phase==="rolling_back"))) manualSnapshot=null;
   if(selectedDaysJob!==jobId){
@@ -836,6 +847,12 @@ async function restoreJob(current) {
   draft={events:[],capture_overrides:{},exclude_families:[],target_stems:{},...state.draft};
   render();
   scheduleReviewPoll();
+  if(reopenBusy()){
+    report(job.reopen.kind==="rollback"?"Bibliothekar prüft die Wiederherstellung …":
+      "Der Verschiebeplan wird zurückgenommen. Bibliothekar prüft den Datei- und Archivbestand …","busy");
+    timer=setTimeout(()=>refresh().catch(()=>{}),2000);
+    return;
+  }
   if($("preparation-progress"))await pollPreparation();
   if(planningBusy() || job.scan_running || job.metadata_running || job.registration_running){
     if(job.registration_running)report("Bibliothekar prüft und registriert den Archivbestand …","busy");
@@ -866,6 +883,10 @@ async function restoreJob(current) {
   if(!current())return;
   const {applied,remaining}=draft.metadata_review_result || {};
   if(viewStep==="plan" && ["failed","interrupted"].includes(job.planning?.state))renderPlanningResult();
+  else if(job.plan.id && job.reopen?.state==="failed" && job.reopen.plan_id===job.plan.id)
+    report(job.reopen.message,"error");
+  else if(job.state==="ready" && job.reopen?.changed_sources)
+    report("Quelldateien haben sich verändert oder fehlen. Lies die Inventur erneut ein. Die Ereignisplanung bleibt erhalten.");
   else if(applied)report(t("Aufnahmezeiten übernommen")+" · "+applied+
     (remaining?" · "+t("Noch zu prüfen")+" · "+remaining:""),remaining?"error":"success");
   else report();
@@ -968,6 +989,7 @@ async function mutate(path, method="POST", body) {
   requireSaved();
   report("Bibliothekar verarbeitet den Auftrag …","busy");
   const checking=path==="/finalize";
+  if(path==="/rollback/check") body={...body,background:true};
   if (checking) $("safety").textContent="Bitte keine Dateien mehr verändern. Bibliothekar prüft und registriert gerade den übernommenen Archivbestand.";
   try {
     const result=await api(jobPath(path),method,body);
@@ -983,7 +1005,7 @@ async function mutate(path, method="POST", body) {
     const target=result.reopened && path==="/rollback/check" ? "inventory" : {"/plan":"review","/confirm":"execute","/finalize":"execute","/reopen":"plan","/script/reopen-unstarted":"inventory","/scan":"inventory","/rollback/start":"execute"}[path];
     if(target)rememberView(target);
     await refresh();
-    if(!checking || !job?.registration_running)report();
+    if(path!=="/rollback/check" && (!checking || !job?.registration_running))report();
     return result;
   } catch (error) {
     if (checking) await refresh().catch(()=>{});
@@ -1031,12 +1053,12 @@ function showRecovery(visible){
 function render() {
   const phase=job.plan.execution?.phase;
   const terminal=job.state==="discarded" || job.plan.state==="completed";
-  $("work").inert=planningBusy();
+  $("work").inert=planningBusy() || reopenBusy();
   navigation();
   $("introduction").hidden=false;
   $("setup").hidden=viewStep!=="setup";
   $("top-actions").replaceChildren();
-  $("top-actions").inert=$("wizard-navigation").inert=false;
+  $("top-actions").inert=$("wizard-navigation").inert=reopenBusy();
   showRecovery(recoveryPhases.includes(phase) &&
     (job.plan.execution.method==="manual" || recoveryOnly));
   $("choice").hidden=true;
@@ -1075,6 +1097,11 @@ function render() {
     status.append(details);
   }
   if (job.scan_error) status.append(line(job.scan_error));
+  const changes=job.inventory_changes || {};
+  if(changes.partners || changes.file_exclusions || changes.family_decisions || changes.metadata_decisions)
+    status.append(line("Einige frühere Datei- oder Familienentscheidungen sind nach der Inventur nicht mehr gültig. Prüfe die betroffenen Ereignisse. Die Ereignisplanung bleibt erhalten."));
+  if(changes.relocated_partners)
+    status.append(line("Bestätigte Dateipartner wurden anhand der Dateiidentität und SHA-256 am neuen Quellpfad wiedererkannt."));
   if(job.review_count)status.append(reviewControls());
   const buttons=node("div",undefined,"inline");
   if (!recoveryOnly && job.scan_running) buttons.append(action("Inventur pausieren",()=>mutate("/pause")));
@@ -1133,6 +1160,8 @@ function renderDraft(host) {
     notice.append(action("Dateiausschlüsse aufheben",()=>updateExclusions(true)));
     panel.append(notice);
   }
+  if(draftStats.some(event=>event.families===0))
+    panel.append(line("Mindestens ein gespeichertes Ereignis enthält nach aktueller Inventur keine zugeordneten Dateifamilien."));
   if(job.partners?.length){
     const notice=node("div",undefined,"adoption-card");
     const details=node("details",undefined,"adoption-file-issues");

@@ -1,5 +1,5 @@
 """Compare manually moved originals with the persisted plan through read-only descriptors."""
-from contextlib import ExitStack
+from contextlib import closing, ExitStack
 import json
 import os
 import stat
@@ -10,6 +10,7 @@ from app.event_inventory import event_root_relative
 from app.legacy_adoption_inventory import _job
 from app.legacy_adoption_paths import AdoptionError, bound_file, bound_sha256, file_identity, relative_parent, target_key, walk_bound_files
 from app.legacy_adoption_plan import _archive_probe, _assert_timeline, _existing_event, _roots, plan_status
+from app.operation_health import read_connection
 
 
 def _plan(connection, job_id):
@@ -304,17 +305,92 @@ def assert_original_layout(connection, library, job, plan, *, source_check=None,
                     raise AdoptionError("Zusätzliche Datei im betroffenen Ereignisordner: " + path)
 
 
-def reopen_plan(library, job_id: str) -> None:
+def editable_plan(connection, job_id):
+    plan = _plan(connection, job_id)
+    if plan["state"] not in {"prepared", "media_verified", "verified"} or connection.execute(
+        "SELECT 1 FROM legacy_adoption_execution WHERE plan_id = ?", (plan["id"],),
+    ).fetchone():
+        raise AdoptionError("Der bestätigte Verschiebeplan ist eingefroren.")
+    return plan
+
+
+def check_original_layout(connection, library, job, plan, *, allow_source_changes=False):
+    """Hash once and check the observed layout again without a SQLite writer."""
+    changed = []
+    source_stamps = {}
+    archive_stamps = {}
+
+    def source_check(root, row):
+        path = row["relative_path"]
+        inventory_stamp = tuple(json.loads(row["identity"]))
+        if allow_source_changes:
+            # Returning to an editable draft revokes the plan. This stamp
+            # only decides whether to demand a new scan; it grants no proof
+            # or rights to execute. Preparation still checks every SHA-256.
+            try:
+                info = _entry(root, path)
+            except OSError:
+                info = None
+            if info is None or file_identity(info) != inventory_stamp:
+                changed.append(path)
+            else:
+                source_stamps[path] = inventory_stamp
+        elif not _matches(root, path, row["size_bytes"], row["sha256"],
+                          expected_inode=inventory_stamp[:2], stamp=source_stamps.__setitem__):
+            raise AdoptionError("Die Quelldatei fehlt oder stimmt nicht mit dem Plan überein: " + path)
+
+    def archive_check(root, path, size, checksum):
+        if not _matches(root, path, size, checksum, stamp=archive_stamps.__setitem__):
+            raise AdoptionError("Vorhandene Archivdatei fehlt oder wurde verändert: " + path)
+
+    assert_original_layout(connection, library, job, plan,
+                           source_check=source_check, archive_check=archive_check)
+
+    def source_stamp(root, row):
+        path = row["relative_path"]
+        previous = source_stamps.get(path)
+        if previous is None:
+            return
+        try:
+            info = _entry(root, path)
+        except OSError:
+            info = None
+        if info is None or file_identity(info) != previous:
+            if not allow_source_changes:
+                raise AdoptionError("Quelldatei seit der Prüfung verändert: " + path)
+            changed.append(path)
+
+    def archive_stamp(root, path, _size, _checksum):
+        info = _entry(root, path)
+        if info is None or file_identity(info) != archive_stamps[path]:
+            raise AdoptionError("Archivpfad seit der Prüfung verändert: " + path)
+
+    assert_original_layout(connection, library, job, plan, source_check=source_stamp, archive_check=archive_stamp)
+    return len(changed)
+
+
+def reopen_plan(library, job_id, *, expected_id=None, finish=None):
+    """Inspect the filesystem read-only, then retire exactly the checked plan."""
+    with closing(read_connection(library.database_path)) as connection:
+        connection.execute("BEGIN")
+        job = _job(connection, library.library_id, job_id)
+        plan = editable_plan(connection, job_id)
+        if expected_id is not None and plan["id"] != expected_id:
+            raise AdoptionError("Der geprüfte Verschiebeplan wurde ersetzt.")
+        changed = check_original_layout(connection, library, job, plan, allow_source_changes=True)
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
-        job = _job(connection, library.library_id, job_id)
-        plan = _plan(connection, job_id)
-        if plan["state"] not in {"prepared", "media_verified", "verified"} or connection.execute(
-            "SELECT 1 FROM legacy_adoption_execution WHERE plan_id = ?", (plan["id"],),
-        ).fetchone():
-            raise AdoptionError("Der bestätigte Verschiebeplan ist eingefroren.")
-        assert_original_layout(connection, library, job, plan)
+        current = _job(connection, library.library_id, job_id)
+        if dict(editable_plan(connection, job_id)) != dict(plan) or any(
+            current[field] != job[field] for field in ("state", "draft_revision", "scan_generation", "dataset_json")
+        ):
+            raise AdoptionError("Der geprüfte Verschiebeplan wurde ersetzt.")
         connection.execute("DELETE FROM legacy_adoption_plans WHERE id = ?", (plan["id"],))
+        if changed:
+            connection.execute("UPDATE legacy_adoption_jobs SET state='ready' WHERE id=?", (job_id,))
+        if finish is not None:
+            finish(connection, current, changed)
+    return changed
 
 
 def plan_issues(library, job_id: str, *, limit: int = 200):

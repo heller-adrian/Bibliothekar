@@ -4,6 +4,19 @@ import re
 
 
 TRANSLATIONS = {
+    "Bibliothekar prüft die Wiederherstellung …": "Bibliothekar is checking the rollback …",
+    "Einige frühere Datei- oder Familienentscheidungen sind nach der Inventur nicht mehr gültig. Prüfe die betroffenen Ereignisse. Die Ereignisplanung bleibt erhalten.":
+        "Some earlier file or family decisions are no longer valid after the scan. Check the affected events. Your event draft is kept.",
+    "Bestätigte Dateipartner wurden anhand der Dateiidentität und SHA-256 am neuen Quellpfad wiedererkannt.":
+        "Confirmed file partners were identified at new source paths by file identity and SHA-256.",
+    "Mindestens ein gespeichertes Ereignis enthält nach aktueller Inventur keine zugeordneten Dateifamilien.":
+        "At least one saved event has no assigned file families in the current inventory.",
+    "Der Verschiebeplan wird bereits zurückgenommen.": "The move plan is already being reopened.",
+    "Der geprüfte Verschiebeplan wurde ersetzt.": "The checked move plan was replaced.",
+    "Der Verschiebeplan wird zurückgenommen. Bibliothekar prüft den Datei- und Archivbestand …":
+        "Reopening the move plan. Bibliothekar is checking the source files and archive …",
+    "Quelldateien haben sich verändert oder fehlen. Lies die Inventur erneut ein. Die Ereignisplanung bleibt erhalten.":
+        "Source files have changed or are missing. Scan the inventory again. Your event draft is kept.",
     "Aktualisieren": "Refresh",
     "Erledigt": "Done",
     "Ausstehend": "Pending",

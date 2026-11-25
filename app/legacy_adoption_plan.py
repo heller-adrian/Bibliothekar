@@ -38,7 +38,7 @@ from app.legacy_adoption_paths import (
 )
 from app.media_family_identity import IDENTITY_VERSION
 from app.metadata import LOCAL_TIMEZONE, family_member_ending
-from app.operation_health import read_session
+from app.operation_health import read_connection, read_session
 from app.released_ranges import merge_intervals
 from app.subevents import assignment_target, normalize_subevents
 
@@ -1341,6 +1341,24 @@ def create_plan(library, registry_path: Path, job_id: str, draft=None, *, draft_
     if filename_method not in {"manual", "script"}:
         raise AdoptionError("Wähle eine verfügbare Durchführungsmethode.")
     plan_id = uuid4().hex
+    replacement = None
+    if replace_plan_id is not None:
+        from app.legacy_adoption_verify import check_original_layout, editable_plan
+
+        with closing(read_connection(library.database_path)) as snapshot:
+            snapshot.execute("BEGIN")
+            old_job = _job(snapshot, library.library_id, job_id)
+            replacement = editable_plan(snapshot, job_id)
+            if replacement["id"] != replace_plan_id or replacement["state"] != "prepared":
+                raise AdoptionError("Der bestätigte Verschiebeplan ist eingefroren.")
+            previous_draft = json.loads(replacement["draft_json"])
+            if filename_method == "manual" and (blocker := _manual_method_blocker(snapshot, job_id, replacement, previous_draft)):
+                raise ManualXmpRenameConflict(
+                    "Die manuelle Methode kann den gebundenen XMP-Verweis nicht anpassen. " + blocker["path"]
+                )
+            if check_original_layout(snapshot, library, old_job, replacement, allow_source_changes=True):
+                raise AdoptionError("Quelldateien haben sich verändert oder fehlen. Lies die Inventur erneut ein. Die Ereignisplanung bleibt erhalten.")
+
     with database_connection(library.database_path) as connection, closing(sqlite3.connect(
         registry_path.absolute().as_uri() + "?mode=ro", uri=True,
     )) as registry:
@@ -1349,27 +1367,17 @@ def create_plan(library, registry_path: Path, job_id: str, draft=None, *, draft_
         if not allow_existing:
             require_no_managed_data(connection)
         job = _job(connection, library.library_id, job_id)
-        if replace_plan_id is not None:
-            from app.legacy_adoption_verify import _plan, assert_original_layout
-
-            previous = _plan(connection, job_id)
-            if (previous["id"] != replace_plan_id or previous["state"] != "prepared"
-                    or connection.execute(
-                        "SELECT 1 FROM legacy_adoption_execution WHERE plan_id = ?", (replace_plan_id,),
-                    ).fetchone()):
-                raise AdoptionError("Der bestätigte Verschiebeplan ist eingefroren.")
-            draft = json.loads(previous["draft_json"])
-            if filename_method == "manual" and (blocker := _manual_method_blocker(connection, job_id, previous, draft)):
-                raise ManualXmpRenameConflict(
-                    "Die manuelle Methode kann den gebundenen XMP-Verweis nicht anpassen. " + blocker["path"]
-                )
-            assert_original_layout(connection, library, job, previous)
+        if replacement is not None:
+            current = editable_plan(connection, job_id)
+            if dict(current) != dict(replacement) or dict(job) != dict(old_job):
+                raise AdoptionError("Der geprüfte Verschiebeplan wurde ersetzt.")
+            draft = previous_draft
             connection.execute("DELETE FROM legacy_adoption_plans WHERE id = ?", (replace_plan_id,))
         if draft_revision is not None:
             if job["draft_revision"] != draft_revision:
                 raise AdoptionError("Der Entwurf wurde in einer anderen Sitzung geändert. Lade ihn erneut.")
             draft = json.loads(job["draft_json"])
-        draft = {key: value for key, value in (draft or {}).items() if key != "planning_attempt"}
+        draft = {key: value for key, value in (draft or {}).items() if key not in {"planning_attempt", "reopen_attempt", "inventory_changes", "scan_family_proofs"}}
         definitions = draft.get("events")
         if not isinstance(definitions, list) or not definitions:
             raise AdoptionError("Lege mindestens ein Ereignis oder einen Sammelordner an.")

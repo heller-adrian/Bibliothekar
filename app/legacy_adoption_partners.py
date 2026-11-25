@@ -101,3 +101,58 @@ def resolve(rows, draft):
         result.extend({**sidecar, "family_key": key, "confirmed_partner": masters[sidecar["relative_path"]]["relative_path"]}
                       for sidecar in merged.get(key, ()))
     return result, masters
+
+
+def reconcile_after_scan(connection, job_id, draft):
+    """Keep only re-inventoried bindings, including unambiguous renames."""
+    decisions = draft.get("file_partners") or {}
+    if not decisions:
+        return 0, 0
+
+    def identifier(digest, stamp):
+        return digest, *stamp[:3]  # kernel device, inode and file size
+
+    rows = list(inventory_members(connection, job_id))
+    by_path = {row["relative_path"]: row for row in rows if row["sha256"] and row["identity"]}
+    by_identity, families = defaultdict(list), defaultdict(list)
+    for row in rows:
+        families[row["family_key"]].append(row)
+    for row in by_path.values():
+        by_identity[identifier(row["sha256"], json.loads(row["identity"]))].append(row)
+
+    def observed(binding):
+        old_path, digest, stamp = binding
+        candidates = by_identity.get(identifier(digest, stamp), ())
+        # If multiple aliases exist, only a pre-existing concrete path may
+        # keep its binding. A disappeared path needs a unique replacement.
+        return next((row for row in candidates if row["relative_path"] == old_path),
+                    candidates[0] if len(candidates) == 1 else None)
+
+    valid, linked = {}, defaultdict(list)
+    relocated = 0
+    excluded = draft.get("file_exclusions") or {}
+    unavailable = set(draft.get("exclude_families") or ())
+    for decision in decisions.values():
+        if decision["version"] != IDENTITY_VERSION:
+            continue
+        matched = {item[0]: observed(item) for item in decision["evidence"]}
+        if any(row is None for row in matched.values()):
+            continue
+        sidecar, master = matched[decision["xmp"]], matched[decision["raw"]]
+        old, new = sidecar["family_key"], master["family_key"]
+        xmp = sidecar["relative_path"]
+        if (old == new or len(families[old]) != 1 or old in unavailable or new in unavailable
+                or old in (draft.get("capture_overrides") or {}) or old in (draft.get("target_stems") or {})
+                or xmp in valid or any(row["relative_path"] in excluded for row in matched.values())
+                or {row["relative_path"] for row in families[new]}
+                != {matched[path]["relative_path"] for path in decision["files"]}
+                or not all(compatible(sidecar, prior) for prior in linked[new])):
+            continue
+        replacement = proof(sidecar, master, families[new])
+        if replacement is None:
+            continue
+        valid[xmp] = replacement
+        linked[new].append(sidecar)
+        relocated += any(old_path != row["relative_path"] for old_path, row in matched.items())
+    draft["file_partners"] = valid
+    return len(decisions) - len(valid), relocated

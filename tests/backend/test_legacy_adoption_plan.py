@@ -691,11 +691,12 @@ def test_verification_detects_archived_media_changes(inventory):
 def test_script_release_rechecks_bound_archived_media_without_rehashing(inventory, monkeypatch):
     import json
     import os
+    import sqlite3
     from sys import platform
 
     from app import legacy_adoption_host as host, legacy_adoption_package as package
     from app.legacy_adoption_catalogue import prepare_documents
-    from app.legacy_adoption_inventory import _job
+    from app.legacy_adoption_execution import confirm_plan
     from app.legacy_adoption_verify import _plan
 
     context, source, registry = inventory
@@ -722,6 +723,9 @@ def test_script_release_rechecks_bound_archived_media_without_rehashing(inventor
     original_hash = package.bound_sha256
 
     def count_hash(fd, **kwargs):
+        # The full hash pass must leave SQLite's writer available.
+        with sqlite3.connect(context.database_path, timeout=0.1) as another:
+            another.execute("BEGIN IMMEDIATE")
         checked_files.append(os.fstat(fd).st_ino)
         return original_hash(fd, **kwargs)
 
@@ -732,13 +736,10 @@ def test_script_release_rechecks_bound_archived_media_without_rehashing(inventor
         checkpoints.append((phase, processed, total, read, size, elapsed_seconds))
 
     with database_connection(context.database_path) as connection:
-        job = _job(connection, context.library_id, job_id)
         plan = _plan(connection, job_id)
-        connection.execute(
-            "INSERT INTO legacy_adoption_execution (plan_id, method, phase) VALUES (?, 'script', 'script_prepared')",
-            (plan["id"],),
-        )
-        package.prepare_manifest(connection, context, job, plan, "synthetic-proof", progress=progress)
+        connection.execute("UPDATE legacy_adoption_plans SET filename_method='script' WHERE id=?", (plan["id"],))
+    confirm_plan(context, job_id, plan["id"], "script", acknowledged=True,
+                 probe_digest="synthetic-proof", progress=progress)
     assert checked_files.count(existing_document.stat().st_ino) == 1
     assert checked_files.count(previous.stat().st_ino) == 1
     assert {entry[0] for entry in checkpoints} == {"source", "archive", "manifest"}
@@ -1483,3 +1484,37 @@ def test_rc7_split_sidecar_requires_evidence_for_matching_target(inventory, monk
         assert (moves[".RAF"]["family_key"] == moves[".xmp"]["family_key"]) == (evidence == "shared-id")
         assert (Path(moves[".RAF"]["target"]).stem == Path(moves[".xmp"]["target"]).stem) == (evidence == "shared-id")
     assert raw.read_bytes() == b"raw" and xmp.read_bytes() == b"<edit/>"
+
+
+def test_rc9_reopen_invalidates_changed_input_but_keeps_draft(inventory, monkeypatch):
+    import json
+
+    from app.database import database_connection
+    from app.legacy_adoption_inventory import inventory_status, scan_inventory
+    from app.legacy_adoption_verify import reopen_plan
+
+    context, source, registry = inventory
+    (source / "changed.JPG").write_bytes(b"original")
+    (source / "missing.JPG").write_bytes(b"missing")
+    (source / "unaffected.JPG").write_bytes(b"unaffected")
+    job = _scan(context, source)
+    draft = _draft()
+    draft["target_stems"] = {"changed": "selected-name", "unaffected": "other-name"}
+    with database_connection(context.database_path) as connection:
+        connection.execute("UPDATE legacy_adoption_jobs SET draft_json=? WHERE id=?", (json.dumps(draft), job))
+    create_plan(context, registry, job, draft)
+    (source / "changed.JPG").write_bytes(b"new content")
+    (source / "missing.JPG").unlink()
+    assert reopen_plan(context, job) == 2
+    assert inventory_status(context, job)["state"] == "ready"
+    with pytest.raises(AdoptionError, match="Inventur"):
+        create_plan(context, registry, job, draft)
+    scan_inventory(context, job)
+    with database_connection(context.database_path) as connection:
+        refreshed = json.loads(connection.execute(
+            "SELECT draft_json FROM legacy_adoption_jobs WHERE id=?", (job,),
+        ).fetchone()[0])
+    assert refreshed["events"] == draft["events"]
+    assert refreshed["target_stems"] == {"unaffected": "other-name"}
+    assert refreshed["inventory_changes"]["family_decisions"] == 1
+    assert create_plan(context, registry, job, refreshed)["move_files"] == 2

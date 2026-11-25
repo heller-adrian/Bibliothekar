@@ -3568,6 +3568,37 @@ def test_rc8_confirmed_partnerships_with_saved_events(fresh_main, monkeypatch, s
     assert recovered["draft"]["events"] == first_check["draft"]["events"]
     assert [case["xmp"] for case in recovered["planning"]["partners"]] == [b[0]]
     revision = decide(revision, "exclusions")["revision"]
+    before_scan = _json(client, "GET", job)
+    _json(client, "POST", job + "/scan", status=202)
+    reread = _json(client, "GET", job)
+    assert reread["draft_revision"] == revision and reread["partners"] == before_scan["partners"]
+    assert reread["draft"]["events"] == before_scan["draft"]["events"]
+
+    if complete:
+        moved = "day/Other/renamed-a.xmp"
+        (source / alternate[0]).rename(source / moved)
+        originals[moved] = originals.pop(alternate[0])
+        alternate = (moved, alternate[1])
+        _json(client, "POST", job + "/scan", status=202)
+        reread = _json(client, "GET", job)
+        assert reread["inventory_changes"]["relocated_partners"] == 1
+        assert reread["inventory_changes"]["partners"] == 0
+        assert {option["xmp"] for option in reread["partners"]} == {a[0], alternate[0], c[0]}
+        assert reread["draft"]["events"] == before_scan["draft"]["events"]
+        revision = reread["draft_revision"]
+        (source / c[0]).write_bytes(b"<c-edited/>")
+        _json(client, "POST", job + "/scan", status=202)
+        reread = _json(client, "GET", job)
+        assert reread["inventory_changes"]["partners"] == 1
+        assert {option["xmp"] for option in reread["partners"]} == {a[0], alternate[0]}
+        assert reread["draft"]["events"] == before_scan["draft"]["events"]
+        (source / c[0]).write_bytes(originals[c[0]])
+        _json(client, "POST", job + "/scan", status=202)
+        reread = _json(client, "GET", job)
+        assert c[0] not in {option["xmp"] for option in reread["partners"]}
+        check = diagnose(reread["draft_revision"])
+        assert c[0] in {item["xmp"] for item in check["planning"]["partners"]}
+        revision = decide(reread["draft_revision"], "partners", choices=[c])["revision"]
 
     freeze = {"revision": revision, "filename_method": "script"}
     if complete:
@@ -3637,3 +3668,84 @@ def test_rc8_confirmed_partnerships_with_saved_events(fresh_main, monkeypatch, s
         actual = {path.relative_to(source).as_posix(): path.read_bytes() for path in source.rglob("*") if path.is_file()}
         assert actual == originals
         assert not any(path.is_file() for path in archive.rglob("*"))
+
+
+@pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["native-zfs"])
+def test_rc9_reopen_is_durable_and_does_not_hold_sqlite_writer(fresh_main, monkeypatch, synthetic_dataset):
+    import json
+    from threading import Event
+    from time import monotonic, sleep
+    import sqlite3
+
+    from app import legacy_adoption_verify
+
+    _, database, _, archive = fresh_main
+    source = archive.parent / "rc9-source"
+    source.mkdir()
+    for index in range(436):
+        (source / f"capture-{index}.RAF").write_bytes(f"catalogue photo {index}".encode())
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+    if os.environ.get("ADOPTION_ZFS_ROOT"):
+        monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", lambda descriptors, _cancel: {
+        fd: {"EXIF:ExifIFD:DateTimeOriginal": "2026:07:01 12:00:00"} for fd in descriptors
+    })
+    client = _onboard(fresh_main)
+    _adopt(client)
+    endpoint = "/api/legacy-adoption/jobs"
+    job = endpoint + "/" + _json(client, "POST", endpoint, status=201, json={"root": "nas"})["id"]
+    _json(client, "POST", job + "/scan", status=202)
+    events = [{"name": "Keep the draft", "start_date": "2026-07-01", "end_date": "2026-07-01"}]
+    revision = _json(client, "PUT", job + "/draft", json={"revision": 0, "events": events})["revision"]
+    frozen = _json(client, "POST", job + "/plan", json={"revision": revision})
+    assert frozen["move_files"] == 436
+    before = _json(client, "GET", job)["draft"]
+    command = {"plan_id": frozen["id"], "background": True}
+    entered, release = Event(), Event()
+    checks = []
+    check = legacy_adoption_verify._entry
+
+    def slow_check(*args, **kwargs):
+        checks.append(args[1])
+        if len(checks) == 1:
+            entered.set()
+            assert release.wait(10), "test failed to release file check"
+        return check(*args, **kwargs)
+
+    monkeypatch.setattr(legacy_adoption_verify, "_entry", slow_check)
+    monkeypatch.setattr(legacy_adoption_verify, "bound_sha256", lambda *_: pytest.fail("reopening rehashed unchanged source"))
+    # Inject the durable state left by a process that stopped after accepting
+    # the request, before launching the worker. Restart has no queued thread.
+    with database_connection(database) as connection:
+        connection.execute(
+            """UPDATE legacy_adoption_jobs SET draft_json=json_set(draft_json, '$.reopen_attempt', json(?))
+               WHERE id=?""",
+            (json.dumps({"id": "interrupted", "state": "queued", "plan_id": frozen["id"]}),
+             job.rsplit("/", 1)[-1]),
+        )
+    assert _json(client, "GET", job)["reopen"]["state"] == "queued"
+    startup = next(handler for handler in main.app.router.on_startup if handler.__name__ == "resume_pending_adoption")
+    startup()
+    try:
+        assert entered.wait(10)
+        refreshed = TestClient(main.app, follow_redirects=False)
+        saved = _json(refreshed, "GET", job)
+        assert saved["reopen"]["state"] == "running" and saved["plan"]["id"] == frozen["id"]
+        with sqlite3.connect(database, timeout=0.1) as other:
+            other.execute("BEGIN IMMEDIATE")
+            other.execute("UPDATE legacy_adoption_jobs SET scan_error=NULL WHERE id=?", (saved["id"],))
+        _json(refreshed, "POST", job + "/reopen", status=202, json=command)
+        _json(refreshed, "POST", job + "/documents", status=409)
+        _json(refreshed, "DELETE", job, status=409)
+    finally:
+        release.set()
+    until = monotonic() + 10
+    while monotonic() < until:
+        saved = _json(client, "GET", job)
+        if saved["reopen"]["state"] not in {"queued", "running"}:
+            break
+        sleep(0.02)
+    assert saved["reopen"]["state"] == "completed", saved["reopen"]
+    assert saved["reopen"]["step"] == "plan" and not saved["plan"] and saved["draft"] == before
+    assert len(checks) == 2 * frozen["move_files"]  # Two stat passes, no source SHA-256.
+    assert not list(archive.iterdir())

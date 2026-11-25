@@ -319,7 +319,8 @@ def _bound_proof(root, path, size, expected, *, inventory_identity=None, xmp_nam
             return {"stamp": host.stamp(info), "sha256": expected}, content
 
 
-def prepare_manifest(connection, library, job, plan, probe_digest, *, progress=None):
+@contextmanager
+def stage_manifest(connection, library, job, plan, probe_digest, *, progress=None):
     if stale_xmp_documents(connection, plan["id"]):
         raise AdoptionError(STALE_XMP_DOCUMENTS)
     plan_id = plan["id"]
@@ -433,12 +434,15 @@ def prepare_manifest(connection, library, job, plan, probe_digest, *, progress=N
         if _read_json(descriptor, "permission.json") is not None:
             raise AdoptionError("Das Paket wurde bereits zur Ausführung freigegeben.")
         digest = _put_json(descriptor, "manifest.json", manifest)
-        connection.execute(
-            """INSERT INTO legacy_adoption_scripts
-               (plan_id, manifest_sha256, package_device, package_inode, host_json)
-               VALUES (?, ?, ?, ?, ?)""",
-            (plan_id, digest, *host.inode(os.fstat(descriptor)), json.dumps(probe["host"])),
-        )
+        yield plan_id, digest, *host.inode(os.fstat(descriptor)), json.dumps(probe["host"])
+
+
+def register_manifest(connection, binding):
+    connection.execute(
+        """INSERT INTO legacy_adoption_scripts
+           (plan_id, manifest_sha256, package_device, package_inode, host_json)
+           VALUES (?, ?, ?, ?, ?)""", binding,
+    )
 
 
 def _script_row(library, job_id, plan_id):
