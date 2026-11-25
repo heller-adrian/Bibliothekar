@@ -14479,7 +14479,10 @@ async def adoption_access_middleware(request: Request, call_next):
         ("POST", "/api/libraries"), ("POST", "/api/setup/preferences/continue"),
     }
     try:
-        async with contextmanager_in_threadpool(adoption_access(REGISTRY_DATABASE_FILE, exclusive=exclusive)) as active:
+        # Deferred startup briefly takes this lock while checking whether
+        # setup is still active. Let the user's explicit decision wait for it.
+        access = adoption_access(REGISTRY_DATABASE_FILE, exclusive=exclusive, wait_seconds=2 if decision else 0)
+        async with contextmanager_in_threadpool(access) as active:
             setup = pending_initial_setup(REGISTRY_DATABASE_FILE)
             request.state.initial_setup = setup
             request.state.legacy_adoption = active

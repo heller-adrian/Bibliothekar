@@ -157,12 +157,12 @@ def choose_initial_setup(registry_path, library, decision):
 
 
 @contextmanager
-def adoption_access(registry_path, *, exclusive=False):
+def adoption_access(registry_path, *, exclusive=False, wait_seconds=0):
     path = Path(registry_path)
     if not path.parent.is_dir():
         yield active_adoption(path)
         return
-    with _lock(path.with_name(path.name + ".adoption.lock"), exclusive=exclusive):
+    with _lock(path.with_name(path.name + ".adoption.lock"), exclusive=exclusive, wait_seconds=wait_seconds):
         yield active_adoption(path)
 
 

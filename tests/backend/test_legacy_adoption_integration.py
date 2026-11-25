@@ -168,6 +168,46 @@ def test_first_setup_choice_blocks_regular_work_and_skip_is_permanent(fresh_main
     ] == "legacy_adoption_inactive"
 
 
+def test_initial_setup_decision_waits_for_transient_adoption_reader(fresh_main, monkeypatch):
+    import fcntl
+    from threading import Event, Thread
+
+    from app.legacy_adoption_mode import adoption_access
+
+    client = _onboard(fresh_main)
+    registry = fresh_main[2]
+    lock_file = registry.with_name(registry.name + ".adoption.lock")
+    lock_inode = lock_file.stat().st_ino
+    contended, retry = Event(), Event()
+    responses = []
+    original_flock = fcntl.flock
+
+    def observe_flock(fd, operation):
+        try:
+            return original_flock(fd, operation)
+        except BlockingIOError:
+            if operation == fcntl.LOCK_EX | fcntl.LOCK_NB and os.fstat(fd).st_ino == lock_inode:
+                contended.set()
+                assert retry.wait(5)
+            raise
+
+    monkeypatch.setattr(fcntl, "flock", observe_flock)
+    request = Thread(target=lambda: responses.append(
+        client.post("/api/setup/adoption", json={"decision": "skipped"})
+    ))
+    try:
+        with adoption_access(registry):
+            request.start()
+            assert contended.wait(5)
+            assert pending_initial_setup(registry)["decision"] == "choice"
+    finally:
+        retry.set()
+        request.join(timeout=7)
+    assert not request.is_alive()
+    assert [(response.status_code, response.json()) for response in responses] == [(200, {"next": "/"})]
+    assert pending_initial_setup(registry) is None
+
+
 def test_existing_catalogue_blocks_adoption_and_is_preserved(fresh_main):
     from tests.backend.test_legacy_adoption_plan import _existing
 
