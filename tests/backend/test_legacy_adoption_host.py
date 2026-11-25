@@ -126,6 +126,24 @@ def test_resume_after_rename_and_keep_original_event_document(package, monkeypat
     assert json.loads((private / "status.json").read_bytes())["state"] == "rolled_back"
 
 
+@pytest.mark.parametrize("package", [True], indirect=True, ids=["native-zfs"])
+def test_rc7_authorized_rollback_cleans_holding_on_first_attempt(package):
+    private, source, archive, plan, binding = package
+    originals = {path.name: path.read_bytes() for path in source.iterdir()}
+    _permit(package, "apply")
+    assert host.main(_command(package, "apply")) == 0
+    holding = archive / (".bibliothekar-adoption-" + plan["plan_id"])
+    assert holding.is_dir()
+    (private / "permission.json").write_bytes(host.json_bytes({
+        "manifest": binding, "mode": "rollback", "rollback_directories": ["event/all"],
+    }))
+    assert host.main(_command(package, "rollback")) == 0
+    assert host.main(_command(package, "rollback")) == 0
+    assert not holding.exists() and not (archive / "event/all").exists()
+    assert (archive / "event/event.json").read_bytes() == b'{"old":true}'
+    assert {path.name: path.read_bytes() for path in source.iterdir()} == originals
+
+
 @pytest.mark.parametrize("point", ["before", "after"])
 def test_real_sigkill_during_media_move_resumes_from_journal(package, point):
     _, source, archive, _, _ = package

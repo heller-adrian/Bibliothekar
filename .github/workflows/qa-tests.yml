@@ -206,6 +206,7 @@ jobs:
               "test_rc5_native_smoke_pair_keeps_colocated_raw_without_shutter_metadata",
               "test_rc6_manual_availability_uses_bound_xmp_name[photo.raf]",
               "test_rc6_manual_availability_uses_bound_xmp_name[photo.RAF]",
+              "test_rc7_authorized_rollback_cleans_holding_on_first_attempt[native-zfs]",
               "test_rc7_replans_stale_xmp_package_with_35_saved_events[unstarted-native-zfs]",
               "test_rc7_replans_stale_xmp_package_with_35_saved_events[journaled-native-zfs]",
               "test_rc7_split_sidecar_requires_evidence_for_matching_target[absent]",

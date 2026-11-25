@@ -647,6 +647,7 @@ def execute(package, binding, plan, source_path, archive_path, *, reverse, rollb
                         pass
 
             holding = None
+            holding_scope = stack.enter_context(ExitStack())
             prefix = ".bibliothekar-adoption-" + plan["plan_id"]
             if plan["documents"] or plan.get("xmp_edits"):
                 holding_state = journal.latest.get("holding")
@@ -657,7 +658,7 @@ def execute(package, binding, plan, source_path, archive_path, *, reverse, rollb
                     journal.append("holding", "directory_intent")
                     holding_state = "directory_intent"
                 if holding_state is not None and (current is not None or not reverse):
-                    holding, _, check_holding = stack.enter_context(
+                    holding, _, check_holding = holding_scope.enter_context(
                         relative_parent(archive, prefix + "/.directory", create=holding_state == "directory_intent"),
                     )
                     check_holding()
@@ -744,6 +745,7 @@ def execute(package, binding, plan, source_path, archive_path, *, reverse, rollb
                 xmp_edits()
                 documents()
             elif rollback_directories is not None:
+                holding_scope.close()
                 journal.append("rollback-cleanup", "media_restored")
                 cleanup_rollback(journal, plan, archive, rollback_directories, check_roots)
             check_roots()
