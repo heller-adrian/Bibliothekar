@@ -57,3 +57,9 @@ konkurrierende Optionen und Methodenüberschriften bei 390 und 1050 px.
 Die Linux-Freigabe fordert beide
 neuen Lebenszyklustests auf nativem ZFS an. Der nächste Schritt nach der
 Backend-QA ist die Containerqualifizierung desselben Commits.
+
+Der erste GitHub-Lauf 45632838850 bestätigte den Container-Smoketest
+und beide neuen Lebenszyklen auf nativem ZFS. Zwei Upgrade-Tests
+erwarteten noch Migration 73 als letzte Version. Die Erwartungen sind
+auf Migration 74 aktualisiert. Ein zusätzlicher Test prüft den Erhalt
+eines RC7-Entwurfs, seines Plans und der XMP-Prüfsummen nach dem Upgrade.

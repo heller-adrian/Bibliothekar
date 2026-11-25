@@ -193,7 +193,7 @@ def test_upgrades_1_0_0_catalogue_and_registry_without_touching_existing_rows(tm
         library_registry.register_source_backup(
             registry, backup_id="historic", source_kind="import", source_identity="old", backup_path="/synthetic",
         )
-    assert initialize_database(db)["newly_applied_versions"] == list(range(56, 74))
+    assert initialize_database(db)["newly_applied_versions"] == list(range(56, 75))
     assert library_registry.initialize_library_registry(registry)["newly_applied_versions"] == [4, 5, 6, 7, 8, 9]
     assert library_registry.read_library_identity(db) == "historic"
     assert library_registry.get_source_backup(registry, "historic")["source_identity"] == "old"
@@ -225,13 +225,57 @@ def test_rc12_review_batch_upgrade_preserves_finished_and_pending_copies(tmp_pat
                 "INSERT INTO legacy_adoption_review_batch (job_id, family_key, state) VALUES ('job', ?, ?)",
                 [("ready", "copied"), ("pending", "pending")],
             )
-    assert initialize_database(db)["newly_applied_versions"] == [66, 67, 68, 69, 70, 71, 72, 73]
+    assert initialize_database(db)["newly_applied_versions"] == [66, 67, 68, 69, 70, 71, 72, 73, 74]
     with database.database_connection(db) as connection:
         rows = connection.execute(
             """SELECT family_key, state, bytes_total, bytes_verified FROM legacy_adoption_review_batch
                ORDER BY family_key""",
         )
         assert [tuple(row) for row in rows] == [("pending", "pending", 400, 0), ("ready", "copied", 200, 200)]
+
+
+def test_rc8_upgrade_preserves_rc7_draft_and_xmp_move_proofs(tmp_path, monkeypatch):
+    from app import database
+
+    db = tmp_path / "rc7.db"
+    migrations = database.available_migrations()
+    with monkeypatch.context() as rc7:
+        rc7.setattr(database, "available_migrations", lambda: [item for item in migrations if item[0] <= 73])
+        initialize_database(db)
+        ensure_library_identity(db, "historic")
+        with database.database_connection(db) as connection:
+            connection.execute(
+                """INSERT INTO legacy_adoption_jobs (
+                       id, library_id, source_root, source_device, source_inode,
+                       archive_root, archive_device, archive_inode, state
+                   ) VALUES ('job', 'historic', '/test/source', 1, 2, '/test/archive', 1, 3, 'inventoried')"""
+            )
+            connection.execute(
+                """UPDATE legacy_adoption_jobs SET draft_json=?, draft_revision=7 WHERE id='job'""",
+                ('{"events":[{"title":"Retain this event"}],"file_exclusions":{"unbound.xmp":{"sha256":"held"}}}',),
+            )
+            connection.execute(
+                """INSERT INTO legacy_adoption_plans (job_id, id, state, draft_json, events_json, filename_method)
+                   SELECT id, 'plan', 'prepared', draft_json, '[{"id":"event"}]', 'script'
+                     FROM legacy_adoption_jobs WHERE id='job'"""
+            )
+            connection.execute(
+                """INSERT INTO legacy_adoption_moves (
+                       plan_id, relative_path, target_path, parent_event_id, assigned_event_id,
+                       capture_time, sha256, current_sha256, current_size_bytes, xmp_old_raw_name, xmp_new_raw_name
+                   ) VALUES ('plan', 'source.xmp', 'renamed.xmp', 'event', 'event', '2026-07-01',
+                             'source-proof', 'target-proof', 42, 'source.RAF', 'renamed.RAF')"""
+            )
+            job = tuple(connection.execute("SELECT draft_json, draft_revision FROM legacy_adoption_jobs").fetchone())
+            plan = tuple(connection.execute("SELECT * FROM legacy_adoption_plans").fetchone())
+            move = tuple(connection.execute("SELECT * FROM legacy_adoption_moves").fetchone())
+
+    assert initialize_database(db)["newly_applied_versions"] == [74]
+    assert initialize_database(db)["newly_applied_versions"] == []
+    with database.database_connection(db) as connection:
+        assert tuple(connection.execute("SELECT draft_json, draft_revision FROM legacy_adoption_jobs").fetchone()) == job
+        assert tuple(connection.execute("SELECT * FROM legacy_adoption_plans").fetchone()) == plan
+        assert tuple(connection.execute("SELECT * FROM legacy_adoption_moves").fetchone()) == (*move, None)
 
 
 def test_separate_raw_jpeg_require_unique_identity_and_compatible_capture(library, monkeypatch):
