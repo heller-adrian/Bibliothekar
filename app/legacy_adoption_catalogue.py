@@ -29,12 +29,13 @@ def adoption_source_signature(plan):
 
 def _inventory_rows(connection, plan, job):
     return connection.execute(
-        """SELECT move.*, inventory.family_key, inventory.size_bytes, inventory.metadata_json
+        """SELECT move.*, coalesce(move.confirmed_family_key, inventory.family_key) AS family_key,
+                  inventory.size_bytes, inventory.metadata_json
              FROM legacy_adoption_moves move
              JOIN legacy_adoption_inventory inventory ON inventory.job_id = ?
                   AND inventory.relative_path = move.relative_path
             WHERE move.plan_id = ? AND move.target_path IS NOT NULL
-            ORDER BY inventory.family_key, move.relative_path""",
+            ORDER BY family_key, move.relative_path""",
         (job["id"], plan["id"]),
     )
 
@@ -257,7 +258,7 @@ def write_catalogue(connection, library, job, plan, events, now):
         first = rows[0]
         capture = first["capture_time"]
         manually_reviewed = key in overrides
-        records = [json.loads(row["metadata_json"]) for row in rows]
+        records = [{**json.loads(row["metadata_json"]), "family_key": key} for row in rows]
         family = summarize_file_metadata(source, records)["families"][0]
         family_id = connection.execute(
             """INSERT INTO file_families (

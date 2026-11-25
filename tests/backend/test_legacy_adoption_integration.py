@@ -3449,3 +3449,191 @@ def test_rc5_resumes_committed_plan_request_during_server_startup(fresh_main, mo
         assert current["draft_revision"] == revision
         assert (source / "photo.JPG").read_bytes() == b"queued plan input"
         assert not list(archive.iterdir())
+
+
+@pytest.mark.parametrize("fresh_main", [True], indirect=True, ids=["native-zfs"])
+@pytest.mark.parametrize("complete", [False, True], ids=["rollback", "register"])
+def test_rc8_confirmed_partnerships_with_saved_events(fresh_main, monkeypatch, synthetic_dataset, complete):
+    from datetime import date, timedelta
+    from hashlib import sha256
+    import json
+
+    from app import legacy_adoption_host as host, legacy_adoption_package as package
+    from tests.backend.test_legacy_adoption_host import _macos_rename
+
+    _, database, _, archive = fresh_main
+    source = archive.parent / "rc8-source"
+    source.mkdir()
+    appdata = database.parent / "rc8-appdata"
+    appdata.mkdir()
+    monkeypatch.setattr(package, "appdata_root", lambda: appdata)
+    monkeypatch.setattr(main, "NAS_SOURCE_ROOT", source)
+    if os.environ.get("ADOPTION_ZFS_ROOT"):
+        monkeypatch.setattr("app.legacy_adoption_dataset.prove", kernel_dataset_proof)
+    if sys.platform == "darwin":
+        monkeypatch.setattr(host, "mount_id", lambda _fd: 1)
+        monkeypatch.setattr(host, "rename_noreplace", _macos_rename)
+
+    originals = {
+        "day/RAW/a.RAF": b"camera-a",
+        "day/JPG/a.JPG": b"jpeg-a",
+        "day/Edits/a.xmp": b'<r xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:RawFileName="a.RAF"/>',
+        "day/Other/a.xmp": b"<version/>",
+        "day/RAW/b.RAF": b"camera-b",
+        "day/Edits/b.xmp": b"<b/>",
+        "day/RAW/c.RAF": b"camera-c",
+        "day/DNG/c.DNG": b"converted-c",
+        "day/Edits/c.xmp": b"<c/>",
+        "day/RAW/d.RAF": b"camera-d",
+        "day/Edits/d.xmp": b"<conflict/>",
+    }
+    first = date(2026, 7, 1)
+    days = [(first + timedelta(days=index)).isoformat() for index in range(35)]
+    originals.update({f"extra-{index}.JPG": day.encode() for index, day in enumerate(days)})
+    for relative, payload in originals.items():
+        path = source / relative
+        path.parent.mkdir(exist_ok=True, parents=True)
+        path.write_bytes(payload)
+
+    def metadata(descriptors, _cancel):
+        result = {}
+        for fd in descriptors:
+            payload = os.pread(fd, 128, 0)
+            xml = payload.startswith(b"<")
+            exif = "XMP:XMP-exif" if xml else "EXIF:ExifIFD"
+            camera = "XMP:XMP-tiff" if xml else "EXIF:IFD0"
+            day = payload.decode() if payload.startswith(b"2026-") else days[0]
+            tags = {exif + ":DateTimeOriginal": day.replace("-", ":") + " 12:00:00",
+                    camera + ":Make": "FUJIFILM", camera + ":Model": "X-H2S"}
+            if payload in (b"camera-a", b"jpeg-a", b"camera-d"):
+                tags[exif + ":ImageUniqueID"] = "a1" * 16 if payload != b"camera-d" else "d1" * 16
+            if payload == b"<conflict/>":
+                tags[exif + ":ImageUniqueID"] = "d2" * 16
+            result[fd] = tags
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    client = _onboard(fresh_main)
+    _adopt(client)
+    endpoint = "/api/legacy-adoption/jobs"
+    job_id = _json(client, "POST", endpoint, status=201, json={"root": "nas"})["id"]
+    job = endpoint + "/" + job_id
+    _json(client, "POST", job + "/scan", status=202)
+    events = [{"name": f"Event {index}", "start_date": day, "end_date": day} for index, day in enumerate(days)]
+    events[0]["folder_layout"] = {"input_path": "Photos", "layout": {"version": 2, "nodes": [
+        {"id": "photos", "name": "Photos"}, {"id": "other", "name": "Other"},
+    ]}}
+    revision = _json(client, "PUT", job + "/draft", json={"revision": 0, "events": events})["revision"]
+
+    def diagnose(active):
+        _json(client, "POST", job + "/plan", status=202, json={
+            "revision": active, "filename_method": "script", "background": True,
+        })
+        return _json(client, "GET", job)
+
+    def decide(active, action, *, restore=False, choices=(), status=200):
+        command = {"revision": active, "acknowledged": True, "restore": restore}
+        if action == "partners":
+            command["choices"] = [{"xmp": xmp, "raw": raw} for xmp, raw in choices]
+        return _json(client, "POST", job + "/planning-" + action, status=status, json=command)
+
+    a = ("day/Edits/a.xmp", "day/RAW/a.RAF")
+    alternate = ("day/Other/a.xmp", "day/RAW/a.RAF")
+    b = ("day/Edits/b.xmp", "day/RAW/b.RAF")
+    c = ("day/Edits/c.xmp", "day/DNG/c.DNG")
+    c_raw = (c[0], "day/RAW/c.RAF")
+    first_check = diagnose(revision)
+    options = {item["xmp"]: item["candidates"] for item in first_check["planning"]["partners"]}
+    assert set(options) == {a[0], alternate[0], b[0], c[0]}
+    assert {item["raw"] for item in options[c[0]]} == {c[1], c_raw[1]}
+    assert set(options[a[0]][0]["files"]) == {"day/RAW/a.RAF", "day/JPG/a.JPG"}
+    decide(revision, "partners", choices=[c, c_raw], status=409)
+    decide(revision, "partners", choices=[("day/Edits/d.xmp", "day/RAW/d.RAF")], status=409)
+    # Save exclusions as RC7 did, then restore them without changing event data.
+    revision = decide(revision, "exclusions")["revision"]
+    assert _json(client, "GET", job)["excluded_files"]["total"] == first_check["planning"]["files"]["total"]
+    revision = decide(revision, "exclusions", restore=True)["revision"]
+    diagnose(revision)
+    revision = decide(revision, "partners", choices=[a])["revision"]
+    assert _json(client, "GET", job)["partners"][0]["raw"] == a[1]
+    revision = decide(revision, "partners", restore=True)["revision"]
+    assert not _json(client, "GET", job)["partners"]
+    diagnose(revision)
+
+    revision = decide(revision, "partners", choices=[a, alternate, c])["revision"]
+    startup = next(handler for handler in main.app.router.on_startup if handler.__name__ == "resume_pending_adoption")
+    startup()
+    recovered = diagnose(revision)
+    assert {choice["xmp"] for choice in recovered["partners"]} == {a[0], alternate[0], c[0]}
+    assert recovered["draft"]["events"] == first_check["draft"]["events"]
+    assert [case["xmp"] for case in recovered["planning"]["partners"]] == [b[0]]
+    revision = decide(revision, "exclusions")["revision"]
+
+    freeze = {"revision": revision, "filename_method": "script"}
+    if complete:
+        xmp = source / a[0]
+        stamp = xmp.stat()
+        xmp.write_bytes(b"X" + originals[a[0]][1:])
+        os.utime(xmp, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        _json(client, "POST", job + "/plan", status=409, json=freeze)
+        xmp.write_bytes(originals[a[0]])
+        os.utime(xmp, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    plan = _json(client, "POST", job + "/plan", json=freeze)
+    assert plan["move_files"] == len(originals) - 2
+    assert len(plan["events"]) == 35
+    decide(revision, "partners", restore=True, status=409)
+    moves = {move["relative_path"]: move for move in _json(client, "GET", job + "/moves")}
+    assert moves[a[0]]["family_key"] == moves[a[1]]["family_key"] == moves[alternate[0]]["family_key"]
+    assert moves[a[1]]["family_key"] == moves["day/JPG/a.JPG"]["family_key"]
+    assert moves[c[0]]["family_key"] == moves[c[1]]["family_key"] != moves[c_raw[1]]["family_key"]
+    assert all(name not in moves for name in b)
+    assert moves[alternate[0]]["target_path"].endswith(".XMP_002.xmp")
+
+    command = {"plan_id": plan["id"]}
+    _json(client, "POST", job + "/documents")
+    probe = _json(client, "POST", job + "/script/probe", json={
+        **command, "appdata": str(appdata), "source": str(source), "archive": str(archive),
+    })
+    folder = Path(probe["host"]["package"])
+    dev, ino = host.inode(folder.stat())
+    args = ["--package", str(folder), "--source", str(source), "--archive", str(archive),
+            "--package-device", str(dev), "--package-inode", str(ino)]
+    assert host.main(["probe", *args, "--sha256", probe["sha256"]]) == 0
+    _json(client, "POST", job + "/confirm", status=202, json={
+        **command, "method": "script", "acknowledged": True, "probe_sha256": probe["sha256"],
+    })
+    _json(client, "GET", job + "/preparation")
+    _json(client, "POST", job + "/script/release", json=command)
+    manifest_payload = (folder / "manifest.json").read_bytes()
+    manifest = json.loads(manifest_payload)
+    assert len(manifest["documents"]) == 35
+    [edit] = manifest["xmp_edits"]
+    assert edit["source"] == a[0] and edit["original_sha256"] == sha256(originals[a[0]]).hexdigest()
+    apply = [*args, "--sha256", sha256(manifest_payload).hexdigest()]
+    assert host.main(["apply", *apply]) == 0
+
+    if complete:
+        assert _json(client, "POST", job + "/finalize", json=command)["state"] == "completed"
+        assert set(path.relative_to(source).as_posix() for path in source.rglob("*") if path.is_file()) == set(b)
+        edited = archive / moves[a[0]]["target_path"]
+        assert sha256(edited.read_bytes()).hexdigest() == edit["sha256"]
+        assert Path(moves[a[1]]["target_path"]).name.encode() in edited.read_bytes()
+        document = json.loads((edited.parent.parent / "event.json").read_bytes())
+        files = {item["relative_path"]: item for item in document["files"]}
+        family_id = files[moves[a[0]]["target_path"]]["family_id"]
+        members = [row for row in files.values() if row["family_id"] == family_id]
+        family = next(row for row in document["families"] if row["family_id"] == family_id)
+        assert len(members) == 4 and family["total_size_bytes"] == sum(row["size_bytes"] for row in members)
+        with database_connection(database) as connection:
+            assert connection.execute("SELECT count(*) FROM file_families").fetchone()[0] == plan["move_families"]
+    else:
+        _json(client, "POST", job + "/rollback/start", json=command)
+        assert host.main(["rollback", *apply]) == 0
+        assert _json(client, "POST", job + "/rollback/check", json={**command, "keep_draft": True}) == {"reopened": True}
+        recovered = _json(client, "GET", job)
+        assert recovered["draft"]["events"] == first_check["draft"]["events"]
+        assert len(recovered["partners"]) == 3
+        assert json.loads((folder / "permission.json").read_bytes())["mode"] is None
+        actual = {path.relative_to(source).as_posix(): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+        assert actual == originals
+        assert not any(path.is_file() for path in archive.rglob("*"))

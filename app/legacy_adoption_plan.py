@@ -29,6 +29,7 @@ from app.folder_import import normalize_device_name
 from app.free_time import free_ranges_for_day
 from app.event_timeline import continuous_event_overlaps, no_event_segment_overlaps, normalize_no_event_segments, normal_event_ranges
 from app.legacy_adoption_inventory import _job, _legacy_family_key, registered_content
+from app.legacy_adoption_partners import inventory_members, proof as partner_proof, resolve as resolve_partners
 from app.legacy_adoption_mode import require_no_managed_data
 from app.legacy_adoption_xmp_plan import MAX_XMP_BYTES, RAW_EXTENSIONS, XmpPlanError, planned_edit, raw_name_pair
 from app.legacy_adoption_paths import (
@@ -58,8 +59,9 @@ def file_issue_summary(items):
 
 
 class PlanFileIssues(AdoptionError):
-    def __init__(self, items):
+    def __init__(self, items, partners=()):
         self.items = items
+        self.partners = partners
         super().__init__("Einige Dateien können nicht sicher in diesen Plan aufgenommen werden.")
 
 
@@ -599,13 +601,17 @@ def _versioned_members(family, member_name, *, canonical_script_sidecars=False):
     owners = {PurePosixPath(member["relative_path"]).name.casefold(): PurePosixPath(member["relative_path"])
               for member in family if PurePosixPath(member["relative_path"]).suffix.casefold() in RAW_EXTENSIONS}
     sidecar_owners = {}
+    inventoried_refs = set()
     for index, member in enumerate(family):
         if not names[index].casefold().endswith(".xmp"):
             continue
         metadata = json.loads(member["metadata_json"] or "{}")
         hint = (metadata.get("capture_identity") or {}).get("sidecar_raw")
+        confirmed = member.get("confirmed_partner") if isinstance(member, dict) else None
         if hint in owners:
-            sidecar_owners[index] = owners[hint]
+            inventoried_refs.add(index)
+        if confirmed or hint in owners:
+            sidecar_owners[index] = PurePosixPath(confirmed) if confirmed else owners[hint]
             if canonical_script_sidecars:
                 names[index] = ".xmp"
     bases = defaultdict(list)
@@ -622,7 +628,7 @@ def _versioned_members(family, member_name, *, canonical_script_sidecars=False):
             path = PurePosixPath(family[index]["relative_path"])
             owner = sidecar_owners.get(index)
             return (owner is None, owner is not None and owner.suffix.casefold() == ".dng",
-                    owner is None or owner.parent != path.parent, path.as_posix())
+                    index not in inventoried_refs, owner is None or owner.parent != path.parent, path.as_posix())
 
         for index in sorted(indexes, key=order)[1:]:
             name = names[index]
@@ -914,10 +920,10 @@ def _automatic_family_targets(folder, key, family, capture, camera, same_second,
         index += 1
 
 
-def _unbound_sidecar_issues(connection, plan_id, job_id, selections, exclusions):
+def _unbound_sidecar_issues(connection, plan_id, job_id, selections, exclusions, originals, confirmed, reported):
     """Route nearby same-stem candidates to review without guessing family identity."""
     rows = connection.execute(
-        """SELECT i.relative_path, i.family_key, i.sha256, i.metadata_json, m.target_path
+        """SELECT i.relative_path, i.family_key, i.sha256, i.metadata_json, m.target_path, m.parent_event_id, m.assigned_event_id
              FROM legacy_adoption_inventory i
              LEFT JOIN legacy_adoption_moves m ON m.plan_id = ? AND m.relative_path = i.relative_path
             WHERE i.job_id = ? AND i.disposition = 'candidate' AND i.sha256 IS NOT NULL
@@ -933,12 +939,18 @@ def _unbound_sidecar_issues(connection, plan_id, job_id, selections, exclusions)
             candidate = (source, identity, row)
             nearby[source.parent, stem].append(candidate)
             adjacent[source.parent.parent, stem].append(candidate)
-        elif source.suffix.casefold() == ".xmp" and not identity.get("sidecar_raw"):
+        elif source.suffix.casefold() == ".xmp" and (not identity.get("sidecar_raw") or str(source) in reported):
             sidecars.append((source, identity, row))
 
-    issues, protected = {}, set()
+    groups, files = defaultdict(list), {}
+    for item in originals:
+        groups[item["family_key"]].append(item)
+        files[item["relative_path"]] = item
+    confirmed_families = {member["family_key"] for member in confirmed.values()}
+    active = {key for key, *_ in selections}
+    issues, protected, partnerships = {}, set(), []
     for source, identity, row in sidecars:
-        if str(source) in exclusions:
+        if str(source) in exclusions or str(source) in confirmed:
             continue
         base = source.with_suffix("")
         ending = family_member_ending(source).casefold()
@@ -948,18 +960,33 @@ def _unbound_sidecar_issues(connection, plan_id, job_id, selections, exclusions)
         candidates = {candidate[0]: candidate for candidate in nearby[source.parent, stem]}
         if source.parent.parent != PurePosixPath("."):
             candidates.update((candidate[0], candidate) for candidate in adjacent[source.parent.parent, stem])
-        unresolved = []
+        unresolved, options = [], []
         for master, other, partner in candidates.values():
             if partner["family_key"] == row["family_key"] or str(master) in exclusions:
                 continue
-            if ending != ".xmp" and master.name.casefold() != base.name.casefold():
+            if ((ending != ".xmp" and master.name.casefold() != base.name.casefold())
+                    or (identity.get("sidecar_raw") and master.name.casefold() != identity["sidecar_raw"])):
                 continue
             if not row["target_path"] and not partner["target_path"]:
                 continue
             if any(identity.get(tag) and other.get(tag) and identity[tag] != other[tag] for tag in ("id", "serial")):
                 continue
             unresolved.append(master.as_posix())
-            protected.add(partner["family_key"])
+            family_key = partner["family_key"]
+            # A deliberately accepted edit version stays with its chosen master
+            # when a different, undecided edit version is excluded.
+            if family_key not in confirmed_families:
+                protected.add(family_key)
+            if (len(groups[row["family_key"]]) == 1 and family_key in active and partner["target_path"]
+                    and (not row["target_path"] or (
+                        row["parent_event_id"], row["assigned_event_id"]
+                    ) == (partner["parent_event_id"], partner["assigned_event_id"]))
+                    and not any(item["relative_path"] in exclusions for item in groups[family_key])):
+                option = partner_proof(files[str(source)], files[str(master)], groups[family_key])
+                if option:
+                    options.append(option)
+        if options:
+            partnerships.append({"xmp": str(source), "candidates": sorted(options, key=lambda item: item["raw"])})
         if unresolved:
             issues[str(source)] = {
                 "path": str(source), "sha256": row["sha256"], "identity_version": IDENTITY_VERSION,
@@ -977,7 +1004,7 @@ def _unbound_sidecar_issues(connection, plan_id, job_id, selections, exclusions)
                 "path": path, "sha256": member["sha256"], "identity_version": IDENTITY_VERSION,
                 "reason": "Datei bleibt mit einem nicht sicher übernehmbaren XMP an der Quelle.",
             })
-    return issues.values()
+    return issues.values(), sorted(partnerships, key=lambda item: item["xmp"])
 
 
 def _retain_xmp_companions(connection, plan_id, job_id, issues, anchors, selections, exclusions):
@@ -1062,15 +1089,15 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
     used_stems = {target_key(_legacy_family_key(Path(), path)) for path in registered}
     registered_keys = {target_key(path) for path in registered}
     filename_sequences = Counter()
-    rows = connection.execute(
-        """SELECT inventory.*, families.capture_time, families.review_required, copy.state AS review_copy
-             FROM legacy_adoption_inventory inventory
-             JOIN legacy_adoption_families families USING (job_id, family_key)
-             LEFT JOIN legacy_adoption_review_copies copy USING (job_id, family_key)
-            WHERE inventory.job_id = ? ORDER BY family_key, relative_path""",
-        (job["id"],),
-    )
-    selections = list(_assigned_families(rows, draft, events, intervals, seen_draft_keys))
+    originals = list(inventory_members(connection, job["id"]))
+    projected, confirmed = resolve_partners(originals, draft)
+    selections = list(_assigned_families(projected, draft, events, intervals, seen_draft_keys))
+    confirmed_paths = set(confirmed)
+    if confirmed_paths:
+        included = {member["relative_path"] for _, family, *_ in selections for member in family}
+        if confirmed_paths - included:
+            raise AdoptionError("Eine bestätigte Dateipartnerschaft ist keinem Ereignis zugeordnet.")
+    confirmed_keys = {member["family_key"] for member in confirmed.values()}
     # Existing global media are skipped entirely, not participants in a new
     # destination collision or duplicate numbering set. Only physical copies
     # which will actually be newly moved can require an indexed target name.
@@ -1148,23 +1175,26 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             xmp_edit = None
             with relative_parent(source_fd, source) as (directory, name):
                 with bound_file(directory, name) as (fd, info):
-                    verify_inventory_identity(fd, info, json.loads(member["identity"]), member["sha256"])
+                    verify_inventory_identity(fd, info, json.loads(member["identity"]), member["sha256"],
+                                              hash_required=key in confirmed_keys)
                     metadata = json.loads(member["metadata_json"] or "{}")
                     raw_hint = (metadata.get("capture_identity") or {}).get("sidecar_raw")
                     if target is not None and metadata.get("media_type") == "xmp" and (
-                        raw_hint or metadata.get("metadata_error")
+                        raw_hint or source in confirmed or metadata.get("metadata_error")
                     ):
                         owner = raw_name_pair(family, targets, raw_hint) if raw_hint else None
                         reason = None
                         if metadata.get("metadata_error"):
                             reason = "XMP-Metadaten konnten nicht gelesen werden."
-                        elif not owner:
+                        elif raw_hint and not owner:
                             reason = "Der referenzierte RAW-Master ist nicht eindeutig zugeordnet."
                         elif info.st_size > MAX_STREAM_BYTES:
                             reason = "Die XMP-Datei überschreitet die sichere Prüfgröße."
                         else:
                             try:
                                 if info.st_size > MAX_XMP_BYTES:
+                                    if not raw_hint:
+                                        raise XmpPlanError("An oversized sidecar needs an inventoried RAW reference.")
                                     proof = large_xmp_proof(fd, info.st_size, raw_hint, owner[1])
                                     if proof.pop("original_sha256") != member["sha256"]:
                                         raise AdoptionError("XMP-Datei wurde während der Planung verändert: " + source)
@@ -1173,7 +1203,10 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                                     payload = os.pread(fd, info.st_size, 0)
                                     if len(payload) != info.st_size:
                                         raise AdoptionError("XMP-Datei wurde während der Planung verändert: " + source)
-                                    xmp_edit = planned_edit(family, targets, payload, inventory_hint=raw_hint)
+                                    xmp_edit = planned_edit(
+                                        family, targets, payload, inventory_hint=raw_hint,
+                                        confirmed_master=confirmed[source]["relative_path"] if source in confirmed else None,
+                                    )
                             except (XmpPlanError, XmpReferenceError):
                                 reason = "Der eingebettete RAW-Verweis konnte nicht sicher geprüft oder angepasst werden."
                             if filename_method == "manual" and xmp_edit is not None:
@@ -1201,10 +1234,11 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
                 connection.execute(
                     """INSERT INTO legacy_adoption_moves (
                            plan_id, relative_path, target_path, target_key, parent_event_id,
-                           assigned_event_id, capture_time, sha256, status
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                           assigned_event_id, capture_time, sha256, status, confirmed_family_key
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (plan_id, source, target, target_key(target) if target else None, event["id"],
-                     assigned, capture, member["sha256"], "pending" if target else "duplicate"),
+                     assigned, capture, member["sha256"], "pending" if target else "duplicate",
+                     key if source in confirmed else None),
                 )
             except sqlite3.IntegrityError as error:
                 raise AdoptionError("Mehrere Aufnahmen beanspruchen dieselbe Zieldatei: " + str(target)) from error
@@ -1231,13 +1265,15 @@ def _plan_moves(connection, registry, job, plan_id, events, intervals, draft, so
             _plan_directories(connection, plan_id, path, layout, archive_entry)
     _retain_xmp_companions(connection, plan_id, job["id"], file_issues, xmp_anchors, new_selections,
                            draft.get("file_exclusions", {}))
+    partners = ()
     if filename_method == "script":
         reported = {item["path"] for item in file_issues}
-        file_issues.extend(item for item in _unbound_sidecar_issues(
-            connection, plan_id, job["id"], new_selections, draft.get("file_exclusions") or {},
-        ) if item["path"] not in reported)
+        unresolved, partners = _unbound_sidecar_issues(
+            connection, plan_id, job["id"], new_selections, draft.get("file_exclusions") or {}, originals, confirmed, reported,
+        )
+        file_issues.extend(item for item in unresolved if item["path"] not in reported)
     if file_issues:
-        raise PlanFileIssues(file_issues)
+        raise PlanFileIssues(file_issues, partners)
     _check_planned_collisions(connection, plan_id)
     if (set(draft.get("capture_overrides") or {}) | set(draft.get("exclude_families") or [])
             | target_stems.keys()) - seen_draft_keys:
@@ -1268,7 +1304,7 @@ def _manual_method_blocker(connection, job_id, plan, draft):
     if plan["filename_method"] != "script":
         return None
     rows = connection.execute(
-        """SELECT inventory.family_key, move.relative_path, move.target_path, move.xmp_old_raw_name
+        """SELECT coalesce(move.confirmed_family_key, inventory.family_key) AS family_key, move.relative_path, move.target_path, move.xmp_old_raw_name
              FROM legacy_adoption_moves move
              JOIN legacy_adoption_inventory inventory
                ON inventory.job_id = ? AND inventory.relative_path = move.relative_path
@@ -1381,14 +1417,14 @@ def plan_status(library, job_id: str) -> dict:
             (plan["id"],),
         ).fetchone()
         volume = connection.execute(
-            """SELECT count(*), coalesce(sum(inventory.size_bytes), 0), count(DISTINCT inventory.family_key)
+            """SELECT count(*), coalesce(sum(inventory.size_bytes), 0), count(DISTINCT coalesce(move.confirmed_family_key, inventory.family_key))
                  FROM legacy_adoption_moves AS move JOIN legacy_adoption_inventory AS inventory
                    ON inventory.job_id = ? AND inventory.relative_path = move.relative_path
                 WHERE move.plan_id = ? AND move.target_path IS NOT NULL""",
             (job_id, plan["id"]),
         ).fetchone()
         renamed = connection.execute(
-            """SELECT count(*), count(DISTINCT inventory.family_key)
+            """SELECT count(*), count(DISTINCT coalesce(move.confirmed_family_key, inventory.family_key))
                  FROM legacy_adoption_moves move
                  JOIN legacy_adoption_inventory inventory
                    ON inventory.job_id = ? AND inventory.relative_path = move.relative_path
@@ -1445,7 +1481,8 @@ def plan_moves(library, job_id: str, *, after: str = "", limit: int = 100, renam
         connection.execute("BEGIN")
         job = _job(connection, library.library_id, job_id)
         rows = connection.execute(
-            """SELECT move.*, inventory.size_bytes, inventory.identity, inventory.family_key
+            """SELECT move.*, inventory.size_bytes, inventory.identity,
+                        coalesce(move.confirmed_family_key, inventory.family_key) AS family_key
                  FROM legacy_adoption_moves move
                  JOIN legacy_adoption_plans plan ON plan.id = move.plan_id
                  JOIN legacy_adoption_inventory inventory ON inventory.job_id = plan.job_id

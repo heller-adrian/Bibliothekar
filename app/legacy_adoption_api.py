@@ -37,6 +37,7 @@ from app.legacy_adoption_preparation import (
     abandon_failed_preparation, exclusive_preparation_worker, preparation_status,
     preparation_worker_active, record_preparation, reserve_preparation, saved_preparation_proof,
 )
+from app.legacy_adoption_partners import inventory_members, resolve as resolve_partners
 from app.legacy_adoption_paths import AdoptionError, bound_directory
 from app.legacy_adoption_mode import (
     active_adoption, adoption_execution_access, choose_initial_setup, complete_initial_preferences,
@@ -130,6 +131,15 @@ class PlanningExclusions(Freeze):
     restore: StrictBool = False
 
 
+class PartnerChoice(BaseModel):
+    xmp: str
+    raw: str
+
+
+class PlanningPartners(PlanningExclusions):
+    choices: list[PartnerChoice] = Field(default_factory=list, max_length=10000)
+
+
 class SelectExecution(BaseModel):
     plan_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     method: Literal["manual", "script"]
@@ -146,6 +156,10 @@ class StageMetadata(SelectedMetadata):
 
 class PlanCommand(BaseModel):
     plan_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+class RollbackCheck(PlanCommand):
+    keep_draft: StrictBool = False
 
 
 class FinishPlan(PlanCommand):
@@ -249,7 +263,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 LIMIT 1""", (job_id, IDENTITY_VERSION),
         ).fetchone() is not None
 
-    def planning_attempt(library, job_id, command, *, state, message=None, issues=None):
+    def planning_attempt(library, job_id, command, *, state, message=None, issues=None, partners=None):
         with database_connection(library.database_path) as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = _job(connection, library.library_id, job_id)
@@ -273,6 +287,8 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 draft["planning_attempt"]["message"] = message
             if issues:
                 draft["planning_attempt"]["issues"] = issues
+            if partners:
+                draft["planning_attempt"]["partners"] = partners
             connection.execute("UPDATE legacy_adoption_jobs SET draft_json=? WHERE id=?",
                                (json.dumps(draft), job_id))
 
@@ -303,7 +319,8 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                         return result
                 except Exception as error:
                     planning_attempt(library, job_id, command, state="failed", message=str(error),
-                                     issues=error.items if isinstance(error, PlanFileIssues) else None)
+                                     issues=error.items if isinstance(error, PlanFileIssues) else None,
+                                     partners=error.partners if isinstance(error, PlanFileIssues) else None)
                     if not command.background:
                         raise
                     logging.getLogger(__name__).info("Legacy adoption planning %s: %s", job_id, error)
@@ -564,6 +581,15 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 issues = attempt.pop("issues", ())
                 if issues:
                     attempt["files"] = file_issue_summary(issues)
+                attempt["partners"] = [
+                    {"xmp": case["xmp"], "candidates": [
+                        {key: option[key] for key in ("raw", "files")} for option in case["candidates"]
+                    ]} for case in attempt.get("partners", ())
+                ]
+                result["partners"] = [
+                    {key: option[key] for key in ("xmp", "raw", "files")}
+                    for option in result["draft"].pop("file_partners", {}).values()
+                ]
                 result["planning"] = attempt
                 result["matching_update_required"] = (item["state"] == "inventoried" and not result["plan"]
                                                       and matching_update_required(connection, job_id))
@@ -781,6 +807,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             previous = json.loads(item["draft_json"])
             saved = draft.model_dump(exclude_none=True, exclude={"revision"})
             saved["file_exclusions"] = previous.get("file_exclusions", {})
+            saved["file_partners"] = previous.get("file_partners", {})
             saved["metadata_review_pending"] = {
                 key: choice for key, choice in previous.get("metadata_review_pending", {}).items()
                 if key not in saved["capture_overrides"]
@@ -824,6 +851,43 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 (json.dumps(draft), revision, job_id),
             )
         return {"revision": revision, "excluded_files": file_issue_summary(excluded.values())}
+
+    @router.post("/jobs/{job_id}/planning-partners")
+    def update_planning_partners(job_id: str, command: PlanningPartners, request: Request):
+        library = context()
+        with _errors(), admission(library), database_connection(library.database_path) as connection:
+            require_adoption(request, library)
+            require_planning_idle(library, job_id)
+            require_inventory_idle(library, job_id)
+            require_review_idle(library, job_id)
+            connection.execute("BEGIN IMMEDIATE")
+            require_no_partial_publication(connection, job_id)
+            row = _job(connection, library.library_id, job_id)
+            if (not command.acknowledged or row["draft_revision"] != command.revision
+                    or row["state"] != "inventoried" or connection.execute(
+                    "SELECT 1 FROM legacy_adoption_plans WHERE job_id=?", (job_id,)).fetchone()):
+                raise AdoptionError("Der Entwurf ist nicht mehr aktuell oder die Bestätigung fehlt.")
+            draft = json.loads(row["draft_json"])
+            attempt = draft.pop("planning_attempt", {})
+            decisions = draft.setdefault("file_partners", {})
+            if command.restore:
+                decisions.clear()
+            else:
+                options = {(case["xmp"], option["raw"]): option for case in attempt.get("partners", ())
+                           for option in case["candidates"] if option["version"] == IDENTITY_VERSION}
+                if (not command.choices or len({choice.xmp for choice in command.choices}) != len(command.choices)
+                        or attempt.get("state") != "failed" or attempt.get("revision") != command.revision
+                        or any((choice.xmp, choice.raw) not in options or choice.xmp in decisions
+                               for choice in command.choices)):
+                    raise AdoptionError("Wähle genau einen angebotenen RAW-Partner pro XMP aus der aktuellen Planprüfung.")
+                decisions.update((choice.xmp, options[choice.xmp, choice.raw]) for choice in command.choices)
+                resolve_partners(inventory_members(connection, job_id), draft)
+            revision = command.revision + 1
+            connection.execute(
+                "UPDATE legacy_adoption_jobs SET draft_json=?, draft_revision=? WHERE id=?",
+                (json.dumps(draft), revision, job_id),
+            )
+        return {"revision": revision}
 
     @router.post("/jobs/{job_id}/plan")
     def freeze(job_id: str, draft: FreezePlan, request: Request, tasks: BackgroundTasks):
@@ -1185,7 +1249,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
             return plan_status(library, job_id)
 
     @router.post("/jobs/{job_id}/rollback/check")
-    def rollback_check(job_id: str, command: PlanCommand):
+    def rollback_check(job_id: str, command: RollbackCheck):
         library = context()
         with _errors(), adoption_execution_access(registry_path()), admission(library):
             execution = plan_status(library, job_id).get("execution")
@@ -1193,7 +1257,7 @@ def install_legacy_adoption_routes(app, *, context, registry_path, source_root_p
                 with locked_script(library, job_id, command.plan_id) as (descriptor, script):
                     if script["phase"] != "rolling_back":
                         raise AdoptionError("Starte zuerst den vorgesehenen Wiederherstellungsweg.")
-                    keep_draft = script_documents_stale(library, command.plan_id)
+                    keep_draft = command.keep_draft or script_documents_stale(library, command.plan_id)
                     if keep_draft and script_journal_started(descriptor):
                         status = script_status(descriptor, script)
                         if not status or (status.get("state"), status.get("mode")) != ("rolled_back", "rollback"):

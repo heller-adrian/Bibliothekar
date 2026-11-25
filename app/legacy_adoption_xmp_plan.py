@@ -30,7 +30,7 @@ def raw_name_pair(family, targets, raw_name):
     return owners[0] if len(owners) == 1 else None
 
 
-def planned_edit(family, targets, payload: bytes, *, inventory_hint=None):
+def planned_edit(family, targets, payload: bytes, *, inventory_hint=None, confirmed_master=None):
     """Return old/new digests and names iff the referenced RAW is renamed.
 
     Only original members of the *already proven* family are eligible. A
@@ -49,6 +49,8 @@ def planned_edit(family, targets, payload: bytes, *, inventory_hint=None):
     if len(original) != 1:
         raise XmpPlanError("XMP contains ambiguous RAW references.")
     old_name = original[0]
+    if confirmed_master and PurePosixPath(confirmed_master).name.casefold() != old_name.casefold():
+        raise XmpPlanError("XMP RawFileName differs from the confirmed master.")
     owner = raw_name_pair(family, targets, old_name)
     if owner is None:
         raise XmpPlanError("XMP RawFileName does not refer to one uniquely matched master.")

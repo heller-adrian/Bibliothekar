@@ -73,6 +73,8 @@ _PAGE = r"""<!doctype html>
 .legacy-adoption section{min-width:0;background:var(--bk-surface);border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:24px;margin:18px 0;box-shadow:var(--bk-shadow)}
 .legacy-adoption .adoption-card{min-width:0;border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:clamp(12px,2vw,22px);margin:12px 0}
 .legacy-adoption .adoption-card>:first-child{margin-top:0}
+.adoption-file-issues code{overflow-wrap:anywhere}
+.adoption-partner-case label{align-items:start}
 .adoption-card h4{font-size:1rem;margin:0 0 12px}
 .legacy-adoption .bk-event-layout-editor:not([open]){padding-block:4px}
 .legacy-adoption .bk-event-layout-editor > summary{list-style:none}
@@ -529,6 +531,62 @@ function describeFiles(host, summary){
   if(summary.total>(summary.examples || []).length)details.append(line("Nur die ersten zehn Pfade werden angezeigt."));
   host.append(details);
 }
+function partnerPaths(host, paths){
+  const files=node("ul");
+  for(const path of paths){
+    const entry=node("li");
+    entry.append(node("code",path));
+    files.append(entry);
+  }
+  host.append(files);
+}
+function renderPartnerChoices(host, attempt){
+  const cases=attempt.partners || [];
+  const toolbar=node("div",undefined,"inline adoption-toolbar");
+  host.append(toolbar);
+  if(!cases.length)return toolbar;
+  const options=[];
+  const details=node("details",undefined,"adoption-file-issues");
+  details.open=true;
+  const summary=node("summary");
+  summary.append(node("span","Mögliche Dateipartnerschaften")," ("+cases.length+")");
+  details.append(summary,line("Bestätige für jedes XMP höchstens einen passenden RAW- oder DNG-Partner. Fälle mit mehreren Kandidaten benötigen eine Einzelauswahl."));
+  for(const [index,group] of cases.entries()){
+    const card=node("div",undefined,"adoption-card adoption-partner-case");
+    card.append(node("code",group.xmp));
+    for(const candidate of group.candidates){
+      const input=node("input");
+      const field=node("label",undefined,"adoption-ack");
+      input.type=group.candidates.length===1?"checkbox":"radio";
+      input.name="adoption-partner-"+index;
+      field.append(input,node("code",candidate.raw));
+      card.append(field);
+      if(candidate.files.length>1)partnerPaths(card,candidate.files.filter(path=>path!==candidate.raw));
+      options.push({input,selection:{xmp:group.xmp,raw:candidate.raw}});
+    }
+    details.append(card);
+  }
+  host.insertBefore(details,toolbar);
+  const confirmPartners=action("Ausgewählte Partner bestätigen",async()=>{
+    const choices=options.filter(option=>option.input.checked).map(option=>option.selection);
+    await mutate("/planning-partners","POST",{revision:draftRevision,acknowledged:true,choices});
+    await startPlan(attempt.method);
+  },true);
+  const update=()=>{confirmPartners.disabled=!options.some(option=>option.input.checked);};
+  for(const [label,select] of [["Alle auswählen",true],["Auswahl aufheben",false]]){
+    const button=node("button",label);
+    button.type="button";
+    button.addEventListener("click",()=>{
+      for(const {input} of options)if(!select || input.type==="checkbox")input.checked=select;
+      update();
+    });
+    details.insertBefore(button,details.querySelector(".adoption-partner-case"));
+  }
+  details.addEventListener("change",update);
+  toolbar.append(confirmPartners);
+  update();
+  return toolbar;
+}
 function renderPlanningResult(){
   const attempt=job.planning || {};
   if(planningBusy()){
@@ -540,7 +598,8 @@ function renderPlanningResult(){
     report(attempt.message,"error");
     if(attempt.files?.total){
       describeFiles($("message"),attempt.files);
-      $("message").append(action("Problematische Dateien ausschließen",()=>updateExclusions(false)));
+      renderPartnerChoices($("message"),attempt)
+        .append(action("Problematische Dateien ausschließen",()=>updateExclusions(false)));
     }
   }
 }
@@ -821,6 +880,7 @@ function showPreparation(result){
   $("wizard-navigation").inert=preparing;
   section.replaceChildren();
   if(!preparing)return;
+  $("execution-method-heading").textContent="Durchführungsmethode – TrueNAS-Skript";
   section.append(node("strong",result.state==="completed"?"Skriptvorbereitung abgeschlossen":
     result.state==="failed"?"Vorbereitung unterbrochen":
     "Skriptmanifest wird serverseitig vorbereitet"));
@@ -1071,6 +1131,25 @@ function renderDraft(host) {
     notice.append(line("Bestätigte Ausschlüsse bleiben unverändert an der Quelle."));
     describeFiles(notice,job.excluded_files);
     notice.append(action("Dateiausschlüsse aufheben",()=>updateExclusions(true)));
+    panel.append(notice);
+  }
+  if(job.partners?.length){
+    const notice=node("div",undefined,"adoption-card");
+    const details=node("details",undefined,"adoption-file-issues");
+    const summary=node("summary");
+    summary.append(node("span","Bestätigte Dateipartnerschaften")," ("+job.partners.length+")");
+    details.append(summary);
+    const entries=node("ul");
+    for(const pair of job.partners){
+      const item=node("li");
+      item.append(node("code",pair.xmp)," → ",node("code",pair.raw));
+      entries.append(item);
+    }
+    details.append(entries);
+    notice.append(details,action("Bestätigungen aufheben",async()=>{
+      if(await window.BibliothekarI18n.confirmAsync("Alle bestätigten Dateipartnerschaften dieses Entwurfs aufheben?"))
+        await mutate("/planning-partners","POST",{revision:draftRevision,acknowledged:true,restore:true});
+    }));
     panel.append(notice);
   }
   if(previewRevision!==draftRevision){
@@ -2190,7 +2269,10 @@ function renderPlan(host) {
   if (phase==="rolling_back" && scripted) {
     const confirmRollback=action("Wiederherstellung prüfen und Auftrag beenden",()=>run("/rollback/check"),true);
     confirmRollback.id="script-rollback-check";
-    controls.append(action("Befehl für die Skriptrücknahme bereitstellen",()=>run("/rollback/start")),confirmRollback);
+    controls.append(action("Befehl für die Skriptrücknahme bereitstellen",()=>run("/rollback/start")));
+    if(!recoveryOnly) controls.append(action("Wiederherstellung prüfen und Entwurf weiterbearbeiten",
+      ()=>mutate("/rollback/check","POST",{...command,keep_draft:true})));
+    controls.append(confirmRollback);
   }
   if (plan.issues) controls.append(action("Prüfprobleme anzeigen",async()=>{
     const issues=await api(jobPath("/issues"));
@@ -2325,6 +2407,7 @@ function renderConfirmation(panel,command) {
   confirmation.classList.add("adoption-card");
   const plannedMethod=job.plan.filename_method || "manual";
   const methodKey="bk-adoption-method:"+jobId+":"+command.plan_id;
+  const heading=slot("execution-method-heading","h3");
   const blocked=job.plan.manual_blocker;
   const choice=node("div",undefined,"adoption-methods");
   choice.setAttribute("role","radiogroup");
@@ -2454,6 +2537,8 @@ function renderConfirmation(panel,command) {
   const manualConfirm=node("div");
   const safety=node("div");
   function showSelectedMethod(){
+    heading.textContent=!methodChosen?"Durchführungsmethode":plannedMethod==="script"?
+      "Durchführungsmethode – TrueNAS-Skript":"Durchführungsmethode – Manuelle Übernahme";
     safety.hidden=!methodChosen;
     choose.hidden=methodChosen;
     if(!methodChosen)return;
@@ -2511,7 +2596,7 @@ function renderConfirmation(panel,command) {
   controls.hidden=true;
   $("top-actions").inert=$("wizard-navigation").inert=true;
   controls.append(choice,choose,methodStatus,safety);
-  confirmation.append(node("h3","Durchführungsmethode"),controls,progress);
+  confirmation.append(heading,controls,progress);
   showSelectedMethod();
   panel.append(confirmation);
 }

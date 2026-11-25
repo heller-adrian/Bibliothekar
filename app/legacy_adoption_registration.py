@@ -48,6 +48,11 @@ def _fingerprint(connection, plan):
             ORDER BY relative_path""", (plan["id"],),
     ):
         digest.update(json.dumps(tuple(row)).encode("utf-8") + b"\n")
+    for row in connection.execute(
+        """SELECT relative_path, confirmed_family_key FROM legacy_adoption_moves
+            WHERE plan_id=? AND confirmed_family_key IS NOT NULL ORDER BY relative_path""", (plan["id"],),
+    ):
+        digest.update(json.dumps(tuple(row)).encode("utf-8") + b"\n")
     return digest.hexdigest()
 
 
