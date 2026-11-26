@@ -1,4 +1,5 @@
 """Persistent confirmation, execution and recovery of a frozen adoption plan."""
+from contextlib import closing, ExitStack
 import json
 
 from app.database import database_connection
@@ -7,7 +8,8 @@ from app.legacy_adoption_inventory import _job
 from app.legacy_adoption_manual import assert_directories_restored, record_missing_directories
 from app.legacy_adoption_paths import AdoptionError
 from app.legacy_adoption_plan import plan_status
-from app.legacy_adoption_verify import _catalogue_unchanged, _plan, assert_original_layout, verify_locked
+from app.legacy_adoption_verify import _catalogue_unchanged, _plan, check_original_layout, verify_locked
+from app.operation_health import read_connection
 
 
 def execution_row(connection, plan_id):
@@ -23,22 +25,44 @@ def set_phase(connection, plan_id, phase):
     )
 
 
-def confirm_plan(library, job_id, plan_id, method, *, acknowledged, probe_digest=None):
+def _confirmable(connection, library, job_id, plan_id, method):
+    job = _job(connection, library.library_id, job_id)
+    plan = _plan(connection, job_id)
+    if (job["state"] != "inventoried" or plan["id"] != plan_id
+            or plan["state"] != "prepared" or not plan["documents_at"]):
+        raise AdoptionError("Der vollständige aktuelle Plan und seine Ereignisdokumente müssen vorliegen.")
+    existing = execution_row(connection, plan_id)
+    if existing is None and plan["filename_method"] not in {None, method}:
+        raise AdoptionError("Wähle zuerst die Durchführungsmethode für den angezeigten Verschiebeplan.")
+    if existing is not None and existing["method"] != method:
+        raise AdoptionError("Die bestätigte Methode kann nicht geändert werden.")
+    return job, plan, existing
+
+
+def confirm_plan(library, job_id, plan_id, method, *, acknowledged, probe_digest=None, progress=None):
     if acknowledged is not True or method not in {"manual", "script"}:
         raise AdoptionError("Bestätige die Sicherheitsbedingungen und wähle eine verfügbare Methode.")
-    with database_connection(library.database_path) as connection:
-        connection.execute("BEGIN IMMEDIATE")
-        job = _job(connection, library.library_id, job_id)
-        plan = _plan(connection, job_id)
-        if (job["state"] != "inventoried" or plan["id"] != plan_id or
-                plan["state"] != "prepared" or not plan["documents_at"]):
-            raise AdoptionError("Der vollständige aktuelle Plan und seine Ereignisdokumente müssen vorliegen.")
-        existing = execution_row(connection, plan_id)
-        if existing is None:
-            if plan["filename_method"] not in {None, method}:
-                raise AdoptionError("Wähle zuerst die Durchführungsmethode für den angezeigten Verschiebeplan.")
+    from app.legacy_adoption_package import register_manifest, stage_manifest
+
+    with ExitStack() as package_lock:
+        with closing(read_connection(library.database_path)) as snapshot:
+            snapshot.execute("BEGIN")
+            job, plan, existing = _confirmable(snapshot, library, job_id, plan_id, method)
+            if existing is not None:
+                return plan_status(library, job_id)
+            _catalogue_unchanged(snapshot, job_id, json.loads(plan["events_json"]))
+            if method == "manual":
+                check_original_layout(snapshot, library, job, plan)
+            else:
+                binding = package_lock.enter_context(
+                    stage_manifest(snapshot, library, job, plan, probe_digest, progress=progress)
+                )
+        with database_connection(library.database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current_job, current_plan, existing = _confirmable(connection, library, job_id, plan_id, method)
+            if dict(current_plan) != dict(plan) or dict(current_job) != dict(job) or existing is not None:
+                raise AdoptionError("Der geprüfte Verschiebeplan wurde ersetzt.")
             _catalogue_unchanged(connection, job_id, json.loads(plan["events_json"]))
-            assert_original_layout(connection, library, job, plan)
             connection.execute(
                 "INSERT INTO legacy_adoption_execution (plan_id, method, phase) VALUES (?, ?, ?)",
                 (plan_id, method, "manual" if method == "manual" else "script_prepared"),
@@ -46,10 +70,7 @@ def confirm_plan(library, job_id, plan_id, method, *, acknowledged, probe_digest
             if method == "manual":
                 record_missing_directories(connection, library, job, plan)
             else:
-                from app.legacy_adoption_package import prepare_manifest
-                prepare_manifest(connection, library, job, plan, probe_digest)
-        elif existing["method"] != method:
-            raise AdoptionError("Die bestätigte Methode kann nicht geändert werden.")
+                register_manifest(connection, binding)
     return plan_status(library, job_id)
 
 
@@ -82,20 +103,35 @@ def verify_execution(library, job_id, plan_id):
     return plan_status(library, job_id)
 
 
-def complete_rollback(library, job_id, plan_id, *, before_commit=None):
+def _rollback_state(connection, library, job_id, plan_id):
+    job = _job(connection, library.library_id, job_id)
+    plan = _plan(connection, job_id)
+    execution = execution_row(connection, plan["id"])
+    if plan["id"] != plan_id or execution is None or execution["phase"] != "rolling_back":
+        raise AdoptionError("Starte zuerst den vorgesehenen Wiederherstellungsweg.")
+    _catalogue_unchanged(connection, job_id, json.loads(plan["events_json"]))
+    return job, plan, execution
+
+
+def complete_rollback(library, job_id, plan_id, *, before_commit=None, keep_draft=False, finish=None):
+    with closing(read_connection(library.database_path)) as snapshot:
+        snapshot.execute("BEGIN")
+        job, plan, execution = _rollback_state(snapshot, library, job_id, plan_id)
+        check_original_layout(snapshot, library, job, plan)
+        if execution["method"] == "manual":
+            assert_directories_restored(snapshot, library, job, plan)
     with database_connection(library.database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
-        job = _job(connection, library.library_id, job_id)
-        plan = _plan(connection, job_id)
-        execution = execution_row(connection, plan["id"])
-        if plan["id"] != plan_id or execution is None or execution["phase"] != "rolling_back":
-            raise AdoptionError("Starte zuerst den vorgesehenen Wiederherstellungsweg.")
-        _catalogue_unchanged(connection, job_id, json.loads(plan["events_json"]))
-        assert_original_layout(connection, library, job, plan)
-        if execution["method"] == "manual":
-            assert_directories_restored(connection, library, job, plan)
+        current = _rollback_state(connection, library, job_id, plan_id)
+        if tuple(map(dict, current)) != tuple(map(dict, (job, plan, execution))):
+            raise AdoptionError("Der geprüfte Verschiebeplan wurde ersetzt.")
         if before_commit:
             before_commit()
+        if finish is not None:
+            finish(connection, current[0], keep_draft)
+        if keep_draft:
+            connection.execute("DELETE FROM legacy_adoption_plans WHERE id = ?", (plan_id,))
+            return {"reopened": True}
         set_phase(connection, plan_id, "rolled_back")
         connection.execute("UPDATE legacy_adoption_jobs SET state = 'discarded' WHERE id = ?", (job_id,))
     return plan_status(library, job_id)

@@ -59,6 +59,240 @@ def test_read_only_draft_preview_identifies_conflicting_event(inventory, case):
         assert connection.execute('SELECT draft_revision FROM legacy_adoption_jobs WHERE id=?', (job,)).fetchone()[0] == 0
 
 
+
+def test_historical_raw_dng_and_export_jpeg_keep_original_stem(inventory, monkeypatch):
+    import os
+
+    context, source, registry = inventory
+    base = "2024/12/17.12.2024"
+    filenames = [
+        f"{base}/RAW/DSCF4762.RAF",
+        f"{base}/DNG/DSCF4762.dng",
+        f"{base}/Export/Foto-Export/DSCF4762.jpg",
+        f"{base}/DNG/DSCF4762-2.dng",
+        f"{base}/DNG/DSCF4762-Enhanced-NR.dng",
+    ]
+    for name in filenames:
+        file = source / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(name.encode())
+
+    def metadata(descriptors, _cancel):
+        result = {}
+        for fd in descriptors:
+            name = os.pread(fd, 400, 0).decode()
+            result[fd] = {
+                "EXIF:IFD0:Make": "FUJIFILM",
+                "EXIF:IFD0:Model": "X-H2S",
+                "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+                "EXIF:ExifIFD:ExposureTime": "1/4",
+                "EXIF:ExifIFD:FNumber": "4.0",
+                "EXIF:ExifIFD:ISO": "1600",
+            }
+            if name.endswith(("-2.dng", "-Enhanced-NR.dng")):
+                result[fd]["EXIF:IFD0:OriginalRawFileName"] = "DSCF4762.RAF"
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft())
+    assert plan["move_files"] == 5
+    assert plan["move_families"] == 3
+    assert plan["rename_files"] == 0
+    targets = {Path(item["target_path"]).name for item in plan_moves(context, job)}
+    assert targets == {Path(name).name for name in filenames}
+
+
+def test_arbitrary_archive_folders_share_proven_capture_name_without_adopted_suffix(
+    inventory, monkeypatch,
+):
+    """End-to-end plan: media matching must not depend on directory labels."""
+    import os
+
+    context, source, registry = inventory
+    paths = (
+        "unclassified/old-camera/DSCF4762.RAF",
+        "my-export/location/DSCF4762.JPG",
+        "conversions/nested/DSCF4762.dng",
+        "editing/metadata/DSCF4762.RAF.xmp",
+    )
+    for relative in paths:
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(relative.encode())
+
+    def metadata(descriptors, _cancel):
+        rows = {}
+        for fd in descriptors:
+            name = os.pread(fd, 500, 0).decode()
+            row = {
+                "EXIF:IFD0:Make": "FUJIFILM",
+                "EXIF:IFD0:Model": "X-H2S",
+                "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+                "EXIF:ExifIFD:ExposureTime": "1/4",
+                "EXIF:ExifIFD:FNumber": "4",
+                "EXIF:ExifIFD:ISO": "1600",
+            }
+            if name.endswith(".dng"):
+                row["EXIF:IFD0:OriginalRawFileName"] = "DSCF4762.RAF"
+            rows[fd] = row
+        return rows
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft())
+    assert plan["move_files"] == 4
+    assert plan["move_families"] == 1
+    assert plan["rename_files"] == 0
+    assert {Path(row["target_path"]).name for row in plan_moves(context, job)} == {
+        Path(name).name for name in paths
+    }
+
+
+def test_historical_duplicate_jpeg_prefers_complete_raw_jpeg_family(inventory):
+    context, source, registry = inventory
+    base = source / "2025" / "04" / "16.04.2025"
+    solo = base / "Serie Rotkelchen"
+    complete = base / "Voegel mit Rotkelchen"
+    solo.mkdir(parents=True)
+    complete.mkdir(parents=True)
+    (solo / "DSCF2922.JPG").write_bytes(b"identical JPEG image")
+    (complete / "DSCF2922.JPG").write_bytes(b"identical JPEG image")
+    (complete / "DSCF2922.RAF").write_bytes(b"unique RAW image")
+    job = _scan(context, source)
+    with database_connection(context.database_path) as connection:
+        rows = {row["relative_path"]: row["disposition"] for row in connection.execute(
+            "SELECT relative_path, disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
+        )}
+    assert rows["2025/04/16.04.2025/Serie Rotkelchen/DSCF2922.JPG"] == "candidate"
+    assert rows["2025/04/16.04.2025/Voegel mit Rotkelchen/DSCF2922.JPG"] == "candidate"
+    assert rows["2025/04/16.04.2025/Voegel mit Rotkelchen/DSCF2922.RAF"] == "candidate"
+    plan = create_plan(context, registry, job, _draft())
+    assert (plan["move_files"], plan["inventory_duplicates"]) == (3, 0)
+    targets = [Path(row["target"]).name for row in plan_moves(context, job)]
+    assert "DSCF2922_Duplicate_001.JPG" in targets
+    assert "DSCF2922_Duplicate_002.JPG" in targets
+
+
+def test_cross_day_identical_media_are_detected_without_source_deletion(inventory):
+    context, source, registry = inventory
+    paths = []
+    for day in ("16.04.2025", "17.04.2025"):
+        folder = source / "2025" / "04" / day / "JPEG"
+        folder.mkdir(parents=True)
+        path = folder / "DSCF2922.JPG"
+        path.write_bytes(b"same historical file")
+        paths.append(path)
+    job = _scan(context, source)
+    with database_connection(context.database_path) as connection:
+        rows = list(connection.execute(
+            "SELECT disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
+        ))
+    assert len(rows) == 2
+    assert sorted(row[0] for row in rows) == ["candidate", "candidate"]
+    assert all(path.read_bytes() == b"same historical file" for path in paths)
+    plan = create_plan(context, registry, job, _draft())
+    assert plan["move_files"] == 2
+    assert plan["inventory_duplicates"] == 0
+    assert {Path(row["target"]).name for row in plan_moves(context, job)} == {
+        "DSCF2922_Duplicate_001.JPG", "DSCF2922_Duplicate_002.JPG"
+    }
+
+
+def test_identical_media_across_undated_arbitrary_directories_are_detected(inventory):
+    context, source, registry = inventory
+    original = source / "collection-A" / "unprocessed" / "DSCF2922.JPG"
+    complete = source / "completely-unrelated-folder" / "DSCF2922.JPG"
+    raw = complete.with_suffix(".RAF")
+    for path in (original, complete, raw):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    original.write_bytes(b"same JPEG bytes")
+    complete.write_bytes(b"same JPEG bytes")
+    raw.write_bytes(b"distinct camera raw")
+    job = _scan(context, source)
+    with database_connection(context.database_path) as connection:
+        rows = {
+            row["relative_path"]: row["disposition"]
+            for row in connection.execute(
+                "SELECT relative_path, disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
+            )
+        }
+    assert rows["collection-A/unprocessed/DSCF2922.JPG"] == "candidate"
+    assert rows["completely-unrelated-folder/DSCF2922.JPG"] == "candidate"
+    assert rows["completely-unrelated-folder/DSCF2922.RAF"] == "candidate"
+    assert original.read_bytes() == complete.read_bytes()
+    plan = create_plan(context, registry, job, _draft())
+    assert plan["move_files"] == 3
+    assert plan["inventory_duplicates"] == 0
+    targets = [Path(row["target"]).name for row in plan_moves(context, job)]
+    assert "DSCF2922_Duplicate_001.JPG" in targets
+    assert "DSCF2922_Duplicate_002.JPG" in targets
+
+
+@pytest.mark.parametrize("method", ["manual", "script"])
+def test_shared_jpeg_with_different_raws_keeps_each_capture_in_the_plan(inventory, method):
+    context, source, registry = inventory
+    folder = source / "2025/06/BWB Wuppertal/RAW"
+    folder.mkdir(parents=True)
+    for stem, raw in (("DSCF8391", b"raw photo A"), ("DSCF8391_1", b"raw photo B")):
+        (folder / (stem + ".JPG")).write_bytes(b"shared JPEG")
+        (folder / (stem + ".RAF")).write_bytes(raw)
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft(), filename_method=method)
+    assert (plan["move_files"], plan["move_families"], plan["inventory_duplicates"]) == (4, 2, 0)
+    moves = plan_moves(context, job)
+    assert len({move["sha256"] for move in moves}) == 3
+    for number, key in enumerate(sorted({move["family_key"] for move in moves}), 1):
+        family = [move for move in moves if move["family_key"] == key]
+        assert len(family) == 2
+        [target_stem] = {Path(move["target"]).stem for move in family}
+        assert target_stem.endswith(f"_Duplicate_{number:03d}")
+        if method == "script":
+            assert target_stem.endswith(f"_Burst_{number:03d}_Duplicate_{number:03d}")
+        assert len({Path(move["target"]).suffix for move in family}) == 2
+
+
+def test_historical_duplicate_raw_preserves_distinct_xmp_as_detached(inventory):
+    context, source, registry = inventory
+    folder = source / "2025" / "06" / "18.06.2025" / "RAW"
+    folder.mkdir(parents=True)
+    (folder / "DSCF0302.RAF").write_bytes(b"identical RAW media")
+    (folder / "DSCF0302_1.raf").write_bytes(b"identical RAW media")
+    (folder / "DSCF0302.xmp").write_bytes(b"original XMP edits")
+    (folder / "DSCF0302_1.xmp").write_bytes(b"other XMP edits")
+    job = _scan(context, source)
+    with database_connection(context.database_path) as connection:
+        rows = {row["relative_path"]: row["disposition"] for row in connection.execute(
+            "SELECT relative_path, disposition FROM legacy_adoption_inventory WHERE job_id = ?", (job,)
+        )}
+    assert rows["2025/06/18.06.2025/RAW/DSCF0302.RAF"] == "candidate"
+    assert rows["2025/06/18.06.2025/RAW/DSCF0302_1.raf"] == "candidate"
+    assert rows["2025/06/18.06.2025/RAW/DSCF0302.xmp"] == "candidate"
+    assert rows["2025/06/18.06.2025/RAW/DSCF0302_1.xmp"] == "candidate"
+    plan = create_plan(context, registry, job, _draft())
+    assert (plan["move_files"], plan["inventory_duplicates"]) == (4, 0)
+    assert sum(Path(row["target"]).suffix.lower() == ".xmp"
+               for row in plan_moves(context, job)) == 2
+
+
+def test_prepared_plan_reports_exact_collision_rename_totals(inventory):
+    context, source, registry = inventory
+    for folder, content in (("RAW", b"first source photo"), ("SECOND", b"second source photo")):
+        (source / folder).mkdir()
+        (source / folder / "DSCF1111.JPG").write_bytes(content)
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft())
+    assert plan["move_files"] == 2
+    assert plan["rename_files"] == 2
+    assert plan["rename_families"] == 2
+    moves = plan_moves(context, job, renamed=True)
+    assert len(moves) == 2
+    assert {Path(row["target"]).name for row in moves} == {
+        "DSCF1111_001.JPG", "DSCF1111_002.JPG"
+    }
+
+
+
 def test_draft_preview_counts_the_same_eligible_families_as_the_move_plan(inventory):
     from app.legacy_adoption_plan import preview_draft
     context, source, _ = inventory
@@ -173,12 +407,41 @@ def test_later_extension_rejects_collision_with_archived_original(inventory):
     archived.write_bytes(b"archived original")
     (source / "same.raf").write_bytes(b"different capture with the same name")
     job = _scan(context, source)
-    with pytest.raises(AdoptionError, match="Zieldatei existiert bereits"):
-        create_plan(context, registry, job, {"events": [{"existing_id": event_id}]}, allow_existing=True)
+    plan = create_plan(context, registry, job, {"events": [{"existing_id": event_id}]}, allow_existing=True)
+    assert plan["move_files"] == 1
+    [move] = plan_moves(context, job)
+    assert Path(move["target"]).name == "same_001.raf"
     assert archived.read_bytes() == b"archived original"
     assert (source / "same.raf").read_bytes() == b"different capture with the same name"
     with database_connection(context.database_path) as connection:
-        assert connection.execute("SELECT count(*) FROM legacy_adoption_plans").fetchone()[0] == 0
+        assert connection.execute("SELECT count(*) FROM legacy_adoption_plans").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize(("method", "stem"), [
+    ("manual", "DSCF8391"), ("script", "20260721_120000_Unbekanntes-Gerät"),
+])
+def test_existing_case_variant_of_numbered_duplicate_keeps_its_path(inventory, method, stem):
+    context, source, registry = inventory
+    event_id = _existing(context)
+    archive = context.archive_root / "2026" / "Urlaub" / "Alle"
+    archive.mkdir()
+    occupied = archive / f"{stem}_Duplicate_001.jpg"
+    occupied.write_bytes(b"already archived")
+    copies = []
+    for directory in ("card", "backup"):
+        original = source / directory / "DSCF8391.JPG"
+        original.parent.mkdir()
+        original.write_bytes(b"identical source copies")
+        copies.append(original)
+    job = _scan(context, source)
+    draft = {"events": [{"existing_id": event_id}]}
+    plan = create_plan(context, registry, job, draft, allow_existing=True, filename_method=method)
+    assert plan["move_files"] == 2
+    assert {Path(row["target"]).name for row in plan_moves(context, job)} == {
+        f"{stem}_Duplicate_002.JPG", f"{stem}_Duplicate_003.JPG",
+    }
+    assert occupied.read_bytes() == b"already archived"
+    assert all(file.read_bytes() == b"identical source copies" for file in copies)
 
 
 @pytest.mark.parametrize(
@@ -272,7 +535,7 @@ def test_explicit_target_name_conflict_and_exact_global_duplicates(inventory):
         (source / directory).mkdir()
         (source / directory / "same.jpg").write_bytes(content)
     job = _scan(context, source)
-    with pytest.raises(AdoptionError, match="dieselbe Zieldatei"):
+    with pytest.raises(AdoptionError, match="Expliziter Zielname kollidiert"):
         create_plan(context, registry, job, {**_draft(), "target_stems": {"second/same": "same"}})
     register_source_backup(
         registry, backup_id="older", source_kind="import", source_identity="older", backup_path="/synthetic/older",
@@ -285,6 +548,9 @@ def test_explicit_target_name_conflict_and_exact_global_duplicates(inventory):
     assert plan["counts"] == {"duplicate": 1, "pending": 1}
     old, new = plan_moves(context, job)
     assert old["target"] is None
+    # The SHA already registered by a previous import is excluded from
+    # destination collision groups. The only newly accepted source should
+    # keep its unchanged original filename.
     assert Path(new["target"]).name == "same.jpg"
 
 
@@ -335,7 +601,7 @@ def test_repeated_camera_names_in_large_plan_get_stable_unique_targets(inventory
         folder = source / f"camera-{index:04d}"
         folder.mkdir()
         (folder / "capture.JPG").write_bytes(str(index).encode())
-    # A different extension alone cannot distinguish two camera families.
+    # A different extension alone does not collide with the full target filename.
     (source / "camera-0001" / "capture.JPG").rename(source / "camera-0001" / "CAPTURE.RAF")
     job = _scan(context, source)
     plan = create_plan(context, registry, job, _draft())
@@ -344,8 +610,8 @@ def test_repeated_camera_names_in_large_plan_get_stable_unique_targets(inventory
         moves.extend(page)
     assert plan["move_families"] == len(moves) == 436
     assert len({Path(move["target"]).stem.casefold() for move in moves}) == 436
-    assert Path(moves[1]["target"]).name == "CAPTURE_Adopted_001.RAF"
-    assert Path(moves[-1]["target"]).name == "capture_Adopted_435.JPG"
+    assert Path(moves[1]["target"]).name == "CAPTURE.RAF"
+    assert Path(moves[-1]["target"]).name == "capture_435.JPG"
     reopen_plan(context, job)
     create_plan(context, registry, job, _draft())
     assert {move["target"] for move in plan_moves(context, job, limit=200)} == {
@@ -420,6 +686,74 @@ def test_verification_detects_archived_media_changes(inventory):
     previous.write_bytes(b"modified")
     assert verify_media(context, job)["state"] == "prepared"
     assert any(row["relative_path"].endswith("old.jpg") for row in plan_issues(context, job))
+
+
+def test_script_release_rechecks_bound_archived_media_without_rehashing(inventory, monkeypatch):
+    import json
+    import os
+    import sqlite3
+    from sys import platform
+
+    from app import legacy_adoption_host as host, legacy_adoption_package as package
+    from app.legacy_adoption_catalogue import prepare_documents
+    from app.legacy_adoption_execution import confirm_plan
+    from app.legacy_adoption_verify import _plan
+
+    context, source, registry = inventory
+    (source / "extra.jpg").write_bytes(b"extra")
+    job_id = _scan(context, source)
+    _, previous = _frozen_rc1_extension(context, registry, job_id, existing_media=True)
+    [document] = prepare_documents(context, job_id)
+    existing_document = context.archive_root / document["relative_path"]
+    prepared = source.parent / "test-script-appdata"
+    prepared.mkdir()
+    monkeypatch.setattr(package, "appdata_root", lambda: prepared)
+    if platform == "darwin":
+        monkeypatch.setattr(host, "mount_id", lambda fd: 1)
+    with package._package(job_id, create=True) as descriptor:
+        package._initialize_files(descriptor)
+    monkeypatch.setattr(
+        package, "_approved_host", lambda _package, library, job, plan, _digest: {
+            "job_id": job["id"], "plan_id": plan, "library_id": library.library_id,
+            "dataset": json.loads(job["dataset_json"]),
+            "host": {"package": str(prepared / package.PACKAGE_ROOT / job_id)},
+        },
+    )
+    checked_files = []
+    original_hash = package.bound_sha256
+
+    def count_hash(fd, **kwargs):
+        # The full hash pass must leave SQLite's writer available.
+        with sqlite3.connect(context.database_path, timeout=0.1) as another:
+            another.execute("BEGIN IMMEDIATE")
+        checked_files.append(os.fstat(fd).st_ino)
+        return original_hash(fd, **kwargs)
+
+    monkeypatch.setattr(package, "bound_sha256", count_hash)
+    checkpoints = []
+
+    def progress(_descriptor, processed, total, read, size, *, phase, elapsed_seconds):
+        checkpoints.append((phase, processed, total, read, size, elapsed_seconds))
+
+    with database_connection(context.database_path) as connection:
+        plan = _plan(connection, job_id)
+        connection.execute("UPDATE legacy_adoption_plans SET filename_method='script' WHERE id=?", (plan["id"],))
+    confirm_plan(context, job_id, plan["id"], "script", acknowledged=True,
+                 probe_digest="synthetic-proof", progress=progress)
+    assert checked_files.count(existing_document.stat().st_ino) == 1
+    assert checked_files.count(previous.stat().st_ino) == 1
+    assert {entry[0] for entry in checkpoints} == {"source", "archive", "manifest"}
+    assert any(phase == "archive" and files == total == 2 and read == size > 0
+               for phase, files, total, read, size, _ in checkpoints)
+    count = len(checked_files)
+    with package.locked_script(context, job_id, plan["id"]) as (descriptor, script):
+        package.assert_unstarted_release_current(context, job_id, plan["id"], descriptor, script)
+        stat = previous.stat()
+        previous.write_bytes(b"modified")
+        os.utime(previous, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        with pytest.raises(AdoptionError, match="nach der Skriptvorbereitung verändert: .*old.jpg"):
+            package.assert_unstarted_release_current(context, job_id, plan["id"], descriptor, script)
+    assert len(checked_files) == count
 
 
 def test_manual_manifest_and_empty_scaffold(inventory):
@@ -713,3 +1047,474 @@ def test_script_and_manual_plans_use_correct_family_names(inventory, monkeypatch
         assert by_source[f"capture-00.{ending}"] == f"20260721_120000107_Fuji-X-E5.{ending}"
     assert by_source["capture-01.MOV"] == "20260721_120000_Fuji-X-E5_Burst_001.MOV"
     assert len(set(by_source.values())) == len(moves)
+
+
+@pytest.mark.parametrize("scenario,expected", [
+    ("distinct_milliseconds", {
+        "20260721_120000125_Fuji-X-E5.JPG",
+        "20260721_120000875_Fuji-X-E5.JPG",
+    }),
+    ("identical_millisecond_different_bytes", {
+        "20260721_120000425_Fuji-X-E5_001.JPG",
+        "20260721_120000425_Fuji-X-E5_002.JPG",
+    }),
+    ("byte_identical_copies", {
+        "20260721_120000425_Fuji-X-E5_Duplicate_001.JPG",
+        "20260721_120000425_Fuji-X-E5_Duplicate_002.JPG",
+    }),
+    ("missing_milliseconds", {
+        "20260721_120000_Fuji-X-E5_Burst_001.JPG",
+        "20260721_120000_Fuji-X-E5_Burst_002.JPG",
+    }),
+])
+def test_script_adoption_precise_burst_vs_real_duplicates(
+    inventory, monkeypatch, scenario, expected,
+):
+    import os
+
+    context, source, registry = inventory
+    a = source / "anywhere-A" / "FIRST0001.JPG"
+    b = source / "different" / "nested" / "SECOND0001.JPG"
+    for path in (a, b):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    a.write_bytes(b"photo-one")
+    b.write_bytes(b"photo-one" if scenario == "byte_identical_copies" else b"photo-two")
+
+    def metadata(descriptors, _cancel):
+        result = {}
+        for fd in descriptors:
+            content = os.pread(fd, 32, 0)
+            row = {
+                "EXIF:IFD0:Make": "FUJIFILM",
+                "EXIF:IFD0:Model": "X-E5",
+                "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+            }
+            if scenario != "missing_milliseconds":
+                row["EXIF:ExifIFD:SubSecTimeOriginal"] = (
+                    "125" if scenario == "distinct_milliseconds" and content == b"photo-one"
+                    else "875" if scenario == "distinct_milliseconds" else "425"
+                )
+            result[fd] = row
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft(), filename_method="script")
+    assert plan["move_files"] == 2
+    assert {Path(item["target"]).name for item in plan_moves(context, job)} == expected
+
+
+@pytest.mark.parametrize("method", ["manual", "script"])
+def test_rc4_preserves_lineage_and_distinct_xmp_versions(inventory, monkeypatch, method):
+    import os
+    from hashlib import sha256
+
+    context, source, registry = inventory
+    first, second = "2025/06/16.06.2025", "2025/07/10.07.2025"
+    first_stem, second_stem = "DSCF9850", "DSCF2371"
+    fixtures = {
+        f"{first}/RAW/{first_stem}.RAF": b"R9850 original",
+        f"{first}/DNG/{first_stem}.dng": b"D9850 derivative",
+        f"{second}/RAW/{second_stem}.RAF": b"R2371 original",
+    }
+    for directory, stem, inst in ((first+"/Sonstiges", first_stem, "9850-edit"),
+                                  (second+"/RAW", second_stem, "2371-original"),
+                                  (second+"/Sonstiges", second_stem, "2371-alternate")):
+        fixtures[f"{directory}/{stem}.xmp"] = (
+            '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+            '<rdf:Description xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" '
+            'xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/" '
+            f'crs:RawFileName="{stem}.RAF" xmpMM:InstanceID="{inst}"/></rdf:RDF></x:xmpmeta>'
+        ).encode()
+    for path, payload in fixtures.items():
+        full = source / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_bytes(payload)
+
+    def read(descriptors, _cancel):
+        result = {}
+        for fd in descriptors:
+            payload = os.pread(fd, 1024, 0)
+            first_day = b'9850' in payload
+            wall_time = "2025:06:16 18:39:58" if first_day else "2025:07:10 17:04:40"
+            tags = {"EXIF:ExifIFD:DateTimeOriginal": wall_time,
+                    "EXIF:IFD0:Make": "FUJIFILM", "EXIF:IFD0:Model": "X-H2S"}
+            if payload.startswith(b'<x:xmpmeta'):
+                tags = {"XMP:XMP-exif:DateTimeOriginal": wall_time+"+02:00",
+                        "XMP:XMP-tiff:Make": "FUJIFILM", "XMP:XMP-tiff:Model": "X-H2S",
+                        "XMP:XMP-crs:RawFileName": (first_stem if first_day else second_stem)+".RAF",
+                        "XMP:XMP-xmpMM:OriginalDocumentID": "origin-9850" if first_day else "origin-2371"}
+            elif payload.startswith(b'D'):
+                tags["XMP:XMP-xmpMM:OriginalDocumentID"] = "origin-9850"
+            result[fd] = tags
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", read)
+    job = _scan(context, source)
+    draft = {"events": [
+        {"event_kind": "no_event", "segments": [{"day_key": day}]}
+        for day in ("2025-06-16", "2025-07-10")
+    ]}
+    plan = create_plan(context, registry, job, draft, filename_method=method)
+    assert (plan["move_files"], plan["move_families"]) == (6, 2)
+    moves = {row["relative_path"]: row for row in plan_moves(context, job)}
+    assert set(moves) == fixtures.keys()
+    assert len({row["target"] for row in moves.values()}) == 6
+    for day, stem in ((first, first_stem), (second, second_stem)):
+        master = Path(moves[f"{day}/RAW/{stem}.RAF"]["target"]).name
+        group = [row for path, row in moves.items() if path.startswith(day+"/")]
+        assert len({row["family_key"] for row in group}) == 1
+        for row in group:
+            original = fixtures[row["relative_path"]]
+            assert row["sha256"] == sha256(original).hexdigest()
+            if row["relative_path"].endswith(".xmp"):
+                if method == "script":
+                    assert row["current_sha256"] == sha256(original.replace((stem+".RAF").encode(), master.encode())).hexdigest()
+                else:
+                    assert master == stem+".RAF" and row["current_sha256"] is None
+    assert any(".XMP_002.xmp" in row["target"] for row in moves.values())
+    assert all((source / path).read_bytes() == content for path, content in fixtures.items())
+
+
+def test_rc2_true_raf_jpeg_xmp_sidecar_shared_script_target_stem(inventory, monkeypatch):
+    """Real DSCF2915 regression: a sidecar in Sonstiges must keep the RAW stem."""
+    import os
+
+    context, source, registry = inventory
+    items = [
+        "2025/04/16.04.2025/Vögel/Roh/DSCF2915.RAF",
+        "2025/04/16.04.2025/Vögel/Bilder/DSCF2915.JPG",
+        "2025/04/16.04.2025/Vögel/Sonstiges/DSCF2915.xmp",
+    ]
+    original_xmp = (
+        b'<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+        b'<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        b'<rdf:Description xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"'
+        b' crs:RawFileName="DSCF2915.RAF" crs:Exposure2012="+0.8"/>'
+        b'</rdf:RDF></x:xmpmeta>'
+    )
+    for item in items:
+        path = source / item
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(original_xmp if item.endswith(".xmp") else path.name.encode())
+
+    def bound_metadata(descriptors, _cancel):
+        result = {}
+        for fd in descriptors:
+            beginning = os.pread(fd, 256, 0)
+            if beginning.startswith(b"<x:xmpmeta"):
+                result[fd] = {
+                    "XMP:XMP-exif:DateTimeOriginal": "2025:04:16 19:37:26+02:00",
+                    "XMP:XMP-tiff:Make": "FUJIFILM",
+                    "XMP:XMP-tiff:Model": "X-H2S",
+                    "XMP:XMP-crs:RawFileName": "DSCF2915.RAF",
+                }
+            else:
+                result[fd] = {
+                    "EXIF:ExifIFD:DateTimeOriginal": "2025:04:16 19:37:26",
+                    "EXIF:IFD0:Make": "FUJIFILM",
+                    "EXIF:IFD0:Model": "X-H2S",
+                    "EXIF:ExifIFD:ExposureTime": "1/50",
+                    "EXIF:ExifIFD:FNumber": "5.6",
+                    "EXIF:ExifIFD:ISO": "3200",
+                }
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", bound_metadata)
+    job = _scan(context, source)
+    draft = {"events": [{"name": "Vögel", "start_date": "2025-04-16", "end_date": "2025-04-16"}]}
+    from app.legacy_adoption_inventory import inventory_families
+    [family] = inventory_families(context, job)
+    with pytest.raises(AdoptionError, match="gebundenen XMP-Verweis"):
+        create_plan(context, registry, job, {**draft, "target_stems": {family["family_key"]: "Renamed"}})
+    assert (source / items[2]).read_bytes() == original_xmp
+    plan = create_plan(context, registry, job, draft, filename_method="script")
+    assert plan["move_files"] == 3
+    moves = plan_moves(context, job)
+    assert {row["relative_path"] for row in moves} == set(items)
+    targets = {row["relative_path"]: Path(row["target"]).name for row in moves}
+    stems = {name.rsplit(".", 1)[0] for name in targets.values()}
+    assert len(stems) == 1
+    assert all("_Burst_" not in name for name in targets.values())
+    assert {Path(name).suffix.lower() for name in targets.values()} == {".raf", ".jpg", ".xmp"}
+    xmp_row = next(row for row in moves if row["relative_path"].endswith(".xmp"))
+    import hashlib
+    expected = original_xmp.replace(b'RawFileName="DSCF2915.RAF"',
+                                    ('RawFileName="' + targets[items[0]] + '"').encode())
+    assert xmp_row["sha256"] == hashlib.sha256(original_xmp).hexdigest()
+    assert xmp_row["current_sha256"] == hashlib.sha256(expected).hexdigest()
+    assert xmp_row["current_size_bytes"] == len(expected)
+    assert xmp_row["xmp_old_raw_name"] == "DSCF2915.RAF"
+    assert xmp_row["xmp_new_raw_name"] == targets[items[0]]
+
+
+
+def test_rc2_duplicate_numbers_are_separate_from_filename_collisions():
+    """Two independent SHA groups cannot consume one another's suffixes."""
+    from app.legacy_adoption_plan import _adoption_occurrence_sequences
+
+    def record(name, checksum):
+        return {
+            "relative_path": name, "sha256": checksum,
+            "metadata_json": '{"media_type": "jpg"}',
+        }
+
+    def candidate(key, name, digest, stem):
+        return (
+            key, [record(name, digest)], "2025-04-16T19:37:26", None,
+            (None, Path("2025/Urlaub"), "", {"structure_enabled": False, "input_path": ""}),
+        )
+
+    selected = [
+        candidate("A", "A/a.jpg", "sha-1", "S1"),
+        candidate("B", "B/b.jpg", "sha-1", "S2"),
+        candidate("C", "C/c.jpg", "sha-2", "S2"),
+        candidate("D", "D/d.jpg", "sha-2", "S3"),
+    ]
+    duplicate, collision, _ = _adoption_occurrence_sequences(
+        selected, {"A": "S1", "B": "S2", "C": "S2", "D": "S3"},
+    )
+    assert duplicate == {"A": 1, "B": 2, "C": 1, "D": 2}
+    assert collision == {"B": 1, "C": 2}
+
+
+def test_overlapping_copies_get_unique_suffixes_without_merging_captures():
+    from app.legacy_adoption_plan import _adoption_occurrence_sequences
+
+    def member(name, sha):
+        return {"relative_path": name, "sha256": sha,
+                "metadata_json": '{"media_type": "raw"}'}
+
+    folder = (None, Path("Album"), "", {"structure_enabled": False, "input_path": ""})
+    selections = [
+        ("A", [member("a.A", "hash-a"), member("a.B", "hash-b")], "2025-04-16", None, folder),
+        ("B", [member("b.A", "hash-a")], "2025-04-16", None, folder),
+        ("C", [member("c.B", "hash-b")], "2025-04-16", None, folder),
+    ]
+    duplicate, _, cohorts = _adoption_occurrence_sequences(selections, {})
+    assert duplicate == {"A": 1, "B": 2, "C": 3}
+    assert cohorts == {key: frozenset({key}) for key in duplicate}
+    assert _adoption_occurrence_sequences(list(reversed(selections)), {})[0] == duplicate
+
+
+def test_rc2_same_second_distinct_captures_with_two_copies_each_use_contiguous_suffixes(
+    inventory, monkeypatch,
+):
+    """A/A-copy and B/B-copy use Burst 001/002 and Duplicate 001/002, not 1/3 and 2/4."""
+    import os
+
+    context, source, registry = inventory
+    fixtures = {
+        "camera-one/AAAA1001.JPG": b"capture-A",
+        "copies/ZZZZ9001.JPG": b"capture-A",
+        "camera-two/BBBB2002.JPG": b"capture-B",
+        "copies/YYYY8002.JPG": b"capture-B",
+    }
+    for relative, content in fixtures.items():
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    def common_camera(descriptors, _cancel):
+        return {
+            fd: {
+                "EXIF:IFD0:Make": "FUJIFILM",
+                "EXIF:IFD0:Model": "X-E5",
+                "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00",
+            } for fd in descriptors
+        }
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", common_camera)
+    job = _scan(context, source)
+    plan = create_plan(context, registry, job, _draft(), filename_method="script")
+    assert plan["move_files"] == 4
+    moves = plan_moves(context, job)
+    by_hash = {}
+    for row in moves:
+        by_hash.setdefault(row["sha256"], set()).add(Path(row["target"]).name)
+    assert len(by_hash) == 2
+    assert sorted(sorted(files) for files in by_hash.values()) == [
+        [
+            "20260721_120000_Fuji-X-E5_Burst_001_Duplicate_001.JPG",
+            "20260721_120000_Fuji-X-E5_Burst_001_Duplicate_002.JPG",
+        ],
+        [
+            "20260721_120000_Fuji-X-E5_Burst_002_Duplicate_001.JPG",
+            "20260721_120000_Fuji-X-E5_Burst_002_Duplicate_002.JPG",
+        ],
+    ]
+
+
+
+def test_identical_companions_do_not_share_a_capture_ordinal_with_different_raw_masters():
+    """Shared JPEG content cannot override conflicting actual RAW capture bytes."""
+    from app.legacy_adoption_plan import _adoption_occurrence_sequences
+
+    folder = (None, Path("2025/Album"), "", {
+        "structure_enabled": False, "input_path": "",
+    })
+
+    def item(relative, digest, kind):
+        return {
+            "relative_path": relative, "sha256": digest,
+            "metadata_json": '{"media_type": "' + kind + '"}',
+        }
+
+    selections = [
+        ("A", [item("A.RAF", "raw-1", "raw"), item("A.JPG", "same-jpeg", "jpeg")],
+         "2025-04-16T19:37:26", None, folder),
+        ("B", [item("B.RAF", "raw-2", "raw"), item("B.JPG", "same-jpeg", "jpeg")],
+         "2025-04-16T19:37:26", None, folder),
+    ]
+    duplicate, _, cohorts = _adoption_occurrence_sequences(selections, {})
+    assert duplicate == {"A": 1, "B": 2}
+    assert cohorts == {"A": frozenset({"A"}), "B": frozenset({"B"})}
+
+
+def test_rc5_keeps_proven_sidecar_when_other_same_second_raw_is_ambiguous(inventory, monkeypatch):
+    import os
+
+    context, source, registry = inventory
+    originals = {
+        "capture/RAW/DSCF0382.RAF": b"first master",
+        "other/RAW/DSCF0382.RAF": b"unrelated master",
+        "capture/Edits/DSCF0382_1.xmp": (
+            b'<r xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:RawFileName="DSCF0382.RAF"/>'
+        ),
+    }
+    for path, data in originals.items():
+        path = source / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    def metadata(descriptors, _cancel):
+        result = {}
+        first = "0123456789abcdef0123456789abcdef"
+        for fd in descriptors:
+            payload = os.pread(fd, 1024, 0)
+            tags = {"EXIF:IFD0:Make": "FUJIFILM", "EXIF:IFD0:Model": "X-H2S",
+                    "EXIF:ExifIFD:DateTimeOriginal": "2026:07:21 12:00:00+02:00",
+                    "EXIF:ExifIFD:FNumber": "5.6", "EXIF:ExifIFD:ExposureTime": "1/125", "EXIF:ExifIFD:ISO": "320"}
+            if payload.startswith(b"<r"):
+                tags = {"XMP:XMP-crs:RawFileName": "DSCF0382.RAF", "XMP:XMP-exifEX:ImageUniqueID": first}
+            else:
+                tags["EXIF:ExifIFD:ImageUniqueID"] = first if payload.startswith(b"first") else first[::-1]
+            result[fd] = tags
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    job = _scan(context, source)
+    result = create_plan(context, registry, job, _draft(), filename_method="script")
+    assert (result["move_families"], result["move_files"]) == (2, 3)
+    by_path = {row["relative_path"]: row for row in plan_moves(context, job)}
+    anchored = by_path["capture/RAW/DSCF0382.RAF"]
+    unrelated = by_path["other/RAW/DSCF0382.RAF"]
+    xmp = by_path["capture/Edits/DSCF0382_1.xmp"]
+    assert xmp["family_key"] == anchored["family_key"] != unrelated["family_key"]
+    assert xmp["xmp_new_raw_name"] == Path(anchored["target_path"]).name
+    assert all((source / path).read_bytes() == content for path, content in originals.items())
+
+
+def test_rc5_native_smoke_pair_keeps_colocated_raw_without_shutter_metadata(inventory, monkeypatch):
+    import shutil
+    from app.metadata import read_bound_metadata
+
+    if shutil.which("exiftool") is None:
+        pytest.skip("ExifTool is required for the real smoke fixture")
+    context, source, registry = inventory
+    (source / "sample.raf").write_bytes(b"synthetic raw for script\n")
+    (source / "sample.xmp").write_text(
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+        '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        '<rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/" '
+        'xmp:CreateDate="2026-07-22T12:34:56+02:00" '
+        'xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:RawFileName="sample.raf"/>'
+        '</rdf:RDF></x:xmpmeta>'
+    )
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", read_bound_metadata)
+    job = _scan(context, source)
+    assert inventory_chronology(context, job) == [{"period": "2026", "families": 1, "review": 0}]
+    plan = create_plan(context, registry, job, _draft(), filename_method="script")
+    assert (plan["move_families"], plan["move_files"]) == (1, 2)
+    assert all((source / name).is_file() for name in ("sample.raf", "sample.xmp"))
+
+
+@pytest.mark.parametrize("evidence", ["absent", "shared-id", "conflicting-id"])
+def test_rc7_split_sidecar_requires_evidence_for_matching_target(inventory, monkeypatch, evidence):
+    import os
+
+    from app.legacy_adoption_plan import PlanFileIssues
+
+    context, source, registry = inventory
+    raw, xmp = (source / name for name in ("day/RAW/DSCF0030.RAF", "day/Edits/DSCF0030.xmp"))
+    for path, content in ((raw, b"raw"), (xmp, b"<edit/>")):
+        path.parent.mkdir(parents=True)
+        path.write_bytes(content)
+    (source / "independent.JPG").write_bytes(b"unrelated")
+    capture_id = "a1" * 16
+
+    def metadata(descriptors, _cancel):
+        result = {}
+        for fd in descriptors:
+            xmp_file = os.pread(fd, 1, 0) == b"<"
+            prefix = "XMP:XMP-exif" if xmp_file else "EXIF:ExifIFD"
+            camera = "XMP:XMP-tiff" if xmp_file else "EXIF:IFD0"
+            result[fd] = {f"{prefix}:DateTimeOriginal": "2026:07:21 12:00:00",
+                          f"{camera}:Make": "FUJIFILM", f"{camera}:Model": "X-H2S"}
+            if evidence != "absent":
+                result[fd][f"{prefix}:ImageUniqueID"] = "b2" * 16 if xmp_file and evidence == "conflicting-id" else capture_id
+        return result
+
+    monkeypatch.setattr("app.legacy_adoption_inventory.read_bound_metadata", metadata)
+    job = _scan(context, source)
+    draft = _draft()
+    if evidence == "absent":
+        with pytest.raises(PlanFileIssues) as error:
+            create_plan(context, registry, job, draft, filename_method="script")
+        assert {item["path"] for item in error.value.items} == {
+            raw.relative_to(source).as_posix(), xmp.relative_to(source).as_posix(),
+        }
+        draft["file_exclusions"] = {item["path"]: item for item in error.value.items}
+        plan = create_plan(context, registry, job, draft, filename_method="script")
+        assert plan["move_files"] == 1
+    else:
+        plan = create_plan(context, registry, job, draft, filename_method="script")
+        assert plan["move_files"] == 3
+        moves = {Path(row["relative_path"]).suffix: row for row in plan_moves(context, job)}
+        assert (moves[".RAF"]["family_key"] == moves[".xmp"]["family_key"]) == (evidence == "shared-id")
+        assert (Path(moves[".RAF"]["target"]).stem == Path(moves[".xmp"]["target"]).stem) == (evidence == "shared-id")
+    assert raw.read_bytes() == b"raw" and xmp.read_bytes() == b"<edit/>"
+
+
+def test_rc9_reopen_invalidates_changed_input_but_keeps_draft(inventory, monkeypatch):
+    import json
+
+    from app.database import database_connection
+    from app.legacy_adoption_inventory import inventory_status, scan_inventory
+    from app.legacy_adoption_verify import reopen_plan
+
+    context, source, registry = inventory
+    (source / "changed.JPG").write_bytes(b"original")
+    (source / "missing.JPG").write_bytes(b"missing")
+    (source / "unaffected.JPG").write_bytes(b"unaffected")
+    job = _scan(context, source)
+    draft = _draft()
+    draft["target_stems"] = {"changed": "selected-name", "unaffected": "other-name"}
+    with database_connection(context.database_path) as connection:
+        connection.execute("UPDATE legacy_adoption_jobs SET draft_json=? WHERE id=?", (json.dumps(draft), job))
+    create_plan(context, registry, job, draft)
+    (source / "changed.JPG").write_bytes(b"new content")
+    (source / "missing.JPG").unlink()
+    assert reopen_plan(context, job) == 2
+    assert inventory_status(context, job)["state"] == "ready"
+    with pytest.raises(AdoptionError, match="Inventur"):
+        create_plan(context, registry, job, draft)
+    scan_inventory(context, job)
+    with database_connection(context.database_path) as connection:
+        refreshed = json.loads(connection.execute(
+            "SELECT draft_json FROM legacy_adoption_jobs WHERE id=?", (job,),
+        ).fetchone()[0])
+    assert refreshed["events"] == draft["events"]
+    assert refreshed["target_stems"] == {"unaffected": "other-name"}
+    assert refreshed["inventory_changes"]["family_decisions"] == 1
+    assert create_plan(context, registry, job, refreshed)["move_files"] == 2

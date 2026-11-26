@@ -43,7 +43,7 @@ jobs:
     outputs:
       request-only: ${{ steps.scope.outputs.request-only }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 24
+    timeout-minutes: ${{ inputs.container_preflight && 40 || 24 }}
     env:
       PYTHONPATH: ${{ github.workspace }}
       PYTEST_ADDOPTS: ''
@@ -101,6 +101,7 @@ jobs:
           from app.main import _library_onboarding_html
           from app.legacy_adoption_i18n import PATTERNS
           from app.legacy_adoption_ui import setup_choice_html, wizard_html
+          from app.initial_library_preferences_ui import preferences_html
           import json
           import re
           scripts=re.findall(r'<script[^>]*>(.*?)</script>',EVENTS_HTML,flags=re.S)
@@ -108,6 +109,7 @@ jobs:
           Path("/tmp/bibliothekar-events.js").write_text("\n".join(scripts))
           Path("/tmp/bibliothekar-shell.js").write_text(FOLDER_LAYOUT_JS + "\n" + BIBLIOTHEKAR_JS)
           for name, html in (("adoption", wizard_html("main")), ("choice", setup_choice_html("choice")),
+                             ("preferences", preferences_html("Synthetic Main")),
                              ("onboarding", _library_onboarding_html())):
               scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
               assert scripts
@@ -118,6 +120,7 @@ jobs:
           node --check /tmp/bibliothekar-events.js
           node --check /tmp/bibliothekar-adoption.js
           node --check /tmp/bibliothekar-choice.js
+          node --check /tmp/bibliothekar-preferences.js
           node --check /tmp/bibliothekar-onboarding.js
           node -e 'for (const [source] of require("/tmp/bibliothekar-adoption-patterns.json")) new RegExp(source, "u")'
       - name: Build and verify the local container on synthetic ZFS
@@ -127,7 +130,11 @@ jobs:
           bash qa/release/install_runner_packages.sh acl
           image="bibliothekar-qa:$QA_SOURCE"
           docker build --label "org.opencontainers.image.revision=$QA_SOURCE" --tag "$image" .
-          bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh "$image" "$QA_SOURCE"
+          smoke_args=("$image" "$QA_SOURCE")
+          if [[ "$GITHUB_REF_NAME" == patch/1.1.2-rc2-xmp-family-adoption || "$GITHUB_REF_NAME" == patch/1.1.2-rc3-adoption-copies || "$GITHUB_REF_NAME" == patch/1.1.2-rc4-adoption-xmp || "$GITHUB_REF_NAME" == patch/1.1.2-rc5-adoption-recovery || "$GITHUB_REF_NAME" == patch/1.1.2-rc6-adoption-confirmation || "$GITHUB_REF_NAME" == patch/1.1.2-rc7-adoption-archive || "$GITHUB_REF_NAME" == patch/1.1.2-rc8-adoption-partners || "$GITHUB_REF_NAME" == patch/1.1.2-rc9-adoption-navigation ]]; then
+            smoke_args+=(ghcr.io/heller-adrian/bibliothekar@sha256:c9c2077374643d0598dbadbf976f26da76a9958343e6d39c221efb411b38ac36 rc112)
+          fi
+          bash qa/release/with_synthetic_zfs.sh bash qa/release/smoke_legacy_adoption.sh "${smoke_args[@]}"
       - name: Verify adoption including the kernel read-only bind mount
         if: steps.scope.outputs.request-only != 'true'
         env:
@@ -137,11 +144,17 @@ jobs:
           cat > "$RUNNER_TEMP/adoption-targets.json" <<'JSON'
           [
             "tests/backend/test_media_family_identity.py",
+            "tests/backend/test_rc2_xmp_family_matching.py",
+            "tests/backend/test_rc2_xmp_raw_filename.py",
+            "tests/backend/test_rc2_server_preparation.py",
+            "tests/backend/test_rc2_initial_library_preferences.py",
             "tests/backend/test_rc1_sd_reimport.py::test_confirmed_reimport_uses_real_worker_and_preserves_source",
             "tests/backend/test_legacy_adoption_inventory.py",
             "tests/backend/test_legacy_adoption_dataset.py",
             "tests/backend/test_legacy_adoption_host.py",
             "tests/backend/test_legacy_adoption_plan.py",
+            "tests/backend/test_legacy_adoption_regression_112.py",
+            "tests/backend/test_legacy_adoption_duplicate_occurrences_112.py",
             "tests/backend/test_legacy_adoption_integration.py",
             "tests/backend/test_rc2_archive_finish_recovery.py",
             "tests/backend/test_0271_archive_assistant.py::test_layout_only_change_stages_new_nested_branch_without_copying_its_parent",
@@ -185,6 +198,32 @@ jobs:
               "test_verified_capture_families_share_import_targets",
               "test_regular_import_recognizes_adopted_file_family_before_any_regular_import[native-zfs]",
               "test_script_and_manual_plans_use_correct_family_names",
+              "test_rc4_preserves_lineage_and_distinct_xmp_versions[manual]",
+              "test_rc4_preserves_lineage_and_distinct_xmp_versions[script]",
+              "test_rc5_large_xmp_streams_to_archive_and_registers[native-zfs]",
+              "test_rc5_streaming_xmp_patch_is_byte_exact_after_recovery[native-zfs]",
+              "test_rc5_resumes_committed_plan_request_during_server_startup",
+              "test_rc5_native_smoke_pair_keeps_colocated_raw_without_shutter_metadata",
+              "test_rc6_manual_availability_uses_bound_xmp_name[photo.raf]",
+              "test_rc6_manual_availability_uses_bound_xmp_name[photo.RAF]",
+              "test_initial_setup_decision_waits_for_transient_adoption_reader",
+              "test_rc7_authorized_rollback_cleans_holding_on_first_attempt[native-zfs]",
+              "test_rc7_replans_stale_xmp_package_with_35_saved_events[unstarted-native-zfs]",
+              "test_rc7_replans_stale_xmp_package_with_35_saved_events[journaled-native-zfs]",
+              "test_rc8_upgrade_preserves_rc7_draft_and_xmp_move_proofs",
+              "test_rc9_reopen_is_durable_and_does_not_hold_sqlite_writer[native-zfs]",
+              "test_rc9_reopen_invalidates_changed_input_but_keeps_draft",
+              "test_script_release_rechecks_bound_archived_media_without_rehashing",
+              "test_rc8_confirmed_partnerships_with_saved_events[rollback-native-zfs]",
+              "test_rc8_confirmed_partnerships_with_saved_events[register-native-zfs]",
+              "test_rc7_split_sidecar_requires_evidence_for_matching_target[absent]",
+              "test_rc7_split_sidecar_requires_evidence_for_matching_target[shared-id]",
+              "test_rc7_split_sidecar_requires_evidence_for_matching_target[conflicting-id]",
+              "test_background_plan_reports_and_reverses_individual_xmp_exclusions[native-zfs]",
+              "test_two_archived_occurrences_are_both_named_and_registered[manual-full-copies-native-when-available]",
+              "test_two_archived_occurrences_are_both_named_and_registered[manual-shared-jpeg-native-when-available]",
+              "test_two_archived_occurrences_are_both_named_and_registered[manual-bound-sidecar-native-when-available]",
+              "test_two_archived_occurrences_are_both_named_and_registered[script-bound-sidecar-native-when-available]",
               "test_layout_only_change_stages_new_nested_branch_without_copying_its_parent",
               "test_stable_folder_renames_reuse_existing_archive_directories[complete]",
               "test_stable_folder_renames_reuse_existing_archive_directories[restore]",

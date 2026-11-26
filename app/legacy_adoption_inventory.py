@@ -1,4 +1,5 @@
 """Persist resumable legacy inventory in the selected library's catalogue."""
+from collections import defaultdict
 from contextlib import closing, ExitStack
 import hashlib
 from itertools import groupby
@@ -12,7 +13,8 @@ from uuid import uuid4
 from app import legacy_adoption_dataset as dataset
 from app.database import catalogue_contains_sha256, database_connection
 from app.legacy_adoption_families import join_split_families
-from app.media_family_identity import IDENTITY_VERSION
+from app.media_family_identity import IDENTITY_VERSION, _xmp_original_capture
+from app.legacy_adoption_partners import reconcile_after_scan
 from app.legacy_adoption_paths import (
     AdoptionError, absolute_root, bound_child_directory, bound_directory,
     bound_file, bound_sha256, directory_identity, file_identity,
@@ -107,8 +109,29 @@ def _inventory_groups(rows, source):
         members = [dict(row) for row in group]
         candidates = [row for row in members if row["disposition"] == "candidate"]
         files = [json.loads(row["metadata_json"]) for row in candidates if row["metadata_json"]]
-        for file in files:
+        primary_has_time = any(
+            file["media_type"] != "xmp" and not file["review_required"] and file["selected_capture_time"]
+            for file in files
+        )
+        primary_paths = {
+            Path(file["relative_path"]).parent / Path(file["relative_path"]).name.casefold()
+            for file in files if file["media_type"] == "raw"
+        }
+        for index, file in enumerate(files):
             file["family_key"] = key
+            if file.get("adoption_xmp_bound"):
+                qualified = _xmp_original_capture(file)
+                if not qualified.get("review_required") and str(qualified.get("selected_capture_source")).endswith(":DateTimeOriginal"):
+                    qualified["capture_time_confidence"] = "high"
+                else:
+                    # Preserve the existing date fallback for a verified
+                    # co-located pair whose RAW has no usable capture time.
+                    raw_name = file["capture_identity"]["sidecar_raw"]
+                    near_raw = (Path(file["relative_path"]).parent / raw_name) in primary_paths
+                    if primary_has_time or not near_raw:
+                        qualified.update(selected_capture_time=None, selected_capture_source=None,
+                                         capture_time_confidence="missing", metadata_conflict=False)
+                files[index] = qualified
         family = {"family_key": key, "status": "review_required"}
         if files:
             family = summarize_file_metadata(source, files)["families"][0]
@@ -340,6 +363,7 @@ def _read_batch(directory, source, rows, cached, cancel):
                         with bound:
                             pass
                         record["family_key"] = row["family_key"]
+                        record.pop("adoption_xmp_bound", None)
                         row.update(sha256=old["sha256"], metadata_json=json.dumps(record, ensure_ascii=False))
                         continue
                 descriptor, _ = files.enter_context(bound)
@@ -409,6 +433,18 @@ def _classify_inventory(connection, registry, job_id, cancel):
         )
 
 
+def _draft_family_proofs(connection, job_id, draft):
+    keys = set(draft.get("capture_overrides", {})) | set(draft.get("exclude_families", ())) | set(draft.get("target_stems", {}))
+    if not keys:
+        return {}
+    rows = connection.execute(
+        """SELECT family_key, relative_path, identity, sha256, disposition FROM legacy_adoption_inventory
+            WHERE job_id=? AND family_key IN (SELECT value FROM json_each(?))
+            ORDER BY family_key, relative_path""", (job_id, json.dumps(sorted(keys))),
+    )
+    return {key: inventory_fingerprint(group) for key, group in groupby(rows, key=lambda row: row["family_key"])}
+
+
 def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path | None = None,
                    cancellation_callback=None) -> dict:
     def cancel():
@@ -425,11 +461,14 @@ def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path 
         if Path(job["archive_root"]) != library.archive_root:
             raise AdoptionError("Die Archivwurzel der Zielbibliothek hat sich geändert.")
         generation = job["scan_generation"] + 1
+        draft = json.loads(job["draft_json"])
+        if "scan_family_proofs" not in draft:
+            draft["scan_family_proofs"] = _draft_family_proofs(connection, job_id, draft)
         connection.execute(
             """UPDATE legacy_adoption_jobs
-                  SET scan_generation = ?, scan_error = NULL, state = 'scanning'
+                  SET scan_generation = ?, scan_error = NULL, state = 'scanning', draft_json=?
                 WHERE id = ?""",
-            (generation, job_id),
+            (generation, json.dumps(draft), job_id),
         )
 
     def check_current(connection):
@@ -494,7 +533,21 @@ def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path 
                 (job_id, generation),
             )
             draft = json.loads(_job(connection, library.library_id, job_id)["draft_json"])
+            draft.pop("planning_attempt", None)
+            excluded = draft.get("file_exclusions", {})
+            previous_exclusions = len(excluded)
+            if excluded:
+                kept = connection.execute(
+                    """SELECT e.key FROM json_each(?) AS e JOIN legacy_adoption_inventory inventory
+                       ON inventory.job_id=? AND inventory.relative_path=e.key
+                        AND inventory.sha256=json_extract(e.value, '$.sha256')
+                        AND json_extract(e.value, '$.identity_version')=?""",
+                    (json.dumps(excluded), job_id, IDENTITY_VERSION),
+                )
+                draft["file_exclusions"] = {row[0]: excluded[row[0]] for row in kept}
             join_split_families(connection, job_id, draft, cancel)
+            # Do not discard source occurrences merely because their bytes match.
+            # The move planner labels every member of a duplicate group.
             _classify_inventory(connection, registry, job_id, cancel)
             connection.execute("DELETE FROM legacy_adoption_families WHERE job_id = ?", (job_id,))
             rows = connection.execute(
@@ -530,9 +583,27 @@ def scan_inventory(library: LibraryContext, job_id: str, *, registry_path: Path 
             for key in applied.keys() - unchanged:
                 del applied[key]
                 draft["capture_overrides"].pop(key, None)
+            former = draft.pop("scan_family_proofs", {})
+            current = _draft_family_proofs(connection, job_id, draft)
+            invalid = {key for key in former.keys() | current.keys() if former.get(key) != current.get(key)}
+            for field in ("capture_overrides", "target_stems"):
+                for key in invalid:
+                    draft.get(field, {}).pop(key, None)
+            if invalid:
+                draft["exclude_families"] = [key for key in draft.get("exclude_families", ()) if key not in invalid]
+                for key in invalid:
+                    pending.pop(key, None)
+                    applied.pop(key, None)
+            lost_partners, relocated = reconcile_after_scan(connection, job_id, draft)
+            lost_exclusions = previous_exclusions - len(draft.get("file_exclusions", {}))
+            lost_metadata = decisions - len(pending) - len(applied)
+            changes = {"partners": lost_partners, "relocated_partners": relocated,
+                       "family_decisions": len(invalid), "metadata_decisions": lost_metadata,
+                       "file_exclusions": lost_exclusions}
+            draft["inventory_changes"] = changes
             connection.execute(
                 "UPDATE legacy_adoption_jobs SET state = 'inventoried', draft_json = ?, draft_revision = draft_revision + ? WHERE id = ?",
-                (json.dumps(draft), int(len(pending) + len(applied) != decisions), job_id),
+                (json.dumps(draft), int(any(changes.values())), job_id),
             )
     except Exception as error:
         with database_connection(library.database_path) as connection:

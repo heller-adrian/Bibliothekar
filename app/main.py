@@ -36,7 +36,9 @@ from app.trash import (
 )
 from app.ui_shell import apply_shell
 from app import view_cache
-from app.legacy_adoption_mode import active_adoption, adoption_access, pending_initial_setup
+from app.legacy_adoption_mode import (
+    active_adoption, adoption_access, pending_initial_setup, initial_preferences_required,
+)
 from app.root_operations import RootOperationBusy, RootOperationError, protect, reserve, mutate, assert_workspace_startable, _identity, generation, admission
 from app import background_mutation_cancel as cancel_queue
 from app.background_activity import current_activity, clear_finished_activity
@@ -1158,7 +1160,7 @@ const managedName=String(payload.display_name||"Bibliothek").toLowerCase().repla
 const check=await json("/api/libraries/check",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{work_root:payload.work_root,archive_root:payload.archive_root,default_library_id:payload.work_root?"":managedName}})}});
 if(!check.valid)throw new Error((check.errors||[]).join("\\n"));
 await json("/api/libraries",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify(payload)}});
-showSetupStatus("Bibliothek eingerichtet. Bibliothekar wird geöffnet …");location.assign("/");
+showSetupStatus("Bibliothek eingerichtet. Einstellungen werden geöffnet …");location.assign("/");
 }}catch(e){{statusEl.className="error";showSetupStatus(e.message);button.disabled=false;}}}});
 </script></body></html>"""
     from app.setup_language import localize_setup_html
@@ -14473,14 +14475,22 @@ async def adoption_access_middleware(request: Request, call_next):
     }
     later_entry = request.query_params.get("mode") == "library" and (start or source_entry)
     eligibility = (method, path) == ("GET", "/api/legacy-adoption/eligibility")
-    exclusive = start or decision or (method, path) == ("POST", "/api/libraries")
+    exclusive = start or decision or (method, path) in {
+        ("POST", "/api/libraries"), ("POST", "/api/setup/preferences/continue"),
+    }
     try:
-        async with contextmanager_in_threadpool(adoption_access(REGISTRY_DATABASE_FILE, exclusive=exclusive)) as active:
+        # Deferred startup briefly takes this lock while checking whether
+        # setup is still active. Let the user's explicit decision wait for it.
+        access = adoption_access(REGISTRY_DATABASE_FILE, exclusive=exclusive, wait_seconds=2 if decision else 0)
+        async with contextmanager_in_threadpool(access) as active:
             setup = pending_initial_setup(REGISTRY_DATABASE_FILE)
             request.state.initial_setup = setup
             request.state.legacy_adoption = active
             adoption_path = path == "/legacy-adoption" or path.startswith("/api/legacy-adoption/")
-            decision_path = path in {"/setup/adoption", "/api/setup/adoption"}
+            decision_path = path in {
+                "/setup/adoption", "/api/setup/adoption",
+                "/setup/preferences", "/api/setup/preferences/continue",
+            }
             if active:
                 wizard = "/legacy-adoption?" + urlencode({"library": active["library_id"], "job": active["job_id"]})
                 later = active["access_kind"] == "library" and setup is None
@@ -14505,8 +14515,30 @@ async def adoption_access_middleware(request: Request, call_next):
                         return await call_next(request)
                 code = "legacy_adoption_recovery_only" if recovery_only and adoption_path else "legacy_adoption_active"
             elif setup:
-                wizard = "/setup/adoption" if setup["decision"] == "choice" else "/legacy-adoption"
-                if (method == "GET" and path == "/setup/adoption") or decision or (
+                initial_choice = setup["decision"] == "choice"
+                needs_preferences = initial_choice and initial_preferences_required(REGISTRY_DATABASE_FILE)
+                wizard = ("/setup/preferences" if needs_preferences else
+                          "/setup/adoption" if initial_choice else "/legacy-adoption")
+                preference_endpoint = (
+                    (method, path) in {
+                        ("GET", "/setup/preferences"),
+                        ("POST", "/api/setup/preferences/continue"),
+                    }
+                    or (initial_choice and method in {"GET", "PUT"} and path in {
+                        "/api/settings/event-naming",
+                        "/api/settings/event-folder-layout",
+                    })
+                )
+                # The library already exists and owns both settings stores.
+                # Only these real per-library settings are accessible before
+                # the adoption decision; never allow general app operations.
+                if initial_choice and needs_preferences and preference_endpoint:
+                    return await call_next(request)
+                if initial_choice and not needs_preferences and (method, path) == ("GET", "/setup/preferences"):
+                    return RedirectResponse("/setup/adoption", status_code=303)
+                if (not needs_preferences and (
+                        (method == "GET" and path == "/setup/adoption") or decision)
+                    ) or (
                     method == "POST" and path == "/api/settings/storage-replace"
                 ):
                     return await call_next(request)

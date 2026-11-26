@@ -47,3 +47,9 @@ Vor der Registrierung kannst du **Kontrollierte Wiederherstellung starten**. Im 
 ## Umstieg von RC1
 
 Bei bestehenden Installationen bleibt die normale Oberfläche nach dem Update verfügbar. Einen bereits aktiven RC1-Auftrag zeigt Bibliothekar mit den gespeicherten Nachweisen an. Verwirf einen unbestätigten Entwurf oder nimm eine bestätigte Durchführung kontrolliert zurück. Hat die Datenbankregistrierung bereits begonnen, kannst du ihren Abschluss über denselben Plan wiederholen. Bewahre dabei die Originalpfade, das Journal und die Datenbanken auf.
+
+## Übernahmeplan aus 1.1.2 RC6 neu erzeugen
+
+Meldet Bibliothekar veraltete XMP-Nachweise, hebe bei einem ungestarteten Skript die Freigabe auf und kehre zur Inventur zurück. Wurde das Skript schon ausgeführt, führe zuerst die kontrollierte Rücknahme aus und lass Bibliothekar sie prüfen. Die Planobjekte mit Zeiträumen, Unterereignissen und Ordnerlayouts bleiben gespeichert. Erzeuge anschließend einen neuen Plan und eine neue Ausführungsfreigabe. Verwende dafür die Dateien und den Befehl des neuen Pakets.
+
+Im Skriptmodus erhält ein eindeutig gebundener XMP-Bearbeitungsstand denselben Zielstamm wie sein RAW. Weitere nachgewiesene Bearbeitungsstände bleiben als nummerierte `.XMP_002.xmp`-Varianten mit überprüftem RAW-Verweis erhalten. Ein Bildeditor, der ausschließlich nach dem gleichen Dateistamm sucht, erkennt automatisch nur die gleichnamige Version. Gleichnamige Quelldateien aus benachbarten Ordnern ohne eindeutigen Aufnahmenachweis erscheinen als Prüffälle. Vor einer bestätigten Ausnahme zeigt der Plan die betroffenen Dateien an.

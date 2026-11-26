@@ -29,19 +29,20 @@ def adoption_source_signature(plan):
 
 def _inventory_rows(connection, plan, job):
     return connection.execute(
-        """SELECT move.*, inventory.family_key, inventory.size_bytes, inventory.metadata_json
+        """SELECT move.*, coalesce(move.confirmed_family_key, inventory.family_key) AS family_key,
+                  inventory.size_bytes, inventory.metadata_json
              FROM legacy_adoption_moves move
              JOIN legacy_adoption_inventory inventory ON inventory.job_id = ?
                   AND inventory.relative_path = move.relative_path
             WHERE move.plan_id = ? AND move.target_path IS NOT NULL
-            ORDER BY inventory.family_key, move.relative_path""",
+            ORDER BY family_key, move.relative_path""",
         (job["id"], plan["id"]),
     )
 
 
 def _store_job(connection, library, job, plan, now):
     count, size = connection.execute(
-        """SELECT count(*), coalesce(sum(inventory.size_bytes), 0)
+        """SELECT count(*), coalesce(sum(coalesce(move.current_size_bytes, inventory.size_bytes)), 0)
              FROM legacy_adoption_moves move JOIN legacy_adoption_inventory inventory
              ON inventory.job_id = ? AND inventory.relative_path = move.relative_path
             WHERE move.plan_id = ? AND move.target_path IS NOT NULL""",
@@ -112,9 +113,16 @@ def _store_event(connection, job_id, event, now):
     register_source_jobs(connection, event_id, [job_id], created_at=now)
 
 
+def _target_proof(row):
+    if row["current_sha256"] is not None:
+        return {"sha256": row["current_sha256"], "size_bytes": row["current_size_bytes"]}
+    return {"sha256": row["sha256"], "size_bytes": row["size_bytes"]}
+
+
 def _store_file(connection, job_id, family_id, row, record, capture, manually_reviewed, source, now):
     confidence = "high" if manually_reviewed else record["capture_time_confidence"]
     selected_time = capture if manually_reviewed else record["selected_capture_time"]
+    target = _target_proof(row)
     result = connection.execute(
         """INSERT INTO files (
                job_id, family_id, original_relative_path, current_relative_path, current_root_kind,
@@ -123,7 +131,8 @@ def _store_file(connection, job_id, family_id, row, record, capture, manually_re
                capture_time_confidence, review_status, created_at, updated_at
            ) VALUES (?, ?, ?, ?, 'camera_archive', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (job_id, family_id, row["relative_path"], row["target_path"], record["filename"], record["extension"],
-         record["media_type"], row["size_bytes"], row["size_bytes"], row["sha256"], row["sha256"],
+         record["media_type"], target["size_bytes"], row["size_bytes"],
+         row["sha256"], target["sha256"],
          selected_time, source, confidence, "confirmed" if manually_reviewed else "not_required", now, now),
     )
     file_id = result.lastrowid
@@ -249,7 +258,7 @@ def write_catalogue(connection, library, job, plan, events, now):
         first = rows[0]
         capture = first["capture_time"]
         manually_reviewed = key in overrides
-        records = [json.loads(row["metadata_json"]) for row in rows]
+        records = [{**json.loads(row["metadata_json"]), "family_key": key} for row in rows]
         family = summarize_file_metadata(source, records)["families"][0]
         family_id = connection.execute(
             """INSERT INTO file_families (
@@ -279,7 +288,7 @@ def write_catalogue(connection, library, job, plan, events, now):
             file_id = _store_file(connection, job_id, family_id, row, record, capture, manually_reviewed, capture_source, now)
             path = row["target_path"]
             relative = Path(path).relative_to(prefixes[parent]).as_posix()
-            _inventory_file(connection, parent, anchor_job, path, relative, row, {
+            _inventory_file(connection, parent, anchor_job, path, relative, _target_proof(row), {
                 "asset_kind": "camera_original", "known_file_id": file_id, "family_id": family_id,
                 "selected_capture_time": capture if manually_reviewed else record["selected_capture_time"],
                 "selected_capture_source": capture_source,

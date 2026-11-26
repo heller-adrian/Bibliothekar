@@ -73,6 +73,8 @@ _PAGE = r"""<!doctype html>
 .legacy-adoption section{min-width:0;background:var(--bk-surface);border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:24px;margin:18px 0;box-shadow:var(--bk-shadow)}
 .legacy-adoption .adoption-card{min-width:0;border:1px solid var(--bk-line);border-radius:var(--bk-radius);padding:clamp(12px,2vw,22px);margin:12px 0}
 .legacy-adoption .adoption-card>:first-child{margin-top:0}
+.adoption-file-issues code{overflow-wrap:anywhere}
+.adoption-partner-case label{align-items:start}
 .adoption-card h4{font-size:1rem;margin:0 0 12px}
 .legacy-adoption .bk-event-layout-editor:not([open]){padding-block:4px}
 .legacy-adoption .bk-event-layout-editor > summary{list-style:none}
@@ -87,7 +89,7 @@ _PAGE = r"""<!doctype html>
 .adoption-stage{display:grid;gap:16px;margin:24px 0}
 .adoption-stage :is(h3,p){margin:0}
 .adoption-stage details>div{padding:8px 0 4px}
-.adoption-stage .adoption-status{background:var(--bk-surface-2);border-radius:8px;padding:12px 14px}
+.adoption-stage .adoption-status,#preparation-progress{background:var(--bk-surface-2);border-radius:8px;padding:12px 14px}
 .adoption-command-box{display:grid;gap:12px;justify-items:start}
 #script-progress{margin:16px 0 0}
 #script-progress:empty{display:none}
@@ -113,8 +115,8 @@ _PAGE = r"""<!doctype html>
 .legacy-adoption .adoption-review-help summary{display:grid;place-items:center;border:1px solid var(--bk-line);border-radius:50%;width:1.65rem;height:1.65rem;padding:0;list-style:none}
 .adoption-review-help summary::-webkit-details-marker{display:none}
 .adoption-review-cases>.inline{align-items:center;margin:12px 0}
-.adoption-stage .adoption-progress{display:grid;gap:8px}
-.adoption-stage .adoption-progress progress{width:100%;accent-color:var(--bk-blue)}
+.adoption-stage .adoption-progress,#preparation-progress{display:grid;gap:8px}
+.adoption-stage .adoption-progress progress,#preparation-progress progress{width:100%;accent-color:var(--bk-blue)}
 .adoption-plan-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr));gap:12px;margin:18px 0}
 .adoption-plan-facts div{padding:10px 12px;background:var(--bk-surface-2);border-radius:10px;overflow-wrap:anywhere}
 .adoption-plan-facts dt{font-size:.875rem;color:var(--bk-muted)}
@@ -274,6 +276,10 @@ min-height:38px;margin-block:5px 8px;gap:8px}
 #event-editor .adoption-interval{margin:-6px 0 4px}
 #wizard-navigation{justify-content:space-between;align-items:center}
 #wizard-navigation .primary{margin-inline-start:auto}
+#execution-method-choice{margin-top:12px}
+#preparation-progress p{margin:0}
+#script-return:empty{display:none}
+.adoption-methods label:has(:disabled){cursor:default;overflow-wrap:anywhere}
 .legacy-adoption .adoption-manual-actions{margin-inline-start:auto;justify-content:flex-end;align-items:center}
 #wizard-navigation .adoption-manual-actions .primary{margin-inline-start:0}
 .legacy-adoption dialog{width:min(760px,calc(100% - 24px));max-height:calc(100% - 24px);box-sizing:border-box;padding:clamp(16px,3vw,28px);border:1px solid var(--bk-line);border-radius:var(--bk-radius);background:var(--bk-surface);color:var(--bk-ink);box-shadow:var(--bk-shadow)}
@@ -332,13 +338,13 @@ if(later) {
   $("choice").href=librarySettings;
 }
 let job = null, draft = {}, draftRevision = 0, year = "", day = null;
-let familyCursor = "", moveCursor = "", timer = 0, scriptTimer = 0, reviewTimer = 0;
+let familyCursor = "", moveCursor = "", timer = 0, scriptTimer = 0, preparationTimer = 0, reviewTimer = 0;
 let reviewSelection = new Set(), reviewOpened = new Set(), reviewBatch = {}, reviewSubmitting = false, reviewCancelling = false;
 let reviewMetadataSaving=false, reviewMetadataFeedback=null;
 let reviewSelectionVersion=0;
 let selectedSource = null, browsedSource = null, browseVersion = 0;
 let draftPage = 40;
-let inventoryStarting = false;
+let inventoryStarting = false, planningRequest = false, scriptReleasing = false;
 let refreshVersion=0;
 let viewStep=currentUrl.searchParams.get("step") || "";
 let manualSnapshot=null, finishing=false;
@@ -370,11 +376,17 @@ function rememberView(step,push=false){
 async function goStep(step){
   requireSaved();
   if(reviewMetadataSaving)return;
-  if(step==="plan" && job?.plan.id && !job.plan.execution)await mutate("/reopen");
+  if(step==="plan" && job?.plan.id && !job.plan.execution){
+    await api(jobPath("/reopen"),"POST",{plan_id:job.plan.id,background:true});
+    await refresh();
+    return;
+  }
   if(!allowedSteps().includes(step))return;
   rememberView(step,true);await refresh();
   window.scrollTo({top:0});
 }
+function reopenBusy(){return ["queued","running"].includes(job?.reopen?.state);}
+function planningBusy(){return planningRequest || ["queued","running"].includes(job?.planning?.state);}
 function navigation(){
   const allowed=allowedSteps();
   if(!allowed.includes(viewStep))rememberView(allowed.at(-1));
@@ -388,17 +400,27 @@ function navigation(){
   if(!job)return;
   const phase=job.plan.execution?.phase;
   if(viewStep==="execute" && (phase==="registering" || (!recoveryOnly && phase==="registration_pending"))){
-    nav.append(action("Übernahme prüfen und registrieren",finishAdoption,true));
+    const register=action("Übernahme prüfen und registrieren",finishAdoption,true);
+    register.disabled=Boolean(job.registration_running);
+    nav.append(register);
     return;
   }
   if(recoveryOnly && !(viewStep==="execute" && manualPhase(job.plan)))return;
   const previous={plan:"inventory",review:"plan",execution:"review"}[viewStep];
-  if(previous)nav.append(action("Zurück",()=>goStep(previous)));
+  if(previous){
+    const back=action("Zurück",()=>goStep(previous));
+    back.disabled=planningBusy();
+    nav.append(back);
+  }
   if(viewStep==="inventory" && job.state==="inventoried")nav.append(action("Weiter: Ereignisse planen",()=>goStep("plan"),true));
-  if(viewStep==="plan" && previewRevision===draftRevision && !reviewBusy())nav.append(action("Weiter: Plan prüfen",()=>{
-    if(!draft.events.length)throw new Error("Lege mindestens ein Ereignis oder einen Sammelordner an.");
-    return mutate("/plan","POST",{revision:draftRevision});
-  },true));
+  if(viewStep==="plan"){
+    const disabled=planningBusy() || previewRevision!==draftRevision || job.matching_update_required || reviewBusy() || !draft.events.length;
+    const manual=action("Weiter: Plan prüfen",()=>startPlan("manual"),true);
+    const script=action("Plan mit TrueNAS-Skript erstellen",()=>startPlan("script"));
+    manual.disabled=script.disabled=disabled;
+    manual.id="plan-manual";script.id="plan-with-script";
+    nav.append(manual,script);
+  }
   if(viewStep==="review" && !job.plan.execution)nav.append(action("Weiter: Methode wählen",async()=>{
     if(!job.plan.documents_at)await mutate("/documents");
     await goStep("execution");
@@ -430,7 +452,7 @@ function navigation(){
     const button=action("Übernahme prüfen und registrieren",finishAdoption,true);
     button.id="script-finalize";
     button.disabled=true;
-    nav.append(button);
+    nav.append(slot("script-return"),button);
   }
 }
 window.addEventListener("bk-language-changed",()=>{
@@ -473,7 +495,8 @@ window.addEventListener("beforeunload", event => {
 const labels = {
  ready:"Bereit", scanning:"Inventur", inventoried:"Inventur abgeschlossen", prepared:"Plan vorbereitet",
  manual:"Manuelle Verschiebung", verifying:"Archivprüfung läuft", repair:"Fehlerbehebung erforderlich",
- script_prepared:"Skript bereitgestellt", script_running:"Skript wird extern ausgeführt",
+ script_prepared:"Skript bereitgestellt", script_releasing:"Nachweis für den Skriptbefehl wird geprüft …",
+ script_running:"Skript wird extern ausgeführt",
  script_interrupted:"Skriptausführung unterbrochen", operations_done:"Dateioperationen abgeschlossen",
  attention_required:"Fehlerbehebung erforderlich",
  registration_pending:"Registrierung ausstehend", registering:"Registrierung läuft",
@@ -492,6 +515,126 @@ function node(tag, content, className) {
   if (className) el.className = className;
   return el;
 }
+function describeFiles(host, summary){
+  const details=node("details",undefined,"adoption-file-issues");
+  const title=node("summary");
+  title.append(node("span","Betroffene Dateien")," ("+summary.total+")");
+  details.append(title);
+  const reasons=node("ul");
+  for(const [reason,count] of Object.entries(summary.reasons || {})){
+    const row=node("li");
+    row.append(count+" · ",node("span",reason));
+    reasons.append(row);
+  }
+  details.append(reasons);
+  const examples=node("ul");
+  for(const item of summary.examples || []){
+    const row=node("li");row.append(node("code",item.path)," · ",node("span",item.reason));
+    examples.append(row);
+  }
+  details.append(examples);
+  if(summary.total>(summary.examples || []).length)details.append(line("Nur die ersten zehn Pfade werden angezeigt."));
+  host.append(details);
+}
+function partnerPaths(host, paths){
+  const files=node("ul");
+  for(const path of paths){
+    const entry=node("li");
+    entry.append(node("code",path));
+    files.append(entry);
+  }
+  host.append(files);
+}
+function renderPartnerChoices(host, attempt){
+  const cases=attempt.partners || [];
+  const toolbar=node("div",undefined,"inline adoption-toolbar");
+  host.append(toolbar);
+  if(!cases.length)return toolbar;
+  const options=[];
+  const details=node("details",undefined,"adoption-file-issues");
+  details.open=true;
+  const summary=node("summary");
+  summary.append(node("span","Mögliche Dateipartnerschaften")," ("+cases.length+")");
+  details.append(summary,line("Bestätige für jedes XMP höchstens einen passenden RAW- oder DNG-Partner. Fälle mit mehreren Kandidaten benötigen eine Einzelauswahl."));
+  for(const [index,group] of cases.entries()){
+    const card=node("div",undefined,"adoption-card adoption-partner-case");
+    card.append(node("code",group.xmp));
+    for(const candidate of group.candidates){
+      const input=node("input");
+      const field=node("label",undefined,"adoption-ack");
+      input.type=group.candidates.length===1?"checkbox":"radio";
+      input.name="adoption-partner-"+index;
+      field.append(input,node("code",candidate.raw));
+      card.append(field);
+      if(candidate.files.length>1)partnerPaths(card,candidate.files.filter(path=>path!==candidate.raw));
+      options.push({input,selection:{xmp:group.xmp,raw:candidate.raw}});
+    }
+    details.append(card);
+  }
+  host.insertBefore(details,toolbar);
+  const confirmPartners=action("Ausgewählte Partner bestätigen",async()=>{
+    const choices=options.filter(option=>option.input.checked).map(option=>option.selection);
+    await mutate("/planning-partners","POST",{revision:draftRevision,acknowledged:true,choices});
+    await startPlan(attempt.method);
+  },true);
+  const update=()=>{confirmPartners.disabled=!options.some(option=>option.input.checked);};
+  for(const [label,select] of [["Alle auswählen",true],["Auswahl aufheben",false]]){
+    const button=node("button",label);
+    button.type="button";
+    button.addEventListener("click",()=>{
+      for(const {input} of options)if(!select || input.type==="checkbox")input.checked=select;
+      update();
+    });
+    details.insertBefore(button,details.querySelector(".adoption-partner-case"));
+  }
+  details.addEventListener("change",update);
+  toolbar.append(confirmPartners);
+  update();
+  return toolbar;
+}
+function renderPlanningResult(){
+  const attempt=job.planning || {};
+  if(planningBusy()){
+    const method=attempt.method || (planningRequest===true ? "manual" : planningRequest);
+    report(method==="script"?"TrueNAS-Skriptplan wird geprüft …":"Manueller Verschiebeplan wird geprüft …","busy");
+  }else if(attempt.state==="interrupted"){
+    report("Die Planprüfung wurde unterbrochen. Starte sie erneut.","error");
+  }else if(attempt.state==="failed"){
+    report(attempt.message,"error");
+    if(attempt.files?.total){
+      describeFiles($("message"),attempt.files);
+      renderPartnerChoices($("message"),attempt)
+        .append(action("Problematische Dateien ausschließen",()=>updateExclusions(false)));
+    }
+  }
+}
+async function updateExclusions(restore){
+  const question=restore?"Alle bestätigten Dateiausschlüsse dieses Entwurfs aufheben?":
+    "Diese Dateien bleiben unverändert an der Quelle. Möchtest du sie für diesen Übernahmeauftrag ausschließen?";
+  if(!await window.BibliothekarI18n.confirmAsync(question)){
+    if(!restore)renderPlanningResult();
+    return;
+  }
+  await mutate("/planning-exclusions","POST",{revision:draftRevision,acknowledged:true,restore});
+}
+async function startPlan(method){
+  if(planningBusy())return;
+  requireSaved();
+  planningRequest=method;
+  navigation();
+  $("work").inert=true;
+  renderPlanningResult();
+  try{
+    await api(jobPath("/plan"),"POST",{revision:draftRevision,filename_method:method,background:true});
+    job.planning={state:"running",method};
+  }finally{
+    planningRequest=false;
+    $("work").inert=planningBusy();
+    navigation();
+  }
+  await refresh();
+}
+
 function report(message="", result="") {
   const editorMessage=document.querySelector("#event-editor[open] #editor-message, dialog[open] #review-metadata-message");
   const status=editorMessage || $("message");
@@ -522,7 +665,11 @@ async function api(path, method="GET", body) {
       if(controller?.signal.aborted)throw error;
       throw new Error("Der Server hat keine lesbare Antwort gesendet.");
     });
-    if (!response.ok) throw new Error(detail(value.detail));
+    if (!response.ok) {
+      const error=new Error(detail(value.detail?.message ?? value.detail));
+      error.code=value.detail?.code ?? value.code;
+      throw error;
+    }
     return value;
   }catch(error){
     if(controller?.signal.aborted)throw new Error("Die Anfrage hat zu lange gedauert. Versuche es erneut.");
@@ -650,6 +797,7 @@ async function startInventory(){
 async function refresh() {
   clearTimeout(timer);
   clearTimeout(scriptTimer);
+  clearTimeout(preparationTimer);
   if (!jobId) return;
   const requested=jobId;
   const version=++refreshVersion;
@@ -660,16 +808,28 @@ async function refresh() {
     await restoreJob(current);
   }catch(error){
     if(!current())return;
+    if(error.code==="legacy_adoption_inactive" && jobId){
+      // The wizard route resolves the completed job to its receipt and
+      // stale or discarded jobs to the app, using the server reservation.
+      location.replace("/legacy-adoption?"+new URLSearchParams({library,job:jobId}));
+      return;
+    }
     $("retry-adoption").hidden=false;
     report(error.message,"error");
     throw error;
   }
 }
 async function restoreJob(current) {
-  const [state, batch]=await Promise.all([api(jobPath()),api(jobPath("/review/batch?details=true"))]);
+  const batchRequest=job?.plan.id ? null : api(jobPath("/review/batch?details=true"));
+  const [state, batch]=await Promise.all([api(jobPath()),batchRequest]);
   if(!current())return;
+  const currentBatch=batch || (!state.plan.id ? await api(jobPath("/review/batch?details=true")) : {});
+  if(!current())return;
+  if(state.scan_generation!==job?.scan_generation)previewRevision=-1;
   requireSaved();
-  job=state;reviewBatch=batch;
+  job=state;reviewBatch=currentBatch;
+  if(!job.plan.id && job.reopen?.state==="completed" && ["review","execution","execute"].includes(viewStep))
+    rememberView(job.reopen.step);
   if(manualSnapshot && (manualSnapshot.plan_id!==job.plan.id ||
       manualSnapshot.reverse!==(job.plan.execution?.phase==="rolling_back"))) manualSnapshot=null;
   if(selectedDaysJob!==jobId){
@@ -679,12 +839,25 @@ async function restoreJob(current) {
     freeSegments=[];archiveSegments=[];draftStats=[];draftCoverage=null;previewRevision=-1;
     selectedEvent=null;selectedArchive=null;selectionAnchor="";day=null;
   }
+  if (job.plan?.state==="completed"){
+    location.replace("/legacy-adoption/history?"+new URLSearchParams({library,job:jobId}));
+    return;
+  }
   draftRevision=state.draft_revision;
   draft={events:[],capture_overrides:{},exclude_families:[],target_stems:{},...state.draft};
   render();
   scheduleReviewPoll();
-  if(job.scan_running || job.metadata_running){
-    if(job.metadata_running)report("Metadatenentscheidungen werden angewendet …","busy");
+  if(reopenBusy()){
+    report(job.reopen.kind==="rollback"?"Bibliothekar prüft die Wiederherstellung …":
+      "Der Verschiebeplan wird zurückgenommen. Bibliothekar prüft den Datei- und Archivbestand …","busy");
+    timer=setTimeout(()=>refresh().catch(()=>{}),2000);
+    return;
+  }
+  if($("preparation-progress"))await pollPreparation();
+  if(planningBusy() || job.scan_running || job.metadata_running || job.registration_running){
+    if(job.registration_running)report("Bibliothekar prüft und registriert den Archivbestand …","busy");
+    else if(planningBusy())renderPlanningResult();
+    else if(job.metadata_running)report("Metadatenentscheidungen werden angewendet …","busy");
     timer=setTimeout(()=>refresh().catch(()=>{}),2000);
     return;
   }
@@ -709,15 +882,105 @@ async function restoreJob(current) {
   }
   if(!current())return;
   const {applied,remaining}=draft.metadata_review_result || {};
-  if(applied)report(t("Aufnahmezeiten übernommen")+" · "+applied+
+  if(viewStep==="plan" && ["failed","interrupted"].includes(job.planning?.state))renderPlanningResult();
+  else if(job.plan.id && job.reopen?.state==="failed" && job.reopen.plan_id===job.plan.id)
+    report(job.reopen.message,"error");
+  else if(job.state==="ready" && job.reopen?.changed_sources)
+    report("Quelldateien haben sich verändert oder fehlen. Lies die Inventur erneut ein. Die Ereignisplanung bleibt erhalten.");
+  else if(applied)report(t("Aufnahmezeiten übernommen")+" · "+applied+
     (remaining?" · "+t("Noch zu prüfen")+" · "+remaining:""),remaining?"error":"success");
   else report();
+}
+function showPreparation(result){
+  const section=$("preparation-progress"), controls=$("confirmation-controls");
+  if(!section || !controls)return;
+  const preparing=result.state!=="not_started";
+  section.hidden=!preparing;
+  controls.hidden=preparing;
+  $("top-actions").inert=preparing;
+  $("wizard-navigation").inert=preparing;
+  section.replaceChildren();
+  if(!preparing)return;
+  $("execution-method-heading").textContent="Durchführungsmethode – TrueNAS-Skript";
+  section.append(node("strong",result.state==="completed"?"Skriptvorbereitung abgeschlossen":
+    result.state==="failed"?"Vorbereitung unterbrochen":
+    "Skriptmanifest wird serverseitig vorbereitet"));
+  const phase={source:"Quelldateien werden geprüft",archive:"Archivbestand wird geprüft",
+    manifest:"Skriptmanifest wird erstellt"}[result.phase];
+  if(phase)section.append(line(phase));
+  if(!result.worker_active && ["queued","running"].includes(result.state))
+    section.append(line("Die Vorbereitung wurde unterbrochen. Beim Fortsetzen werden die Dateien erneut geprüft."));
+  const total=Number(result.total || 0), done=Number(result.processed || 0);
+  if(total>0){
+    const bar=node("progress");
+    bar.max=total;
+    bar.value=Math.min(total,done);
+    bar.setAttribute("aria-label",t("Geprüfte Dateien"));
+    section.append(bar,line(done+" / "+total+" "+t("Dateien geprüft")+" · "+
+      Math.round(Number(result.bytes_processed || 0)/1048576)+" / "+
+      Math.round(Number(result.bytes_total || 0)/1048576)+" MiB"));
+  }else{
+    section.append(line("Der Auftrag ist gespeichert und kann nach einem erneuten Öffnen fortgesetzt werden."));
+  }
+  if(result.error)section.append(line(result.error));
+  if(result.state==="failed" && !result.worker_active){
+    section.append(action("Fehlgeschlagene Vorbereitung zurücksetzen",async()=>{
+      if(!confirm(t("Nur den fehlgeschlagenen Vorbereitungsversuch zurücksetzen? Der Ereignisentwurf und die Originaldateien bleiben erhalten.")))return;
+      await api(jobPath("/preparation/abandon"),"POST");
+      await refresh();
+    }));
+  }
+  if(result.state==="failed" || (!result.worker_active &&
+      ["queued","running"].includes(result.state))){
+    const retry=action("Vorbereitung fortsetzen",async()=>{
+      retry.disabled=true;
+      try {
+        const proof=await api(jobPath("/script/probe"));
+        if(!proof.verified || !proof.sha256)throw Error(t("Der Hostnachweis muss erneut geprüft werden."));
+        await api(jobPath("/confirm"),"POST",{
+          plan_id:job.plan.id,method:"script",acknowledged:true,probe_sha256:proof.sha256
+        });
+        await refresh();
+      }catch(error){
+        report(error.message,"error");
+        retry.disabled=false;
+      }
+    });
+    section.append(retry);
+  }
+}
+
+async function pollPreparation(){
+  const panel=$("preparation-progress");
+  if(!panel || job.plan.execution)return;
+  let result;
+  try {
+    result=await api(jobPath("/preparation"));
+  } catch (error) {
+    if(panel!==$("preparation-progress"))return;
+    if(!$("preparation-connection")) {
+      const note=line("Verbindung unterbrochen. Der letzte Fortschritt bleibt sichtbar.");
+      note.id="preparation-connection";
+      panel.append(note);
+    }
+    preparationTimer=setTimeout(pollPreparation,3000);
+    return;
+  }
+  if(panel!==$("preparation-progress"))return;
+  showPreparation(result);
+  // A terminal preparation record is not equivalent to a verified adoption.
+  // Re-fetch the plan to display its registered execution phase.
+  if(result.state==="completed"){
+    preparationTimer=setTimeout(()=>refresh().catch(()=>{}),500);
+  }else if(["queued","running"].includes(result.state)){
+    preparationTimer=setTimeout(()=>pollPreparation().catch(()=>{}),3000);
+  }
 }
 async function finishAdoption(){
   if(finishing)return;
   finishing=true;
   try{
-    return await mutate("/finalize","POST",{plan_id:job.plan.id});
+    return await mutate("/finalize","POST",{plan_id:job.plan.id,background:true});
   } finally {
     finishing=false;
   }
@@ -726,6 +989,7 @@ async function mutate(path, method="POST", body) {
   requireSaved();
   report("Bibliothekar verarbeitet den Auftrag …","busy");
   const checking=path==="/finalize";
+  if(path==="/rollback/check") body={...body,background:true};
   if (checking) $("safety").textContent="Bitte keine Dateien mehr verändern. Bibliothekar prüft und registriert gerade den übernommenen Archivbestand.";
   try {
     const result=await api(jobPath(path),method,body);
@@ -738,10 +1002,10 @@ async function mutate(path, method="POST", body) {
       return result;
     }
     if(checking || path==="/rollback/start")manualSnapshot=null;
-    const target={"/plan":"review","/confirm":"execute","/finalize":"execute","/reopen":"plan","/scan":"inventory","/rollback/start":"execute"}[path];
+    const target=result.reopened && path==="/rollback/check" ? "inventory" : {"/plan":"review","/confirm":"execute","/finalize":"execute","/reopen":"plan","/script/reopen-unstarted":"inventory","/scan":"inventory","/rollback/start":"execute"}[path];
     if(target)rememberView(target);
     await refresh();
-    report();
+    if(path!=="/rollback/check" && (!checking || !job?.registration_running))report();
     return result;
   } catch (error) {
     if (checking) await refresh().catch(()=>{});
@@ -767,28 +1031,36 @@ const planningToolsObserver=new ResizeObserver(entries=>{
     target.parentElement?.style.setProperty("--adoption-plan-tools-height",target.offsetHeight+"px");
   }
 });
+function showRecovery(visible){
+  const existing=$("rollback-start");
+  if(!visible){existing?.remove();return;}
+  if(existing)return;
+  const recovery=action("Kontrollierte Wiederherstellung starten",async()=>{
+    if(!confirm(t("Möchtest du die Übernahme anhand des gespeicherten Plans rückgängig machen?")))return;
+    const command={plan_id:job.plan.id};
+    const manual=job.plan.execution.method==="manual";
+    await mutate("/rollback/start","POST",command);
+    if(manual){
+      report("Bibliothekar prüft den aktuellen Dateibestand …","busy");
+      await loadManualWork(true);
+      report();
+      if(manualSnapshot?.ready)await mutate("/rollback/check","POST",command);
+    }
+  });
+  recovery.id="rollback-start";
+  recovery.classList.add("danger-button");$("top-actions").append(recovery);
+}
 function render() {
   const phase=job.plan.execution?.phase;
   const terminal=job.state==="discarded" || job.plan.state==="completed";
+  $("work").inert=planningBusy() || reopenBusy();
   navigation();
   $("introduction").hidden=false;
   $("setup").hidden=viewStep!=="setup";
   $("top-actions").replaceChildren();
-  if(recoveryPhases.includes(phase)){
-    const recovery=action("Kontrollierte Wiederherstellung starten",async()=>{
-      if(!confirm(t("Möchtest du die Übernahme anhand des gespeicherten Plans rückgängig machen?")))return;
-      const command={plan_id:job.plan.id};
-      const manual=job.plan.execution.method==="manual";
-      await mutate("/rollback/start","POST",command);
-      if(manual){
-        report("Bibliothekar prüft den aktuellen Dateibestand …","busy");
-        await loadManualWork(true);
-        report();
-        if(manualSnapshot?.ready)await mutate("/rollback/check","POST",command);
-      }
-    });
-    recovery.classList.add("danger-button");$("top-actions").append(recovery);
-  }
+  $("top-actions").inert=$("wizard-navigation").inert=reopenBusy();
+  showRecovery(recoveryPhases.includes(phase) &&
+    (job.plan.execution.method==="manual" || recoveryOnly));
   $("choice").hidden=true;
   $("safety").hidden=terminal;
   const warnings={
@@ -825,17 +1097,22 @@ function render() {
     status.append(details);
   }
   if (job.scan_error) status.append(line(job.scan_error));
+  const changes=job.inventory_changes || {};
+  if(changes.partners || changes.file_exclusions || changes.family_decisions || changes.metadata_decisions)
+    status.append(line("Einige frühere Datei- oder Familienentscheidungen sind nach der Inventur nicht mehr gültig. Prüfe die betroffenen Ereignisse. Die Ereignisplanung bleibt erhalten."));
+  if(changes.relocated_partners)
+    status.append(line("Bestätigte Dateipartner wurden anhand der Dateiidentität und SHA-256 am neuen Quellpfad wiedererkannt."));
   if(job.review_count)status.append(reviewControls());
   const buttons=node("div",undefined,"inline");
   if (!recoveryOnly && job.scan_running) buttons.append(action("Inventur pausieren",()=>mutate("/pause")));
   else if (!recoveryOnly && !terminal && !job.plan.id && !inventoryStarting && !reviewBusy()) {
     const labels={ready:"Inventur starten",scanning:"Inventur fortsetzen",inventoried:"Inventur erneut starten"};
     buttons.append(action(labels[job.state],async()=>{
-      if(job.state==="inventoried" && !confirm(t("Inventur neu starten? Der bisherige Entwurf wird verworfen. Originaldateien bleiben unverändert.")))return;
+      if(job.state==="inventoried" && !confirm(t("Inventur neu starten? Die gespeicherte Ereignisplanung bleibt erhalten.")))return;
       await startInventory();
     },true));
   }
-  if (!terminal && !job.plan.execution && !job.scan_running && !inventoryStarting && !reviewBusy()) { const discard=action("Änderungen verwerfen",async()=>{
+  if (!terminal && !job.plan.execution && !planningBusy() && !job.scan_running && !inventoryStarting && !reviewBusy()) { const discard=action("Änderungen verwerfen",async()=>{
     if(reviewBusy())return;
     if (!confirm(t("Auftrag und Entwurf verwerfen? Originale und fertige Arbeitskopien in General bleiben erhalten."))) return;
     await api(jobPath(),"DELETE");
@@ -870,6 +1147,40 @@ function applyDraftPreview(checked){
 }
 function renderDraft(host) {
   const panel=section("Ereignisse planen");
+  if(job.matching_update_required){
+    const refreshNotice=node("div",undefined,"adoption-card");
+    refreshNotice.append(line("Aktualisiere die Inventur für die neue RAW- und XMP-Zuordnung."),
+      action("Inventur aktualisieren",()=>mutate("/scan"),true));
+    panel.append(refreshNotice);
+  }
+  if(job.excluded_files?.total){
+    const notice=node("div",undefined,"adoption-card");
+    notice.append(line("Bestätigte Ausschlüsse bleiben unverändert an der Quelle."));
+    describeFiles(notice,job.excluded_files);
+    notice.append(action("Dateiausschlüsse aufheben",()=>updateExclusions(true)));
+    panel.append(notice);
+  }
+  if(draftStats.some(event=>event.families===0))
+    panel.append(line("Mindestens ein gespeichertes Ereignis enthält nach aktueller Inventur keine zugeordneten Dateifamilien."));
+  if(job.partners?.length){
+    const notice=node("div",undefined,"adoption-card");
+    const details=node("details",undefined,"adoption-file-issues");
+    const summary=node("summary");
+    summary.append(node("span","Bestätigte Dateipartnerschaften")," ("+job.partners.length+")");
+    details.append(summary);
+    const entries=node("ul");
+    for(const pair of job.partners){
+      const item=node("li");
+      item.append(node("code",pair.xmp)," → ",node("code",pair.raw));
+      entries.append(item);
+    }
+    details.append(entries);
+    notice.append(details,action("Bestätigungen aufheben",async()=>{
+      if(await window.BibliothekarI18n.confirmAsync("Alle bestätigten Dateipartnerschaften dieses Entwurfs aufheben?"))
+        await mutate("/planning-partners","POST",{revision:draftRevision,acknowledged:true,restore:true});
+    }));
+    panel.append(notice);
+  }
   if(previewRevision!==draftRevision){
     host.append(panel);
     return;
@@ -1540,10 +1851,12 @@ async function setDraft(value, editor) {
   const checked=await api(jobPath("/draft/check"),"POST",value);
   if(!checked.valid){showConflicts(checked,value,editor);throw new Error("Zeitkonflikt: Korrigiere die markierte Planung. Gespeicherte Entwürfe bleiben erhalten.");}
   const result=await api(jobPath("/draft"),"PUT",{...value,revision:draftRevision});
+  if(job)job.planning={};
   applyDraftPreview(checked);previewRevision=result.revision;
   draft=value;
   draftRevision=result.revision;
   savedEditor(editor);
+  navigation();
   selectedEvent=null;
   selectedArchive=null;
   day=null;
@@ -1892,6 +2205,8 @@ function renderPlan(host) {
   for (const [title,value] of [
     ["Zu übernehmende Dateien",format.format(plan.move_files)],
     ["Dateifamilien im Verschiebeplan",format.format(plan.move_families)],
+    ["Geplante Dateiumbenennungen",format.format(plan.rename_files ?? 0)],
+    ["Betroffene Dateifamilien",format.format(plan.rename_families ?? 0)],
     ["Datenvolumen",format.format(plan.move_bytes / 1024**power)+" "+unit[power]],
     ["Zielbibliothek",plan.library_name],
     ["Neue Ereignisse und Sammelordner",format.format(plan.events.filter(event=>!event.existing).length)],
@@ -1902,6 +2217,10 @@ function renderPlan(host) {
     const fact=node("div");fact.append(node("dt",title),node("dd",value));facts.append(fact);
   }
   panel.append(facts);
+  if(plan.excluded_files?.total){
+    panel.append(line("Bestätigte Ausschlüsse bleiben unverändert an der Quelle."));
+    describeFiles(panel,plan.excluded_files);
+  }
   if (duplicateFiles) panel.append(line("Duplikate sind bereits registriert oder in diesem Plan mit identischem Inhalt enthalten."));
   if (job.review_count) panel.append(line("Dateifamilien ohne Zuordnung und ausgenommene Prüffälle bleiben an der Quelle. Prüfe sie in der Liste der Prüffälle."),reviewControls());
   const diagnostics=node("details",undefined,"adoption-proof");
@@ -1949,7 +2268,6 @@ function renderPlan(host) {
     const target=renames.querySelector("#rename-preview");
     if(renames.open && !target.childElementCount)showRenames(target).catch(error=>report(error.message,"error"));
   });
-  renames.open=viewStep==="execution" && plan.filename_method==="script";
   panel.append(renames);
   if(!recoveryOnly && !phase && plan.documents_at && viewStep==="execution")renderConfirmation(panel,command);
   if (manualPhase(plan) && viewStep==="execute"){
@@ -1978,8 +2296,12 @@ function renderPlan(host) {
   }
   if (!recoveryOnly && phase==="repair" && !scripted) controls.append(action("Manuelle Schritte fortsetzen",()=>run("/resume")));
   if (phase==="rolling_back" && scripted) {
-    controls.append(action("Befehl für die Skriptrücknahme bereitstellen",()=>run("/rollback/start")),
-      action("Wiederherstellung prüfen und Auftrag beenden",()=>run("/rollback/check"),true));
+    const confirmRollback=action("Wiederherstellung prüfen und Auftrag beenden",()=>run("/rollback/check"),true);
+    confirmRollback.id="script-rollback-check";
+    controls.append(action("Befehl für die Skriptrücknahme bereitstellen",()=>run("/rollback/start")));
+    if(!recoveryOnly) controls.append(action("Wiederherstellung prüfen und Entwurf weiterbearbeiten",
+      ()=>mutate("/rollback/check","POST",{...command,keep_draft:true})));
+    controls.append(confirmRollback);
   }
   if (plan.issues) controls.append(action("Prüfprobleme anzeigen",async()=>{
     const issues=await api(jobPath("/issues"));
@@ -2110,7 +2432,12 @@ function scriptLinks(confirmed=false) {
   return links;
 }
 function renderConfirmation(panel,command) {
-  const confirmation=node("div",undefined,"adoption-card");
+  const confirmation=slot("execution-confirmation");
+  confirmation.classList.add("adoption-card");
+  const plannedMethod=job.plan.filename_method || "manual";
+  const methodKey="bk-adoption-method:"+jobId+":"+command.plan_id;
+  const heading=slot("execution-method-heading","h3");
+  const blocked=job.plan.manual_blocker;
   const choice=node("div",undefined,"adoption-methods");
   choice.setAttribute("role","radiogroup");
   choice.setAttribute("aria-label",t("Durchführungsmethode"));
@@ -2120,8 +2447,14 @@ function renderConfirmation(panel,command) {
   ];
   for(const [value,title,description] of methods){
     const option=node("label"), radio=node("input");
-    radio.type="radio";radio.name="adoption-execution";radio.value=value;radio.checked=value===(job.plan.filename_method || "manual");
-    option.append(radio,node("strong",title),node("small",description));choice.append(option);
+    radio.type="radio";radio.name="adoption-execution";radio.value=value;radio.checked=value===plannedMethod;
+    option.append(radio,node("strong",title),node("small",description));
+    if(value==="manual" && blocked){
+      radio.disabled=true;
+      option.append(node("small","Die manuelle Methode kann den gebundenen XMP-Verweis nicht anpassen."),
+        node("small",blocked.path+" · "+blocked.raw_reference+" → "+blocked.raw_name));
+    }
+    choice.append(option);
   }
   const method=()=>choice.querySelector("input:checked").value;
   const scripts=node("div",undefined,"stack");
@@ -2134,12 +2467,13 @@ function renderConfirmation(panel,command) {
   const [wrap,ack]=field("Ich bestätige die Sicherheitsbedingungen und den angezeigten Plan.","checkbox");
   wrap.classList.add("adoption-ack");
   let probe=null, checking=false, confirming=false;
+  let methodChosen=sessionStorage.getItem(methodKey)===plannedMethod;
   function updateConfirmation(){
     const scripted=method()==="script";
     const busy=checking || confirming;
     wrap.hidden=scripted && !probe?.verified;
     ack.disabled=busy || wrap.hidden;
-    confirmButton.disabled=ack.disabled || !ack.checked;
+    confirmButton.disabled=!methodChosen || ack.disabled || !ack.checked;
     confirmButton.classList.toggle("bk-busy",confirming);
     confirmButton.setAttribute("aria-busy",String(confirming));
     prepareButton.disabled=busy;
@@ -2203,15 +2537,25 @@ function renderConfirmation(panel,command) {
     separator.setAttribute("aria-hidden","true");
     return separator;
   }
-  const confirmButton=action("Durchführung verbindlich starten",()=>{
+  const confirmButton=action("Durchführung verbindlich starten",async()=>{
     const selected=method();
+    if(!methodChosen || selected!==plannedMethod) return;
     if (!ack.checked) throw new Error("Bitte bestätige zuerst die Sicherheitsbedingungen.");
     if (selected==="script" && !probe?.verified) throw new Error("Führe zuerst die Host- und Dataset-Prüfung durch.");
     const payload={...command,method:selected,acknowledged:true};
     if (selected==="script") payload.probe_sha256=probe.sha256;
     confirming=true;
     updateConfirmation();
-    return mutate("/confirm","POST",payload);
+    if(selected==="manual")return mutate("/confirm","POST",payload);
+    clearTimeout(preparationTimer);
+    showPreparation({state:"queued",worker_active:true});
+    $("preparation-progress").focus();
+    try {
+      await api(jobPath("/confirm"),"POST",payload);
+    } finally {
+      // Read the durable state even when the response was lost.
+      await pollPreparation();
+    }
   },true,()=>{
     confirming=false;
     updateConfirmation();
@@ -2220,37 +2564,69 @@ function renderConfirmation(panel,command) {
   scripts.append(line("Führe die Prüfung in der TrueNAS-Host-Shell aus. Der automatische Befehl verwendet sudo für den Zugriff auf das geschützte AppData-Paket. TrueNAS kann nach deinem Passwort fragen."),
     actions,proofState);
   const manualConfirm=node("div");
-  manualConfirm.hidden=true;
-  function selectMethod(){
-    scripts.hidden=advanced.hidden=method()!=="script";
+  const safety=node("div");
+  function showSelectedMethod(){
+    heading.textContent=!methodChosen?"Durchführungsmethode":plannedMethod==="script"?
+      "Durchführungsmethode – TrueNAS-Skript":"Durchführungsmethode – Manuelle Übernahme";
+    safety.hidden=!methodChosen;
+    choose.hidden=methodChosen;
+    if(!methodChosen)return;
+    scripts.hidden=advanced.hidden=plannedMethod!=="script";
     manualConfirm.hidden=!scripts.hidden;
-    const placement=scripts.hidden ? manualConfirm : actions;
-    placement.append(confirmButton);
+    (scripts.hidden ? manualConfirm : actions).append(confirmButton);
     ack.checked=false;
     updateConfirmation();
-    if (!scripts.hidden && !probe && !checking) checkProbe().catch(error=>report(error.message,"error"));
+    if(!scripts.hidden && !probe && !checking)checkProbe().catch(error=>report(error.message,"error"));
   }
-  choice.addEventListener("change",async()=>{
+  const choose=action("Diese Methode wählen",async()=>{
+    requireSaved();
     const selected=method();
-    for(const radio of choice.querySelectorAll("input"))radio.disabled=true;
-    checking=true;ack.checked=false;updateConfirmation();
-    try {
-      await mutate("/execution-method","POST",{...command,method:selected});
-    } catch(error) {
-      await refresh().catch(()=>{});
-      report(error.message,"error");
-    } finally {
-      checking=false;
-      for(const radio of choice.querySelectorAll("input"))radio.disabled=false;
-      updateConfirmation();
+    if(selected!==plannedMethod){
+      choice.inert=true;
+      methodStatus.hidden=false;
+      try{
+        const plan=await api(jobPath("/execution-method"),"POST",{...command,method:selected});
+        sessionStorage.removeItem(methodKey);
+        sessionStorage.setItem("bk-adoption-method:"+jobId+":"+plan.id,selected);
+        await refresh();
+      }catch(error){
+        await refresh().catch(()=>{});
+        throw error;
+      }finally{
+        choice.inert=false;
+        methodStatus.hidden=true;
+      }
+      return;
     }
+    sessionStorage.setItem(methodKey,selected);
+    methodChosen=true;
+    showSelectedMethod();
+  },true);
+  choose.id="execution-method-choice";
+  const methodStatus=line("Der Plan wird für die gewählte Methode geprüft …");
+  methodStatus.setAttribute("role","status");
+  methodStatus.hidden=true;
+  choice.addEventListener("change",()=>{
+    sessionStorage.removeItem(methodKey);
+    methodChosen=false;
+    showSelectedMethod();
   });
   ack.addEventListener("change",updateConfirmation);
-  confirmation.append(node("h3","Verbindliche Sicherheitsbestätigung"),choice,
+  safety.append(node("h4","Verbindliche Sicherheitsbestätigung"),
     line("Nach dieser Bestätigung müssen die geplanten Verschiebungen abgeschlossen, überprüft oder kontrolliert rückgängig gemacht werden."),
     line("Quelle und Ziel müssen auf demselben ZFS-Dataset liegen. Führe währenddessen keine weiteren Änderungen am Archiv durch."),
     scripts,wrap,manualConfirm,advanced);
-  selectMethod();
+  const controls=slot("confirmation-controls");
+  const progress=slot("preparation-progress");
+  progress.className="adoption-status adoption-progress";
+  progress.tabIndex=-1;
+  progress.setAttribute("role","status");
+  progress.append(line("Vorbereitungsstatus wird geladen …"));
+  controls.hidden=true;
+  $("top-actions").inert=$("wizard-navigation").inert=true;
+  controls.append(choice,choose,methodStatus,safety);
+  confirmation.append(heading,controls,progress);
+  showSelectedMethod();
   panel.append(confirmation);
 }
 async function pollScript() {
@@ -2263,11 +2639,17 @@ async function pollScript() {
     const result=await api(jobPath("/script"));
     if (target!==$("script-state")) return;
     const status=result.status;
-    const state=result.running ? "script_running" :
+    if(result.stale_documents && $("script-rollback-check")){
+      $("script-rollback-check").textContent=t("Wiederherstellung prüfen und zur Inventur zurückkehren");
+    }
+    const releasing=scriptReleasing || result.release_running;
+    if(!recoveryOnly && recoveryPhases.includes(phase) && result.journal_started!==null)
+      showRecovery(result.journal_started);
+    const state=releasing ? "script_releasing" : result.running ? "script_running" :
       status?.state==="running" ? "script_interrupted" :
       status?.state==="completed" ? "operations_done" : status?.state || phase;
     const nodes=[];
-    if(status || result.running){
+    if(status || result.running || releasing){
       const progress=node("div",undefined,"adoption-status adoption-progress");
       progress.append(node("strong",label(state)));
       if(status){
@@ -2280,6 +2662,10 @@ async function pollScript() {
       }
       nodes.push(progress);
     }
+    if(result.stale_documents && phase!=="rolling_back")nodes.push(line(result.can_reopen
+      ? "Die Ereignisdokumente enthalten veraltete XMP-Nachweise. Hebe die Skriptfreigabe auf und erstelle einen neuen Plan."
+      : "Die Ereignisdokumente enthalten veraltete XMP-Nachweise. Schließe die kontrollierte Wiederherstellung ab, bevor du neu planst."
+    ));
     if (status?.error) nodes.push(line(status.error));
     const readyCommand=(["script_prepared","repair","rolling_back"].includes(phase) &&
       !(status?.state==="completed" && phase!=="repair"))?result.command:null;
@@ -2290,12 +2676,28 @@ async function pollScript() {
       delete target.dataset.command;
       target.replaceChildren();
     }
-    if (!recoveryOnly && !result.running && status?.state!=="completed" &&
-        ["script_prepared","repair"].includes(phase) && !result.command) {
-      nodes.push(action("Skriptbefehl bereitstellen",()=>run("/script/release"),true));
+    if (!recoveryOnly && !result.stale_documents && (releasing || !result.running) && status?.state!=="completed" &&
+        ["script_prepared","repair"].includes(phase) && !readyCommand) {
+      const release=action("Skriptbefehl bereitstellen",async()=>{
+        scriptReleasing=true;
+        release.disabled=true;
+        try{await run("/script/release");}
+        finally{scriptReleasing=false;}
+      },true);
+      release.disabled=releasing;
+      nodes.push(release);
+    }
+    const returnSlot=$("script-return");
+    const canReturn=!recoveryOnly && !releasing && result.can_reopen;
+    if(!canReturn) returnSlot?.replaceChildren();
+    else if(returnSlot && !returnSlot.firstElementChild){
+      returnSlot.append(action("Skriptfreigabe aufheben und zur Inventur zurückkehren",()=>{
+        if(confirm(t("Das ungestartete Skript wird gesperrt. Der Ereignisentwurf bleibt erhalten. Fortfahren?")))
+          return run("/script/reopen-unstarted");
+      }));
     }
     const finalize=$("script-finalize");
-    if (finalize) finalize.disabled=finishing || result.running || status?.state!=="completed" || status.mode!=="apply";
+    if (finalize) finalize.disabled=Boolean(result.stale_documents) || finishing || result.running || status?.state!=="completed" || status.mode!=="apply";
     if (!$("script-progress")) target.append(slot("script-progress"));
     $("script-progress").classList.add("adoption-stage");
     $("script-progress").replaceChildren(...nodes);

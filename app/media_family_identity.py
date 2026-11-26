@@ -7,11 +7,11 @@ from pathlib import PurePosixPath
 import re
 import unicodedata
 
+from app.filename_collisions import has_capture_fraction
+
 
 IDENTITY_TAGS = ("ImageUniqueID", "BodySerialNumber", "OriginalRawFileName")
-IDENTITY_VERSION = 2
-FORMAT_DIRECTORIES = {"raw", "raf", "nef", "cr2", "cr3", "arw", "orf", "rw2",
-                      "jpeg", "jpg", "dng", "xmp", "sidecar", "sidecars"}
+IDENTITY_VERSION = 6
 
 
 def _normalized(value):
@@ -33,6 +33,9 @@ def capture_identity(metadata):
         "serial": next(iter(serials)) if len(serials) == 1 else "",
         "original_raw": _normalized(metadata.get("DNG:IFD0:OriginalRawFileName")
                                     or metadata.get("EXIF:IFD0:OriginalRawFileName")),
+        "sidecar_raw": _normalized(metadata.get("XMP:XMP-crs:RawFileName")),
+        "document": _normalized(metadata.get("XMP:XMP-xmpMM:DocumentID")),
+        "original_document": _normalized(metadata.get("XMP:XMP-xmpMM:OriginalDocumentID")),
         "conflict": len(ids) > 1 or len(serials) > 1,
     }
 
@@ -53,13 +56,6 @@ def _time(record):
     return datetime.fromisoformat(value).astimezone(timezone.utc)
 
 
-def _format_scope(record):
-    parent = PurePosixPath(record["relative_path"]).parent
-    if parent.name.casefold() in FORMAT_DIRECTORIES:
-        return parent.parent
-    return None
-
-
 def _same_setting(left, right):
     """Reject contradictory exposure evidence; accept equivalent numeric forms."""
     if left in (None, "") or right in (None, ""):
@@ -70,6 +66,14 @@ def _same_setting(left, right):
         return _normalized(left) == _normalized(right)
 
 
+def _compatible_time(first, second, left, right):
+    if left is None or right is None or left.replace(microsecond=0) != right.replace(microsecond=0):
+        return False
+    return (left == right or not all(
+        has_capture_fraction(item["selected_capture_time"]) for item in (first, second)
+    ))
+
+
 def _compatible(first, second):
     a, b = first["capture_identity"], second["capture_identity"]
     if a["id"] and b["id"] and a["id"] != b["id"]:
@@ -77,9 +81,7 @@ def _compatible(first, second):
     if a["serial"] and b["serial"] and a["serial"] != b["serial"]:
         return False
     left, right = _time(first), _time(second)
-    if left is None or right is None or left.replace(microsecond=0) != right.replace(microsecond=0):
-        return False
-    if left.microsecond and right.microsecond and left != right:
+    if not _compatible_time(first, second, left, right):
         return False
     a_settings = first.get("capture_settings") or {}
     b_settings = second.get("capture_settings") or {}
@@ -94,7 +96,29 @@ def _compatible(first, second):
     return True
 
 
-def split_family_groups(groups, *, ending, cancel=lambda: None):
+def _xmp_original_capture(record):
+    """Only independent shutter times corroborate an Adobe sidecar."""
+    evidence = [
+        item for item in record.get("metadata_candidates", ())
+        if item["tag_name"].endswith(":DateTimeOriginal")
+    ]
+    if not evidence:
+        return record
+    times = [item["normalized_datetime"] for item in evidence]
+    if not all(times):
+        return {**record, "metadata_conflict": True}
+    precise = [value for value in times if has_capture_fraction(value)]
+    seconds = {datetime.fromisoformat(value).astimezone(timezone.utc).replace(microsecond=0) for value in times}
+    fractions = {datetime.fromisoformat(value).astimezone(timezone.utc) for value in precise}
+    if len(seconds) != 1 or len(fractions) > 1:
+        return {**record, "metadata_conflict": True}
+    selected = (precise or times)[0]
+    tag = next(item["tag_name"] for item in evidence if item["normalized_datetime"] == selected)
+    return {**record, "selected_capture_time": selected, "selected_capture_source": tag,
+            "metadata_conflict": False, "review_required": False}
+
+
+def split_family_groups(groups, *, ending, cancel=lambda: None, preserve_xmp_versions=False):
     """Yield only sets backed by unambiguous, mutually compatible evidence.
 
     Each input supplies its local family key, its member records and eligibility.
@@ -103,7 +127,9 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
     by_id, by_precision, by_context = defaultdict(set), defaultdict(set), defaultdict(set)
     candidates = {}
     primary_by_name = defaultdict(set)
+    primary_by_stem = defaultdict(set)
     standalone_sidecars = {}
+    dng_by_document = defaultdict(list)
     for key, members, eligible in groups:
         cancel()
         primaries = [item for item in members if _role(item) in {"raw", "jpeg", "dng"}]
@@ -113,10 +139,14 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
         if not primaries and eligible and len(members) == 1 and _role(members[0]) == "xmp":
             standalone_sidecars[key] = members[0]
         for primary in primaries:
-            scope = _format_scope(primary)
-            if scope is not None:
-                name = _normalized(PurePosixPath(primary["relative_path"]).name)
-                primary_by_name[(scope, name)].add(key)
+            # A sidecar can point to its media by exact filename without
+            # assuming RAW/JPEG/XMP directories or any historic folder layout.
+            name = _normalized(PurePosixPath(primary["relative_path"]).name)
+            primary_by_name[name].add(key)
+            primary_by_stem[_normalized(PurePosixPath(primary["relative_path"]).stem)].add(key)
+            lineage = (primary.get("capture_identity") or {}).get("original_document")
+            if preserve_xmp_versions and _role(primary) == "dng" and lineage:
+                dng_by_document[lineage].append((key, primary))
         if not evidence:
             continue
         # A local family with multiple media files is a single unit. Every
@@ -132,73 +162,231 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
                 by_id[(camera, identity["id"])].add(key)
                 has_proof = True
             instant = _time(item)
-            scope = _format_scope(item)
             source = item.get("selected_capture_source") or ""
-            if (instant and scope is not None and source.endswith(":DateTimeOriginal")
+            if (instant and source.endswith(":DateTimeOriginal")
                     and _role(item) in {"raw", "jpeg", "dng"}):
-                # Real camera RAW/JPEG/DNG triplets may have neither ImageUniqueID,
-                # serial nor subsecond time. Accept a *candidate* only inside the
-                # same format-folder sibling scope, with the exact camera stem.
-                # Final merging still requires all members to agree, with no
-                # competing same-role candidate or metadata contradiction.
-                by_context[(camera, scope, _normalized(PurePosixPath(key).name),
-                            instant.replace(microsecond=0))].add(key)
+                stem = _normalized(PurePosixPath(key).name)
+                settings = item.get("capture_settings") or {}
+                # Keep coarse candidates available for a proven sidecar, but
+                # never connect primaries on a model/stem/whole second alone.
                 has_proof = True
-                if identity["serial"] and instant.microsecond:
-                    by_precision[(camera, identity["serial"], scope,
-                                  _normalized(PurePosixPath(key).name), instant)].add(key)
-        if has_proof:
+                if identity["serial"] and has_capture_fraction(item["selected_capture_time"]):
+                    by_precision[(camera, identity["serial"], stem, instant)].add(key)
+                if all(settings.get(field) not in (None, "") for field in ("exposure", "aperture", "iso")):
+                    by_context[(camera, stem, instant.replace(microsecond=0))].add(key)
+        if has_proof or preserve_xmp_versions and primaries:
             candidates[key] = (members, evidence, usable)
 
     by_sidecar = {}
+    by_lineage = []
     for key, sidecar in standalone_sidecars.items():
         cancel()
+        if preserve_xmp_versions:
+            sidecar = _xmp_original_capture(sidecar)
         path = PurePosixPath(sidecar["relative_path"])
-        original_name = path.stem if path.suffix.casefold() == ".xmp" else ""
-        if PurePosixPath(original_name).suffix.casefold() not in {
+        if path.suffix.casefold() != ".xmp":
+            continue
+        original_name = _normalized(path.stem)
+        identity = sidecar.get("capture_identity") or {}
+        raw_hint = identity.get("sidecar_raw") or ""
+        named_extension = PurePosixPath(original_name).suffix.casefold()
+        exact_named = named_extension in {
             ".raf", ".nef", ".cr2", ".cr3", ".arw", ".orf", ".rw2",
             ".dng", ".jpg", ".jpeg",
-        }:
-            continue
-        scope = _format_scope(sidecar)
-        owners = primary_by_name.get((scope, _normalized(original_name)), set())
-        if scope is None or len(owners) != 1:
-            continue
-        [owner] = owners
-        if owner not in candidates or not candidates[owner][2]:
-            continue
-        exact = [item for item in candidates[owner][0]
-                 if _normalized(PurePosixPath(item["relative_path"]).name) == _normalized(original_name)]
-        if len(exact) != 1:
-            continue
-        original = exact[0]
-        identity = sidecar.get("capture_identity") or {}
-        match = original.get("capture_identity") or {}
+        }
+        # An explicit RAW filename is authoritative about the *name*, not
+        # globally unique capture identity. Resolve it against the entire
+        # inventory and require a single, corroborated capture.
+        if raw_hint:
+            if exact_named and original_name != raw_hint:
+                continue
+            owners = primary_by_name.get(raw_hint, set())
+        elif exact_named:
+            owners = primary_by_name.get(original_name, set())
+        else:
+            # Adobe's common DSCF1234.xmp sidecar has no extension hint.
+            # Only corroborating camera AND capture time can qualify it.
+            owners = primary_by_stem.get(original_name, set())
+
         if (sidecar.get("metadata_error") or sidecar.get("metadata_conflict")
-                or (sidecar.get("review_required") and sidecar.get("selected_capture_time"))):
-            continue
-        if identity.get("conflict") or any(identity.get(tag) and match.get(tag)
-                                           and identity[tag] != match[tag] for tag in ("id", "serial")):
-            continue
-        sidecar_settings = sidecar.get("capture_settings") or {}
-        original_settings = original.get("capture_settings") or {}
-        if any(not _same_setting(sidecar_settings.get(field), original_settings.get(field))
-               for field in ("exposure", "aperture", "iso")):
+                or identity.get("conflict")):
             continue
         sidecar_camera = _camera(sidecar)
-        if any(sidecar_camera) and sidecar_camera != _camera(original):
+        # XMP CreateDate can describe a later edit or sidecar creation;
+        # only DateTimeOriginal is an independently usable capture instant.
+        sidecar_source = str(sidecar.get("selected_capture_source") or "")
+        sidecar_time = (_time(sidecar) if sidecar_source.endswith(":DateTimeOriginal")
+                        else None)
+        if not raw_hint and not exact_named:
+            if not all(sidecar_camera) or not (sidecar_time is not None or preserve_xmp_versions and identity.get("id")):
+                continue
+        if sidecar.get("review_required") and sidecar.get("selected_capture_time"):
             continue
-        sidecar_time = _time(sidecar)
-        original_time = _time(original)
-        if sidecar_time is not None and (original_time is None
-                                         or sidecar_time.replace(microsecond=0)
-                                         != original_time.replace(microsecond=0)):
-            continue
-        candidates[key] = ([sidecar], [], True)
-        by_sidecar[key] = {key, owner}
 
+        lineage = identity.get("original_document") or identity.get("document")
+        qualified, colocated = {}, {}
+        for owner in owners:
+            if owner not in candidates or not candidates[owner][2]:
+                continue
+            primaries = candidates[owner][0]
+            exact = [
+                item for item in primaries
+                if _normalized(PurePosixPath(item["relative_path"]).name) == raw_hint
+            ] if raw_hint else [
+                item for item in primaries
+                if (_normalized(PurePosixPath(item["relative_path"]).name) == original_name
+                    if exact_named else
+                    _normalized(PurePosixPath(item["relative_path"]).stem) == original_name)
+            ]
+            for original in exact:
+                if raw_hint and _role(original) not in {"raw", "dng"}:
+                    continue
+                match = original.get("capture_identity") or {}
+                if any(identity.get(tag) and match.get(tag)
+                       and identity[tag] != match[tag] for tag in ("id", "serial")):
+                    continue
+                original_camera = _camera(original)
+                shared_id = bool(identity.get("id") and identity["id"] == match.get("id"))
+                same_camera = all(sidecar_camera) and sidecar_camera == original_camera
+                if preserve_xmp_versions and raw_hint:
+                    if match.get("conflict") or any(left and right and left != right
+                                                    for left, right in zip(sidecar_camera, original_camera)):
+                        continue
+                elif any(sidecar_camera) and not same_camera:
+                    continue
+                if preserve_xmp_versions and match.get("conflict"):
+                    continue
+                original_time = _time(original)
+                if sidecar_time is not None and not _compatible_time(sidecar, original, sidecar_time, original_time):
+                    continue
+                serial = identity.get("serial")
+                has_evidence = shared_id or same_camera and (
+                    sidecar_time is not None or serial and serial == match.get("serial")
+                )
+                if preserve_xmp_versions and raw_hint and not has_evidence:
+                    # The Adobe document ID can corroborate the link through a
+                    # DNG, provided the DNG itself matches this camera capture.
+                    conversions = dng_by_document.get(lineage, ())
+                    has_evidence = len(conversions) == 1 and all(original_camera) and (
+                        _role(original) == "raw" and _camera(conversions[0][1]) == original_camera
+                        and not conversions[0][1]["capture_identity"].get("conflict")
+                        and _compatible(conversions[0][1], original)
+                    )
+                    # Retain the existing exact co-located pair if metadata
+                    # does not point to a competing capture. Never extend
+                    # this fallback to other folders.
+                    if not has_evidence and path.parent == PurePosixPath(original["relative_path"]).parent:
+                        colocated[(owner, original["relative_path"])] = original
+                if not has_evidence:
+                    continue
+                if not raw_hint:
+                    # Adoption can use a shared capture ID, or exact recorded
+                    # subseconds from the same camera serial. Otherwise keep
+                    # the original shutter-settings corroboration.
+                    exact_identity = preserve_xmp_versions and same_camera and (
+                        shared_id or bool(serial and serial == match.get("serial") and sidecar_time is not None
+                                          and sidecar_time == original_time
+                                          and has_capture_fraction(sidecar.get("selected_capture_time"))
+                                          and has_capture_fraction(original.get("selected_capture_time")))
+                    )
+                    settings = sidecar.get("capture_settings") or {}
+                    original_settings = original.get("capture_settings") or {}
+                    fields = ("exposure", "aperture", "iso")
+                    if preserve_xmp_versions and not exact_named and not exact_identity and any(
+                        values.get(field) in (None, "") for values in (settings, original_settings) for field in fields
+                    ):
+                        continue
+                    if any(not _same_setting(settings.get(field), original_settings.get(field)) for field in fields):
+                        continue
+                qualified[(owner, original["relative_path"])] = original
+
+        if not qualified and len(colocated) == 1:
+            qualified = colocated
+        if not qualified:
+            continue
+        # Two RAW files can reuse the same name, even in different folders.
+        # Never choose arbitrarily; leave ambiguous cases for review.
+        unique_owners = {owner for owner, _ in qualified}
+        if raw_hint or exact_named:
+            if len(qualified) != 1:
+                continue
+        else:
+            raw_candidates = {
+                (owner, name) for (owner, name), item in qualified.items()
+                if _role(item) == "raw"
+            }
+            if len(raw_candidates) > 1 or (not raw_candidates and len(unique_owners) != 1):
+                continue
+            # Plain XMP can bind to one RAW, but cannot itself prove a
+            # relationship between that RAW and a separately stored JPEG.
+            if raw_candidates:
+                unique_owners = {owner for owner, _ in raw_candidates}
+        if preserve_xmp_versions and raw_hint:
+            sidecar = {**sidecar, "adoption_xmp_bound": True}
+        candidates[key] = ([sidecar], [], True)
+        by_sidecar[key] = {key, *unique_owners}
+        if preserve_xmp_versions and raw_hint:
+            ((owner, _), original), = qualified.items()
+            derived = [
+                (dng_key, dng) for dng_key, dng in dng_by_document.get(lineage, ())
+                if _camera(dng) == _camera(original) and dng.get("capture_identity")
+                and not dng["capture_identity"].get("conflict")
+                and _compatible(dng, original)
+            ]
+            # A document lineage supplements an already proven RAW binding.
+            # An ambiguous lineage must not choose between multiple DNGs.
+            if _role(original) == "raw" and len(derived) == 1 and derived[0][0] in candidates:
+                by_lineage.append({owner, derived[0][0]})
+
+    def qualified_group(component):
+        if (not preserve_xmp_versions and len(component) > 7) or not all(candidates[item][2] for item in component):
+            return None
+        records = [item for key in sorted(component) for item in candidates[key][0]]
+        evidence = [item for key in component for item in candidates[key][1]]
+        primary = [item for item in records if _role(item) != "xmp"]
+        roles = [_role(item) for item in primary]
+        if not roles or len(set(roles)) != len(roles) or (not preserve_xmp_versions and len(records) > 7):
+            return None
+        ending_buckets = defaultdict(list)
+        for item in records:
+            ending_buckets[_normalized(ending(item["relative_path"]))].append(item)
+        if any(len(items) > 1 and not (
+            preserve_xmp_versions and all(
+                _role(item) == "xmp" and (item.get("capture_identity") or {}).get("sidecar_raw")
+                for item in items
+            )
+        ) for items in ending_buckets.values()):
+            return None
+        if any(not item.get("capture_identity") or item["capture_identity"]["conflict"] for item in evidence):
+            return None
+        if len({_camera(item) for item in evidence}) != 1 or any(
+            not _compatible(item, other) for index, item in enumerate(evidence) for other in evidence[:index]
+        ):
+            return None
+        # A qualified sidecar names a particular primary rather than every
+        # file in the family. Require that original, even across folders.
+        originals = {_normalized(PurePosixPath(item["relative_path"]).name) for item in primary}
+        masters = [_normalized(PurePosixPath(item["relative_path"]).name) for item in primary
+                   if _role(item) in {"raw", "dng"}]
+        if any(masters.count(hint) != 1 for item in records if _role(item) == "xmp"
+               and (hint := (item.get("capture_identity") or {}).get("sidecar_raw"))):
+            return None
+        if any(_role(item) == "xmp" and ending(item["relative_path"]).count(".") > 1
+               and _normalized(PurePosixPath(item["relative_path"]).stem) not in originals
+               for item in records):
+            return None
+        anchor = next(key for role in ("raw", "dng", "jpeg") for key in sorted(component)
+                      if any(_role(item) == role for item in candidates[key][1]))
+        return anchor, component, records
+
+    direct = defaultdict(set)
+    if preserve_xmp_versions:
+        for sidecar, connected in by_sidecar.items():
+            if (candidates[sidecar][0][0].get("adoption_xmp_bound") and len(connected) == 2):
+                owner = next(iter(connected - {sidecar}))
+                direct[owner].add(sidecar)
     groups_by_key = defaultdict(list)
-    for bucket in chain(by_id.values(), by_precision.values(), by_context.values(), by_sidecar.values()):
+    for bucket in chain(by_id.values(), by_precision.values(), by_context.values(), by_sidecar.values(), by_lineage):
         if len(bucket) > 1:
             for key in bucket:
                 groups_by_key[key].append(bucket)
@@ -218,29 +406,11 @@ def split_family_groups(groups, *, ending, cancel=lambda: None):
                 component.update(others)
                 pending.extend(others)
         visited.update(component)
-        if len(component) > 7 or not all(candidates[item][2] for item in component):
-            continue
-        records = [item for key in sorted(component) for item in candidates[key][0]]
-        evidence = [item for key in component for item in candidates[key][1]]
-        primary = [item for item in records if _role(item) != "xmp"]
-        roles = [_role(item) for item in primary]
-        if not roles or len(set(roles)) != len(roles) or len(records) > 7:
-            continue
-        if len({_normalized(ending(item["relative_path"])) for item in records}) != len(records):
-            continue
-        if any(not item.get("capture_identity") or item["capture_identity"]["conflict"] for item in evidence):
-            continue
-        if len({_camera(item) for item in evidence}) != 1 or any(
-            not _compatible(item, other) for index, item in enumerate(evidence) for other in evidence[:index]
-        ):
-            continue
-        # A qualified sidecar names a particular primary rather than every
-        # file in the family. Require that original, even across folders.
-        originals = {_normalized(PurePosixPath(item["relative_path"]).name) for item in primary}
-        if any(_role(item) == "xmp" and ending(item["relative_path"]).count(".") > 1
-               and _normalized(PurePosixPath(item["relative_path"]).stem) not in originals
-               for item in records):
-            continue
-        anchor = next(key for role in ("raw", "dng", "jpeg") for key in sorted(component)
-                      if any(_role(item) == role for item in candidates[key][1]))
-        yield anchor, component, records
+        if result := qualified_group(component):
+            yield result
+        elif preserve_xmp_versions:
+            # An ambiguous JPEG or DNG link cannot invalidate a sidecar's
+            # independently proven and unique RAW association.
+            for owner in sorted(component & direct.keys()):
+                if result := qualified_group({owner, *direct[owner]}):
+                    yield result

@@ -316,14 +316,41 @@ def move(journal, operation, source, source_path, target, target_path, expected,
         journal.append(operation, done)
 
 
-def write_document(holding, name, data):
+def stream_xmp_patch(fd, size, patch):
+    """Copy byte ranges with one verified substitution, using bounded reads."""
+    offset = patch["offset"]
+    old, new = bytes.fromhex(patch["old"]), bytes.fromhex(patch["new"])
+    if os.pread(fd, len(old), offset) != old:
+        raise ExecutionError("The original XMP token differs from the approved patch.")
+
+    def read(start, end):
+        while start < end:
+            block = os.pread(fd, min(1024 * 1024, end - start), start)
+            if not block:
+                raise ExecutionError("The original XMP ended during staging.")
+            yield block
+            start += len(block)
+
+    yield from read(0, offset)
+    yield new
+    yield from read(offset + len(old), size)
+
+
+def write_document(holding, name, data, size, digest):
     if info_at(holding, name) is not None:
         return  # A crash may have followed creation but preceded the journal record.
     temporary = ".document-" + uuid4().hex
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666, dir_fd=holding)
     try:
         with os.fdopen(fd, "wb") as stream:
-            stream.write(data)
+            checksum = hashlib.sha256()
+            written = 0
+            for block in (data,) if isinstance(data, bytes) else data:
+                stream.write(block)
+                checksum.update(block)
+                written += len(block)
+            if (written, checksum.hexdigest()) != (size, digest):
+                raise ExecutionError("The generated file differs from the approved output: " + name)
             stream.flush()
             os.fsync(stream.fileno())
         rename_noreplace(holding, temporary, holding, name)
@@ -363,7 +390,8 @@ def apply_document(journal, item, archive, holding, prefix, index, check_roots, 
         if hashlib.sha256(data).hexdigest() != item["sha256"]:
             raise ExecutionError("The prepared document differs from the manifest: " + current)
         check_roots()
-        write_document(holding, ready_name, data)
+        if info_at(holding, ready_name) is None:
+            write_document(holding, ready_name, data, len(data), item["sha256"])
         with file_at(holding, ready_name) as (fd, info):
             if info.st_size != len(data) or hash_fd(fd) != item["sha256"]:
                 raise ExecutionError("The staged document differs from the manifest: " + current)
@@ -377,8 +405,76 @@ def apply_document(journal, item, archive, holding, prefix, index, check_roots, 
     move(journal, install, archive, ready, archive, current, proof, check_roots)
 
 
+def apply_xmp_edit(journal, item, original_move, archive, holding, prefix, index,
+                   check_roots, *, reverse=False):
+    """Journal a two-way, byte-preserving XMP content swap.
+
+    The original inode/bytes are kept under the protected archive holding
+    directory until verification or rollback. The revised file is installed
+    by no-replace rename; nothing is overwritten in place.
+    """
+    stage = f"xmp-stage:{index}"
+    save = f"media:xmp-save:{index}"
+    install = f"media:xmp-install:{index}"
+    ready_name = f"new-xmp-{index}.xmp"
+    saved_name = f"original-xmp-{index}.xmp"
+    ready = prefix + "/" + ready_name
+    saved = prefix + "/" + saved_name
+    target = item["target"]
+    original = {"stamp": original_move["stamp"], "sha256": original_move["sha256"]}
+    staged = journal.proofs.get(stage)
+
+    if reverse:
+        if journal.latest.get(save) is None and journal.latest.get(install) is None:
+            return
+        if staged is None:
+            raise ExecutionError("XMP staging proof missing during rollback: " + target)
+        if journal.latest.get(install) is not None:
+            if journal.latest.get(save) in {"reverse_intent", "reverse_done"}:
+                verify_file(holding, ready_name, staged, allow_ctime_change=True)
+            else:
+                move(journal, install, archive, target, archive, ready,
+                     staged, check_roots, reverse=True)
+        if journal.latest.get(save) is not None:
+            move(journal, save, archive, saved, archive, target,
+                 original, check_roots, reverse=True)
+        return
+
+    if staged is None:
+        check_roots()
+        if info_at(holding, ready_name) is None:
+            size, digest = item["size_bytes"], item["sha256"]
+            if "patch" in item:
+                with relative_parent(archive, target) as (directory, name, check), file_at(directory, name) as (fd, info):
+                    if stamp(info)[:4] != original["stamp"][:4]:
+                        raise ExecutionError("Original XMP identity differs from the manifest: " + target)
+                    write_document(holding, ready_name, stream_xmp_patch(fd, info.st_size, item["patch"]), size, digest)
+                    check()
+            else:
+                content = base64.b64decode(item["content"], validate=True)
+                write_document(holding, ready_name, content, size, digest)
+        with file_at(holding, ready_name) as (fd, info):
+            if info.st_size != item["size_bytes"] or hash_fd(fd) != item["sha256"]:
+                raise ExecutionError("Staged XMP content has changed: " + target)
+            staged = {"stamp": stamp(info), "sha256": item["sha256"]}
+        journal.append(stage, "xmp_staged", proof=staged)
+    elif journal.latest.get(install) is None:
+        verify_file(holding, ready_name, staged, allow_ctime_change=True)
+
+    if journal.latest.get(save) != "forward_done":
+        move(journal, save, archive, target, archive, saved,
+             original, check_roots)
+    else:
+        verify_file(holding, saved_name, original, allow_ctime_change=True)
+
+    # If the install intent was journaled but the rename crashed, move()
+    # reconciles the existing name before a new operation is attempted.
+    move(journal, install, archive, ready, archive, target, staged, check_roots)
+    verify_file(holding, saved_name, original, allow_ctime_change=True)
+
+
 def validate_plan(plan):
-    if plan["format"] != 1 or not re.fullmatch(r"[0-9a-f]{32}", plan["plan_id"]):
+    if plan["format"] not in {1, 2} or not re.fullmatch(r"[0-9a-f]{32}", plan["plan_id"]):
         raise ExecutionError("Unknown adoption package format.")
     if not re.fullmatch(r"[0-9a-f]{32}", plan["job_id"]) or not plan["library_id"]:
         raise ExecutionError("Missing adoption or library identity.")
@@ -397,6 +493,49 @@ def validate_plan(plan):
         if parts[-1] != "event.json" or document["path"] in paths["target"]:
             raise ExecutionError("Invalid event document destination.")
         paths["target"].add(document["path"])
+    edits = plan.get("xmp_edits", [])
+    if not isinstance(edits, list) or (plan["format"] == 1 and edits):
+        raise ExecutionError("Invalid XMP extension in the approved manifest.")
+    original_moves = {item["source"]: item for item in plan["moves"]}
+    seen_edits = set()
+    for edit in edits:
+        source, destination = edit["source"], edit["target"]
+        path_parts(source)
+        path_parts(destination)
+        original = original_moves.get(source)
+        if (original is None or original["target"] != destination
+                or not destination.casefold().endswith(".xmp")
+                or source in seen_edits or
+                edit["original_sha256"] != original["sha256"]):
+            raise ExecutionError("XMP rewrite does not match one approved source move.")
+        seen_edits.add(source)
+        expected_size = edit["size_bytes"]
+        if not isinstance(expected_size, int):
+            raise ExecutionError("Invalid XMP output size.")
+        if "patch" in edit:
+            patch = edit["patch"]
+            size = original["stamp"][2]
+            if ("content" in edit or not isinstance(patch, dict)
+                    or set(patch) != {"offset", "old", "new"}
+                    or type(patch["offset"]) is not int
+                    or not all(isinstance(patch[key], str) and re.fullmatch(r"(?:[0-9a-f]{2}){1,2048}", patch[key])
+                               for key in ("old", "new"))
+                    or not 0 < size <= 128 * 1024 * 1024):
+                raise ExecutionError("Invalid streaming XMP patch.")
+            old_size, new_size = len(patch["old"]) // 2, len(patch["new"]) // 2
+            if (not 0 <= patch["offset"] <= size - old_size
+                    or expected_size != size - old_size + new_size
+                    or not re.fullmatch(r"[0-9a-f]{64}", edit["sha256"])):
+                raise ExecutionError("Invalid streaming XMP patch proof.")
+        else:
+            if not 0 <= expected_size <= 16 * 1024 * 1024:
+                raise ExecutionError("XMP rewrite exceeds the supported size limit.")
+            data = base64.b64decode(edit["content"], validate=True)
+            if (len(data) != expected_size or
+                    hashlib.sha256(data).hexdigest() != edit["sha256"]):
+                raise ExecutionError("Approved XMP rewrite checksum is inconsistent.")
+    if plan["format"] == 2 and not edits:
+        raise ExecutionError("The extended manifest has no bound XMP edits.")
     reserved = ".bibliothekar-adoption-" + plan["plan_id"]
     if any(path.split("/", 1)[0] == reserved for path in (*paths["target"], *plan["directories"])):
         raise ExecutionError("A planned path overlaps the protected document holding area.")
@@ -412,14 +551,63 @@ def probe_roots(source_path, archive_path, binding, source, archive):
         raise ExecutionError("The current shell user cannot modify the supplied host directories.")
 
 
-def execute(package, binding, plan, source_path, archive_path, *, reverse):
+def remove_empty_directory(root, path, *, expected=None):
+    try:
+        with relative_parent(root, path) as (parent, name, check):
+            child = os.open(name, _DIRECTORY, dir_fd=parent)
+            try:
+                check()
+                check_child(parent, name, child)
+                if expected is not None and inode(os.fstat(child)) != expected:
+                    raise ExecutionError("A rollback directory was replaced: " + path)
+                os.rmdir(name, dir_fd=parent)
+                os.fsync(parent)
+            finally:
+                os.close(child)
+    except FileNotFoundError:
+        pass
+
+
+def cleanup_rollback(journal, plan, archive, directories, check_roots):
+    """Remove only verified generated copies and empty, approved directories."""
+    prefix = ".bibliothekar-adoption-" + plan["plan_id"]
+    check_roots()
+    if info_at(archive, prefix) is not None:
+        staged = {f"new-{index}.json": item["sha256"] for index, item in enumerate(plan["documents"])}
+        staged.update((f"new-xmp-{index}.xmp", item["sha256"])
+                      for index, item in enumerate(plan.get("xmp_edits", ())))
+        with relative_parent(archive, prefix + "/.directory") as (holding, _, check):
+            if inode(os.fstat(holding)) != journal.proofs.get("holding"):
+                raise ExecutionError("The document holding directory was replaced.")
+            names = sorted(os.listdir(holding))
+            if not set(names) <= staged.keys():
+                raise ExecutionError("Unrestored originals or unknown files remain in the holding directory.")
+            for name in names:
+                check_roots()
+                with file_at(holding, name) as (fd, info):
+                    if hash_fd(fd) != staged[name]:
+                        raise ExecutionError("A generated rollback file changed: " + name)
+                check()
+                current = info_at(holding, name)
+                if current is None or stamp(current) != stamp(info):
+                    raise ExecutionError("A generated rollback file changed: " + name)
+                os.unlink(name, dir_fd=holding)
+                os.fsync(holding)
+        remove_empty_directory(archive, prefix, expected=journal.proofs["holding"])
+
+    for path in sorted(directories, key=lambda p: (-p.count("/"), p)):
+        check_roots()
+        remove_empty_directory(archive, path)
+
+
+def execute(package, binding, plan, source_path, archive_path, *, reverse, rollback_directories=None):
     validate_plan(plan)
     direction = "rollback" if reverse else "apply"
     completed = "rolled_back" if reverse else "completed"
 
     def status(state, processed, *, error=None):
         result = {"manifest": binding, "state": state, "mode": direction, "processed": processed,
-                  "total": len(plan["moves"]) + len(plan["documents"])}
+                  "total": len(plan["moves"]) + len(plan["documents"]) + len(plan.get("xmp_edits", []))}
         if error:
             result["error"] = str(error)
         write_atomic(package, "status.json", json_bytes(result))
@@ -444,6 +632,13 @@ def execute(package, binding, plan, source_path, archive_path, *, reverse):
                 raise ExecutionError("Rollback was already started. This package can only finish rollback.")
             journal.append(None, direction)
             status("running", processed)
+            if reverse and journal.latest.get("rollback-cleanup") == "media_restored":
+                if rollback_directories is None:
+                    raise ExecutionError("The rollback cleanup scope is missing.")
+                cleanup_rollback(journal, plan, archive, rollback_directories, check_roots)
+                journal.append(None, completed)
+                status(completed, len(plan["moves"]) + len(plan["documents"]) + len(plan.get("xmp_edits", ())))
+                return
 
             if not reverse:
                 for path in plan["directories"]:
@@ -452,8 +647,9 @@ def execute(package, binding, plan, source_path, archive_path, *, reverse):
                         pass
 
             holding = None
+            holding_scope = stack.enter_context(ExitStack())
             prefix = ".bibliothekar-adoption-" + plan["plan_id"]
-            if plan["documents"]:
+            if plan["documents"] or plan.get("xmp_edits"):
                 holding_state = journal.latest.get("holding")
                 current = info_at(archive, prefix)
                 if holding_state is None and not reverse:
@@ -462,7 +658,7 @@ def execute(package, binding, plan, source_path, archive_path, *, reverse):
                     journal.append("holding", "directory_intent")
                     holding_state = "directory_intent"
                 if holding_state is not None and (current is not None or not reverse):
-                    holding, _, check_holding = stack.enter_context(
+                    holding, _, check_holding = holding_scope.enter_context(
                         relative_parent(archive, prefix + "/.directory", create=holding_state == "directory_intent"),
                     )
                     check_holding()
@@ -490,8 +686,40 @@ def execute(package, binding, plan, source_path, archive_path, *, reverse):
                     processed += 1
                     status("running", processed)
 
+            edits = plan.get("xmp_edits", [])
+            move_by_source = {item["source"]: item for item in plan["moves"]}
+            edited_sources = {item["source"] for item in edits}
+
+            def xmp_edits():
+                nonlocal processed
+                if holding is None:
+                    if edits and (not reverse or any(
+                        operation.startswith(("media:xmp-save:", "media:xmp-install:")) for operation in journal.latest
+                    )):
+                        raise ExecutionError("The XMP backup holding directory is missing.")
+                    return
+                indexes = range(len(edits))
+                for index in reversed(indexes) if reverse else indexes:
+                    item = edits[index]
+                    original_operation = "media:" + item["source"]
+                    # After rollback of a complete XMP swap, the original
+                    # media is at its source name; never replay the swap.
+                    if reverse and journal.latest.get(original_operation) in {
+                        "reverse_intent", "reverse_done"
+                    }:
+                        continue
+                    check_roots()
+                    check_holding()
+                    apply_xmp_edit(
+                        journal, item, move_by_source[item["source"]],
+                        archive, holding, prefix, index, check_roots, reverse=reverse,
+                    )
+                    processed += 1
+                    status("running", processed)
+
             if reverse:
                 documents()
+                xmp_edits()
             items = reversed(plan["moves"]) if reverse else plan["moves"]
             for item in items:
                 check_roots()
@@ -500,11 +728,26 @@ def execute(package, binding, plan, source_path, archive_path, *, reverse):
                     move(journal, operation, archive, item["target"], source, item["source"],
                          item, check_roots, reverse=True)
                 else:
-                    move(journal, operation, source, item["source"], archive, item["target"], item, check_roots)
+                    # The unmodified sidecar is now saved in the recovery
+                    # holding directory (or its swap has completed). Replaying
+                    # the original move would compare it to the edited bytes.
+                    edit_index = next(
+                        (i for i, entry in enumerate(edits)
+                         if entry["source"] == item["source"]), None,
+                    )
+                    if (edit_index is None or
+                            journal.latest.get(f"media:xmp-save:{edit_index}") is None):
+                        move(journal, operation, source, item["source"],
+                             archive, item["target"], item, check_roots)
                 processed += 1
                 status("running", processed)
             if not reverse:
+                xmp_edits()
                 documents()
+            elif rollback_directories is not None:
+                holding_scope.close()
+                journal.append("rollback-cleanup", "media_restored")
+                cleanup_rollback(journal, plan, archive, rollback_directories, check_roots)
             check_roots()
             journal.append(None, completed)
             status(completed, processed)
@@ -546,9 +789,19 @@ def main(argv=None):
                 if binding["host"] != {"package": args.package, "source": args.source, "archive": args.archive}:
                     raise ExecutionError("The host paths differ from the confirmed manifest.")
                 permission = json.loads(read_bytes(package, "permission.json"))
-                if permission != {"manifest": args.sha256, "mode": args.mode}:
+                reverse = args.mode == "rollback"
+                expected = {"manifest": args.sha256, "mode": args.mode}
+                cleanup_paths = None
+                if reverse and "rollback_directories" in permission:
+                    cleanup_paths = permission["rollback_directories"]
+                    if (not isinstance(cleanup_paths, list) or not all(isinstance(item, str) for item in cleanup_paths)
+                            or not set(cleanup_paths) <= set(binding["directories"])):
+                        raise ExecutionError("Invalid rollback directory scope.")
+                    expected["rollback_directories"] = cleanup_paths
+                if permission != expected:
                     raise ExecutionError("This action has not been released by Bibliothekar.")
-                execute(package, args.sha256, binding, args.source, args.archive, reverse=args.mode == "rollback")
+                execute(package, args.sha256, binding, args.source, args.archive, reverse=reverse,
+                        rollback_directories=cleanup_paths)
     except (OSError, DatasetError, ExecutionError, KeyError, ValueError, TypeError) as error:
         print(str(error), file=sys.stderr)
         return 1

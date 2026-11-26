@@ -22,6 +22,9 @@ case "$image" in
 esac
 test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$revision"
 export ADOPTION_SMOKE_VERSION="$(python -c 'from app import __version__; print(__version__)')"
+export ADOPTION_SMOKE_PROTOCOL=current
+export ADOPTION_SMOKE_XMP=0
+if [[ "${4:-}" == rc112 ]]; then export ADOPTION_SMOKE_XMP=1; fi
 export ADOPTION_SMOKE_PASSWORD=synthetic-legacy-adoption-smoke-password
 methods=(manual script rollback skip review)
 previous_image="${3:-}"
@@ -31,6 +34,13 @@ if [[ -n "$previous_image" ]]; then
   docker pull "$stable_100"
   docker pull "$previous_image"
   methods+=(upgrade-rc22 upgrade-100)
+  if [[ "${4:-}" == rc112 ]]; then
+    stable_111="ghcr.io/heller-adrian/bibliothekar@sha256:b47c8422ea53c6c3ec890e8f182643ef4f144a03ec770d1ab979bdf5f9121520"
+    previous_rc1="ghcr.io/heller-adrian/bibliothekar@sha256:ea267ab15c8d7fb34f7dcf3eaa7a5ca86eeb7ca45691da2c4a2c10e3290e8d7a"
+    docker pull "$stable_111"
+    docker pull "$previous_rc1"
+    methods+=(upgrade-111 upgrade-112-rc1 upgrade-112-rc1-prepared)
+  fi
 fi
 
 start_container() {
@@ -72,24 +82,30 @@ for method in "${methods[@]}"; do
     directory="$source/first/old-folders/camera/import"
     mkdir -p "$directory"
     printf 'synthetic raw for %s\n' "$method" > "$directory/sample.raf"
+    binding=""
+    if [[ "$ADOPTION_SMOKE_XMP" == 1 && ( "$method" == script || "$method" == rollback ) ]]; then
+      binding='xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/" crs:RawFileName="sample.raf"'
+    fi
     cat > "$directory/sample.xmp" <<XML
 <x:xmpmeta xmlns:x="adobe:ns:meta/">
   <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
-    <rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreateDate="2026-07-${day}T12:34:56+02:00"/>
+    <rdf:Description xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreateDate="2026-07-${day}T12:34:56+02:00" $binding/>
   </rdf:RDF>
 </x:xmpmeta>
 XML
   fi
   initial_image="$image"
   case "$method" in
-    upgrade-rc22) initial_image="$previous_image" ;;
+    upgrade-rc22) initial_image="$previous_image"; previous_version=1.0.1 ;;
+    upgrade-111) initial_image="$stable_111"; previous_version=1.1.1 ;;
+    upgrade-112-rc1|upgrade-112-rc1-prepared) initial_image="$previous_rc1"; previous_version=1.1.2 ;;
     upgrade-100) initial_image="$stable_100" ;;
   esac
   container="$(start_container "$initial_image")"
   test "$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/main-library"}}{{.RW}}{{end}}{{end}}' "$container")" = false
   test "$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/sources/nas"}}{{.RW}}{{end}}{{end}}' "$container")" = false
-  if [[ "$method" == upgrade-rc22 ]]; then
-    ADOPTION_SMOKE_VERSION=1.0.1 python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" script
+  if [[ "$method" == upgrade-rc22 || "$method" == upgrade-111 || "$method" == upgrade-112-rc1 ]]; then
+    ADOPTION_SMOKE_PROTOCOL=historical ADOPTION_SMOKE_VERSION="$previous_version" python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" script
     find "$archive" -type f -print0 | sort -z | xargs -0 sha256sum > "$scratch/upgrade-archive.sha256"
     test -s "$scratch/upgrade-archive.sha256"
     docker stop "$container" >/dev/null
@@ -97,7 +113,22 @@ XML
     container="$(start_container "$image")"
     python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" upgrade
     sha256sum --check "$scratch/upgrade-archive.sha256"
-    echo "Upgrade from RC22 retained the registered archive, receipt and SHA-256 on native ZFS."
+    case "$method" in
+      upgrade-rc22) fixture=RC22 ;;
+      upgrade-111) fixture=1.1.1 ;;
+      upgrade-112-rc1) fixture=1.1.2-RC1 ;;
+    esac
+    echo "Upgrade from $fixture retained the registered archive, receipt and SHA-256 on native ZFS."
+  elif [[ "$method" == upgrade-112-rc1-prepared ]]; then
+    export ADOPTION_SMOKE_HANDOFF="$scratch/rc1-prepared.json"
+    ADOPTION_SMOKE_PROTOCOL=historical ADOPTION_SMOKE_VERSION="$previous_version" \
+      python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" prepare-upgrade-112-rc1
+    test -s "$ADOPTION_SMOKE_HANDOFF"
+    docker stop "$container" >/dev/null
+    docker rm "$container" >/dev/null
+    container="$(start_container "$image")"
+    python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" resume-112-rc1
+    unset ADOPTION_SMOKE_HANDOFF
   elif [[ "$method" == upgrade-100 ]]; then
     ADOPTION_SMOKE_VERSION=1.0.0 python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" prepare-upgrade-100
     docker stop "$container" >/dev/null

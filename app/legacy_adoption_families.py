@@ -31,8 +31,11 @@ def join_split_families(connection, job_id, draft, cancel):
     evidence_fields = (
         "media_type", "extension", "relative_path", "capture_identity", "camera_make", "camera_model",
         "selected_capture_time", "selected_capture_source", "review_required", "metadata_error",
-        "capture_settings",
+        "metadata_conflict", "metadata_candidates", "capture_settings",
     )
+
+    split_keys = {}
+    joined_paths = set()
 
     def groups():
         for key, group in groupby(rows, key=lambda row: row["family_key"]):
@@ -41,12 +44,38 @@ def join_split_families(connection, job_id, draft, cancel):
             members = [{name: item[name] for name in evidence_fields if name in item} for item in decoded]
             usable = key not in protected and all(row["disposition"] == "candidate" and row["sha256"] and not row["error"]
                          and not item.get("metadata_error") for row, item in zip(entries, members, strict=True))
-            yield key, members, usable
+            if not usable or len(members) == 1:
+                yield key, members, usable
+                continue
+            # An explicit sidecar may sit beside a converted DNG or another
+            # rendition of the same stem. The local group is only a proposal.
+            # Qualify its actual RAW independently, including extra versions.
+            remainder = []
+            for item in members:
+                path = item["relative_path"]
+                if item["media_type"] == "xmp" and (item.get("capture_identity") or {}).get("sidecar_raw"):
+                    split = "/" + path  # Valid inventory paths are relative.
+                    split_keys[path] = split
+                    yield split, [item], True
+                else:
+                    remainder.append(item)
+            if remainder:
+                yield key, remainder, usable
 
-    for anchor, _, members in split_family_groups(groups(), ending=family_member_ending, cancel=cancel):
+    for anchor, _, members in split_family_groups(
+        groups(), ending=family_member_ending, cancel=cancel, preserve_xmp_versions=True,
+    ):
+        joined_paths.update(item["relative_path"] for item in members)
         connection.executemany(
             """UPDATE legacy_adoption_inventory
-                  SET family_key = ?1, metadata_json = json_set(metadata_json, '$.family_key', ?1, '$.adoption_family', ?1)
+                  SET family_key = ?1, metadata_json = json_set(metadata_json, '$.family_key', ?1,
+                      '$.adoption_family', ?1, '$.adoption_xmp_bound', ?4)
                 WHERE job_id = ?2 AND relative_path = ?3""",
-            [(anchor, job_id, item["relative_path"]) for item in members],
+            [(anchor, job_id, item["relative_path"], int(item.get("adoption_xmp_bound", False))) for item in members],
         )
+    connection.executemany(
+        """UPDATE legacy_adoption_inventory
+              SET family_key = ?1, metadata_json = json_set(metadata_json, '$.family_key', ?1)
+            WHERE job_id = ?2 AND relative_path = ?3""",
+        [(key, job_id, path) for path, key in split_keys.items() if path not in joined_paths],
+    )

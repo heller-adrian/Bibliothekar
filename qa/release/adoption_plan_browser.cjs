@@ -254,6 +254,7 @@ async function checkManual(browser, language, width) {
         state:execution?.phase==="registration_pending"?"verified":"prepared",move_files:2,move_families:1,
         move_bytes:700,library_name:"Main Library",source_root:"/sources/photos",archive_root:"/main-library",
         dataset:{dataset:"test/media"},events:[{existing:false}],counts:{pending:2},issues:0}}});
+    if (key==="/preparation") return route.fulfill({json:{state:"not_started"}});
     if (key==="/review/batch")return route.fulfill({json:inactive});
     if (key==="/moves" && url.searchParams.get("renamed")==="true")
       return route.fulfill({json:[{source:"/sources/photos/old/a.raf",target:"/main-library/new/a_Adopted_001.raf",
@@ -286,8 +287,10 @@ async function checkManual(browser, language, width) {
   });
   await page.goto(origin+"/legacy-adoption?job="+jobId+"&step=execution");
   const submit=page.getByRole("button",{name:l("Durchführung verbindlich starten","Confirm and start")});
+  assert.ok(!(await submit.isVisible()));
+  await page.locator("#execution-method-choice").click();
   assert.ok(await submit.isDisabled());
-  await page.getByText(l("Geplante Dateiumbenennungen","Planned filename changes"),{exact:true}).click();
+  await page.locator("#rename-preview").locator("..").locator("summary").click();
   await page.locator("#rename-preview").getByText("→ /main-library/new/a_Adopted_001.raf",{exact:true}).waitFor();
   await page.locator(".adoption-ack input").check();
   await submit.click();
@@ -339,11 +342,17 @@ async function checkManual(browser, language, width) {
 async function checkScriptCompletion(browser, language, width) {
   const page = await browser.newPage({viewport: {width, height: 840}});
   const planId = "d".repeat(32);
-  const plan = {id: planId, documents_at: "set", execution: {method: "script", phase: "script_prepared"},
+  const l=(de,en)=>language==="de"?de:en;
+  const plan = {id: planId, documents_at: "set", execution: null, filename_method:"script",
+    manual_blocker:{path:"capture.xmp",raw_reference:"capture.raf",raw_name:"capture.RAF"},
     state: "prepared", move_files: 1, move_families: 1, move_bytes: 500, events: [],
     counts: {pending: 1}, issues: 0, dataset: {dataset: "test/media"}};
   const requests = [];
-  let finished = false;
+  let stage = "not_started", released = false, finished = false, confirmations=0;
+  let releaseConfirmation;
+  const pending = new Promise(resolve=>{releaseConfirmation=resolve;});
+  const errors=[];
+  page.on("pageerror",error=>errors.push(error.message));
   await page.addInitScript(language => localStorage.setItem("bibliothekar-language", language), language);
   await page.route(origin + "/**", async route => {
     const {pathname} = new URL(route.request().url());
@@ -352,8 +361,24 @@ async function checkScriptCompletion(browser, language, width) {
     const key = pathname.split("/" + jobId).at(-1);
     if (!key) return route.fulfill({json: {state:"inventoried", plan, draft:{}, draft_revision:1, review_count:0}});
     if (key === "/review/batch") return route.fulfill({json: inactive});
-    if (key === "/script") return route.fulfill({json: {running: !finished,
-      status: {state: finished ? "completed" : "running", mode: "apply", processed: 1, total: 1}}});
+    if (key === "/script/probe") return route.fulfill({json: {verified:true,dataset:"test/media",
+      sha256:"a".repeat(64),host:{source:"/synthetic/source",archive:"/synthetic/archive"}}});
+    if (key === "/preparation") return route.fulfill({json: {state:stage, phase:"source",
+      worker_active:stage==="running", processed:2,total:3,bytes_processed:4194304,bytes_total:8388608}});
+    if (key === "/confirm") {
+      confirmations++;
+      assert.deepEqual(route.request().postDataJSON(),{plan_id:planId,method:"script",acknowledged:true,probe_sha256:"a".repeat(64)});
+      stage="running";
+      await pending;
+      return route.fulfill({status:202,json:{accepted:true}}).catch(()=>{});
+    }
+    if (key === "/script/release") {
+      released=true;
+      return route.fulfill({json:{command:"python3 synthetic-adoption.py"}});
+    }
+    if (key === "/script") return route.fulfill({json: {running: false, journal_started: finished,
+      can_reopen:!finished, command:released?"python3 synthetic-adoption.py":null,
+      status:finished?{state:"completed",mode:"apply",processed:3,total:3}:null}});
     if (route.request().method() === "POST") {
       requests.push(key);
       assert.equal(key, "/finalize");
@@ -366,19 +391,52 @@ async function checkScriptCompletion(browser, language, width) {
     if (pathname === "/auth/client.js" || pathname === "/favicon.ico") return route.fulfill({body: ""});
     throw Error("Unmocked scripted wizard request " + pathname);
   });
-  await page.goto(origin + "/legacy-adoption?job=" + jobId + "&step=verify");
+  await page.goto(origin + "/legacy-adoption?job=" + jobId + "&step=execution");
+  assert.ok(await page.locator('input[value=manual]').isDisabled());
+  await page.getByText("capture.xmp · capture.raf → capture.RAF",{exact:true}).waitFor();
+  await page.getByRole("button",{name:l("Diese Methode wählen","Choose this method")}).click();
+  const ack=page.locator(".adoption-ack input");
+  const confirm=page.getByRole("button",{name:l("Durchführung verbindlich starten","Confirm and start")});
+  assert.ok(await confirm.isDisabled());
+  await ack.check();
+  await confirm.click();
+  const progress=page.locator("#execution-confirmation #preparation-progress");
+  await progress.waitFor();
+  assert.ok(!(await ack.isVisible()));
+  assert.equal(await page.locator("#top-actions #preparation-progress").count(),0);
+  await page.reload();
+  await progress.getByRole("progressbar").waitFor();
+  assert.ok(!(await ack.isVisible()));
+  assert.equal(confirmations,1);
+  assert.match(await progress.innerText(),/2 \/ 3 .*4 \/ 8 MiB/);
+  if(process.env.BIBLIOTHEKAR_BROWSER_SCREENSHOTS)
+    await page.screenshot({path:process.env.BIBLIOTHEKAR_BROWSER_SCREENSHOTS+"/rc6-preparation-"+language+".png"});
+  plan.execution={method:"script",phase:"script_prepared"};
+  stage="completed";
+  releaseConfirmation();
   await page.waitForURL("**step=execute");
+  const back=page.locator("#wizard-navigation #script-return button");
+  await back.waitFor();
+  assert.equal(await page.locator("#top-actions #rollback-start").count(),0);
+  const release=page.getByRole("button",{name:l("Skriptbefehl bereitstellen","Prepare script command")});
+  await release.click();
+  await page.locator(".adoption-command").waitFor();
+  await back.waitFor();
+  assert.equal(await page.locator("#top-actions #rollback-start").count(),0);
   assert.equal(await page.locator("#wizard-steps button").count(),6);
   const finalize = page.getByRole("button", {name: language === "de"
     ? "Übernahme prüfen und registrieren" : "Verify and register adoption"});
   await finalize.waitFor();
   assert.ok(await finalize.isDisabled());
   finished = true;
+  await page.locator("#rollback-start").waitFor({timeout:6000});
+  assert.ok(!(await back.isVisible()));
   await finalize.click({timeout: 6000});
   await page.getByText("Synthetic verification issue",{exact:true}).waitFor();
   await finalize.click({timeout:6000});
   await page.waitForURL("**/legacy-adoption/history?*");
   assert.deepEqual(requests, ["/finalize","/finalize"]);
+  assert.deepEqual(errors,[]);
   await page.close();
 }
 
@@ -419,6 +477,7 @@ async function checkReviewPlan(browser, language, width) {
       plan={...plan,id:payload.method==="script"?"e".repeat(32):batchId,filename_method:payload.method};
       return route.fulfill({json:plan});
     }
+    if (key === "/preparation") return route.fulfill({json:{state:"not_started"}});
     if (key === "/script/probe") return route.fulfill({json:{}});
     if (key === "/moves") return route.fulfill({json:[{
       source:"/synthetic/source/DSCF.MOV",target:"/synthetic/archive/20261117_090000_Camera.MOV",
@@ -445,11 +504,23 @@ async function checkReviewPlan(browser, language, width) {
   await page.waitForURL("**step=execution");
   assert.deepEqual(calls, ["/documents"]);
   await page.locator('input[name=adoption-execution][value=script]').click();
+  assert.deepEqual(calls, ["/documents"]);
+  assert.ok(!(await page.locator(".adoption-confirm-actions").isVisible()));
+  await page.locator("#execution-method-choice").click();
+  await page.locator(".adoption-confirm-actions").waitFor();
+  const renames=page.locator("#rename-preview").locator("..");
+  assert.equal(await renames.getAttribute("open"),null);
+  await renames.locator("summary").click();
   await page.getByText("→ /synthetic/archive/20261117_090000_Camera.MOV",{exact:true}).waitFor();
   assert.ok(await page.locator('input[name=adoption-execution][value=script]').isChecked());
   assert.ok(await page.getByRole("button",{name:german?"Durchführung verbindlich starten":"Confirm and start"}).isDisabled());
+  await page.reload();
+  await page.locator(".adoption-confirm-actions").waitFor();
+  assert.equal(await renames.getAttribute("open"),null);
   await page.locator('input[name=adoption-execution][value=manual]').click();
-  await page.waitForFunction(()=>!document.querySelector('input[name=adoption-execution][value=manual]').disabled);
+  assert.deepEqual(calls, ["/documents", "script"]);
+  await page.locator("#execution-method-choice").click();
+  await page.locator(".adoption-ack").waitFor();
   const back = page.getByRole("button", {name: german ? "Zurück" : "Back", exact: true});
   await back.click();
   await page.waitForURL("**step=review");

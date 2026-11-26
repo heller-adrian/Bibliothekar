@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable
+from app.filename_collisions import has_capture_fraction
 from app.media_family_identity import IDENTITY_TAGS, IDENTITY_VERSION, capture_identity, split_family_groups
 from app.source_filter import should_ignore_source_path
 from zoneinfo import ZoneInfo
@@ -178,12 +179,12 @@ def parse_exiftool_datetime(
 
 
 def normalize_datetime(
-    value: datetime,
+    value: datetime, *, fraction_recorded: bool = False,
 ) -> str:
     # Den am Medium gespeicherten Offset erhalten. Für die spätere
     # Tagesgruppierung zählt der lokale Aufnahmetag der Kamera, nicht
     # die Zeitzone des NAS. Vergleiche erfolgen separat in UTC.
-    return value.isoformat()
+    return value.isoformat(timespec="microseconds" if fraction_recorded else "auto")
 
 
 def candidate_definition(
@@ -243,6 +244,9 @@ def run_exiftool(
         "-DateTimeOriginal",
         "-SubSecTimeOriginal",
         "-SubSecTimeDigitized",
+        "-XMP-crs:RawFileName",
+        "-XMP-xmpMM:DocumentID",
+        "-XMP-xmpMM:OriginalDocumentID",
         "-OffsetTimeOriginal",
         "-ExposureTime",
         "-FNumber",
@@ -548,7 +552,7 @@ def build_candidates(
             "tag_name": str(tag_name),
             "raw_value": raw_text,
             "normalized_datetime": (
-                normalize_datetime(parsed)
+                normalize_datetime(parsed, fraction_recorded=has_capture_fraction(raw_text))
                 if parsed is not None
                 else None
             ),
@@ -705,9 +709,9 @@ def analyze_file_metadata(
         "capture_identity": capture_identity(metadata),
         "capture_identity_version": IDENTITY_VERSION,
         "capture_settings": {
-            "exposure": metadata.get("EXIF:ExifIFD:ExposureTime"),
-            "aperture": metadata.get("EXIF:ExifIFD:FNumber"),
-            "iso": metadata.get("EXIF:ExifIFD:ISO"),
+            "exposure": metadata.get("EXIF:ExifIFD:ExposureTime") or metadata.get("XMP:XMP-exif:ExposureTime"),
+            "aperture": metadata.get("EXIF:ExifIFD:FNumber") or metadata.get("XMP:XMP-exif:FNumber"),
+            "iso": metadata.get("EXIF:ExifIFD:ISO") or metadata.get("XMP:XMP-exif:ISO"),
         },
     }
 
@@ -823,31 +827,21 @@ def summarize_file_metadata(
             for member in strong_members
         }
 
-        if len(strong_times) > 1 and len({datetime.fromisoformat(value) for value in strong_times}) == 1:
-            strong_times = {min(strong_times)}
-
-        # Camera pairs can share a second while only the RAW stores real
-        # fractional EXIF seconds. Accept one unambiguous fractional value;
-        # differing real fractional values remain an explicit family conflict.
         if len(strong_times) > 1:
-            # A JPEG may only record whole seconds while its paired RAW
-            # records actual fractional EXIF seconds. Inherit the unique
-            # precise value, including on high-confidence whole-second files,
-            # only if all camera instants share that UTC second.
-            instants = {
-                datetime.fromisoformat(value).astimezone(timezone.utc)
-                .replace(microsecond=0)
-                for value in strong_times
-            }
-            precise = {value for value in strong_times if "." in value[:26]}
-            if len(instants) == 1 and len(precise) == 1:
-                precise_value = next(iter(precise))
+            instants = {value: datetime.fromisoformat(value).astimezone(timezone.utc)
+                        for value in strong_times}
+            precise = {value for value in strong_times if has_capture_fraction(value)}
+            if (precise and len({instants[value] for value in precise}) == 1
+                    and len({instant.replace(microsecond=0) for instant in instants.values()}) == 1):
+                precise_value = min(precise)
                 for member in strong_members:
-                    if member["selected_capture_time"] != precise_value:
+                    if member["selected_capture_time"] not in precise:
                         member["selected_capture_time"] = precise_value
                         member["selected_capture_source"] = "family_subsecond_inheritance"
                         member["inherited_from_family"] = True
                 strong_times = {precise_value}
+            elif len(set(instants.values())) == 1:
+                strong_times = {min(strong_times)}
 
         if len(strong_times) == 1:
             family_time = next(
