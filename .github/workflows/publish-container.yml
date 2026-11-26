@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       qualified_image_run:
-        description: Successful 1.1.0 image qualification run for the source merged by PR 41
+        description: Successful RC9 image and ZFS qualification run for the 1.1.2 Stable promotion
         type: string
         default: ''
       verify_existing_adoption_image:
