@@ -31,7 +31,6 @@ jobs:
       PREVIOUS_TAG: v1.1.1
       PREVIOUS_SOURCE: d18afab745126aaddd8d2a586e62bcc034b42b51
       PREVIOUS_DIGEST: sha256:b47c8422ea53c6c3ec890e8f182643ef4f144a03ec770d1ab979bdf5f9121520
-      RELEASE_EVIDENCE: ${{ runner.temp }}/stable-qualification
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,6 +39,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Locate promotion evidence
+        run: printf 'RELEASE_EVIDENCE=%s/stable-qualification\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Verify full QA, qualified container and merged source
         shell: bash
         run: |
