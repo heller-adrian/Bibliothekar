@@ -576,6 +576,16 @@ def scan_event_inventory(
         physical_files = _iter_regular_event_files(event_root)
         physical_directories = _iter_regular_event_directories(event_root)
 
+    if fast_refresh and root_kind == "shared_workspace":
+        # A size-only shortcut cannot clear a confirmed content discrepancy.
+        with database_connection(database_path) as connection:
+            fast_refresh = not connection.execute(
+                """SELECT 1 FROM external_change_notices
+                   WHERE event_id=? AND root_kind=? AND kind='workspace_content_changed'
+                     AND status='open' LIMIT 1""",
+                (event_id, root_kind),
+            ).fetchone()
+
     previous_by_relative: dict[str, dict[str, Any]] = {}
     known_by_current_relative: dict[str, dict[str, Any]] = {}
     if fast_refresh:

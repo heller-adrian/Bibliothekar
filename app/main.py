@@ -1321,6 +1321,7 @@ def synchronize_global_central_stock() -> dict[str, Any]:
 def reconcile_global_central_stock_state(
     *,
     force: bool = False,
+    check_same_size_content: bool = False,
 ) -> dict[str, Any]:
     global _CENTRAL_RECONCILE_LAST
     global _CENTRAL_RECONCILE_RESULT
@@ -1330,7 +1331,7 @@ def reconcile_global_central_stock_state(
     with _CENTRAL_RECONCILE_LOCK:
         now_monotonic = time.monotonic()
         if (
-            not force
+            not force and not check_same_size_content
             and _CENTRAL_RECONCILE_LAST > 0
             and now_monotonic - _CENTRAL_RECONCILE_LAST < 20.0
         ):
@@ -1364,9 +1365,10 @@ def reconcile_global_central_stock_state(
                     WORKSPACE_PATH,
                     library_id=library_id,
                     excluded_family_ids=blocked,
+                    check_same_size_content=check_same_size_content,
                 )
                 results[library_id] = state
-                if int(state.get("deleted_file_count") or 0):
+                if int(state.get("deleted_file_count") or 0) or int(state.get("modified_file_count") or 0):
                     changed = True
                     backfill_library_claims(
                         REGISTRY_DATABASE_FILE,
@@ -9933,9 +9935,10 @@ def api_refresh_workspace_state() -> dict[str,Any]:
     try:
         phases['inventory']=refresh_live_event_inventories(context.database_path,
             current_workspace_root(),context.archive_root,workspace_only=True)
-        phases['central_stock']=reconcile_global_central_stock_state(force=True)
+        phases['central_stock']=reconcile_global_central_stock_state(force=True,check_same_size_content=True)
         phases['structure']=detect_all_event_structure_changes(
             context.database_path,current_workspace_root(),workspace_only=True,
+            observed_event_ids=set(phases["inventory"]["events"]),
         )
         phases['claims']=backfill_library_claims(REGISTRY_DATABASE_FILE,
             database_path=context.database_path,library_id=context.library_id)

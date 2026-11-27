@@ -24,7 +24,7 @@ test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.open
 export ADOPTION_SMOKE_VERSION="$(python -c 'from app import __version__; print(__version__)')"
 export ADOPTION_SMOKE_PROTOCOL=current
 export ADOPTION_SMOKE_XMP=0
-if [[ "${4:-}" == rc112 ]]; then export ADOPTION_SMOKE_XMP=1; fi
+if [[ "${4:-}" == rc112 || "${4:-}" == rc113 ]]; then export ADOPTION_SMOKE_XMP=1; fi
 export ADOPTION_SMOKE_PASSWORD=synthetic-legacy-adoption-smoke-password
 methods=(manual script rollback skip review)
 previous_image="${3:-}"
@@ -34,12 +34,17 @@ if [[ -n "$previous_image" ]]; then
   docker pull "$stable_100"
   docker pull "$previous_image"
   methods+=(upgrade-rc22 upgrade-100)
-  if [[ "${4:-}" == rc112 ]]; then
+  if [[ "${4:-}" == rc112 || "${4:-}" == rc113 ]]; then
     stable_111="ghcr.io/heller-adrian/bibliothekar@sha256:b47c8422ea53c6c3ec890e8f182643ef4f144a03ec770d1ab979bdf5f9121520"
     previous_rc1="ghcr.io/heller-adrian/bibliothekar@sha256:ea267ab15c8d7fb34f7dcf3eaa7a5ca86eeb7ca45691da2c4a2c10e3290e8d7a"
     docker pull "$stable_111"
     docker pull "$previous_rc1"
     methods+=(upgrade-111 upgrade-112-rc1 upgrade-112-rc1-prepared)
+  fi
+  if [[ "${4:-}" == rc113 ]]; then
+    stable_112="ghcr.io/heller-adrian/bibliothekar@sha256:a62c29229192ec9eac433469d500ea57d4c8aebed974c5a3e0d89ba16439ad8a"
+    docker pull "$stable_112"
+    methods+=(upgrade-112)
   fi
 fi
 
@@ -99,6 +104,7 @@ XML
     upgrade-rc22) initial_image="$previous_image"; previous_version=1.0.1 ;;
     upgrade-111) initial_image="$stable_111"; previous_version=1.1.1 ;;
     upgrade-112-rc1|upgrade-112-rc1-prepared) initial_image="$previous_rc1"; previous_version=1.1.2 ;;
+    upgrade-112) initial_image="$stable_112"; previous_version=1.1.2 ;;
     upgrade-100) initial_image="$stable_100" ;;
   esac
   container="$(start_container "$initial_image")"
@@ -119,6 +125,16 @@ XML
       upgrade-112-rc1) fixture=1.1.2-RC1 ;;
     esac
     echo "Upgrade from $fixture retained the registered archive, receipt and SHA-256 on native ZFS."
+  elif [[ "$method" == upgrade-112 ]]; then
+    ADOPTION_SMOKE_VERSION="$previous_version" python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" script
+    find "$archive" -type f -print0 | sort -z | xargs -0 sha256sum > "$scratch/upgrade-archive.sha256"
+    test -s "$scratch/upgrade-archive.sha256"
+    docker rm -f "$container" >/dev/null
+    container="$(start_container "$image")"
+    python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" upgrade
+    sha256sum --check "$scratch/upgrade-archive.sha256"
+    echo "Upgrade from 1.1.2 retained the registered archive, receipt and SHA-256 on native ZFS."
+    python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" archive-inventory
   elif [[ "$method" == upgrade-112-rc1-prepared ]]; then
     export ADOPTION_SMOKE_HANDOFF="$scratch/rc1-prepared.json"
     ADOPTION_SMOKE_PROTOCOL=historical ADOPTION_SMOKE_VERSION="$previous_version" \

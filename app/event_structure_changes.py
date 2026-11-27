@@ -1484,6 +1484,7 @@ def detect_event_structure_change(
 
 def detect_all_event_structure_changes(
     database_path: Path, workspace_path: Path | None = None, *, workspace_only: bool = False,
+    observed_event_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     from app.operation_health import read_only
     if read_only():return {'detected':[],'errors':[],'read_only':True}
@@ -1502,6 +1503,8 @@ def detect_all_event_structure_changes(
     detected = []
     errors = []
     for event_id in ids:
+        if observed_event_ids is not None and event_id not in observed_event_ids:
+            continue
         try:
             item = detect_event_structure_change(database_path, event_id)
             if item is not None:

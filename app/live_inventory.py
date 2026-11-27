@@ -70,7 +70,7 @@ def refresh_live_event_inventories(
                 persist=True,
                 update_known_file_locations=False,
                 event_prefix_override=prefix,
-                fast_refresh=True,
+                fast_refresh=not workspace_only,
             )
             refreshed[current_event_id] = dict(inventory.get("summary") or {})
         except (EventInventoryError, WorkspaceLayoutError, OSError) as error:

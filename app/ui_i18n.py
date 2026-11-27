@@ -1007,6 +1007,8 @@ UI_TRANSLATIONS.update({
   "Offene Aufgaben ·": "Open tasks ·",
   "Keine offenen Aufgaben": "No pending tasks",
   "Alles erledigt.": "All done.",
+  "Dateiinhalt im Arbeitsbereich geändert": "Workspace file content changed",
+  "Am bisherigen Pfad liegt eine Datei mit anderem Inhalt. Prüfe die Datei vor weiteren Änderungen.": "The file at the existing path has different content. Review it before making more changes.",
   "Archivbestand": "Archive inventory",
   "Archiv neu scannen": "Rescan archive",
   "Fortschritt des Archivscans": "Archive scan progress",

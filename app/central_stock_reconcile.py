@@ -372,6 +372,7 @@ def reconcile_central_free_stock(
     *,
     library_id: str,
     excluded_family_ids: set[int] | None = None,
+    check_same_size_content: bool = False,
 ) -> dict[str, Any]:
     timestamp = _now()
     trash_state = reconcile_trash_inventory(database_path, workspace_root)
@@ -425,7 +426,11 @@ def reconcile_central_free_stock(
         st = path.stat(follow_symlinks=False)
         signatures[str(path)] = (st.st_dev,st.st_ino,st.st_mode,st.st_size,st.st_mtime_ns,st.st_ctime_ns)
         r = expected.get(str(item['relative_path']))
-        if r is None or int(r['size_bytes']) != int(item['size_bytes']) or int(item['size_bytes']) in search_sizes:
+        if (
+            check_same_size_content or r is None
+            or int(r["size_bytes"]) != int(item["size_bytes"])
+            or int(item["size_bytes"]) in search_sizes
+        ):
             hash_cache[str(path)] = _sha256_file(path)
 
     def digest_for(item):
@@ -488,7 +493,9 @@ def reconcile_central_free_stock(
             expected_item = actual_by_relative.get(expected)
             if expected_item is not None:
                 matched_central_paths.add(expected)
-                if int(expected_item["size_bytes"]) != expected_size:
+                if int(expected_item["size_bytes"]) != expected_size or (
+                    check_same_size_content and digest_for(expected_item) != expected_sha
+                ):
                     # Eine externe Metadaten-/Dateiänderung im fachlich richtigen
                     # Ordner wird als neuer IST-Inhalt übernommen, nicht als
                     # Benutzeraufgabe.

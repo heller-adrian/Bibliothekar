@@ -147,6 +147,62 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
         catalogue = api("/api/events/search")
         assert [event["status"] for event in catalogue["events"]] == ["archived"]
         return
+    if method == "archive-inventory":
+        endpoint = "/api/settings/archive-inventory"
+        summary = api("/api/archive/summary")
+        assert summary["released_count"] == 1, summary
+        assert api(endpoint)["status"] == "idle"
+        assert b'id="bk-archive-scan-start"' in request("/archive")
+        assert api(endpoint)["status"] == "idle"
+
+        [original] = [path for path in archive.rglob("*") if path.suffix.casefold() == ".raf"]
+        old = original.read_bytes()
+        changed = bytes([old[0] ^ 1]) + old[1:]
+        original.write_bytes(changed)
+        outside = archive / "unassigned.bin"
+        with outside.open("wb") as fixture:
+            # Sparse on the synthetic dataset. Give the test time to interrupt
+            # a real SHA-256 read without requiring gigabytes of disk space.
+            fixture.truncate(2 << 30)
+        stamp = outside.stat()
+
+        queued = api(endpoint, method="POST", expected=202)
+        job_id = queued["id"]
+        assert api(endpoint, method="POST", expected=202)["id"] == job_id
+        for _ in range(200):
+            before = api(endpoint)
+            if before["status"] == "running" and before["phase"] == "hashing":
+                assert before["total"] >= 3
+                break
+            assert before["status"] in {"queued", "running"}, before
+            time.sleep(0.05)
+        else:
+            raise AssertionError("Archive inventory never reached hashing")
+        subprocess.run(["docker", "kill", container], check=True)
+        subprocess.run(["docker", "start", container], check=True)
+        base = address()
+        wait_ready()
+        login()
+
+        for _ in range(180):
+            result = api(endpoint)
+            assert result["id"] == job_id, result
+            if result["status"] == "completed":
+                break
+            assert result["status"] in {"queued", "running", "interrupted"}, result
+            time.sleep(0.5)
+        else:
+            raise AssertionError("Archive inventory did not resume")
+        assert result["attempt"] > before["attempt"], result
+        assert result["checked"] == result["total"] and result["percent"] == 100
+        assert result["result"]["changed"] == result["result"]["unassigned"] == 1, result
+        assert api("/api/archive/summary")["candidates"][0]["verification_invalidated"]
+        after = outside.stat()
+        assert (after.st_ino, after.st_size, after.st_mtime_ns) == (stamp.st_ino, stamp.st_size, stamp.st_mtime_ns)
+        assert original.read_bytes() == changed
+        assert api("/api/events/search")["events"][0]["status"] == "archived"
+        print("Archive inventory resumed after container termination and reported changes on native ZFS.")
+        return
     if method == "upgrade-100":
         [library] = api("/api/libraries")["libraries"]
         assert library["library_id"] == "main" and library["display_name"] == "Smoke"

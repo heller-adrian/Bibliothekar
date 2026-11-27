@@ -244,6 +244,29 @@ def reconcile_missing_files(
             now=timestamp,
         )
 
+    occupied: dict[int, Any] = {}
+    if root_kind == "shared_workspace":
+        occupied = {
+            int(row["file_id"]): row
+            for row in connection.execute(
+                """SELECT f.id AS file_id,f.job_id,i.relative_path
+                   FROM event_inventory_files i JOIN files f
+                     ON f.current_relative_path=i.relative_path
+                    AND f.current_root_kind=i.root_kind
+                   WHERE i.event_id=? AND i.root_kind=?
+                     AND i.sha256<>COALESCE(f.sha256_current,f.sha256_original,'')""",
+                (event_id, root_kind),
+            )
+            if int(row["file_id"]) in missing
+        }
+        for row in connection.execute(
+            """SELECT notice_key,file_id FROM external_change_notices
+               WHERE event_id=? AND root_kind=? AND kind='workspace_content_changed' AND status='open'""",
+            (event_id, root_kind),
+        ).fetchall():
+            if row["file_id"] not in occupied:
+                resolve_notice_key(connection, row["notice_key"], now=timestamp)
+
     confirmed: list[int] = []
     pending: list[int] = []
     for file_id in sorted(missing):
@@ -272,6 +295,30 @@ def reconcile_missing_files(
                 f"cross-event:{event_id}:{file_id}",
                 now=timestamp,
             )
+            continue
+
+        if file_id in occupied:
+            observed = occupied[file_id]
+            connection.execute(
+                """DELETE FROM event_missing_file_observations
+                   WHERE event_id=? AND root_kind=? AND file_id=?""",
+                (event_id, root_kind, file_id),
+            )
+            record_notice(
+                connection,
+                notice_key=f"workspace-content:{event_id}:{file_id}",
+                kind="workspace_content_changed",
+                root_kind=root_kind,
+                title="Dateiinhalt im Arbeitsbereich geändert",
+                detail="Am bisherigen Pfad liegt eine Datei mit anderem Inhalt. Prüfe die Datei vor weiteren Änderungen.",
+                job_id=observed["job_id"],
+                event_id=event_id,
+                file_id=file_id,
+                relative_path=observed["relative_path"],
+                action_required=True,
+                now=timestamp,
+            )
+            pending.append(file_id)
             continue
 
         cross_matches = []

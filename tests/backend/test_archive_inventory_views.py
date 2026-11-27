@@ -92,3 +92,80 @@ def test_explicit_workspace_inventory_ignores_unrelated_archived_events(tmp_path
     )
     event_structure_changes.detect_all_event_structure_changes(db, workspace_only=True)
     assert checked == ["working"]
+
+
+def test_explicit_workspace_refresh_does_not_treat_replacement_as_deletion(tmp_path, monkeypatch):
+    from app import event_structure_changes, live_inventory
+    from tests.backend.test_0263_event_inventory import seed_family
+
+    db = tmp_path / "library.sqlite3"
+    initialize_database(db)
+    workspace = tmp_path / "workspace"
+    relative = "2026/07-23 - Trip/Alle/A.JPG"
+    file = workspace / relative
+    file.parent.mkdir(parents=True)
+    file.write_bytes(b"new")
+    with database_connection(db) as connection:
+        seed_job(connection)
+        seed_event(connection, status="applied")
+        _, file_id = seed_family(connection, content=b"old", current_path=relative)
+        connection.execute("UPDATE files SET current_root_kind='shared_workspace' WHERE id=?", (file_id,))
+
+    monkeypatch.setattr(live_inventory, "reconcile_trash_inventory", lambda *args: None)
+    monkeypatch.setattr(live_inventory, "shared_work_root", lambda root: root)
+    for _ in range(2):
+        refreshed = live_inventory.refresh_live_event_inventories(
+            db, workspace, tmp_path / "archive", workspace_only=True,
+        )
+        assert refreshed["refreshed_count"] == 1, refreshed
+        event_structure_changes.detect_event_structure_change(db, "e")
+    with database_connection(db) as connection:
+        original = connection.execute("SELECT sha256_current FROM files WHERE id=?", (file_id,)).fetchone()
+        observed = connection.execute(
+            "SELECT sha256 FROM event_inventory_files WHERE relative_path=?", (relative,),
+        ).fetchone()
+        assert original[0] != observed[0]
+        assert connection.execute(
+            "SELECT status FROM external_change_notices WHERE kind='workspace_content_changed'",
+        ).fetchone()[0] == "open"
+        assert not connection.execute("SELECT 1 FROM event_missing_file_observations").fetchone()
+
+    live_inventory.refresh_live_event_inventories(db, workspace, tmp_path / "archive", event_id="e")
+    event_structure_changes.detect_event_structure_change(db, "e")
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT status FROM external_change_notices WHERE kind='workspace_content_changed'",
+        ).fetchone()[0] == "open"
+
+    file.write_bytes(b"old")
+    live_inventory.refresh_live_event_inventories(db, workspace, tmp_path / "archive", workspace_only=True)
+    event_structure_changes.detect_event_structure_change(db, "e")
+    with database_connection(db) as connection:
+        assert connection.execute(
+            "SELECT status FROM external_change_notices WHERE kind='workspace_content_changed'",
+        ).fetchone()[0] == "resolved"
+
+
+def test_explicit_workspace_refresh_detects_equal_size_change_in_free_stock(tmp_path):
+    from app.central_stock_reconcile import reconcile_central_free_stock
+    from app.workspace_layout import ensure_workspace_layout
+    from tests.backend.test_0412_consistency_semantics import _seed_free_file
+
+    db = tmp_path / "library.sqlite3"
+    initialize_database(db)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    central = Path(ensure_workspace_layout(workspace)["backup_root"])
+    _, file_id, relative = _seed_free_file(
+        db, family_key="A", filename="A.JPG", day="2026-10-05", data=b"old",
+    )
+    path = central / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"new")
+    result = reconcile_central_free_stock(db, workspace, library_id="main", check_same_size_content=True)
+    assert result["modified_file_count"] == 1
+    assert result["deleted_file_count"] == 0
+    assert path.read_bytes() == b"new"
+    with database_connection(db) as connection:
+        row = connection.execute("SELECT sha256_original,sha256_current FROM files WHERE id=?", (file_id,)).fetchone()
+        assert row[0] != row[1]
