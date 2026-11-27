@@ -5625,14 +5625,26 @@ def api_backups() -> dict[str, Any]:
     "/api/archive/summary",
     tags=["Archivübernahme"],
 )
-def api_archive_summary(force_refresh: bool = False) -> dict[str, Any]:
+def api_archive_summary(
+    force_refresh: bool = False,
+    created_at: str | None = None,
+    event_id: str | None = None,
+) -> dict[str, Any]:
+    if (created_at is None) != (event_id is None) or (
+        created_at is not None and (not created_at or not event_id)
+    ):
+        raise HTTPException(status_code=400, detail="Ungültige Archivverlaufsposition.")
+    before = (created_at, event_id) if created_at is not None else None
     db_path = current_database_file()
     if not force_refresh:
-        cached = view_cache.get_snapshot(db_path, "archive", max_age_seconds=20)
+        cached = view_cache.get_snapshot(db_path, "archive", before)
         if cached is not None:
             return cached
-    result = list_archive_candidates(db_path, current_archive_root(), observe_current=True)
-    view_cache.put_snapshot(db_path, "archive", result)
+    stamp = view_cache.database_stamp(db_path)
+    result = list_archive_candidates(
+        db_path, current_archive_root(), paginate_history=True, history_before=before,
+    )
+    view_cache.put_snapshot(db_path, "archive", result, before, observed_stamp=stamp)
     return result
 
 

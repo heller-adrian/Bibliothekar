@@ -1007,6 +1007,8 @@ UI_TRANSLATIONS.update({
   "Offene Aufgaben ·": "Open tasks ·",
   "Keine offenen Aufgaben": "No pending tasks",
   "Alles erledigt.": "All done.",
+  "Weitere Ereignisse anzeigen": "Show more events",
+  "Archivbestand laut Katalog": "Archive inventory from catalogue",
   "Noch keine freigegebenen Ereignisse im Verlauf.": "No released events in archive history yet.",
   "Prüfung fehlgeschlagen": "Verification failed",
   "Manuelle Archivänderung": "Manual archive change",

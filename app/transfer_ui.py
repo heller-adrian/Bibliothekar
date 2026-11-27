@@ -153,6 +153,8 @@ TRANSFER_HTML = r'''<!doctype html>
   <section>
     <div class="section-head"><div class="bk-section-title-row"><h2 class="bk-title-help" tabindex="0" role="button" aria-expanded="false" data-bk-title-help data-help="Freigegebene Ereignisse bleiben hier nachvollziehbar. Neueste Ereignisse stehen zuerst.">Archivverlauf</h2></div></div>
     <div id="history-list" class="list"><div class="empty bk-loading-status">Wird geladen …</div></div>
+    <div class="actions"><button id="archive-history-more" type="button" hidden>Weitere Ereignisse anzeigen</button></div>
+    <p id="archive-history-status" role="status" hidden></p>
   </section>
 </main>
 
@@ -184,6 +186,10 @@ TRANSFER_HTML = r'''<!doctype html>
     setInterval(refreshGlobalTasks,30000);
 
   const historyList=document.getElementById('history-list');
+  const historyMore=document.getElementById('archive-history-more');
+  const historyStatus=document.getElementById('archive-history-status');
+  let historyCursor=null;
+  let historyPageRequest=null;
   const archiveList=document.getElementById('archive-list');
   const archiveNotice=document.getElementById('archive-notice');
   const blockedCount=document.getElementById('blocked-count');
@@ -388,13 +394,10 @@ TRANSFER_HTML = r'''<!doctype html>
     const observation=live?.available
       ? `<span>${Number(live.file_count)} Dateien</span><span>${Number(live.family_count)} Familien</span><span>${Number(live.uncatalogued_file_count||0)} nicht katalogisiert</span>`
       : `<span>${escapeHtml(live?.error||'Aktueller Archivbestand nicht verfügbar.')}</span>`;
-    return `<div class="meta"><strong>Aktueller Archivbestand</strong>${observation}</div>`
+    return `<div class="meta"><strong>Archivbestand laut Katalog</strong>${observation}</div>`
       + `<details class="archive-history-details"><summary>Historische Details anzeigen</summary><div class="muted">Verwaltungsdateien wie event.json werden nicht mitgezählt.</div>`
       + `<div class="muted">Bestand geprüft: <span data-bk-preserve-language>${escapeHtml(formatDate(live?.scanned_at))}</span></div>`
       + `<div class="meta"><strong>Historische Archivverifikation</strong><span>${Number(item.verification_file_count||0)} Dateien</span><span data-bk-preserve-language>${escapeHtml(formatDate(item.verification_completed_at))}</span></div></details>`;
-  }
-  function syncArchiveHistoryDetails() {
-    // Native details start collapsed on every screen; retain user expansion.
   }
   function renderArchive(summary){
     archiveReadable=summary.archive_readable;
@@ -407,7 +410,6 @@ TRANSFER_HTML = r'''<!doctype html>
     archiveNotice.textContent=summary.archive_readable?'':`Kamerabibliothek ist noch nicht read-only unter ${summary.archive_root} eingebunden. Die Verwaltungsseite ist bereit; die Prüfung und Arbeitsbereich-Freigabe bleiben bis zur Einbindung gesperrt.`;
     archiveList.innerHTML=''; historyList.innerHTML='';
     const open=(summary.candidates||[]).filter(item=>!item.released);
-    const history=(summary.candidates||[]).filter(item=>item.released);
     if(!open.length) archiveList.innerHTML='<div class="empty">Keine offenen Ereignisse zur Archivprüfung.</div>';
     for(const item of open){
       const card=document.createElement('article');card.className='card archive-check-card';
@@ -449,18 +451,46 @@ TRANSFER_HTML = r'''<!doctype html>
       attachRecoveryAction(card,item);
       archiveList.appendChild(card);
     }
-    if(!history.length) historyList.innerHTML='<div class="empty">Noch keine freigegebenen Ereignisse im Verlauf.</div>';
+    historyStatus.hidden=true;
+    if(!summary.released_count) historyList.innerHTML='<div class="empty">Noch keine freigegebenen Ereignisse im Verlauf.</div>';
+    renderArchiveHistory(summary);
+  }
+
+  function renderArchiveHistory(page){
+    const history=(page.candidates||[]).filter(item=>item.released);
     for(const item of history){
       const card=document.createElement('article');card.className='card';
       card.innerHTML=`<div class="item-head"><div><div class="title"><span class="muted history-field-label">Ereignisname im Katalog</span><span data-bk-preserve-language>${escapeHtml(item.name)}</span></div><div class="path"><span class="history-field-label">Aktueller Archivordner</span><span data-bk-preserve-language>${escapeHtml(item.current_archive?.event_prefix || item.folder_name)}</span></div><div class="muted">Erstellt: ${escapeHtml(formatDate(item.event_created_at))}</div></div><span class="badge success">Arbeitsbereich freigegeben</span></div>${archiveHistoryCounts(item)}`;
       attachRecoveryAction(card,item);
       historyList.appendChild(card);
     }
-    syncArchiveHistoryDetails();
+    historyCursor=page.history_next_cursor;
+    historyMore.hidden=!historyCursor;
   }
 
+  historyMore.addEventListener('click',async()=>{
+    if(!historyCursor||historyPageRequest)return;
+    const cursor=historyCursor;
+    historyPageRequest=cursor;
+    historyMore.disabled=true;
+    historyStatus.hidden=true;
+    try{
+      const query=new URLSearchParams(cursor);
+      const page=await getJson('/api/archive/summary?'+query);
+      if(historyCursor===cursor)renderArchiveHistory(page);
+    }catch(error){
+      if(historyCursor===cursor){
+        historyStatus.textContent=error.message;
+        historyStatus.hidden=false;
+      }
+    }finally{
+      historyPageRequest=null;
+      historyMore.disabled=false;
+    }
+  });
+
   async function load({forceRefresh=false}={}){
-    const snapshotKey = "bk-archive-0452:" + (window.__bkLibraryId || "main");
+    const snapshotKey = "bk-archive-history-v1:" + (window.__bkLibraryId || "main");
     if(!forceRefresh){
       try {
         const cached=JSON.parse(sessionStorage.getItem(snapshotKey) || "null");

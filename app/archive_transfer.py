@@ -14,7 +14,7 @@ import uuid
 
 from app.database import database_connection
 from app.event_access import event_file_rows
-from app.event_inventory import EventInventoryError, scan_event_inventory
+from app.event_inventory import EventInventoryError, event_root_relative, scan_event_inventory
 from app.archive_locations import (
     ArchiveLocationError,
     archive_path_without_symlinks,
@@ -115,25 +115,108 @@ def latest_archive_verification(
     return result
 
 
+ARCHIVE_HISTORY_PAGE_SIZE = 10
+
+# The same classification drives both the page and the whole-library counters.
+_ARCHIVE_STATES = """
+    SELECT e.id, e.created_at,
+           v.id AS verification_id, v.status AS verification_status,
+           v.error_message AS verification_error_message, r.id AS release_id,
+           (e.status = 'archived' OR COALESCE(r.status = 'completed', 0)) AS released
+    FROM events e
+    LEFT JOIN event_archive_verifications v ON v.id = (
+        SELECT id FROM event_archive_verifications WHERE event_id=e.id AND job_id=e.job_id
+        ORDER BY created_at DESC, id DESC LIMIT 1
+    )
+    LEFT JOIN event_ssd_releases r ON r.id = (
+        SELECT id FROM event_ssd_releases WHERE event_id=e.id AND job_id=e.job_id
+        ORDER BY created_at DESC, id DESC LIMIT 1
+    )
+    WHERE e.parent_event_id IS NULL AND e.status IN ('applied', 'archived')
+"""
+
+
+def _catalogued_archive(connection, item: dict[str, Any]) -> dict[str, Any]:
+    rows = connection.execute(
+        """SELECT relative_path, event_relative_path, asset_kind, known_file_id, family_id, scanned_at
+           FROM event_inventory_files WHERE event_id=? AND root_kind='camera_archive'""",
+        (item["event_id"],),
+    ).fetchall()
+    try:
+        prefix = str(event_root_relative(item))
+    except EventInventoryError:
+        prefix = item["folder_name"]
+    if not rows:
+        return {
+            "available": True, "event_prefix": prefix,
+            "file_count": item["file_count"], "family_count": item["family_count"],
+            "uncatalogued_file_count": 0, "scanned_at": None,
+        }
+    first = rows[0]
+    suffix = "/" + first["event_relative_path"]
+    if first["relative_path"].endswith(suffix):
+        prefix = first["relative_path"].removesuffix(suffix)
+    return _archive_observation(rows, prefix, first["scanned_at"])
+
+
+def _archive_observation(rows, prefix: str, scanned_at: str | None) -> dict[str, Any]:
+    families = {
+        ("known", row["family_id"]) if row["family_id"] is not None
+        else ("observed", str(PurePosixPath(row["event_relative_path"]).with_suffix("")))
+        for row in rows if row["asset_kind"] == "camera_original"
+    }
+    return {
+        "available": True, "scanned_at": scanned_at, "event_prefix": prefix,
+        "file_count": len(rows), "family_count": len(families),
+        "uncatalogued_file_count": sum(row["known_file_id"] is None for row in rows),
+    }
+
+
 def list_archive_candidates(
     database_path: Path,
     archive_root: Path,
     *,
     observe_current: bool = False,
+    paginate_history: bool = False,
+    history_before: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     archive_root = archive_root.expanduser().resolve(strict=False)
     available = archive_root.exists() and archive_root.is_dir()
     readable = available and os.access(archive_root, os.R_OK | os.X_OK)
 
+    selection = "SELECT * FROM archive_states"
+    params: tuple[Any, ...] = ()
+    if paginate_history:
+        history_filter = "released"
+        if history_before is not None:
+            history_filter += " AND (created_at, id) < (?, ?)"
+            params = history_before
+        selection = f"""
+            SELECT * FROM (
+                SELECT * FROM archive_states WHERE {history_filter}
+                ORDER BY created_at DESC, id DESC LIMIT {ARCHIVE_HISTORY_PAGE_SIZE + 1}
+            )
+        """
+        if history_before is None:
+            selection += " UNION ALL SELECT * FROM archive_states WHERE NOT released"
+
     with database_connection(database_path) as connection:
+        connection.execute("BEGIN")
+        metrics = dict(connection.execute(f"""
+            WITH archive_states AS ({_ARCHIVE_STATES})
+            SELECT COUNT(*) FILTER (WHERE NOT released) AS candidate_count,
+                   COUNT(*) FILTER (WHERE NOT released AND verification_status='verified') AS verified_count,
+                   COUNT(*) FILTER (WHERE released) AS released_count,
+                   COUNT(*) FILTER (WHERE verification_status='failed'
+                     AND verification_error_message IS NOT 'verification_invalidated_by_edit') AS blocked_count
+            FROM archive_states
+        """).fetchone())
         rows = connection.execute(
-            """
-            WITH RECURSIVE event_tree AS (
-                SELECT
-                    parent.id AS root_event_id,
-                    parent.id AS event_id
-                FROM events AS parent
-                WHERE parent.parent_event_id IS NULL
+            f"""
+            WITH RECURSIVE archive_states AS ({_ARCHIVE_STATES}),
+            selected AS ({selection}),
+            event_tree AS (
+                SELECT id AS root_event_id, id AS event_id FROM selected
 
                 UNION ALL
 
@@ -213,37 +296,36 @@ def list_archive_candidates(
                  WHERE pr.event_id=events.id AND pr.target_event_id IS NULL) AS pending_reassignment_count,
                 (SELECT COUNT(*) FROM event_mutations em
                  WHERE em.job_id=events.job_id AND em.status IN ('pending_reassignment','pending_apply','manual_archive')) AS active_mutation_count
-            FROM events
-            LEFT JOIN event_file_counts AS counts
-                ON counts.event_id = events.id
+            FROM selected
+            JOIN events ON events.id = selected.id
+            LEFT JOIN event_file_counts AS counts ON counts.event_id = events.id
             LEFT JOIN event_archive_verifications AS latest_verification
-                ON latest_verification.id = (
-                    SELECT verification.id
-                    FROM event_archive_verifications AS verification
-                    WHERE verification.event_id = events.id
-                      AND verification.job_id = events.job_id
-                    ORDER BY verification.created_at DESC, verification.id DESC
-                    LIMIT 1
-                )
-            LEFT JOIN event_ssd_releases AS latest_release
-                ON latest_release.id = (
-                    SELECT release.id
-                    FROM event_ssd_releases AS release
-                    WHERE release.event_id = events.id
-                      AND release.job_id = events.job_id
-                    ORDER BY release.created_at DESC, release.id DESC
-                    LIMIT 1
-                )
-            WHERE events.parent_event_id IS NULL
-              AND events.status IN ('applied', 'archived')
+                ON latest_verification.id = selected.verification_id
+            LEFT JOIN event_ssd_releases AS latest_release ON latest_release.id = selected.release_id
             ORDER BY events.created_at DESC, events.id DESC
-            """
+            """,
+            params,
         ).fetchall()
 
-    candidates: list[dict[str, Any]] = []
+        candidates: list[dict[str, Any]] = []
+        next_cursor = None
+        last_history_key = None
+        history_count = 0
+        for row in rows:
+            item = dict(row)
+            released = item["release_status"] == "completed" or item["status"] == "archived"
+            if paginate_history and released:
+                history_count += 1
+                if history_count > ARCHIVE_HISTORY_PAGE_SIZE:
+                    next_cursor = last_history_key
+                    continue
+                last_history_key = {
+                    "created_at": item["event_created_at"], "event_id": item["event_id"],
+                }
+                item["current_archive"] = _catalogued_archive(connection, item)
+            candidates.append(item)
 
-    for row in rows:
-        item = dict(row)
+    for item in candidates:
         item["archive_verification_ready"] = bool(readable)
         item["archive_root"] = str(archive_root)
         item["verification_invalidated"] = (
@@ -290,35 +372,19 @@ def list_archive_candidates(
                     str(item["event_id"]), root_kind="camera_archive",
                     persist=False, fast_refresh=True,
                 )
-                originals = [row for row in inventory["files"] if row["asset_kind"] == "camera_original"]
-                families = {
-                    ("known", row["family_id"]) if row.get("family_id") is not None
-                    else ("observed", str(PurePosixPath(row["event_relative_path"]).with_suffix("")))
-                    for row in originals
-                }
-                item["current_archive"] = {
-                    "available": True, "scanned_at": inventory["scanned_at"],
-                    "event_prefix": inventory["event_prefix"],
-                    "file_count": len(inventory["files"]), "family_count": len(families),
-                    "uncatalogued_file_count": sum(row.get("known_file_id") is None for row in inventory["files"]),
-                }
+                item["current_archive"] = _archive_observation(
+                    inventory["files"], inventory["event_prefix"], inventory["scanned_at"],
+                )
             except (EventInventoryError, OSError) as error:
                 item["current_archive"] = {"available": False, "error": str(error)}
-        candidates.append(item)
 
     return {
         "archive_root": str(archive_root),
         "archive_available": bool(available),
         "archive_readable": bool(readable),
-        "candidate_count": sum(1 for item in candidates if not item["released"]),
-        "verified_count": sum(1 for item in candidates if item["verified"] and not item["released"]),
-        "released_count": sum(1 for item in candidates if item["released"]),
-        "blocked_count": sum(
-            1 for item in candidates
-            if item.get("verification_status") == "failed"
-            and not item.get("verification_invalidated")
-        ),
+        **metrics,
         "candidates": candidates,
+        "history_next_cursor": next_cursor,
     }
 
 
