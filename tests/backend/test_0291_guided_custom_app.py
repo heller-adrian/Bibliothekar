@@ -6,7 +6,7 @@ from pathlib import Path
 
 from app import container_supervisor
 from app import main
-from app import source_helper
+from app import source_helper, source_profile
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -18,18 +18,18 @@ def test_0291_keeps_frozen_camera_core_and_bumps_only_deployment():
     assert tuple(map(int, main.DEPLOYMENT_VERSION.split("-", 1)[0].split("."))) >= (0, 29, 1)
 
 
-def test_0291_image_starts_single_container_supervisor_as_root():
+def test_0291_image_starts_single_container_supervisor_as_apps():
     dockerfile = (REPO_ROOT / "Dockerfile").read_text()
-    assert "USER 0:0" in dockerfile
+    assert "USER 568:568" in dockerfile
     assert 'CMD ["python", "-m", "app.container_supervisor"]' in dockerfile
     assert 'CMD ["uvicorn", "app.main:app"' not in dockerfile
 
 
 def test_0291_supervisor_separates_root_helper_from_web_uid(monkeypatch):
-    for name,value in shipped_constants(container_supervisor,["WEB_UID","WEB_GID","HELPER_ENABLED"]).items():monkeypatch.setattr(container_supervisor,name,value)
+    for name,value in shipped_constants(container_supervisor,["WEB_UID","WEB_GID"]).items():monkeypatch.setattr(container_supervisor,name,value)
     assert container_supervisor.WEB_UID == 568
     assert container_supervisor.WEB_GID == 568
-    assert container_supervisor.HELPER_ENABLED is False  # optional privileged helper requires opt-in
+    assert shipped_constants(source_profile, ["SOURCE_HELPER_ENABLED"])["SOURCE_HELPER_ENABLED"] is False
     assert container_supervisor.web_command()[-3:] == [
         "0.0.0.0",
         "--port",
@@ -58,11 +58,15 @@ def test_0291_compose_is_one_service_and_guided_custom_app_compatible():
     assert "\n  source-helper:" not in compose
     assert "pid: host" not in compose
     assert "network_mode:" not in compose
-    assert 'user: "0:0"' in compose
+    assert 'user: "568:568"' in compose
     import yaml
     base=yaml.safe_load(compose)['services']['bibliothekar']
     removable=yaml.safe_load((REPO_ROOT/'compose.removable.yaml').read_text())['services']['bibliothekar']
     assert not base.get('privileged',False)
+    assert not base.get('devices') and not base.get('cap_add')
+    assert not any(row['target'].startswith(('/dev', '/run/udev')) for row in base['volumes'])
+    assert all(row.get('bind', {}).get('propagation', 'rprivate') == 'rprivate' for row in base['volumes'])
+    assert removable['user'] == '0:0'
     assert base['environment']['KAMERA_SOURCE_HELPER_ENABLED']=='false'
     assert removable['privileged'] is True
     assert removable['environment']['KAMERA_SOURCE_HELPER_ENABLED']=='true'

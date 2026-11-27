@@ -77,6 +77,8 @@ def test_0274_removable_drive_root_and_subfolder_use_same_safe_import_endpoint(
 
     monkeypatch.setattr(app_main, "DATABASE_FILE", db)
     monkeypatch.setattr(app_main, "WORKSPACE_PATH", workspace)
+    monkeypatch.setattr(app_main, "LOG_PATH", tmp_path / "logs")
+    monkeypatch.setattr(app_main, "SOURCE_HELPER_ENABLED", True)
     monkeypatch.setattr(app_main, "REMOVABLE_ROOT", removable)
     # Im GitHub-Runner stehen oft weniger als die produktive
     # 20-GiB-Sicherheitsreserve zur Verfügung.

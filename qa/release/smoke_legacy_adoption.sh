@@ -44,12 +44,22 @@ if [[ -n "$previous_image" ]]; then
   if [[ "${4:-}" == rc113 ]]; then
     stable_112="ghcr.io/heller-adrian/bibliothekar@sha256:a62c29229192ec9eac433469d500ea57d4c8aebed974c5a3e0d89ba16439ad8a"
     docker pull "$stable_112"
-    methods+=(upgrade-112)
+    methods+=(upgrade-112 catalog)
   fi
 fi
 
 start_container() {
-  docker run -d --read-only --tmpfs /tmp:size=64m,mode=1777 --security-opt no-new-privileges \
+  local -a extra=()
+  if [[ "$method" == catalog ]]; then
+    if [[ "${2:-false}" == true ]]; then
+      extra+=(--user 0:0 --privileged -e KAMERA_SOURCE_HELPER_ENABLED=true)
+    else
+      extra+=(--user 568:568 --cap-drop ALL -e KAMERA_SOURCE_HELPER_ENABLED=false)
+    fi
+    extra+=(--mount "type=bind,source=$second_archive,target=/second-library,readonly"
+      --mount "type=bind,source=$source/saved,target=/sources/import,readonly")
+  fi
+  docker run "${extra[@]}" -d --read-only --tmpfs /tmp:size=64m,mode=1777 --security-opt no-new-privileges \
     -p 127.0.0.1::8080 \
     --mount "type=bind,source=$install_root/appdata,target=/appdata" \
     --mount "type=bind,source=$workspace,target=/workspace" \
@@ -99,6 +109,14 @@ for method in "${methods[@]}"; do
 </x:xmpmeta>
 XML
   fi
+  if [[ "$method" == catalog ]]; then
+    second_archive="$media/second-library"
+    mkdir -m 755 "$second_archive"
+    mkdir -p "$source/saved/backup"
+    sed 's/2026-07-22/2026-07-23/g' "$source/first/old-folders/camera/import/sample.xmp" > "$source/saved/backup/sample.xmp"
+    printf 'different synthetic backup RAW\n' > "$source/saved/backup/sample.raf"
+    find "$source" -type f -print0 | sort -z | xargs -0 sha256sum > "$scratch/catalog-source.sha256"
+  fi
   initial_image="$image"
   case "$method" in
     upgrade-rc22) initial_image="$previous_image"; previous_version=1.0.1 ;;
@@ -126,7 +144,7 @@ XML
     esac
     echo "Upgrade from $fixture retained the registered archive, receipt and SHA-256 on native ZFS."
   elif [[ "$method" == upgrade-112 ]]; then
-    ADOPTION_SMOKE_VERSION="$previous_version" python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" script
+    ADOPTION_SMOKE_XMP=0 ADOPTION_SMOKE_VERSION="$previous_version" python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" script
     find "$archive" -type f -print0 | sort -z | xargs -0 sha256sum > "$scratch/upgrade-archive.sha256"
     test -s "$scratch/upgrade-archive.sha256"
     docker rm -f "$container" >/dev/null
@@ -153,6 +171,41 @@ XML
     python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" upgrade-100
   else
     python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" "$method"
+  fi
+  if [[ "$method" == catalog ]]; then
+    sha256sum --check "$scratch/catalog-source.sha256"
+    docker inspect "$container" | python -c '
+import json, sys
+[container] = json.load(sys.stdin)
+host = container["HostConfig"]
+assert container["Config"]["User"] == "568:568"
+assert not host["Privileged"] and not host["Devices"] and not host["CapAdd"]
+assert all(m["Destination"] not in ("/dev", "/run/udev") and m["Propagation"] == "rprivate" for m in container["Mounts"])
+mounts = {m["Destination"]:m for m in container["Mounts"]}
+assert all(not mounts[p]["RW"] for p in ("/sources/nas", "/sources/import", "/main-library", "/second-library"))
+'
+    echo "Catalog profile used UID/GID 568, regular mounts and no removable source helper on native ZFS."
+    docker rm -f "$container" >/dev/null
+    container="$(start_container "$image" true)"
+    docker exec "$container" python -c '
+import time, urllib.error, urllib.request
+for attempt in range(60):
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8090/healthz", timeout=2) as response:
+            assert response.status == 200
+        break
+    except OSError:
+        if attempt == 59:
+            raise
+        time.sleep(0.5)
+'
+    python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" profile-enabled
+    docker rm -f "$container" >/dev/null
+    container="$(start_container "$image")"
+    python qa/release/smoke_legacy_adoption.py "$container" "$source" "$archive" "$install_root/appdata" profile-disabled
+    sha256sum --check "$scratch/catalog-source.sha256"
+    echo "Switching the same installation between source profiles preserved libraries, imports and source bytes."
+
   fi
   if [[ "$method" == review ]]; then
     stage="$(sudo find "$workspace" -type d -name .bibliothekar-legacy-review-stage -print -quit)"

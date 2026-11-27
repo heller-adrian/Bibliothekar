@@ -172,11 +172,25 @@ def _assert_catalogue_duplicates(connection, plan):
 
 
 def _assert_document_projection(connection, library, plan, events):
-    expected = {row["relative_path"]: row["sha256"] for row in connection.execute(
-        "SELECT relative_path, sha256 FROM legacy_adoption_documents WHERE plan_id = ?", (plan["id"],),
-    )}
+    expected = {}
+    prepared_versions = {}
+    for row in connection.execute(
+        "SELECT relative_path, content, sha256 FROM legacy_adoption_documents WHERE plan_id = ?", (plan["id"],),
+    ):
+        path, content, digest = row["relative_path"], row["content"], row["sha256"]
+        try:
+            version = json.loads(content)["source_app_version"]
+        except (TypeError, ValueError, KeyError) as error:
+            raise _RegistrationConflict("Das bestätigte Ereignisdokument ist ungültig.") from error
+        if not isinstance(version, str) or not version or hashlib.sha256(content).hexdigest() != digest:
+            raise _RegistrationConflict("Das bestätigte Ereignisdokument ist ungültig.")
+        expected[path] = digest
+        prepared_versions[path] = version
+
+    # App version is part of the already approved document's provenance.
+    # Compare the complete projected document against its original hash.
     actual = {path: checksum for path, _, checksum in catalogue_documents(
-        connection, library, plan, events, plan["documents_at"],
+        connection, library, plan, events, plan["documents_at"], prepared_versions=prepared_versions,
     )}
     if expected != actual:
         raise _RegistrationConflict("Der Bibliotheksindex hat sich geändert. "

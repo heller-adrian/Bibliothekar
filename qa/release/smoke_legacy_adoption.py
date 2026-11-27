@@ -11,6 +11,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from uuid import uuid4
 from zipfile import ZipFile
 
 
@@ -137,7 +138,8 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             target = archive / move["target_path"]
             assert hashlib.sha256(target.read_bytes()).hexdigest() == move["sha256"]
             assert not (source / "first" / move["relative_path"]).exists()
-        assert api(job + "/finalize", method="POST", payload=command)["state"] == "completed"
+        finalized = api(job + "/finalize", method="POST", payload=command)
+        assert finalized["state"] == "completed", finalized
         assert b'id="bk-settings-dialog"' in request("/workspace")
         print("Prepared RC1 script resumed and registered after upgrade on native ZFS.")
         return
@@ -146,6 +148,18 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
         assert b'legacy-adoption/history?library=main&amp;job=' in request("/legacy-adoption/history?library=main")
         catalogue = api("/api/events/search")
         assert [event["status"] for event in catalogue["events"]] == ["archived"]
+        return
+    if method in {"profile-enabled", "profile-disabled"}:
+        enabled = method == "profile-enabled"
+        assert api("/api/capabilities")["source_helper_enabled"] is enabled
+        assert (b'id="bk-source-picker"' in request("/")) is enabled
+        assert len(api("/api/libraries")["libraries"]) == 2
+        assert api("/api/import-history")["total"] == 2
+        if not enabled:
+            api("/api/source-devices", expected=409)
+            subprocess.run(["docker", "exec", container, "python", "-c",
+                            "import socket; assert socket.socket().connect_ex(('127.0.0.1', 8090)) != 0"],
+                           check=True)
         return
     if method == "archive-inventory":
         endpoint = "/api/settings/archive-inventory"
@@ -232,12 +246,73 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
         assert isinstance(api("/api/settings/event-folder-layout"), dict)
         assert api("/api/setup/preferences/continue", method="POST") == {"next": "/setup/adoption"}
     assert "Hast du eine bestehende Fotosammlung?".encode() in request("/workspace")
-    if method == "skip":
+    if method in {"skip", "catalog"}:
         assert api("/api/setup/adoption", method="POST", payload={"decision": "skipped"}) == {"next": "/"}
         assert b'id="bk-settings-dialog"' in request("/")
         assert api("/api/legacy-adoption/jobs", method="POST", expected=409, payload={"root": "nas"})[
             "code"
         ] == "legacy_adoption_inactive"
+        if method == "catalog":
+            health = api("/api/health")
+            assert (health["runtime"]["uid"], health["runtime"]["gid"]) == (568, 568)
+            assert not api("/api/capabilities")["source_helper_enabled"]
+            assert b'id="bk-source-picker"' not in request("/")
+            assert b'id="folder-import-button"' in request("/")
+            assert not api("/api/source-devices", expected=409).get("devices")
+            api("/api/source-devices/mount", method="POST", payload={}, expected=409)
+            api("/api/source-devices/unmount", method="POST", payload={}, expected=409)
+            def wait_for_write_admission():
+                for _ in range(90):
+                    status = api("/api/settings/storage-health")
+                    if status["ready"] and status["operation_health"]["writes_allowed"]:
+                        return
+                    assert startup_recovery_only(status["operation_health"]), status
+                    time.sleep(0.5)
+                raise AssertionError("Storage write admission did not become ready")
+
+            wait_for_write_admission()
+            second = api("/api/libraries", method="POST", expected=201, payload={
+                "display_name": "Second smoke library", "archive_root": "/second-library",
+            })["library"]
+            assert second["library_id"] != "main"
+
+            def wait_job(path):
+                for _ in range(240):
+                    job = api(path)
+                    if job["state"] == "completed":
+                        return job
+                    assert job["state"] not in {"failed", "interrupted"}, job
+                    time.sleep(.5)
+                raise AssertionError(f"Unfinished import: {path}")
+
+            def import_source(root, folder, *, duplicate=False):
+                result = api("/api/jobs/folder-import", method="POST", expected=202, payload={
+                    "source_root_key": root, "source_relative_path": folder, "source_mode": "folder",
+                    "request_id": str(uuid4()),
+                })
+                check = wait_job("/api/sd-rechecks/" + result["task_id"])
+                import_id = check["result"].get("import_job_id")
+                if duplicate:
+                    assert not import_id, check
+                    return
+                assert import_id, check
+                imported = wait_job("/api/jobs/" + import_id)
+                assert imported["result"]["organization"]["file_count"] >= 1, imported
+
+            import_source("nas", "first")
+            import_source("nas", "first", duplicate=True)
+            subprocess.run(["docker", "restart", container], check=True)
+            base = address()
+            wait_ready()
+            login()
+            wait_for_write_admission()
+            assert len(api("/api/libraries")["libraries"]) == 2
+            import_source("nas", "first", duplicate=True)
+            import_source("saved", "backup")
+            assert api("/api/import-history")["total"] == 2
+            assert b'id="bk-settings-dialog"' in request("/workspace")
+            print("Catalog profile verified NAS and saved-folder imports, duplicates and restart on native ZFS.")
+            return
         print("Explicit skip released normal access.")
         return
     assert api("/api/setup/adoption", method="POST", payload={"decision": "adopting"}) == {"next": "/legacy-adoption"}

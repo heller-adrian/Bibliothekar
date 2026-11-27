@@ -15,4 +15,4 @@ def test_helper_defaults_match_single_container_opt_in():
     source=re.sub(r"\s+", "", Path("app/main.py").read_text())
     assert '"KAMERA_SOURCE_HELPER_URL","http://127.0.0.1:8090"' in source
     assert 'KAMERA_SOURCE_HELPER_ENABLED=false' in Path('Dockerfile').read_text()
-    assert 'KAMERA_SOURCE_HELPER_ENABLED", "false"' in Path('app/container_supervisor.py').read_text()
+    assert 'KAMERA_SOURCE_HELPER_ENABLED", "false"' in Path('app/source_profile.py').read_text()

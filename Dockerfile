@@ -45,18 +45,19 @@ RUN mkdir -p \
         /workspace \
         /main-library \
         /sources/nas \
+        /sources/import \
         /sources/removable \
     && chown -R 568:568 \
+        /appdata \
         /config \
         /database \
         /logs \
         /workspace \
         /sources/nas
 
-# 0.31.0 startet absichtlich als root: nur der interne Quellen-Helper
-# benoetigt Mount-/Geraeterechte. Der Supervisor startet die eigentliche
-# Bibliothekar-Web-App explizit als UID/GID 568.
-USER 0:0
+# The default profile runs the supervisor and web application as apps.
+# The optional removable-media profile explicitly overrides this user.
+USER 568:568
 
 EXPOSE 8080
 

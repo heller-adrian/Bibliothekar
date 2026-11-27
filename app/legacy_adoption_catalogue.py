@@ -300,7 +300,7 @@ def write_catalogue(connection, library, job, plan, events, now):
         _store_verified_event(connection, plan, library, event, event.get("job_id", job_id), now)
 
 
-def catalogue_documents(connection, library, plan, events, now):
+def catalogue_documents(connection, library, plan, events, now, *, prepared_versions=None):
     for event in events:
         payload = build_event_document_from_db(
             library.database_path, library.workspace_root, event.get("job_id", catalogue_job_id(plan)),
@@ -308,10 +308,11 @@ def catalogue_documents(connection, library, plan, events, now):
         )
         if payload is None:
             raise AdoptionError("Das Ereignisdokument konnte nicht erzeugt werden.")
+        path = str(event_root_relative(event) / EVENT_DOCUMENT_FILENAME)
         payload["generated_at"] = now
-        payload["source_app_version"] = __version__
+        payload["source_app_version"] = __version__ if prepared_versions is None else prepared_versions.get(path)
         content = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
-        yield str(event_root_relative(event) / EVENT_DOCUMENT_FILENAME), content, hashlib.sha256(content).hexdigest()
+        yield path, content, hashlib.sha256(content).hexdigest()
 
 
 def prepare_documents(library, job_id: str) -> list[dict]:

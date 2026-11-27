@@ -130,7 +130,7 @@ def test_5_5_gib_http_returns_before_hash_and_progress_persists(sd,monkeypatch):
 def child(sd,mode,point,evidence):
     case,ws,reg,dbs,source,context=sd
     (case/'sd-case.json').write_text(json.dumps({'database':str(dbs[0]),'working':str(storage_paths(ws)['backup_root'])}))
-    env=dict(os.environ,KAMERA_CONFIG=str(case/'settings.json'),KAMERA_WORKSPACE=str(ws),
+    env=dict(os.environ,KAMERA_SOURCE_HELPER_ENABLED='true',KAMERA_CONFIG=str(case/'settings.json'),KAMERA_WORKSPACE=str(ws),
              KAMERA_REGISTRY_DATABASE=str(reg),KAMERA_DATABASE_DIR=str(case),
              KAMERA_LOG_DIR=str(case/'logs'),KAMERA_REMOVABLE_ROOT=str(case/'removable'),
              KAMERA_POOL_PROBE=str(ws),KAMERA_ARCHIVE_ROOT=str(context.archive_root))
@@ -209,6 +209,7 @@ def test_ui_persists_request_before_post_and_resumes_polling(tmp_path):
     html=main.index()
     start=html.index('    const sdRecheckTasks =');end=html.index('    refreshButton.addEventListener',start)
     script=r'''
+const sourceHelperEnabled=true;
 const store={},timers=[],posts=[];let task={state:'verifying',progress_current:250,progress_total:1000,progress_message:'Checking'};
 const localStorage={getItem:k=>store[k]||null,setItem:(k,v)=>store[k]=v,removeItem:k=>delete store[k]};
 const noticeElement={textContent:'',classList:{toggle(){},add(){},remove(){}}};

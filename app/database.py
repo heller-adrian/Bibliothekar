@@ -779,6 +779,7 @@ def claim_next_job(
     *,
     operation: str | None = None,
     job_id: str | None = None,
+    disabled_removable_root: Path | None = None,
 ) -> dict[str, Any] | None:
     connection = connect(
         database_path
@@ -789,40 +790,34 @@ def claim_next_job(
             "BEGIN IMMEDIATE"
         )
 
+        conditions = ["state='queued'"]
+        args = []
         if job_id is not None:
-            row=connection.execute("SELECT * FROM jobs WHERE state='queued' AND id=? AND operation='folder_import'",(job_id,)).fetchone()
-        elif operation is None:
-            row = connection.execute(
-                """
-                SELECT *
-                FROM jobs
-                WHERE state = 'queued'
-                  AND NOT (operation='sd_recheck' AND stage='waiting_for_import'
-                    AND EXISTS (SELECT 1 FROM jobs AS publishing
-                      WHERE publishing.operation='folder_import'
-                        AND publishing.state IN ('queued','copying','verifying','backup_verified',
-                          'analyzing_metadata','organizing','interrupted')))
-                ORDER BY created_at ASC, id ASC
-                LIMIT 1
-                """
-            ).fetchone()
+            conditions.extend(["id=?", "operation='folder_import'"])
+            args.append(job_id)
         else:
-            row = connection.execute(
-                """
-                SELECT *
-                FROM jobs
-                WHERE state = 'queued'
-                  AND NOT (operation='sd_recheck' AND stage='waiting_for_import'
+            conditions.append("""
+                NOT (operation='sd_recheck' AND stage='waiting_for_import'
                     AND EXISTS (SELECT 1 FROM jobs AS publishing
                       WHERE publishing.operation='folder_import'
                         AND publishing.state IN ('queued','copying','verifying','backup_verified',
-                          'analyzing_metadata','organizing','interrupted')))
-                  AND operation = ?
-                ORDER BY created_at ASC, id ASC
-                LIMIT 1
-                """,
-                (str(operation),),
-            ).fetchone()
+                          'analyzing_metadata','organizing','interrupted')
+                        AND NOT removable(publishing.operation,publishing.trigger_type,
+                                          publishing.source_device_id,publishing.source_path,publishing.result_json)))
+            """)
+            if operation is not None:
+                conditions.append("operation=?")
+                args.append(operation)
+        if disabled_removable_root is not None:
+            from app.source_profile import removable_job
+            connection.create_function("removable", 5, lambda *fields: removable_job(*fields, disabled_removable_root))
+            conditions.append("NOT removable(operation,trigger_type,source_device_id,source_path,result_json)")
+        else:
+            connection.create_function("removable", 5, lambda *_: False)
+        row = connection.execute(
+            "SELECT * FROM jobs WHERE " + " AND ".join(conditions) + " ORDER BY created_at ASC,id ASC LIMIT 1",
+            args,
+        ).fetchone()
 
         if row is None:
             connection.commit()

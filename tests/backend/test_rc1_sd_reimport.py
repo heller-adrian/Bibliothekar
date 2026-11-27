@@ -71,6 +71,7 @@ def test_confirmed_recheck_is_queued_without_erasing_history(fixture,monkeypatch
     case,ws,reg,dbs,ev=fixture
     root=case/'removable';card=root/'CARD';card.mkdir(parents=True);(card/'A.JPG').write_bytes(b'photo')
     old_job(dbs[0],card)
+    monkeypatch.setattr(main, "SOURCE_HELPER_ENABLED", True)
     monkeypatch.setattr(main,'REMOVABLE_ROOT',root)
     monkeypatch.setattr(main,'preflight_folder_import',lambda *a,**kw:{})
     response=main.api_run_folder_import({'source_root_key':'removable','source_relative_path':'CARD','source_mode':'sd_card','confirm_reimport':True})
@@ -125,6 +126,7 @@ def setup_live_import(fixture,monkeypatch):
     (case/'settings.json').write_text(json.dumps({'storage':{'safety_reserve_gib':0,'processing_buffer_percent':0}}))
     root=case/'removable';card=root/'CARD';card.mkdir(parents=True);p=card/'A.JPG';Image.new('RGB',(8,8),'green').save(p)
     subprocess.run(['exiftool','-overwrite_original','-DateTimeOriginal=2026:07:22 10:14:04',str(p)],check=True,capture_output=True)
+    monkeypatch.setattr(main, "SOURCE_HELPER_ENABLED", True)
     monkeypatch.setattr(main,'REMOVABLE_ROOT',root);monkeypatch.setattr(main,'LOG_PATH',case/'logs')
     return case,ws,reg,dbs,p,resolve_library_context(reg,'main')
 

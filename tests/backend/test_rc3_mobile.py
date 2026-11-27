@@ -84,7 +84,7 @@ def node(tmp_path, script):
 
 def test_r01_click_contract_and_explicit_integrity(tmp_path):
     from app.main import index
-    html=index();start=html.index('    async function confirmSdIntegrity()');end=html.index('    deviceSelect.addEventListener',start)
+    html=index();start=html.index('    async function confirmSdIntegrity()');end=html.index('    if (deviceSelect) deviceSelect.addEventListener',start)
     node(tmp_path,'''let calls=[],confirmed=0,selectedSdDevice={mounted:true,read_only:true,device_id:'CARD',label:'User <name>'};
 let sdSourceSummary={has_import_history:true,new_file_count:0,changed_file_count:0,unknown_file_count:0};
 const window={BibliothekarI18n:{confirmAsync:async()=>{confirmed++;return true}}};
@@ -144,8 +144,7 @@ def test_r03_r04_browser_bundle_and_css(tmp_path):
     bundle={'shellWorkspace':apply_shell(WORKSPACE_HTML,active_area='workspace',subarea='captures'),'shellArchive':apply_shell(TRANSFER_HTML,active_area='archive'),'workspace':WORKSPACE_HTML,'archive':TRANSFER_HTML,'import':index(),'i18n':I18N_UI_JS,
         'preview':part(WORKSPACE_HTML,'    const mobilePreviewButton =','    function setSelectedPreviewEvent'),
         'stored':part(WORKSPACE_HTML,'    function renderStoredEventPreview(','    async function openStoredEventPreview'),
-        'history':part(TRANSFER_HTML,'  function archiveHistoryCounts(','  function syncArchiveHistoryDetails('),
-        'historyMedia':part(TRANSFER_HTML,'  function syncArchiveHistoryDetails(','  function renderArchive('),
+        'history':part(TRANSFER_HTML,'  function archiveHistoryCounts(','  function renderArchive('),
         'jobs':part(index(),'    const activeStates =','    async function loadHealth()')}
     (output/'browser-bundle.json').write_text(json.dumps(bundle))
 

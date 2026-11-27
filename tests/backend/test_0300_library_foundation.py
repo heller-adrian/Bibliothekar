@@ -810,7 +810,7 @@ def test_0300_worker_skips_broken_queue_and_uses_next_library(
     healthy.database_path.touch()
 
     seen = []
-    def fake_claim(database_path):
+    def fake_claim(database_path, *, disabled_removable_root=None):
         seen.append(database_path)
         return {"id": "job-healthy"}
 

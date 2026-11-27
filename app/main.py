@@ -43,6 +43,7 @@ from app.root_operations import RootOperationBusy, RootOperationError, protect, 
 from app import background_mutation_cancel as cancel_queue
 from app.background_activity import current_activity, clear_finished_activity
 from app import archive_batches, archive_inventory_scan
+from app.source_profile import DISABLED_MESSAGE, SOURCE_HELPER_ENABLED, removable_job
 from app import ssd_release_background as release_queue
 from app.live_inventory import refresh_live_event_inventories
 from app.global_workspace import build_global_workspace_summary
@@ -1447,6 +1448,7 @@ def process_claimed_job(
     }
 
     try:
+        _guard_removable_job(job)
         settings = load_settings()
         storage = settings.get("storage", {})
 
@@ -2292,7 +2294,8 @@ def _claim_context_job(context, *, operation=None):
     # Legacy direct callers may claim SQL-only fixtures without a mounted
     # workspace. Registered workers and every physical operation stay strict.
     with admission(context,allow_missing_legacy=True):
-        return claim_next_job(context.database_path) if operation is None else claim_next_job(context.database_path,operation=operation)
+        kwargs = {"operation": operation} if operation is not None else {}
+        return _claim_profile_job(context.database_path, **kwargs)
 
 
 def claim_next_library_job(
@@ -2462,7 +2465,7 @@ def _claim_runtime_job(last_library_id):
     with admission(import_context):
         global_import = None
         for operation in ['sd_recheck','folder_import','metadata_multiple_import','metadata_general_import','trash_import']:
-            global_import = claim_next_job(DATABASE_FILE,operation=operation)
+            global_import = _claim_profile_job(DATABASE_FILE, operation=operation)
             if global_import is not None:break
     if global_import is not None:
         claimed = (import_context, global_import)
@@ -4672,6 +4675,7 @@ def api_capabilities() -> dict[str, Any]:
     settings = load_settings()
 
     return {
+        "source_helper_enabled": SOURCE_HELPER_ENABLED,
         "trigger": settings.get("trigger", {}),
         "safety": settings.get("safety", {}),
         "storage": settings.get("storage", {}),
@@ -4702,10 +4706,10 @@ def api_capabilities() -> dict[str, Any]:
             "archive_transfer_ui": True,
             "ssd_release_after_archive": True,
             "archive_change_review_api": True,
-            "approved_sd_trigger": True,
-            "usb_key_trigger": True,
-            "real_sd_pipeline": True,
-            "external_drive_source": True,
+            "approved_sd_trigger": SOURCE_HELPER_ENABLED,
+            "usb_key_trigger": SOURCE_HELPER_ENABLED,
+            "real_sd_pipeline": SOURCE_HELPER_ENABLED,
+            "external_drive_source": SOURCE_HELPER_ENABLED,
             "folder_source_browser": True,
             "real_zfs_snapshot": False,
         },
@@ -4720,7 +4724,28 @@ MEDIA_SOURCE_EXTENSIONS = {
 }
 
 
+def _require_source_helper() -> None:
+    if not SOURCE_HELPER_ENABLED:
+        raise HTTPException(status_code=409, detail=DISABLED_MESSAGE)
+
+
+def _guard_removable_job(job: dict[str, Any]) -> None:
+    if not SOURCE_HELPER_ENABLED and removable_job(
+        job.get("operation"), job.get("trigger_type"), job.get("source_device_id"),
+        job.get("source_path"), job.get("result"), REMOVABLE_ROOT,
+    ):
+        _require_source_helper()
+
+
+def _claim_profile_job(database_path: Path, **kwargs):
+    return claim_next_job(
+        database_path, disabled_removable_root=None if SOURCE_HELPER_ENABLED else REMOVABLE_ROOT, **kwargs,
+    )
+
+
 def source_root_path(root_key: str) -> Path | None:
+    if str(root_key).strip() == "removable" and not SOURCE_HELPER_ENABLED:
+        return None
     return {
         "saved": IMPORT_ROOT,
         "removable": REMOVABLE_ROOT,
@@ -4729,6 +4754,8 @@ def source_root_path(root_key: str) -> Path | None:
 
 
 def _safe_root(root_key: str) -> Path:
+    if str(root_key).strip() == "removable":
+        _require_source_helper()
     root = source_root_path(root_key)
     if root is None:
         raise HTTPException(status_code=422, detail="Unbekannter Quellenbereich.")
@@ -4893,6 +4920,7 @@ def discover_import_sources(root_key: str = "saved") -> list[dict[str, Any]]:
 
 
 def _helper_request(path: str, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    _require_source_helper()
     data = None
     headers: dict[str, str] = {}
     if payload is not None:
@@ -4918,17 +4946,19 @@ def api_import_sources(force_refresh: bool = False) -> dict[str, Any]:
     # Die Darstellung bleibt kurz gecacht; Mount-Prüfung erfolgt unabhängig davon.
     db_path = DATABASE_FILE
     if not force_refresh:
-        cached = view_cache.get_snapshot(db_path, "import-sources", max_age_seconds=15)
+        cached = view_cache.get_snapshot(db_path, "import-sources", SOURCE_HELPER_ENABLED, max_age_seconds=15)
         if cached is not None and cached["mounted"] == IMPORT_ROOT.is_dir():
             return cached
-    sources = discover_import_sources("saved") + discover_import_sources("removable")
+    sources = discover_import_sources("saved")
+    if SOURCE_HELPER_ENABLED:
+        sources += discover_import_sources("removable")
     result = {
         "root": str(IMPORT_ROOT),
         "mounted": IMPORT_ROOT.is_dir(),
         "count": len(sources),
         "sources": sources,
     }
-    view_cache.put_snapshot(db_path, "import-sources", result)
+    view_cache.put_snapshot(db_path, "import-sources", result, SOURCE_HELPER_ENABLED)
     return result
 
 
@@ -5041,6 +5071,7 @@ def api_sd_recheck(task_id: str):
     job = get_job(DATABASE_FILE, task_id)
     if job is None or job.get("operation") != "sd_recheck":
         raise HTTPException(status_code=404, detail="SD-Prüfauftrag nicht gefunden.")
+    _guard_removable_job(job)
     return job
 
 
@@ -5060,6 +5091,8 @@ def api_run_folder_import(payload: dict[str, Any]) -> JSONResponse:
     source_mode = str(payload.get("source_mode") or "folder").strip()
     if source_mode not in {"folder", "drive", "sd_card"} or (source_mode == "sd_card" and root_key != "removable"):
         raise HTTPException(status_code=422, detail="Ungültige Importquellenart.")
+    if root_key == "removable" or source_mode in {"drive", "sd_card"}:
+        _require_source_helper()
     source = resolve_import_source(relative_value, root_key)
     root = _safe_root(root_key)
     source_device_id = source_device_id_for_path(source, root_key, root)
@@ -5286,6 +5319,10 @@ def api_import_history_visibility(job_id: str, payload: dict[str, Any]) -> dict[
 def api_import_recovery(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     from app.import_recovery import qualify
     try:
+        if payload.get("action") == "resume":
+            job = get_job(DATABASE_FILE, job_id)
+            if job is not None:
+                _guard_removable_job(job)
         proof=qualify(DATABASE_FILE,REGISTRY_DATABASE_FILE,WORKSPACE_PATH,LOG_PATH,job_id)
         if proof['job']['state'] not in {'failed','interrupted'}:
             raise ValueError('import_recovery_job_not_terminal: '+job_id)
@@ -5306,7 +5343,7 @@ def api_import_recovery(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
                 from app.library_context import _context_from_row
                 context=_context_from_row(get_library(REGISTRY_DATABASE_FILE,'main',active_only=False))
                 with admission(context):
-                    recovered_job=claim_next_job(DATABASE_FILE,job_id=job_id)
+                    recovered_job=_claim_profile_job(DATABASE_FILE, job_id=job_id)
                 if recovered_job is None:raise ValueError('import_recovery_job_not_claimed')
                 process_claimed_job(recovered_job,library_context=context)
         elif action=='retain':
@@ -11358,7 +11395,7 @@ def web_app_manifest(request: Request) -> JSONResponse:
     include_in_schema=False,
 )
 def index() -> str:
-    return apply_shell("""
+    html = """
 <!doctype html>
 <html lang="de">
 <head>
@@ -12001,6 +12038,7 @@ def index() -> str:
         <span class="bk-copy-warning"><strong>Achtung:</strong> Sicherungen werden als Kopie angelegt und belegen zusätzlichen Speicherplatz.</span>
       </div>
 
+      <!-- helper-controls -->
       <div id="bk-source-picker" class="bk-source-picker" aria-label="Importquelle wählen">
         <button type="button" class="bk-source-option active" data-source-mode="sd">
           <span class="bk-source-option-icon"><svg viewBox="0 0 24 24"><path d="M7 3h8l3 3v15H7z"/><path d="M10 3v5h5V3M10 13h5M10 16h5"/></svg></span>
@@ -12088,6 +12126,7 @@ def index() -> str:
             </div>
           </section>
 
+          <!-- /helper-controls -->
           <section class="bk-source-pane" data-source-pane="folder" hidden>
             <h3>Sicherungsordner auswählen</h3>
             <p class="section-description">
@@ -12097,7 +12136,8 @@ def index() -> str:
             <div class="folder-browser">
               <select id="folder-root-select" aria-label="Quellenbereich">
                 <option value="nas">NAS-Speicher</option>
-                <option value="removable">Eingebundene Wechselmedien</option>
+                <!-- helper-controls --><option value="removable">Eingebundene Wechselmedien</option><!-- /helper-controls -->
+                <!-- saved-source-option -->
               </select>
               <div class="folder-path" id="folder-path">/</div>
               <div class="folder-list" id="folder-list"></div>
@@ -12109,8 +12149,10 @@ def index() -> str:
             </div>
 
           </section>
+      <!-- helper-controls -->
         </div>
       </details>
+      <!-- /helper-controls -->
     </section>
 
     <div class="bk-metadata-toolbar">
@@ -12178,6 +12220,7 @@ def index() -> str:
     const noticeElement =
       document.getElementById("notice");
 
+    const sourceHelperEnabled = __SOURCE_HELPER_ENABLED__;
     const sdSourceDetail =
       document.getElementById("sd-source-detail");
 
@@ -12994,6 +13037,7 @@ def index() -> str:
     }
 
     function updateDriveControls() {
+      if (!sourceHelperEnabled) return;
       const device = currentExternalDevice();
       const verifiedReadOnly = Boolean(device?.mounted && device?.read_only);
       deviceMountButton.disabled = !device || Boolean(device.mounted);
@@ -13017,6 +13061,7 @@ def index() -> str:
     }
 
     async function loadSourceDevices() {
+      if (!sourceHelperEnabled) return;
       try {
         const response = await fetch("/api/source-devices", {cache:"no-store"});
         const data = await response.json();
@@ -13092,6 +13137,7 @@ def index() -> str:
     let sdSummaryRequest = 0;
     let sdSourceSummary = null;
     async function updateSdSourceDetail() {
+      if (!sourceHelperEnabled) return;
       const device = selectedSdDevice;
       sdSourceSummary = null;
       const requestId = ++sdSummaryRequest;
@@ -13577,7 +13623,7 @@ def index() -> str:
       }
     }
 
-    sdMountButton.addEventListener("click", async () => {
+    if (sdMountButton) sdMountButton.addEventListener("click", async () => {
       if (!selectedSdDevice) return;
       sdMountButton.disabled = true;
       try {
@@ -13587,7 +13633,7 @@ def index() -> str:
       } catch (error) { showError(error); }
     });
 
-    sdUnmountButton.addEventListener("click", async () => {
+    if (sdUnmountButton) sdUnmountButton.addEventListener("click", async () => {
       if (!selectedSdDevice) return;
       sdUnmountButton.disabled = true;
       try { await unmountDevice(selectedSdDevice.device_path); noticeElement.textContent = "SD-Karte wurde sicher ausgeworfen."; }
@@ -13608,15 +13654,15 @@ def index() -> str:
       if (verify && !(await confirmSdIntegrity())) return;
       await startFolderImportSelection("removable", device.device_id, device.label || device.model || "SD Card", "sd_card", verify);
     }
-    sdImportButton.addEventListener("click", () => requestSdBackup());
+    if (sdImportButton) sdImportButton.addEventListener("click", () => requestSdBackup());
 
-    deviceSelect.addEventListener("change", () => {
+    if (deviceSelect) deviceSelect.addEventListener("change", () => {
       driveFolderBrowser.hidden = true;
       driveFolderBoundary = null;
       updateDriveControls();
     });
 
-    deviceMountButton.addEventListener("click", async () => {
+    if (deviceMountButton) deviceMountButton.addEventListener("click", async () => {
       if (!deviceSelect.value) return;
       const selectedPath = deviceSelect.value;
       deviceMountButton.disabled = true;
@@ -13628,7 +13674,7 @@ def index() -> str:
       } catch (error) { showError(error); }
     });
 
-    deviceUnmountButton.addEventListener("click", async () => {
+    if (deviceUnmountButton) deviceUnmountButton.addEventListener("click", async () => {
       const device = currentExternalDevice();
       if (!device?.mounted) return;
       deviceUnmountButton.disabled = true;
@@ -13640,7 +13686,7 @@ def index() -> str:
       } catch (error) { showError(error); }
     });
 
-    deviceImportButton.addEventListener("click", async () => {
+    if (deviceImportButton) deviceImportButton.addEventListener("click", async () => {
       const device = currentExternalDevice();
       if (!device?.mounted || !device?.read_only || !device.device_id) {
         showError(new Error("Bitte das externe Laufwerk zuerst ausschließlich lesend einbinden."));
@@ -13654,7 +13700,7 @@ def index() -> str:
       );
     });
 
-    deviceFolderButton.addEventListener("click", async () => {
+    if (deviceFolderButton) deviceFolderButton.addEventListener("click", async () => {
       const device = currentExternalDevice();
       if (!device?.mounted || !device?.read_only || !device.device_id) {
         showError(new Error("Bitte das externe Laufwerk zuerst ausschließlich lesend einbinden."));
@@ -13670,13 +13716,13 @@ def index() -> str:
       }
     });
 
-    driveFolderUpButton.addEventListener("click", () => {
+    if (driveFolderUpButton) driveFolderUpButton.addEventListener("click", () => {
       if (driveFolderParent !== null) {
         loadDriveFolderBrowser(driveFolderParent).catch(showError);
       }
     });
 
-    driveFolderImportButton.addEventListener("click", async () => {
+    if (driveFolderImportButton) driveFolderImportButton.addEventListener("click", async () => {
       const device = currentExternalDevice();
       if (!device?.mounted || !device?.read_only || !driveFolderPathValue) {
         showError(new Error("Bitte zuerst einen Ordner im eingebundenen Laufwerk auswählen."));
@@ -13691,7 +13737,7 @@ def index() -> str:
       );
     });
 
-    folderRootSelect.addEventListener("change", () => loadFolderBrowser(folderRootSelect.value, ".").catch(showError));
+    if (folderRootSelect) folderRootSelect.addEventListener("change", () => loadFolderBrowser(folderRootSelect.value, ".").catch(showError));
     folderUpButton.addEventListener("click", () => {
       if (currentFolderParent !== null) loadFolderBrowser(currentFolderRoot, currentFolderParent).catch(showError);
     });
@@ -13725,7 +13771,8 @@ def index() -> str:
           const active = !["completed","failed","interrupted"].includes(task.state);
           const percent = task.progress_total ? Math.round(100 * task.progress_current / task.progress_total) : 0;
           noticeElement.classList.toggle("error-text", task.state === "failed" || task.state === "interrupted");
-          noticeElement.textContent = importUiText(task.error_message || task.progress_message || "SD-Sicherung wird geprüft.")
+          const pendingMessage = sourceHelperEnabled ? "SD-Sicherung wird geprüft." : "Quellprüfung läuft.";
+          noticeElement.textContent = importUiText(task.error_message || task.progress_message || pendingMessage)
             + (active ? " · " + percent + "%" : "");
           if (active) { setTimeout(poll, 2000); return; }
           sdRecheckTasks.delete(device);
@@ -13741,7 +13788,11 @@ def index() -> str:
     }
     function resumeSdRechecks() {
       for (const key of Object.keys(localStorage)) {
-        if (key.startsWith("bk-sd-recheck:")) followSdRecheck(localStorage.getItem(key), key.slice("bk-sd-recheck:".length));
+        if (!key.startsWith("bk-sd-recheck:")) continue;
+        const source = key.slice("bk-sd-recheck:".length);
+        if (sourceHelperEnabled || /^(nas|saved):/.test(source)) {
+          followSdRecheck(localStorage.getItem(key), source);
+        }
       }
     }
 
@@ -13753,9 +13804,11 @@ def index() -> str:
       }
 
       folderImportButton.disabled = true;
-      sdImportButton.disabled = true;
-      deviceImportButton.disabled = true;
-      driveFolderImportButton.disabled = true;
+      if (sourceHelperEnabled) {
+        sdImportButton.disabled = true;
+        deviceImportButton.disabled = true;
+        driveFolderImportButton.disabled = true;
+      }
       noticeElement.classList.remove("error-text");
       noticeElement.classList.add("bk-loading-status");
       noticeElement.textContent = confirmReimport ? bk0511ImportLabel("Sicherungen werden geprüft …", "Checking existing backups …") : "Ordnerimport wird angelegt …";
@@ -13848,7 +13901,21 @@ def index() -> str:
   </script>
 </body>
 </html>
-""", active_area="import")
+"""
+    if not SOURCE_HELPER_ENABLED:
+        html = re.sub(r"<!-- helper-controls -->.*?<!-- /helper-controls -->", "", html, flags=re.S)
+        html = html.replace('data-source-pane="folder" hidden', 'data-source-pane="folder"')
+        html = html.replace(
+            "Wähle SD-Karte, externes Laufwerk oder einen Ordner.",
+            "Wähle einen Ordner auf dem NAS oder eine vorhandene Sicherung.",
+        ).replace(
+            "Wähle einen einzelnen Ordner auf dem NAS oder auf einem bereits\n"
+            "              eingebundenen Wechselmedium.",
+            "Wähle einen einzelnen Ordner auf dem NAS oder in einer vorhandenen Sicherung.",
+        )
+    html = html.replace("__SOURCE_HELPER_ENABLED__", json.dumps(SOURCE_HELPER_ENABLED))
+    html = html.replace("<!-- saved-source-option -->", '<option value="saved">Vorhandene Sicherungen</option>' if IMPORT_ROOT.is_dir() else "")
+    return apply_shell(html, active_area="import")
 
 
 @app.get(

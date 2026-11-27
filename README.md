@@ -118,7 +118,7 @@ The [Compose example](compose.example.yaml) is authoritative for the actual cont
 
 ### SD cards and USB drives
 
-The default deployment uses folder-based sources **without privileged container mode**. Direct detection and mounting of physical SD/USB devices is a separate optional capability and requires additional host/device permissions. Do **not** enable elevated privileges just for convenience; consult the deployment/security documentation and assess the impact on your TrueNAS host. Automatic removable-device operation is not yet qualified for an official TrueNAS catalog listing.
+The default profile runs as **UID/GID 568** and imports from read-only NAS folders or backups. It uses ordinary dataset mounts. The same image supports direct SD and USB access when an administrator explicitly enables the optional removable-media profile. See the [TrueNAS catalog profile and deployment checks](docs/truenas-catalog-profile.md).
 
 ## Data safety
 

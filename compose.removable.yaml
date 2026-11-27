@@ -2,6 +2,7 @@
 # Base installation requires no privileged helper or removable host mount.
 services:
   bibliothekar:
+    user: "0:0"
     privileged: true
     environment:
       KAMERA_SOURCE_HELPER_ENABLED: "true"

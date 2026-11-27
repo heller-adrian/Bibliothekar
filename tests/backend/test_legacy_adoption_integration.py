@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import json
 import os
 import shutil
 import sys
@@ -2535,6 +2536,7 @@ def test_manual_adoption_steps_follow_smb_changes_and_require_verification(
     saved = _json(client, "PUT", job + "/draft", json={**draft, "revision": 0})
     plan = _json(client, "POST", job + "/plan", json={"revision": saved["revision"]})
     command = {"plan_id": plan["id"]}
+    monkeypatch.setattr("app.legacy_adoption_catalogue.__version__", "1.1.2")
     _json(client, "POST", job + "/documents")
     _json(client, "GET", job + "/manual-work", status=409)
     _json(client, "POST", job + "/confirm", json={**command, "method": "manual", "acknowledged": True})
@@ -2568,6 +2570,7 @@ def test_manual_adoption_steps_follow_smb_changes_and_require_verification(
 
     paths = extract("manual-setup", archive)
     [event_document] = [path for path in paths if path.endswith("/event.json")]
+    assert json.loads((archive / event_document).read_bytes())["source_app_version"] == "1.1.2"
     assert any(path.endswith("/") for path in paths)
     assert work()["steps"][0]["state"] == "done"
 
@@ -2584,6 +2587,7 @@ def test_manual_adoption_steps_follow_smb_changes_and_require_verification(
     (source / "first/one.jpg").unlink()
 
     assert main.DATABASE_INITIALIZATION_ERROR is None
+    monkeypatch.setattr("app.legacy_adoption_catalogue.__version__", "1.1.3")
     main.startup_database()
     client = TestClient(main.app, follow_redirects=False)
     assert work()["steps"][1]["state"] == "done"

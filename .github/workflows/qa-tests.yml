@@ -149,6 +149,7 @@ jobs:
             "tests/backend/test_media_family_identity.py",
             "tests/backend/test_archive_inventory_views.py",
             "tests/backend/test_archive_inventory_scan.py",
+            "tests/backend/test_source_profiles.py",
             "tests/backend/test_rc2_xmp_family_matching.py",
             "tests/backend/test_rc2_xmp_raw_filename.py",
             "tests/backend/test_rc2_server_preparation.py",

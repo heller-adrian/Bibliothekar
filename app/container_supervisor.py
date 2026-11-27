@@ -7,15 +7,12 @@ import sys
 import time
 from collections.abc import Callable
 
+from app.source_profile import SOURCE_HELPER_ENABLED as HELPER_ENABLED
+
 
 WEB_UID = int(os.environ.get("KAMERA_WEB_UID", "568"))
 WEB_GID = int(os.environ.get("KAMERA_WEB_GID", "568"))
-HELPER_ENABLED = os.environ.get("KAMERA_SOURCE_HELPER_ENABLED", "false").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
+
 
 
 def web_command() -> list[str]:

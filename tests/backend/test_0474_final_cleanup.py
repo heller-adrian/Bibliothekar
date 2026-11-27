@@ -86,6 +86,7 @@ def test_0474_removable_card_needs_no_saved_source_mount(tmp_path, monkeypatch):
     (card / "DCIM").mkdir(parents=True)
     (card / "DCIM" / "img.mov").write_bytes(b"video")
     monkeypatch.setattr(main, "DATABASE_FILE", db)
+    monkeypatch.setattr(main, "SOURCE_HELPER_ENABLED", True)
     monkeypatch.setattr(main, "REMOVABLE_ROOT", mount)
     monkeypatch.setattr(main, "IMPORT_ROOT", tmp_path / "missing-saved-mount")
     stats = main.api_source_folder_summary("removable", "CARD01")

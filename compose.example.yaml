@@ -1,9 +1,9 @@
 services:
   bibliothekar:
     # Set BIBLIOTHEKAR_IMAGE to a verified image digest to pin deployments.
-    image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:1.1.1}
+    image: ${BIBLIOTHEKAR_IMAGE:-ghcr.io/heller-adrian/bibliothekar:1.1.2}
     restart: unless-stopped
-    user: "0:0"
+    user: "568:568"
 
     environment:
       TZ: ${TZ:-Europe/Berlin}
@@ -16,7 +16,6 @@ services:
       KAMERA_NAS_SOURCE_ROOT: /sources/nas
       KAMERA_SOURCE_HELPER_URL: http://127.0.0.1:8090
       KAMERA_SOURCE_HELPER_ENABLED: "false"
-      KAMERA_DEVICE_NODE_ROOT: /dev/bibliothekar
       KAMERA_WEB_UID: "568"
       KAMERA_WEB_GID: "568"
 
