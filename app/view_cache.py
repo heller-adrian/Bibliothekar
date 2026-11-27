@@ -10,7 +10,6 @@ from typing import Any
 
 _LOCK = RLock()
 _ITEMS: OrderedDict[tuple[Any, ...], tuple[tuple[Any, ...], float, Any]] = OrderedDict()
-_VERIFIED: set[str] = set()
 _MAX_ITEMS = 24
 _MAX_AGE_SECONDS = 600
 
@@ -54,16 +53,6 @@ def put_snapshot(path: Path, group: str, value: Any, *args: Any, observed_stamp=
         while len(_ITEMS) > _MAX_ITEMS:
             _ITEMS.popitem(last=False)
         return True
-
-
-def needs_first_physical_check(path: Path) -> bool:
-    with _LOCK:
-        return str(path.resolve(strict=False)) not in _VERIFIED
-
-
-def mark_physical_checked(path: Path) -> None:
-    with _LOCK:
-        _VERIFIED.add(str(path.resolve(strict=False)))
 
 
 def invalidate(path: Path) -> None:

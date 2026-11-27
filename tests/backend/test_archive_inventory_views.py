@@ -57,3 +57,38 @@ def test_history_pages_use_the_catalogue_and_preserve_totals(
         assert all(item["released"] for item in page["candidates"])
 
     assert loaded == [f"event-{index:03}" for index in reversed(range(count))]
+
+
+def test_explicit_workspace_inventory_ignores_unrelated_archived_events(tmp_path, monkeypatch):
+    from app import event_structure_changes, live_inventory
+
+    db = tmp_path / "library.sqlite3"
+    initialize_database(db)
+    with database_connection(db) as connection:
+        seed_job(connection)
+        seed_event(connection, event_id="working", status="applied")
+        seed_event(connection, event_id="archived", status="archived")
+
+    observations = []
+    monkeypatch.setattr(live_inventory, "reconcile_trash_inventory", lambda *args: None)
+    monkeypatch.setattr(live_inventory, "shared_work_root", lambda root: root)
+    monkeypatch.setattr(live_inventory, "_reapply_physical_event_prefix", lambda *args: None)
+
+    def scan(db_path, root, job_id, event_id, *, root_kind, **kwargs):
+        observations.append((root, job_id, event_id, root_kind))
+        return {"summary": {}}
+
+    monkeypatch.setattr(live_inventory, "scan_event_inventory", scan)
+    refreshed = live_inventory.refresh_live_event_inventories(
+        db, tmp_path / "workspace", tmp_path / "archive", workspace_only=True,
+    )
+    assert refreshed["refreshed_count"] == 1
+    assert observations == [(tmp_path / "workspace", "j", "working", "shared_workspace")]
+
+    checked = []
+    monkeypatch.setattr(
+        event_structure_changes, "detect_event_structure_change",
+        lambda db_path, event_id: checked.append(event_id),
+    )
+    event_structure_changes.detect_all_event_structure_changes(db, workspace_only=True)
+    assert checked == ["working"]

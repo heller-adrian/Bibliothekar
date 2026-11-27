@@ -2626,7 +2626,7 @@ WORKSPACE_HTML = r"""<!doctype html>
         } catch (_) {}
       }
       if (!workspace?.statistics) setStatus("Arbeitsbestände werden geladen …");
-      const data = await getJson("/api/jobs");
+      const data = await getJson("/api/jobs?observe_workspace=false");
       if(request!==jobsLoadSerial)return;
       await writeWorkspaceSnapshot(cacheKey,data,()=>request===jobsLoadSerial);
       if(request!==jobsLoadSerial)return;
@@ -2700,7 +2700,7 @@ WORKSPACE_HTML = r"""<!doctype html>
           } catch (error) { refreshWarning=String(error.message || error); }
         }
         const fresh=await getJson(
-          `/api/workspace/summary?jobs=${query}&physical_refresh=${physicalRefresh ? "true" : "false"}`
+          `/api/workspace/summary?jobs=${query}&physical_refresh=false`
         );
         if(request!==workspaceLoadSerial)return;
         workspace=fresh;

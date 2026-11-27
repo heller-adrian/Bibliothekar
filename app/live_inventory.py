@@ -18,13 +18,14 @@ def refresh_live_event_inventories(
     *,
     job_id: str | None = None,
     event_id: str | None = None,
+    workspace_only: bool = False,
 ) -> dict[str, Any]:
     """Refresh observational IST snapshots for applied/archived parent events."""
     from app.operation_health import read_only
     reconcile_trash_inventory(database_path, workspace_path)
     where = [
         "parent_event_id IS NULL",
-        "status IN ('applied','archived')",
+        "status='applied'" if workspace_only else "status IN ('applied','archived')",
         "COALESCE(TRIM(linkage_kind),'')=''",
     ]
     params: list[Any] = []

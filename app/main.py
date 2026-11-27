@@ -5322,16 +5322,12 @@ def api_import_recovery(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     "/api/jobs",
     tags=["Aufträge"],
 )
-def api_jobs() -> dict[str, Any]:
-    try:
-        reconcile_global_central_stock_state(
-            force=False
-        )
-    except Exception as error:
-        print(
-            f"Zentralbestands-Abgleich übersprungen: {error}",
-            flush=True,
-        )
+def api_jobs(observe_workspace: bool = True) -> dict[str, Any]:
+    if observe_workspace:
+        try:
+            reconcile_global_central_stock_state(force=False)
+        except Exception as error:
+            print(f"Zentralbestands-Abgleich übersprungen: {error}", flush=True)
     jobs = list_jobs()
     central_root = workspace_backup_root(WORKSPACE_PATH)
 
@@ -7425,13 +7421,6 @@ def api_job_events(
             detail="Auftrag wurde nicht gefunden.",
         )
 
-    refresh_live_event_inventories(
-        current_database_file(),
-        current_workspace_root(),
-        current_archive_root(),
-        job_id=job_id,
-    )
-
     events = list_job_events(
         current_database_file(),
         job_id,
@@ -9197,25 +9186,18 @@ def api_event_preview(
 @app.get("/api/events/search", tags=["Ereignisse"])
 def api_search_events(
     q: str = "", limit: int = 25, offset: int = 0,
-    physical_refresh: bool = True,
+    physical_refresh: bool = False,
 ) -> dict[str, Any]:
     db_path = current_database_file()
     from app.operation_health import read_only
-    must_check = not read_only() and (physical_refresh or view_cache.needs_first_physical_check(db_path))
-    if must_check:
-        refresh_live_event_inventories(
-            db_path, current_workspace_root(), current_archive_root()
-        )
-        reconcile_global_central_stock_state(force=True)
-        detect_all_event_structure_changes(db_path, current_workspace_root())
-        view_cache.mark_physical_checked(db_path)
-        view_cache.invalidate(db_path)
-    if not must_check:
-        result = view_cache.get_snapshot(db_path, "events", q, limit, offset)
-        if result is not None:
-            return result
+    if physical_refresh and not read_only():
+        api_refresh_workspace_state()
+    result = view_cache.get_snapshot(db_path, "events", q, limit, offset)
+    if result is not None:
+        return result
+    stamp = view_cache.database_stamp(db_path)
     result = search_events(db_path, query=q, limit=limit, offset=offset)
-    view_cache.put_snapshot(db_path, "events", result, q, limit, offset)
+    view_cache.put_snapshot(db_path, "events", result, q, limit, offset, observed_stamp=stamp)
     return result
 
 
@@ -9766,12 +9748,13 @@ def api_repair_all_external_changes() -> dict[str, Any]:
             current_database_file(),
             current_workspace_root(),
             current_archive_root(),
+            workspace_only=True,
         )
         reconcile_global_central_stock_state(
             force=True
         )
         detect_all_event_structure_changes(
-            current_database_file(), current_workspace_root()
+            current_database_file(), current_workspace_root(), workspace_only=True
         )
         result["state"] = list_external_change_state(
             current_database_file()
@@ -9803,10 +9786,11 @@ def api_accept_external_filename_rename(
             current_database_file(),
             current_workspace_root(),
             current_archive_root(),
+            workspace_only=True,
         )
         reconcile_global_central_stock_state(force=True)
         detect_all_event_structure_changes(
-            current_database_file(), current_workspace_root()
+            current_database_file(), current_workspace_root(), workspace_only=True
         )
         view_cache.invalidate(current_database_file())
         return result
@@ -9835,12 +9819,13 @@ def api_repair_external_change(
             current_database_file(),
             current_workspace_root(),
             current_archive_root(),
+            workspace_only=True,
         )
         reconcile_global_central_stock_state(
             force=True
         )
         detect_all_event_structure_changes(
-            current_database_file(), current_workspace_root()
+            current_database_file(), current_workspace_root(), workspace_only=True
         )
         return result
     except ExternalChangeError as error:
@@ -9933,12 +9918,13 @@ def api_refresh_workspace_state() -> dict[str,Any]:
     phases={}
     try:
         phases['inventory']=refresh_live_event_inventories(context.database_path,
-            current_workspace_root(),context.archive_root)
+            current_workspace_root(),context.archive_root,workspace_only=True)
         phases['central_stock']=reconcile_global_central_stock_state(force=True)
-        phases['structure']=detect_all_event_structure_changes(context.database_path,current_workspace_root())
+        phases['structure']=detect_all_event_structure_changes(
+            context.database_path,current_workspace_root(),workspace_only=True,
+        )
         phases['claims']=backfill_library_claims(REGISTRY_DATABASE_FILE,
             database_path=context.database_path,library_id=context.library_id)
-        view_cache.mark_physical_checked(context.database_path)
         view_cache.invalidate(context.database_path)
         return {'refreshed':True,'phases':phases}
     except (OSError,ValueError,RuntimeError) as error:
@@ -9950,15 +9936,9 @@ def api_refresh_workspace_state() -> dict[str,Any]:
 @app.get("/api/workspace/summary", tags=["Arbeitsbereich"])
 def api_global_workspace_summary(
     jobs: str = "",
-    physical_refresh: bool = True,
+    physical_refresh: bool = False,
 ) -> dict[str, Any]:
-    """Canonical library workspace projection; independent of the display cache.
-
-    The first inspection per process remains physical. A user-requested
-    physical_refresh=True forces verification; ordinary view reads reuse
-    a DB-stamp-scoped snapshot. Any destructive action checks physical truth
-    separately and must not trust this display snapshot.
-    """
+    """Project the saved Workspace catalogue. Explicit refresh observes its physical stock."""
     selected = [
         part.strip()
         for part in str(jobs or "").split(",")
@@ -9973,33 +9953,13 @@ def api_global_workspace_summary(
 
     db_path = current_database_file()
     from app.operation_health import read_only
-    must_check = not read_only() and (physical_refresh or view_cache.needs_first_physical_check(db_path))
-    if must_check:
-        refresh_live_event_inventories(
-            db_path,
-            current_workspace_root(),
-            current_archive_root(),
-        )
-        reconcile_global_central_stock_state(
-            force=True
-        )
-        detect_all_event_structure_changes(
-            current_database_file(), current_workspace_root()
-        )
-        backfill_library_claims(
-            REGISTRY_DATABASE_FILE,
-            database_path=current_database_file(),
-            library_id=current_library_context().library_id,
-        )
-
-        view_cache.mark_physical_checked(db_path)
-        view_cache.invalidate(db_path)
+    if physical_refresh and not read_only():
+        api_refresh_workspace_state()
 
     cache_key = (tuple(sorted(selected)),view_cache.database_stamp(REGISTRY_DATABASE_FILE))
-    if not must_check:
-        cached = view_cache.get_snapshot(db_path, "workspace", cache_key)
-        if cached is not None:
-            return cached
+    cached = view_cache.get_snapshot(db_path, "workspace", cache_key)
+    if cached is not None:
+        return cached
 
     snapshot_stamp=view_cache.database_stamp(db_path)
     with database_connection(db_path) as connection:
@@ -10060,13 +10020,6 @@ def api_workspace_summary(
             detail="Auftrag wurde nicht gefunden.",
         )
 
-    live_inventory = refresh_live_event_inventories(
-        current_database_file(),
-        current_workspace_root(),
-        current_archive_root(),
-        job_id=job_id,
-    )
-
     blocked = blocked_family_ids(
         REGISTRY_DATABASE_FILE,
         database_path=current_database_file(),
@@ -10116,7 +10069,6 @@ def api_workspace_summary(
 
     return {
         "job": job,
-        "live_inventory": live_inventory,
         "day_groups": day_groups,
         "event_count": len(events),
         "events": events,

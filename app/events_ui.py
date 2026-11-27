@@ -2369,7 +2369,7 @@ EVENTS_HTML = r"""<!doctype html>
             if (!refreshed.ok) refreshWarning=JSON.stringify((await refreshed.json()).detail || 'Refresh requires review');
           } catch (error) { refreshWarning=String(error.message || error); }
         }
-        data = await requestJson(`/api/events/search?q=${encodeURIComponent(q)}&limit=${eventLimit}&offset=${eventOffset}&physical_refresh=${physicalRefresh ? "true" : "false"}`);
+        data = await requestJson(`/api/events/search?q=${encodeURIComponent(q)}&limit=${eventLimit}&offset=${eventOffset}&physical_refresh=false`);
       } finally {
         statusElement.classList.remove("bk-loading-status");
       }

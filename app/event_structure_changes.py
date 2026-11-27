@@ -1483,7 +1483,7 @@ def detect_event_structure_change(
 
 
 def detect_all_event_structure_changes(
-    database_path: Path, workspace_path: Path | None = None,
+    database_path: Path, workspace_path: Path | None = None, *, workspace_only: bool = False,
 ) -> dict[str, Any]:
     from app.operation_health import read_only
     if read_only():return {'detected':[],'errors':[],'read_only':True}
@@ -1494,8 +1494,9 @@ def detect_all_event_structure_changes(
                 """SELECT id FROM events
                    WHERE parent_event_id IS NULL
                      AND COALESCE(TRIM(linkage_kind),'')=''
-                     AND status IN ('applied','archived')
-                   ORDER BY updated_at"""
+                     AND (status='applied' OR (status='archived' AND NOT ?))
+                   ORDER BY updated_at""",
+                (workspace_only,),
             ).fetchall()
         ]
     detected = []

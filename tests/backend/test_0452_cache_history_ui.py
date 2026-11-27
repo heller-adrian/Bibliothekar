@@ -99,23 +99,18 @@ def test_0452_import_visibility_is_persistent_and_only_for_completed(tmp_path, m
     assert main.api_import_history(hidden=True)["total"] == 0
 
 
-def test_0452_physical_check_once_then_fast_search(tmp_path, monkeypatch):
+def test_event_search_reads_catalogue_until_explicit_workspace_refresh(tmp_path, monkeypatch):
     path = tmp_path / "library.sqlite3"
     path.write_bytes(b"test")
     calls = []
     monkeypatch.setattr(main, "current_database_file", lambda: path)
-    monkeypatch.setattr(main, "current_workspace_root", lambda: tmp_path)
-    monkeypatch.setattr(main, "current_archive_root", lambda: tmp_path)
-    monkeypatch.setattr(main, "refresh_live_event_inventories", lambda *args: calls.append("scan"))
-    monkeypatch.setattr(main, "reconcile_global_central_stock_state", lambda **kwargs: calls.append("stock"))
-    monkeypatch.setattr(main, "detect_all_event_structure_changes", lambda *args: calls.append("change"))
+    monkeypatch.setattr(main, "api_refresh_workspace_state", lambda: calls.append("refresh"))
     monkeypatch.setattr(main, "search_events", lambda *args, **kwargs: {"events": [], "q": kwargs["query"]})
+    assert main.api_search_events(q="Test")["q"] == "Test"
     assert main.api_search_events(q="Test", physical_refresh=False)["q"] == "Test"
-    assert calls == ["scan", "stock", "change"]
-    assert main.api_search_events(q="Test", physical_refresh=False)["q"] == "Test"
-    assert calls == ["scan", "stock", "change"]
+    assert calls == []
     main.api_search_events(q="Test", physical_refresh=True)
-    assert calls == ["scan", "stock", "change", "scan", "stock", "change"]
+    assert calls == ["refresh"]
 
 
 def test_0452_history_ui_is_compact_and_paginated():
