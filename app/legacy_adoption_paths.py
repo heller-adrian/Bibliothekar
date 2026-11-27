@@ -142,7 +142,7 @@ def validate_target(relative: str) -> None:
             raise AdoptionError(f"{error} ({relative})") from error
 
 
-def walk_bound_files(root_fd, prefix, on_directory=None):
+def walk_bound_files(root_fd, prefix, on_directory=None, *, validate_names=True):
     """Yield each regular file under an event, with its held directory."""
     device = os.fstat(root_fd).st_dev
 
@@ -153,7 +153,8 @@ def walk_bound_files(root_fd, prefix, on_directory=None):
         with os.scandir(directory) as entries:
             for entry in entries:
                 path = relative / entry.name
-                validate_target(str(path))
+                if validate_names:
+                    validate_target(str(path))
                 info = entry.stat(follow_symlinks=False)
                 if info.st_dev != device:
                     raise AdoptionError("Dateisystemgrenze im Archiv: " + str(path))

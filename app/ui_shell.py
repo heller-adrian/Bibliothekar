@@ -4672,6 +4672,90 @@ BIBLIOTHEKAR_JS = EVENT_PREFERENCES_JS + r"""
     document.getElementById(id)?.showModal?.();
   }
 
+  const archiveScanButton = document.getElementById("bk-archive-scan-start");
+  const archiveScanProgress = document.getElementById("bk-archive-scan-progress");
+  const archiveScanState = document.getElementById("bk-archive-scan-state");
+  const archiveScanLast = document.getElementById("bk-archive-scan-last");
+  const archiveScanResult = document.getElementById("bk-archive-scan-result");
+  const archiveScanDialog = document.getElementById("bk-settings-dialog");
+  let archiveScanTimer;
+  let archiveScanRequest = 0;
+  const archiveScanActive = new Set(["queued", "running", "interrupted"]);
+  function archiveScanText(de, en) {
+    return document.documentElement.dataset.bkLocale === "de" ? de : en;
+  }
+  const archiveScanKinds = {
+    added: ["Neu", "New"], missing: ["Fehlend", "Missing"],
+    moved: ["Verschoben oder umbenannt", "Moved or renamed"], changed: ["Inhalt geändert", "Content changed"],
+    unassigned: ["Nicht eindeutig zugeordnet", "Unassigned"],
+  };
+
+  function renderArchiveScan(state) {
+    const active = archiveScanActive.has(state.status);
+    archiveScanButton.disabled = active;
+    archiveScanProgress.hidden = !active;
+    if (state.percent == null) archiveScanProgress.removeAttribute("value");
+    else archiveScanProgress.value = state.percent;
+    const phases = {
+      idle: ["Bereit", "Ready"], queued: ["Scan wartet", "Scan queued"],
+      discovery: ["Archivdateien werden erfasst", "Discovering archive files"],
+      hashing: ["Dateien werden per SHA-256 geprüft", "Checking files with SHA-256"],
+      completed: ["Scan abgeschlossen", "Scan complete"],
+      failed: ["Scan fehlgeschlagen", "Scan failed"],
+      interrupted: ["Unterbrochen · wird erneut gestartet", "Interrupted · restarting"],
+    };
+    const status = state.status === "running" ? state.phase : state.status;
+    const counters = Number.isInteger(state.total)
+      ? " · " + state.checked + " / " + state.total + " " + archiveScanText("Dateien", "files")
+        + (state.percent == null ? "" : " · " + state.percent + " %")
+      : "";
+    const eta = state.eta_seconds == null
+      ? archiveScanText("Wird berechnet", "Calculating")
+      : state.eta_seconds < 60
+        ? archiveScanText("Weniger als eine Minute", "Less than a minute")
+        : archiveScanText("Ca. ", "About ") + Math.ceil(state.eta_seconds / 60) + " min";
+    archiveScanState.textContent = archiveScanText(...phases[status]) + counters
+      + (active ? " · " + archiveScanText("Restzeit", "Time remaining") + " · " + eta : "")
+      + (state.status === "failed" && state.error ? " · " + state.error : "");
+    archiveScanLast.textContent = archiveScanText("Letzter erfolgreicher Scan", "Last successful scan") + " · "
+      + (state.last_success_at ? new Date(state.last_success_at).toLocaleString(document.documentElement.lang)
+        : archiveScanText("Noch keiner", "None yet"));
+    const findings = Object.entries(state.result || {}).filter(([, count]) => count);
+    archiveScanResult.textContent = findings.length
+      ? findings.map(([kind, count]) => archiveScanText(...archiveScanKinds[kind]) + " " + count).join(" · ")
+        + " · " + archiveScanText("Details unter Aufgaben", "See Tasks for details")
+      : state.result ? archiveScanText("Keine Abweichungen gefunden.", "No differences found.") : "";
+    const pending = archiveScanDialog?.open && !archiveScanButton.closest(".bk-settings-panel").hidden;
+    if (pending && active) archiveScanTimer = setTimeout(() => refreshArchiveScan(), 2000);
+  }
+
+  async function refreshArchiveScan(method="GET") {
+    if (!archiveScanButton) return;
+    const request = ++archiveScanRequest;
+    clearTimeout(archiveScanTimer);
+    if (method==="POST") archiveScanButton.disabled = true;
+    try {
+      const state = await bkJson("/api/settings/archive-inventory", {method, cache:"no-store"});
+      if (request === archiveScanRequest) {
+        renderArchiveScan(state);
+        if (state.status === "completed") window.dispatchEvent(new Event("bk-activity-refresh"));
+      }
+    } catch (error) {
+      if (request !== archiveScanRequest) return;
+      archiveScanState.textContent = error.message;
+      if (archiveScanDialog?.open && !archiveScanButton.closest(".bk-settings-panel").hidden) {
+        archiveScanTimer = setTimeout(() => refreshArchiveScan(), 3000);
+      }
+    }
+  }
+  archiveScanButton?.addEventListener("click", () => refreshArchiveScan("POST"));
+  archiveScanDialog?.addEventListener("close", () => clearTimeout(archiveScanTimer));
+  window.addEventListener("bk-language-changed", () => {
+    if (archiveScanDialog?.open && archiveScanButton && !archiveScanButton.closest(".bk-settings-panel").hidden) {
+      refreshArchiveScan();
+    }
+  });
+
   function setSettingsArea(area) {
     document.querySelectorAll("[data-bk-settings-area]").forEach(button => {
       button.classList.toggle("active", button.dataset.bkSettingsArea === area);
@@ -4679,6 +4763,8 @@ BIBLIOTHEKAR_JS = EVENT_PREFERENCES_JS + r"""
     document.querySelectorAll("[data-bk-settings-panel]").forEach(panel => {
       panel.hidden = panel.dataset.bkSettingsPanel !== area;
     });
+    if (area === "general") refreshArchiveScan();
+    else clearTimeout(archiveScanTimer);
   }
   document.querySelectorAll("[data-bk-settings-area]").forEach(button => {
     button.addEventListener("click", () => setSettingsArea(button.dataset.bkSettingsArea));
@@ -4693,6 +4779,7 @@ BIBLIOTHEKAR_JS = EVENT_PREFERENCES_JS + r"""
   document.querySelector("[data-bk-open-settings]")?.addEventListener("click", () => {
     openDialog("bk-settings-dialog");
     bkRefreshLibraryManagement();
+    if (archiveScanButton && !archiveScanButton.closest(".bk-settings-panel").hidden) refreshArchiveScan();
   });
   document.querySelector("[data-bk-open-library]")?.addEventListener("click", () => {
     openDialog("bk-library-dialog");
@@ -5214,6 +5301,17 @@ BIBLIOTHEKAR_JS = EVENT_PREFERENCES_JS + r"""
         bkEscapeNotice(row.details.event_id) +
         '">Archiv prüfen</button>'
       ) : "";
+      const inventoryDetails = row.kind === "archive_inventory_scan" && Array.isArray(row.details?.examples)
+        ? '<details><summary>' + bk0511NoticeLanguage("Gefundene Pfade", "Paths found") + '</summary>'
+          + '<ul style="overflow-wrap:anywhere">' + row.details.examples.map(example =>
+            '<li>' + bkEscapeNotice(archiveScanText(...archiveScanKinds[example.kind])) + ' · <span data-bk-preserve-language>'
+            + bkEscapeNotice(example.path + (example.observed_path ? " → " + example.observed_path : "")) + '</span></li>'
+          ).join("") + '</ul>'
+          + (row.details.event_id
+            ? '<a href="/events?event=' + encodeURIComponent(row.details.event_id) + '">'
+              + bk0511NoticeLanguage("Ereignis öffnen", "Open event") + '</a>' : '')
+          + '</details>'
+        : "";
       const renameButtons = required && row.kind === "filename_rename"
         ? (["shared_workspace","central_stock"].includes(row.root_kind)
           ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:9px">' +
@@ -5240,6 +5338,7 @@ BIBLIOTHEKAR_JS = EVENT_PREFERENCES_JS + r"""
           ? '<div style="margin-top:8px">' + archiveButton + '</div>'
           : '') +
         renameButtons +
+        inventoryDetails +
         '</div>'
       );
     }).join("");
@@ -5979,6 +6078,16 @@ def _shell_markup(active_area: str, subarea: str | None) -> str:
           <button type="button" class="active" data-bk-language-choice="en" aria-pressed="true">English</button>
         </div>
         <div class="bk-language-note">Die Sprache betrifft die Oberfläche. Vorhandene Ordnernamen, Benutzereingaben und Dateipfade bleiben unverändert.</div>
+      </section>
+      <section class="bk-settings-group">
+        <strong>Archivbestand</strong>
+        <div class="bk-library-actions" style="margin-top:12px">
+          <button id="bk-archive-scan-start" type="button">Archiv neu scannen</button>
+        </div>
+        <p id="bk-archive-scan-last" class="bk-language-note" data-bk-preserve-language></p>
+        <p id="bk-archive-scan-state" class="bk-language-note" role="status" data-bk-preserve-language></p>
+        <progress id="bk-archive-scan-progress" max="100" aria-label="Fortschritt des Archivscans" hidden></progress>
+        <p id="bk-archive-scan-result" class="bk-language-note" data-bk-preserve-language></p>
       </section>
       <section class="bk-settings-group">
         <strong>Sitzung</strong>

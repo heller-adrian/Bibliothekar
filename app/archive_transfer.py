@@ -208,7 +208,8 @@ def list_archive_candidates(
                    COUNT(*) FILTER (WHERE NOT released AND verification_status='verified') AS verified_count,
                    COUNT(*) FILTER (WHERE released) AS released_count,
                    COUNT(*) FILTER (WHERE verification_status='failed'
-                     AND verification_error_message IS NOT 'verification_invalidated_by_edit') AS blocked_count
+                     AND verification_error_message IS NOT 'verification_invalidated_by_edit'
+                     AND verification_error_message IS NOT 'verification_invalidated_by_archive_scan') AS blocked_count
             FROM archive_states
         """).fetchone())
         rows = connection.execute(
@@ -330,7 +331,9 @@ def list_archive_candidates(
         item["archive_root"] = str(archive_root)
         item["verification_invalidated"] = (
             item.get("verification_status") == "failed"
-            and item.get("verification_error_message") == "verification_invalidated_by_edit"
+            and item.get("verification_error_message") in {
+                "verification_invalidated_by_edit", "verification_invalidated_by_archive_scan",
+            }
         )
         item["verified"] = item.get("verification_status") == "verified"
         if item.get("verification_file_count") is not None:

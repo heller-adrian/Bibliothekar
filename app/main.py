@@ -42,7 +42,7 @@ from app.legacy_adoption_mode import (
 from app.root_operations import RootOperationBusy, RootOperationError, protect, reserve, mutate, assert_workspace_startable, _identity, generation, admission
 from app import background_mutation_cancel as cancel_queue
 from app.background_activity import current_activity, clear_finished_activity
-from app import archive_batches
+from app import archive_batches, archive_inventory_scan
 from app import ssd_release_background as release_queue
 from app.live_inventory import refresh_live_event_inventories
 from app.global_workspace import build_global_workspace_summary
@@ -2370,7 +2370,8 @@ RELEASE_WORKER_THREAD: Thread | None = None
 
 def process_background_release() -> bool:
     for context in list_active_library_contexts(REGISTRY_DATABASE_FILE):
-        if _release_for_context(context):return True
+        if _release_for_context(context) or archive_inventory_scan.process_next(context, RELEASE_WORKER_STOP.is_set):
+            return True
     return False
 
 
@@ -5641,6 +5642,19 @@ def api_archive_summary(
         db_path, current_archive_root(), paginate_history=True, history_before=before,
     )
     view_cache.put_snapshot(db_path, "archive", result, before, observed_stamp=stamp)
+    return result
+
+
+@app.get("/api/settings/archive-inventory", tags=["Archiv"])
+def api_archive_inventory_status() -> dict[str, Any]:
+    return archive_inventory_scan.status(current_database_file())
+
+
+@app.post("/api/settings/archive-inventory", tags=["Archiv"], status_code=202)
+@_root_request
+def api_start_archive_inventory() -> dict[str, Any]:
+    result = archive_inventory_scan.enqueue(current_database_file())
+    RELEASE_WORKER_WAKE.set()
     return result
 
 

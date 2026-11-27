@@ -13,6 +13,7 @@ from datetime import datetime,timezone
 from app.sqlite_retry import idempotent_write
 
 FUNCTIONS = {
+    'app.archive_inventory_scan.run':'inventory',
     'app.central_stock_reconcile.reconcile_central_free_stock':'inventory',
     'app.event_inventory.scan_event_inventory':'inventory',
     'app.trash.reconcile_trash_inventory':'inventory',
