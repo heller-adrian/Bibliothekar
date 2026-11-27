@@ -22,7 +22,7 @@ async function test(browser, lang, width) {
   let state = {status: "idle", last_success_at: null};
   await page.route(origin + "/**", route => {
     const url = new URL(route.request().url());
-    if (url.pathname === "/archive") return route.fulfill({body: html, contentType: "text/html"});
+    if (url.pathname === "/transfer") return route.fulfill({body: html, contentType: "text/html"});
     if (url.pathname === "/api/archive/summary") {
       const before = url.searchParams.get("event_id");
       const start = before === null ? 0 : Number(before) + 1;
@@ -47,7 +47,7 @@ async function test(browser, lang, width) {
     return route.fulfill({body: ""});
   });
 
-  await page.goto(origin + "/archive");
+  await page.goto(origin + "/transfer");
   const more = page.locator("#archive-history-more");
   await more.waitFor({state: "visible"});
   assert.equal(await page.locator("#history-list article").count(), 10);

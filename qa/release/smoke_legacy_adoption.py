@@ -123,6 +123,15 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
     wait_ready()
     login()
     assert api("/api/health")["version"] == os.environ["ADOPTION_SMOKE_VERSION"]
+    def wait_for_write_admission():
+        for _ in range(90):
+            status = api("/api/settings/storage-health")
+            if status["ready"] and status["operation_health"]["writes_allowed"]:
+                return
+            assert startup_recovery_only(status["operation_health"]), status
+            time.sleep(0.5)
+        raise AssertionError("Storage write admission did not become ready")
+
     if method == "resume-112-rc1":
         recorded = json.loads(Path(os.environ["ADOPTION_SMOKE_HANDOFF"]).read_text())
         job, command = recorded["job"], recorded["plan"]
@@ -166,7 +175,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
         summary = api("/api/archive/summary")
         assert summary["released_count"] == 1, summary
         assert api(endpoint)["status"] == "idle"
-        assert b'id="bk-archive-scan-start"' in request("/archive")
+        assert b'id="bk-archive-scan-start"' in request("/transfer")
         assert api(endpoint)["status"] == "idle"
 
         [original] = [path for path in archive.rglob("*") if path.suffix.casefold() == ".raf"]
@@ -180,6 +189,7 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             fixture.truncate(2 << 30)
         stamp = outside.stat()
 
+        wait_for_write_admission()
         queued = api(endpoint, method="POST", expected=202)
         job_id = queued["id"]
         assert api(endpoint, method="POST", expected=202)["id"] == job_id
@@ -261,15 +271,6 @@ def smoke(container: str, source: Path, archive: Path, appdata: Path, method: st
             assert not api("/api/source-devices", expected=409).get("devices")
             api("/api/source-devices/mount", method="POST", payload={}, expected=409)
             api("/api/source-devices/unmount", method="POST", payload={}, expected=409)
-            def wait_for_write_admission():
-                for _ in range(90):
-                    status = api("/api/settings/storage-health")
-                    if status["ready"] and status["operation_health"]["writes_allowed"]:
-                        return
-                    assert startup_recovery_only(status["operation_health"]), status
-                    time.sleep(0.5)
-                raise AssertionError("Storage write admission did not become ready")
-
             wait_for_write_admission()
             second = api("/api/libraries", method="POST", expected=201, payload={
                 "display_name": "Second smoke library", "archive_root": "/second-library",
