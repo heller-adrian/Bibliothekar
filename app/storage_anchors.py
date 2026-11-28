@@ -10,14 +10,17 @@ import os
 import sqlite3
 import stat
 
+from app.source_profile import SOURCE_HELPER_ENABLED
+
 _INTEGRITY = {}
 _INTEGRITY_LOCK = Lock()
+_REMOVABLE_ROLE = 'appdata_removable-sources'
 
 
 def definitions(workspace, state):
     from app.storage_config import load_storage_settings, storage_paths
     from app.managed_directory_names import directory_name
-    from app.appdata import root as appdata_root, mount
+    from app.appdata import root as appdata_root
     root = Path(workspace).absolute()
     paths = storage_paths(root)
     result = {str(root): {'role': 'workspace', 'writable': True}}
@@ -43,19 +46,62 @@ def definitions(workspace, state):
     if base:
         result[str(base)] = {'role': 'appdata', 'writable': True}
         for name in ('config', 'database', 'logs', 'removable-sources'):
-            path = base/name
-            row = {'role': 'appdata_'+name, 'writable': True}
-            mounted = mount(path)
-            if name == 'removable-sources' and mounted and mounted['target'] == str(path) and mounted['filesystem'] == 'tmpfs':
-                row['policy'] = 'runtime_tmpfs'
-            result[str(path)] = row
+            result[str(base/name)] = {'role': 'appdata_'+name, 'writable': True}
     return result
 
 
 def expected_identity(state, path):
     # An explicit loss-confirmed F14 root replacement updates bindings. Never
     # let an older display receipt override that audited transition.
-    return state.get('bindings', {}).get(str(path), state.get('structural_anchors', {}).get(str(path), {}).get('identity'))
+    row = state.get('structural_anchors', {}).get(str(path), {})
+    identity = None if row.get('role') == _REMOVABLE_ROLE and row.get('policy') == 'runtime_tmpfs' else row.get('identity')
+    return state.get('bindings', {}).get(str(path), identity)
+
+
+def _direct_mount(path, mounted):
+    return mounted is not None and mounted['target'] == str(path)
+
+
+def _removable_issue(path, info, state, mounted):
+    from app.appdata import mount
+    from app.private_storage_security import qualified
+
+    if _direct_mount(path, mounted):
+        if (not SOURCE_HELPER_ENABLED or mounted['filesystem'] != 'tmpfs'
+                or mounted['source'] != 'bibliothekar-removable' or info.st_uid != 0
+                or info.st_mode & 0o022):
+            return 'removable_runtime_invalid'
+        return None
+
+    name = str(path)
+    old = state.get('structural_anchors', {}).get(name, {})
+    expected = expected_identity(state, path)
+    if expected is not None and expected != [info.st_dev, info.st_ino]:
+        return 'identity_changed'
+    if mounted != mount(path.parent):
+        return 'mount_identity_changed'
+    if old.get('policy') == 'runtime_tmpfs':
+        # Older enabled installations only recorded their ephemeral mount.
+        # Qualify and pin the empty backing directory when it becomes visible.
+        with qualified(path, directory=True) as (fd, check):
+            held = os.fstat(fd)
+            if (held.st_dev, held.st_ino) != (info.st_dev, info.st_ino) or os.listdir(fd):
+                return 'removable_backing_invalid'
+            check()
+    elif old and mounted != state.get('mounts', {}).get(name, old.get('mount')):
+        return 'mount_identity_changed'
+    return None
+
+
+def check_removable_backing(workspace, path):
+    """Check the persistent anchor before the supervisor can cover it with tmpfs."""
+    from app.appdata import mount
+    from app.root_operations import RootOperationError, _control_location, _read
+
+    control = _read(_control_location(workspace)/'state.json', {})
+    code = _removable_issue(path, path.lstat(), control, mount(path))
+    if code:
+        raise RootOperationError(code + ': ' + str(path))
 
 
 def issues(workspace, state, *, initializing=False):
@@ -71,21 +117,21 @@ def issues(workspace, state, *, initializing=False):
         code = None
         try:
             info = path.lstat()
+            mounted = mount(path)
+            runtime = row['role'] == _REMOVABLE_ROLE and _direct_mount(path, mounted)
             if not stat.S_ISDIR(info.st_mode) or path.resolve() != path:
                 code = 'invalid_directory'
-            runtime = row.get('policy') == 'runtime_tmpfs'
-            if old and old.get('policy') != row.get('policy'):
+            elif row['role'] == _REMOVABLE_ROLE:
+                code = _removable_issue(path, info, state, mounted)
+            elif old and old.get('policy') != row.get('policy'):
                 code = 'structural_anchor_policy_changed'
-            if runtime:
-                if info.st_uid != 0 or info.st_mode & 0o022:
-                    code = 'removable_runtime_invalid'
             elif expected is not None and expected != [info.st_dev, info.st_ino]:
                 code = 'identity_changed'
             access = os.R_OK | os.X_OK | (os.W_OK if row['writable'] and not runtime else 0)
             if not os.access(path, access):
                 code = 'inaccessible'
             expected_mount = state.get('mounts', {}).get(name, (old or {}).get('mount'))
-            if old and expected_mount != mount(path) and not runtime:
+            if row['role'] != _REMOVABLE_ROLE and old and expected_mount != mounted:
                 code = 'mount_identity_changed'
             if str(workspace) == '/workspace' and row['role'].startswith('library_archive_root:') and not os.statvfs(path).f_flag & os.ST_RDONLY:
                 code = 'archive_mount_not_read_only'
@@ -126,10 +172,20 @@ def pin(workspace):
         state.setdefault('storage_names',load_storage_settings(workspace_root=root))
         current = state.setdefault('structural_anchors', {})
         for name, row in definitions(root, state).items():
-            if name in current:
+            old = current.get(name)
+            if old and (row['role'] != _REMOVABLE_ROLE or old.get('policy') != 'runtime_tmpfs'):
                 continue
-            info = Path(name).stat()
-            current[name] = dict(row, identity=[info.st_dev, info.st_ino], mount=mount(name))
+            mounted = mount(name)
+            runtime = row['role'] == _REMOVABLE_ROLE and _direct_mount(name, mounted)
+            if old and runtime:
+                continue
+            path = Path(name)
+            info = path.lstat()
+            if old and (not stat.S_ISDIR(info.st_mode) or _removable_issue(path, info, state, mounted)):
+                raise ro.RootOperationError('removable_backing_invalid: '+name)
+            current[name] = dict(row, identity=[info.st_dev, info.st_ino], mount=mounted)
+            if runtime:
+                current[name]['policy'] = 'runtime_tmpfs'
         ro._write(parent/'state.json', state)
 
 
@@ -195,12 +251,23 @@ def check_active(workspace, parent):
     Kernel-remounted private removable tmpfs retains its separate runtime policy.
     """
     from app import root_operations as ro
+    from app.appdata import mount
     state=ro._read(Path(parent)/'state.json',None)
     if state is None:
         raise ro.RootOperationError('Active operation lost its control state: '+str(parent))
     for name,row in state.get('structural_anchors',{}).items():
         role=row.get('role','')
-        if row.get('policy')=='runtime_tmpfs':continue
+        if role == _REMOVABLE_ROLE:
+            path = Path(name)
+            try:
+                info = path.lstat()
+                invalid = (not stat.S_ISDIR(info.st_mode) or path.resolve() != path
+                           or _removable_issue(path, info, state, mount(path)))
+            except OSError as error:
+                raise ro.RootOperationError('Required removable anchor unavailable: '+name) from error
+            if invalid:
+                raise ro.RootOperationError('Required removable anchor changed during operation: '+name)
+            continue
         if role in {'metadata_general','metadata_multiple'} or role.startswith('appdata'):
             expected=expected_identity(state,name)
             if expected is None or ro._identity(name)!=expected:

@@ -1,6 +1,7 @@
 """New storage/operation contract. All data belongs to pytest's temporary fixture."""
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import pytest
 from app import root_operations as ro, operation_health as operations
 from app.storage_status import State, describe
@@ -82,6 +83,73 @@ def test_replaced_required_anchor_is_global(ready):
     _,ws,_,dbs,_=ready
     anchor=storage_paths(ws)['trash_root'];anchor.rename(anchor.with_name(anchor.name+'-old'));anchor.mkdir()
     assert inspect_storage(ws,database=dbs[0])['state']=='UNAVAILABLE'
+
+
+@pytest.fixture
+def removable_anchor(ready, monkeypatch):
+    case, ws, _, _, _ = ready
+    base = (case / 'appdata').resolve()
+    for name in ('config', 'database', 'logs', 'removable-sources'):
+        (base / name).mkdir(parents=True, mode=0o700)
+    monkeypatch.setenv('KAMERA_APPDATA', str(base))
+    parent = ro._control_location(ws)
+    state = ro._read(parent / 'state.json')
+    ro._write(parent / 'state.json', dict(state, format=3))
+    pin(ws)
+    return ws, parent, base / 'removable-sources'
+
+
+def test_removable_profile_switch_preserves_backing_anchor(removable_anchor, monkeypatch):
+    from app import appdata, storage_anchors
+
+    ws, parent, path = removable_anchor
+    original = ro._read(parent / 'state.json')
+    original_anchor = original['structural_anchors'][str(path)]
+    mount = appdata.mount
+    backing = path.lstat()
+    runtime = {'target': str(path), 'filesystem': 'tmpfs', 'source': 'bibliothekar-removable'}
+    runtime_stat = SimpleNamespace(st_uid=0, st_mode=backing.st_mode, st_dev=999, st_ino=1)
+
+    with monkeypatch.context() as enabled:
+        lstat = Path.lstat
+        enabled.setattr(storage_anchors, 'SOURCE_HELPER_ENABLED', True)
+        enabled.setattr(Path, 'lstat', lambda p: runtime_stat if p == path else lstat(p))
+        enabled.setattr(appdata, 'mount', lambda p: runtime if Path(p) == path else mount(p))
+        assert not storage_anchors.issues(ws, original)
+        storage_anchors.check_active(ws, parent)
+        pin(ws)
+        assert ro._read(parent / 'state.json')['structural_anchors'][str(path)] == original_anchor
+        enabled.setattr(storage_anchors, 'SOURCE_HELPER_ENABLED', False)
+        assert any(i['code'] == 'removable_runtime_invalid' for i in storage_anchors.issues(ws, original))
+
+    storage_anchors.check_removable_backing(ws, path)
+    assert not storage_anchors.issues(ws, original)
+    path.rename(path.with_suffix('.original'))
+    path.mkdir(mode=0o700)
+    with pytest.raises(ro.RootOperationError, match='identity_changed'):
+        storage_anchors.check_removable_backing(ws, path)
+    with pytest.raises(ro.RootOperationError, match='Required removable anchor changed'):
+        storage_anchors.check_active(ws, parent)
+
+
+def test_historical_removable_mount_receipt_only_migrates_empty_backing(removable_anchor):
+    from app import storage_anchors
+
+    ws, parent, path = removable_anchor
+    state = ro._read(parent / 'state.json')
+    state['structural_anchors'][str(path)].update(policy='runtime_tmpfs', identity=[999, 1])
+    ro._write(parent / 'state.json', state)
+    unexpected = path / 'keep'
+    unexpected.write_bytes(b'unknown data')
+    with pytest.raises(ro.RootOperationError, match='removable_backing_invalid'):
+        pin(ws)
+    assert unexpected.read_bytes() == b'unknown data'
+    unexpected.unlink()
+    pin(ws)
+    anchor = ro._read(parent / 'state.json')['structural_anchors'][str(path)]
+    assert anchor.get('policy') is None
+    assert anchor['identity'] == ro._identity(path)
+    storage_anchors.check_active(ws, parent)
 
 
 def test_unknown_operation_never_runs_normal_startup_recovery(ready):

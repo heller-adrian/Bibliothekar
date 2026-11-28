@@ -25,6 +25,8 @@ The web application blocks direct removable device and folder requests when the 
 
 Administrators can add [the removable-media overlay](../compose.removable.yaml) for a Custom App under their own control. It explicitly uses a root supervisor with a privileged, container-local helper. The web process still runs as UID/GID 568. The helper verifies read-only mounts for both SD cards and USB drives. Keep the same application data and workspace when changing profiles and recreate the container to apply the new settings.
 
+The helper mounts its temporary filesystem inside the container. Its mount identity is checked separately from the persistent AppData directory. If an older installation only recorded the temporary mount, Bibliothekar qualifies the underlying directory on its first folder-only start. Unexpected contents or a replacement of an already registered directory keep affected operations blocked.
+
 Physical reader and USB drive insertion, removal and repeated reinsertion are manual acceptance checks on supported hardware. The automated device responses and mount-policy fixtures are synthetic.
 
 The standard deployment choices follow the [TrueNAS app contribution guide](https://github.com/truenas/apps/blob/master/CONTRIBUTIONS.md) and [TrueNAS app storage documentation](https://www.truenas.com/docs/scale/apps/appsscreens/).

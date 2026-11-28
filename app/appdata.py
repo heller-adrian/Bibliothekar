@@ -90,6 +90,9 @@ def prepare():
                     if runtime_mount['filesystem'] != 'tmpfs' or info.st_uid != 0 or info.st_mode & 0o022:
                         raise OSError('removable_runtime_invalid: '+str(path))
                     recheck(); continue  # Web reads source mounts, never helper journals.
+                if name == 'removable-sources' and manifest:
+                    from app.storage_anchors import check_removable_backing
+                    check_removable_backing(ws, path)
                 probe = '.access-'+uuid.uuid4().hex
                 out = os.open(probe,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600,dir_fd=child)
                 try: os.write(out,b'access probe'); os.fsync(out)
